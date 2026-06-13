@@ -17,13 +17,14 @@ export function useProfile() {
   const router = useRouter()
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!session) { router.replace('/login'); return }
-      const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).single()
-      if (!data) { router.replace('/login'); return }
+      const { data, error } = await supabase.from('profiles').select('*').eq('id', session.user.id).single()
+      if (error || !data) { router.replace('/login'); return }
       setProfile(data)
       setLoading(false)
     })
+    return () => subscription.unsubscribe()
   }, [router])
 
   return { profile, loading }
