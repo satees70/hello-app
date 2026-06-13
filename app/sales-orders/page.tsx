@@ -13,8 +13,20 @@ interface SalesImport {
   created_at: string
 }
 
+interface SalesLine {
+  id: string
+  customer_name: string
+  item_code: string
+  description: string
+  quantity: number
+  outstanding_qty: number
+  delivery_date: string
+  location_code: string
+}
+
 const STATUS_STYLES: Record<string, string> = {
   Pending: 'bg-amber-100 text-amber-700',
+  Processing: 'bg-blue-100 text-blue-700',
   Processed: 'bg-green-100 text-green-700',
   Error: 'bg-red-100 text-red-700',
 }
@@ -27,6 +39,11 @@ export default function SalesOrdersPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Extracted-line viewing state
+  const [lines, setLines] = useState<SalesLine[]>([])
+  const [linesFor, setLinesFor] = useState<SalesImport | null>(null)
+  const [linesLoading, setLinesLoading] = useState(false)
 
   useEffect(() => { if (profile) loadImports() }, [profile])
 
@@ -55,20 +72,58 @@ export default function SalesOrdersPage() {
       .upload(path, file)
     if (uploadError) { setError(`Upload failed: ${uploadError.message}`); setUploading(false); return }
 
-    const { error: insertError } = await supabase.from('sales_imports').insert({
-      file_name: file.name,
-      file_path: path,
-      status: 'Pending',
-      factory_code: profile.factory_code,
-      uploaded_by: profile.id,
-    })
-    if (insertError) { setError(`Saving record failed: ${insertError.message}`); setUploading(false); return }
+    const { data: inserted, error: insertError } = await supabase
+      .from('sales_imports')
+      .insert({
+        file_name: file.name,
+        file_path: path,
+        status: 'Processing',
+        factory_code: profile.factory_code,
+        uploaded_by: profile.id,
+      })
+      .select()
+      .single()
+    if (insertError || !inserted) { setError(`Saving record failed: ${insertError?.message}`); setUploading(false); return }
 
-    setSuccess(`Uploaded "${file.name}" successfully.`)
+    setSuccess(`Uploaded "${file.name}". Reading the document with Claude…`)
     setFile(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
     setUploading(false)
     loadImports()
+
+    // Kick off extraction on the server.
+    try {
+      const res = await fetch('/api/extract-sales-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ importId: inserted.id, filePath: path }),
+      })
+      const result = await res.json()
+      if (!res.ok) {
+        setError(`Extraction failed: ${result.error || 'Unknown error'}`)
+        setSuccess('')
+      } else {
+        setSuccess(`Extracted ${result.count} line(s) from "${inserted.file_name}".`)
+        viewLines(inserted)
+      }
+    } catch {
+      setError('Could not reach the extraction service.')
+      setSuccess('')
+    }
+    loadImports()
+  }
+
+  async function viewLines(doc: SalesImport) {
+    setLinesFor(doc)
+    setLinesLoading(true)
+    setLines([])
+    const { data } = await supabase
+      .from('sales_order_lines')
+      .select('*')
+      .eq('import_id', doc.id)
+      .order('customer_name', { ascending: true })
+    setLines(data || [])
+    setLinesLoading(false)
   }
 
   async function handleDownload(path: string) {
@@ -90,9 +145,9 @@ export default function SalesOrdersPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
-      <div className="max-w-5xl mx-auto px-6 py-8">
+      <div className="max-w-6xl mx-auto px-6 py-8">
         <h1 className="text-2xl font-bold mb-1">Sales Orders</h1>
-        <p className="text-gray-500 text-sm mb-6">Upload a sales order PDF. It is stored securely and tracked below.</p>
+        <p className="text-gray-500 text-sm mb-6">Upload a sales order PDF. It is stored securely, then read automatically to extract each line.</p>
 
         <form onSubmit={handleUpload} className="bg-white rounded-xl shadow-sm border p-6 mb-8">
           <label className="block text-sm font-medium mb-2">Sales Order PDF</label>
@@ -112,7 +167,7 @@ export default function SalesOrdersPage() {
         </form>
 
         <h2 className="font-semibold text-lg mb-3">Uploaded Documents</h2>
-        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <div className="bg-white rounded-xl shadow-sm border overflow-hidden mb-8">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>
@@ -126,7 +181,7 @@ export default function SalesOrdersPage() {
                 <tr><td colSpan={5} className="text-center py-8 text-gray-400">No documents uploaded yet</td></tr>
               )}
               {imports.map(doc => (
-                <tr key={doc.id} className="border-b last:border-0 hover:bg-gray-50">
+                <tr key={doc.id} className={`border-b last:border-0 hover:bg-gray-50 ${linesFor?.id === doc.id ? 'bg-blue-50' : ''}`}>
                   <td className="px-4 py-3 font-medium">{doc.file_name}</td>
                   <td className="px-4 py-3 text-gray-600">
                     {doc.factory_code === 'HEAD_OFFICE' ? 'Head Office' : doc.factory_code}
@@ -137,7 +192,10 @@ export default function SalesOrdersPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-gray-600">{formatDate(doc.created_at)}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 space-x-3 whitespace-nowrap">
+                    <button onClick={() => viewLines(doc)} className="text-blue-600 hover:underline text-xs">
+                      View Lines
+                    </button>
                     <button onClick={() => handleDownload(doc.file_path)} className="text-blue-600 hover:underline text-xs">
                       View PDF
                     </button>
@@ -147,6 +205,48 @@ export default function SalesOrdersPage() {
             </tbody>
           </table>
         </div>
+
+        {linesFor && (
+          <>
+            <h2 className="font-semibold text-lg mb-3">
+              Extracted Lines — <span className="text-gray-500 font-normal">{linesFor.file_name}</span>
+            </h2>
+            <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    {['Customer', 'Item Code', 'Description', 'Qty', 'Outstanding', 'Delivery Date', 'Location'].map(h => (
+                      <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {linesLoading && (
+                    <tr><td colSpan={7} className="text-center py-8 text-gray-400">Loading…</td></tr>
+                  )}
+                  {!linesLoading && lines.length === 0 && (
+                    <tr><td colSpan={7} className="text-center py-8 text-gray-400">No lines extracted for this document.</td></tr>
+                  )}
+                  {lines.map(line => (
+                    <tr key={line.id} className="border-b last:border-0 hover:bg-gray-50">
+                      <td className="px-4 py-3 text-gray-700">{line.customer_name}</td>
+                      <td className="px-4 py-3 font-medium whitespace-nowrap">{line.item_code}</td>
+                      <td className="px-4 py-3 text-gray-600">{line.description}</td>
+                      <td className="px-4 py-3 text-right">{line.quantity}</td>
+                      <td className="px-4 py-3 text-right">{line.outstanding_qty}</td>
+                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{line.delivery_date}</td>
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                          {line.location_code}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
