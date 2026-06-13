@@ -17,7 +17,7 @@ export default function LoginPage() {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) { setError(error.message); setLoading(false); return }
     if (!data.session) { setError('Login succeeded but no session returned. Please try again.'); setLoading(false); return }
-    router.replace('/dashboard')
+    window.location.href = '/dashboard'
   }
 
   return (
