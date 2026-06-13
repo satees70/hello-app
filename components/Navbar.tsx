@@ -23,6 +23,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const links = [
     { href: '/dashboard', label: 'Dashboard' },
     { href: '/admin/items', label: 'Items' },
+    { href: '/sales-orders', label: 'Sales Orders' },
     ...(isHO ? [
       { href: '/admin/location-map', label: 'Location Map' },
       ...(isAdmin ? [{ href: '/admin/users', label: 'Users' }] : []),
