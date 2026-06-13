@@ -17,6 +17,9 @@ export default function LoginPage() {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) { setError(error.message); setLoading(false); return }
     if (!data.session) { setError('Login succeeded but no session returned. Please try again.'); setLoading(false); return }
+    // Verify session is actually stored before redirecting
+    const { data: { session: stored } } = await supabase.auth.getSession()
+    if (!stored) { setError('Session was not saved to browser storage. Try disabling browser privacy extensions.'); setLoading(false); return }
     window.location.href = '/dashboard'
   }
 
