@@ -19,19 +19,20 @@ async function fetchProfile(userId: string) {
 export function useProfile() {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const router = useRouter()
 
   useEffect(() => {
-    // Check session immediately on mount
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) { router.replace('/login'); return }
-      const data = await fetchProfile(session.user.id)
-      if (!data) { router.replace('/login'); return }
+      const { data, error: profileError } = await supabase
+        .from('profiles').select('*').eq('id', session.user.id).single()
+      if (profileError) { setError(`Profile error: ${profileError.message}`); setLoading(false); return }
+      if (!data) { setError('No profile found for this user.'); setLoading(false); return }
       setProfile(data)
       setLoading(false)
     })
 
-    // Also listen for auth changes (logout, token refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_OUT') { router.replace('/login') }
     })
@@ -39,5 +40,5 @@ export function useProfile() {
     return () => subscription.unsubscribe()
   }, [router])
 
-  return { profile, loading }
+  return { profile, loading, error }
 }
