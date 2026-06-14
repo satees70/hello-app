@@ -47,6 +47,7 @@ export default function ProductionPage() {
   const [groupBy, setGroupBy] = useState<'date' | 'factory'>('date')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [factoryFilter, setFactoryFilter] = useState('')
   const [savingStock, setSavingStock] = useState('')
   const [raising, setRaising] = useState(false)
 
@@ -146,6 +147,7 @@ export default function ProductionPage() {
   let shown = filter === 'All' ? batches : batches.filter(b => b.status === filter)
   if (fromTs !== null) shown = shown.filter(b => { const k = dateKey(b.delivery_date); return k !== Number.MAX_SAFE_INTEGER && k >= fromTs })
   if (toTs !== null) shown = shown.filter(b => { const k = dateKey(b.delivery_date); return k !== Number.MAX_SAFE_INTEGER && k <= toTs })
+  if (isHO && factoryFilter) shown = shown.filter(b => b.factory_code === factoryFilter)
   const counts: Record<string, number> = { Planned: 0, 'In Progress': 0, Completed: 0 }
   batches.forEach(b => { counts[b.status] = (counts[b.status] || 0) + 1 })
 
@@ -193,8 +195,17 @@ export default function ProductionPage() {
           <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="border rounded-lg px-2 py-1 bg-white" />
           <span className="text-gray-400">to</span>
           <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="border rounded-lg px-2 py-1 bg-white" />
-          {(dateFrom || dateTo) && (
-            <button onClick={() => { setDateFrom(''); setDateTo('') }} className="text-blue-600 hover:underline">Clear</button>
+          {isHO && (
+            <>
+              <span className="text-gray-500 ml-3">Factory:</span>
+              <select value={factoryFilter} onChange={e => setFactoryFilter(e.target.value)} className="border rounded-lg px-2 py-1 bg-white">
+                <option value="">All factories</option>
+                {factories.map(f => <option key={f.code} value={f.code}>{f.name}</option>)}
+              </select>
+            </>
+          )}
+          {(dateFrom || dateTo || factoryFilter) && (
+            <button onClick={() => { setDateFrom(''); setDateTo(''); setFactoryFilter('') }} className="text-blue-600 hover:underline ml-1">Clear filters</button>
           )}
         </div>
 
