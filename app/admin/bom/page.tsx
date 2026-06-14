@@ -6,7 +6,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { supabase } from '@/lib/supabase'
 
 interface Item { id: string; code: string; description: string; unit: string; type: string }
-interface BomComponent { id: string; parent_item_id: string; component_item_id: string; quantity: number }
+interface BomComponent { id: string; parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean }
 
 export default function BomPage() {
   const { profile, loading } = useProfile()
@@ -71,6 +71,13 @@ export default function BomPage() {
     const { error: updErr } = await supabase.from('bom_components').update({ quantity: Number(c.quantity) || 0 }).eq('id', c.id)
     if (updErr) { setError(updErr.message); return }
     setSuccess('Quantity updated.')
+  }
+
+  async function toggleAllowance(c: BomComponent) {
+    setError(''); setSuccess('')
+    const { error: updErr } = await supabase.from('bom_components').update({ apply_allowance: !c.apply_allowance }).eq('id', c.id)
+    if (updErr) { setError(updErr.message); return }
+    setComponents(prev => prev.map(x => (x.id === c.id ? { ...x, apply_allowance: !x.apply_allowance } : x)))
   }
 
   async function removeRow(id: string) {
@@ -141,14 +148,14 @@ export default function BomPage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b">
                   <tr>
-                    {['Component Code', 'Description', 'Type', 'Unit', 'Qty per unit', 'Actions'].map(h => (
+                    {['Component Code', 'Description', 'Type', 'Unit', 'Qty per unit', 'Allowance', 'Actions'].map(h => (
                       <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {components.length === 0 && (
-                    <tr><td colSpan={6} className="text-center py-8 text-gray-400">No components yet. Add the first one above.</td></tr>
+                    <tr><td colSpan={7} className="text-center py-8 text-gray-400">No components yet. Add the first one above.</td></tr>
                   )}
                   {components.map(c => {
                     const ci = itemById(c.component_item_id)
@@ -166,6 +173,12 @@ export default function BomPage() {
                           <input type="number" step="any" value={c.quantity}
                             onChange={e => setRowQty(c.id, e.target.value)}
                             className="w-24 border rounded px-2 py-1 text-right" />
+                        </td>
+                        <td className="px-4 py-3">
+                          <label className="inline-flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" checked={c.apply_allowance} onChange={() => toggleAllowance(c)} className="h-4 w-4" />
+                            <span className="text-xs text-gray-500">{c.apply_allowance ? '+10%' : 'none'}</span>
+                          </label>
                         </td>
                         <td className="px-4 py-3 space-x-3 whitespace-nowrap">
                           <button onClick={() => saveRow(c)} className="text-blue-600 hover:underline text-xs">Save</button>

@@ -17,7 +17,7 @@ interface Batch {
   production_batch_items: BatchItem[]
 }
 interface Item { id: string; code: string; description: string; unit: string; type: string }
-interface BomComp { parent_item_id: string; component_item_id: string; quantity: number }
+interface BomComp { parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean }
 
 const STATUSES = ['Planned', 'In Progress', 'Completed'] as const
 const FILTERS = ['All', ...STATUSES] as const
@@ -60,7 +60,7 @@ export default function ProductionPage() {
       supabase.from('production_batches').select('*, production_batch_items(id, customer_name, quantity)').order('created_at', { ascending: false }),
       supabase.from('factories').select('code, name').order('code'),
       supabase.from('items').select('id, code, description, unit, type'),
-      supabase.from('bom_components').select('parent_item_id, component_item_id, quantity'),
+      supabase.from('bom_components').select('parent_item_id, component_item_id, quantity, apply_allowance'),
       supabase.from('item_stock').select('item_id, factory_code, quantity'),
       supabase.from('material_requests').select('batch_id'),
     ])
@@ -98,10 +98,12 @@ export default function ProductionPage() {
       const required = c.quantity * batch.total_quantity
       const key = `${c.component_item_id}|${batch.factory_code}`
       const st = stock[key] ?? 0
+      const shortfall = Math.max(required - st, 0)
+      const requested = c.apply_allowance ? Math.ceil(shortfall * BUFFER) : clean(shortfall)
       return {
         item_id: c.component_item_id, key,
         code: ci?.code || '—', description: ci?.description || '', unit: ci?.unit || '',
-        required, stock: st, shortfall: Math.max(required - st, 0),
+        required, stock: st, shortfall, requested,
       }
     })
     return { note: '', rows }
@@ -272,7 +274,7 @@ export default function ProductionPage() {
                               className="w-24 border rounded px-2 py-1 text-right" />
                           </td>
                           <td className={`px-3 py-2 text-right font-semibold ${r.shortfall > 0 ? 'text-red-600' : 'text-green-600'}`}>{clean(r.shortfall)}</td>
-                          <td className="px-3 py-2 text-right font-semibold text-blue-700">{r.shortfall > 0 ? Math.ceil(r.shortfall * BUFFER) : 0}</td>
+                          <td className="px-3 py-2 text-right font-semibold text-blue-700">{r.shortfall > 0 ? r.requested : 0}</td>
                           <td className="px-3 py-2 whitespace-nowrap">
                             <button onClick={() => saveStock(r.item_id, selected.factory_code, r.key, stock[r.key] ?? 0)}
                               disabled={savingStock === r.key}
