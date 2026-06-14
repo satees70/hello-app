@@ -10,7 +10,7 @@ interface NavbarProps {
   role: string
 }
 
-interface Toast { id: number; message: string }
+interface Toast { id: number; title: string; message: string }
 
 export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const router = useRouter()
@@ -20,9 +20,9 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const [pendingCount, setPendingCount] = useState(0)
   const [toasts, setToasts] = useState<Toast[]>([])
 
-  function addToast(message: string) {
+  function addToast(title: string, message: string) {
     const id = Date.now() + Math.random()
-    setToasts(t => [...t, { id, message }])
+    setToasts(t => [...t, { id, title, message }])
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 7000)
   }
 
@@ -42,22 +42,40 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     return () => { active = false; clearInterval(timer) }
   }, [isHO, pathname])
 
-  // Head Office: live pop-up the instant a new request is raised
+  // Live notifications:
+  //  - Head Office gets a toast when a new request is raised
+  //  - The requester gets a toast when their request is approved/rejected
   useEffect(() => {
-    if (!isHO) return
+    let channel: ReturnType<typeof supabase.channel> | null = null
+    let myId: string | null = null
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) supabase.realtime.setAuth(data.session.access_token)
+      if (!data.session) return
+      myId = data.session.user.id
+      supabase.realtime.setAuth(data.session.access_token)
+      channel = supabase
+        .channel('change-requests-feed')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'change_requests' }, payload => {
+          if (!isHO) return
+          const row = payload.new as { request_type?: string; requested_by_name?: string; requested_by_email?: string }
+          const kind = row.request_type === 'delete' ? 'delete' : 'change'
+          addToast('🔔 New request to approve', `New ${kind} request from ${row.requested_by_name || row.requested_by_email || 'a user'}`)
+          setPendingCount(c => c + 1)
+        })
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'change_requests' }, payload => {
+          const row = payload.new as { requested_by?: string; status?: string; request_type?: string }
+          if (isHO && (row.status === 'Approved' || row.status === 'Rejected')) {
+            setPendingCount(c => Math.max(0, c - 1))
+          }
+          // Notify the person who raised it
+          if (row.requested_by === myId && (row.status === 'Approved' || row.status === 'Rejected')) {
+            const what = row.request_type === 'delete' ? 'delete request' : 'change request'
+            const ok = row.status === 'Approved'
+            addToast(ok ? '✅ Request approved' : '❌ Request rejected', `Your ${what} was ${ok ? 'approved' : 'rejected'} by Head Office.`)
+          }
+        })
+        .subscribe()
     })
-    const channel = supabase
-      .channel('change-requests-feed')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'change_requests' }, payload => {
-        const row = payload.new as { request_type?: string; requested_by_email?: string; requested_by_name?: string }
-        const kind = row.request_type === 'delete' ? 'delete' : 'change'
-        addToast(`New ${kind} request from ${row.requested_by_name || row.requested_by_email || 'a user'}`)
-        setPendingCount(c => c + 1)
-      })
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
+    return () => { if (channel) supabase.removeChannel(channel) }
   }, [isHO])
 
   async function handleLogout() {
@@ -112,9 +130,9 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
           {toasts.map(t => (
             <button key={t.id} onClick={() => router.push('/sales-orders/changes')}
               className="block w-72 text-left bg-white text-gray-800 border border-blue-200 shadow-lg rounded-lg px-4 py-3 text-sm hover:bg-blue-50">
-              <span className="font-semibold text-blue-700">🔔 New request to approve</span>
+              <span className="font-semibold text-blue-700">{t.title}</span>
               <span className="block text-gray-600 mt-0.5">{t.message}</span>
-              <span className="block text-blue-600 text-xs mt-1">Click to review →</span>
+              <span className="block text-blue-600 text-xs mt-1">Click to view →</span>
             </button>
           ))}
         </div>
