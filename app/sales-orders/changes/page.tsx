@@ -12,6 +12,7 @@ interface ChangeRequest {
   old_value: string | null
   new_value: string
   reason: string | null
+  request_type: string
   status: string
   requested_by_email: string | null
   requested_at: string
@@ -123,14 +124,14 @@ export default function PendingChangesPage() {
                 <tr key={r.id} className="border-b last:border-0 align-top hover:bg-gray-50">
                   <td className="px-3 py-2 min-w-[140px]">{r.sales_imports?.file_name || '—'}</td>
                   <td className="px-3 py-2 min-w-[160px]">
-                    <span className="font-mono font-medium">{r.sales_order_lines?.item_code || '—'}</span>
+                    <span className="font-mono font-medium">{r.sales_order_lines?.item_code || (r.request_type === 'delete' ? r.old_value : '—')}</span>
                     <span className="block text-gray-400">{r.sales_order_lines?.description}</span>
                   </td>
-                  <td className="px-3 py-2 whitespace-nowrap">{FIELD_LABEL[r.field] || r.field}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">{r.request_type === 'delete' ? 'Whole line' : (FIELD_LABEL[r.field] || r.field)}</td>
                   <td className="px-3 py-2 min-w-[160px]">
-                    <span className="line-through text-gray-400">{r.old_value || '(empty)'}</span>
-                    <span className="mx-1">→</span>
-                    <span className="font-medium text-gray-800">{r.new_value}</span>
+                    {r.request_type === 'delete'
+                      ? <span className="text-red-600 font-medium">🗑 Delete line</span>
+                      : <><span className="line-through text-gray-400">{r.old_value || '(empty)'}</span><span className="mx-1">→</span><span className="font-medium text-gray-800">{r.new_value}</span></>}
                   </td>
                   <td className="px-3 py-2 text-gray-600 min-w-[140px]">{r.reason}</td>
                   <td className="px-3 py-2 whitespace-nowrap">

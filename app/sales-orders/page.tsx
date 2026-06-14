@@ -79,6 +79,7 @@ export default function SalesOrdersPage() {
   const [reqField, setReqField] = useState<keyof SalesLine>('customer_name')
   const [reqValue, setReqValue] = useState('')
   const [reqReason, setReqReason] = useState('')
+  const [reqMode, setReqMode] = useState<'edit' | 'delete'>('edit')
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
@@ -188,9 +189,17 @@ export default function SalesOrdersPage() {
   const pendingForDoc = changeReqs.filter(c => c.status === 'Pending').length
 
   function openRequest(line: SalesLine) {
+    setReqMode('edit')
     setReqLine(line)
     setReqField('customer_name')
     setReqValue(String(line.customer_name ?? ''))
+    setReqReason('')
+    setError('')
+  }
+
+  function openDelete(line: SalesLine) {
+    setReqMode('delete')
+    setReqLine(line)
     setReqReason('')
     setError('')
   }
@@ -207,25 +216,27 @@ export default function SalesOrdersPage() {
 
   async function submitRequest() {
     if (!reqLine || !profile || !linesFor) return
-    if (!reqValue.trim()) { setError('Enter the proposed new value.'); return }
-    if (!reqReason.trim()) { setError('Please give a reason for the change.'); return }
+    if (!reqReason.trim()) { setError('Please give a reason.'); return }
+    if (reqMode === 'edit' && !reqValue.trim()) { setError('Enter the proposed new value.'); return }
     setSubmitting(true); setError(''); setSuccess('')
+
+    const payload = reqMode === 'delete'
+      ? { request_type: 'delete', field: '__line__', old_value: `${reqLine.item_code} — ${reqLine.description}`, new_value: '(delete line)' }
+      : { request_type: 'edit', field: reqField, old_value: String(reqLine[reqField] ?? ''), new_value: reqValue.trim() }
 
     const { error: insErr } = await supabase.from('change_requests').insert({
       line_id: reqLine.id,
       import_id: linesFor.id,
-      field: reqField,
-      old_value: String(reqLine[reqField] ?? ''),
-      new_value: reqValue.trim(),
       reason: reqReason.trim(),
       status: 'Pending',
       requested_by: profile.id,
       requested_by_email: profile.email,
       factory_code: reqLine.factory_code || profile.factory_code,
+      ...payload,
     })
     if (insErr) { setError(`Could not submit request: ${insErr.message}`); setSubmitting(false); return }
 
-    setSuccess('Change request submitted for Head Office approval.')
+    setSuccess(reqMode === 'delete' ? 'Delete request submitted for Head Office approval.' : 'Change request submitted for Head Office approval.')
     setSubmitting(false)
     setReqLine(null)
     loadChangeReqs(linesFor.id)
@@ -331,42 +342,46 @@ export default function SalesOrdersPage() {
 
             {reqLine && (
               <div className="bg-white rounded-xl shadow-sm border p-5 mb-4">
-                <h3 className="font-semibold mb-1">Request a change</h3>
+                <h3 className="font-semibold mb-1">{reqMode === 'delete' ? 'Request to delete this line' : 'Request a change'}</h3>
                 <p className="text-gray-500 text-xs mb-4">Line: <span className="font-mono">{reqLine.item_code}</span> — {reqLine.description}</p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-                  <div>
-                    <label className="block text-xs font-medium mb-1">Field to change</label>
-                    <select value={reqField} onChange={e => onReqFieldChange(e.target.value as keyof SalesLine)}
-                      className="w-full border rounded-lg px-3 py-2 text-sm bg-white">
-                      {FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1">Current value</label>
-                    <input value={String(reqLine[reqField] ?? '')} disabled className="w-full border rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-500" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1">Proposed new value</label>
-                    {reqField === 'location_code' ? (
-                      <select value={reqValue} onChange={e => setReqValue(e.target.value)}
+                {reqMode === 'delete' ? (
+                  <p className="text-red-600 text-sm bg-red-50 p-2 rounded mb-4">This asks Head Office to remove this line from the document. Give a reason below.</p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                    <div>
+                      <label className="block text-xs font-medium mb-1">Field to change</label>
+                      <select value={reqField} onChange={e => onReqFieldChange(e.target.value as keyof SalesLine)}
                         className="w-full border rounded-lg px-3 py-2 text-sm bg-white">
-                        <option value="">Select location…</option>
-                        {locationCodes.map(c => <option key={c} value={c}>{c}</option>)}
+                        {FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
                       </select>
-                    ) : (
-                      <input value={reqValue} onChange={e => setReqValue(e.target.value)}
-                        className="w-full border rounded-lg px-3 py-2 text-sm bg-white" />
-                    )}
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium mb-1">Current value</label>
+                      <input value={String(reqLine[reqField] ?? '')} disabled className="w-full border rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-500" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium mb-1">Proposed new value</label>
+                      {reqField === 'location_code' ? (
+                        <select value={reqValue} onChange={e => setReqValue(e.target.value)}
+                          className="w-full border rounded-lg px-3 py-2 text-sm bg-white">
+                          <option value="">Select location…</option>
+                          {locationCodes.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      ) : (
+                        <input value={reqValue} onChange={e => setReqValue(e.target.value)}
+                          className="w-full border rounded-lg px-3 py-2 text-sm bg-white" />
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
                 <label className="block text-xs font-medium mb-1">Reason</label>
                 <textarea value={reqReason} onChange={e => setReqReason(e.target.value)} rows={2}
-                  className="w-full border rounded-lg px-3 py-2 text-sm bg-white mb-4" placeholder="Why does this need to change?" />
+                  className="w-full border rounded-lg px-3 py-2 text-sm bg-white mb-4" placeholder={reqMode === 'delete' ? 'Why should this line be deleted?' : 'Why does this need to change?'} />
                 {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
                 <div className="flex gap-3">
                   <button onClick={submitRequest} disabled={submitting}
-                    className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">
-                    {submitting ? 'Submitting…' : 'Submit request'}
+                    className={`text-white px-5 py-2 rounded-lg disabled:opacity-50 text-sm font-medium ${reqMode === 'delete' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                    {submitting ? 'Submitting…' : (reqMode === 'delete' ? 'Submit delete request' : 'Submit request')}
                   </button>
                   <button onClick={() => setReqLine(null)} className="border px-5 py-2 rounded-lg hover:bg-gray-50 text-sm">Cancel</button>
                 </div>
@@ -405,6 +420,7 @@ export default function SalesOrdersPage() {
                         <td className="px-3 py-2 whitespace-nowrap">
                           {pend > 0 && <span className="mr-2 text-amber-600">⏳ {pend}</span>}
                           <button onClick={() => openRequest(line)} className="text-blue-600 hover:underline">Request change</button>
+                          <button onClick={() => openDelete(line)} className="text-red-600 hover:underline ml-3">Request delete</button>
                         </td>
                       </tr>
                     )
