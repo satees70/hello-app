@@ -51,9 +51,9 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     const channel = supabase
       .channel('change-requests-feed')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'change_requests' }, payload => {
-        const row = payload.new as { request_type?: string; requested_by_email?: string }
+        const row = payload.new as { request_type?: string; requested_by_email?: string; requested_by_name?: string }
         const kind = row.request_type === 'delete' ? 'delete' : 'change'
-        addToast(`New ${kind} request from ${row.requested_by_email || 'a user'}`)
+        addToast(`New ${kind} request from ${row.requested_by_name || row.requested_by_email || 'a user'}`)
         setPendingCount(c => c + 1)
       })
       .subscribe()

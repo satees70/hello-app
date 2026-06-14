@@ -231,6 +231,7 @@ export default function SalesOrdersPage() {
       status: 'Pending',
       requested_by: profile.id,
       requested_by_email: profile.email,
+      requested_by_name: profile.full_name || profile.email,
       factory_code: reqLine.factory_code || profile.factory_code,
       ...payload,
     })

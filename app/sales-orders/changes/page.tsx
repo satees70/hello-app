@@ -15,8 +15,10 @@ interface ChangeRequest {
   request_type: string
   status: string
   requested_by_email: string | null
+  requested_by_name: string | null
   requested_at: string
   reviewed_by_email: string | null
+  reviewed_by_name: string | null
   reviewed_at: string | null
   factory_code: string
   sales_order_lines: { item_code: string; description: string } | null
@@ -148,12 +150,12 @@ export default function PendingChangesPage() {
                   </td>
                   <td className="px-3 py-2 text-gray-600 min-w-[140px]">{r.reason}</td>
                   <td className="px-3 py-2 whitespace-nowrap">
-                    <span className="block">{r.requested_by_email}</span>
+                    <span className="block">{r.requested_by_name || r.requested_by_email}</span>
                     <span className="block text-gray-400">{fmt(r.requested_at)}</span>
                   </td>
                   <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full font-medium ${STATUS_STYLES[r.status] || 'bg-gray-100 text-gray-700'}`}>{r.status}</span></td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-600">
-                    {r.status === 'Pending' ? '—' : (<><span className="block">{r.reviewed_by_email}</span><span className="block text-gray-400">{fmt(r.reviewed_at)}</span></>)}
+                    {r.status === 'Pending' ? '—' : (<><span className="block">{r.reviewed_by_name || r.reviewed_by_email}</span><span className="block text-gray-400">{fmt(r.reviewed_at)}</span></>)}
                   </td>
                   {isHO && (
                     <td className="px-3 py-2 whitespace-nowrap">
