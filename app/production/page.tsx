@@ -77,6 +77,7 @@ export default function ProductionPage() {
   const factoryName = (code: string) => factories.find(f => f.code === code)?.name || code || '—'
   // Trim floating-point noise (e.g. 0.0011250000000000001 -> 0.001125)
   const clean = (n: number) => Number(n.toPrecision(12))
+  const BUFFER = 1.1 // request 10% more than the shortfall as a safety margin
 
   async function setStatus(b: Batch, status: string) {
     setUpdating(b.id); setError('')
@@ -254,7 +255,7 @@ export default function ProductionPage() {
                 <div className="overflow-x-auto border rounded-lg">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b">
-                      <tr>{['Material', 'Description', 'Unit', 'Required', 'Stock', 'Shortfall', ''].map(h => (
+                      <tr>{['Material', 'Description', 'Unit', 'Required', 'Stock', 'Shortfall', 'Request (+10%)', ''].map(h => (
                         <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
                     </thead>
                     <tbody>
@@ -271,6 +272,7 @@ export default function ProductionPage() {
                               className="w-24 border rounded px-2 py-1 text-right" />
                           </td>
                           <td className={`px-3 py-2 text-right font-semibold ${r.shortfall > 0 ? 'text-red-600' : 'text-green-600'}`}>{clean(r.shortfall)}</td>
+                          <td className="px-3 py-2 text-right font-semibold text-blue-700">{r.shortfall > 0 ? clean(r.shortfall * BUFFER) : 0}</td>
                           <td className="px-3 py-2 whitespace-nowrap">
                             <button onClick={() => saveStock(r.item_id, selected.factory_code, r.key, stock[r.key] ?? 0)}
                               disabled={savingStock === r.key}
@@ -296,7 +298,7 @@ export default function ProductionPage() {
                     {raising ? 'Raising…' : 'Raise Material Request'}
                   </button>
                 </div>
-                <p className="text-gray-400 text-xs mt-2">Tip: save your stock figures first, then raise the request — it captures the shortfall at that moment.</p>
+                <p className="text-gray-400 text-xs mt-2">Tip: save your stock figures first, then raise the request — it captures the shortfall at that moment and asks the warehouse for 10% more as a safety margin.</p>
               </>
             )}
           </div>

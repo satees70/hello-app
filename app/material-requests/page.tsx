@@ -12,6 +12,7 @@ interface MRItem {
   required_qty: number
   stock_qty: number
   shortfall_qty: number
+  requested_qty: number
   received_qty: number
 }
 interface MaterialRequest {
@@ -123,12 +124,12 @@ export default function MaterialRequestsPage() {
                 <div className="overflow-x-auto border rounded-lg">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b">
-                      <tr>{['Material', 'Description', 'Unit', 'Required', 'Stock', 'Shortfall', 'Received', ''].map(h => (
+                      <tr>{['Material', 'Description', 'Unit', 'Required', 'Stock', 'Shortfall', 'Requested (+10%)', 'Received', ''].map(h => (
                         <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
                     </thead>
                     <tbody>
                       {r.material_request_items?.map(it => {
-                        const done = it.received_qty >= it.shortfall_qty
+                        const done = it.received_qty >= it.requested_qty
                         return (
                           <tr key={it.id} className={`border-b last:border-0 ${done ? 'bg-green-50/40' : ''}`}>
                             <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{it.item_code}</td>
@@ -136,7 +137,8 @@ export default function MaterialRequestsPage() {
                             <td className="px-3 py-2 text-gray-500">{it.unit}</td>
                             <td className="px-3 py-2 text-right">{it.required_qty}</td>
                             <td className="px-3 py-2 text-right text-gray-500">{it.stock_qty}</td>
-                            <td className="px-3 py-2 text-right font-semibold text-red-600">{it.shortfall_qty}</td>
+                            <td className="px-3 py-2 text-right text-red-600">{it.shortfall_qty}</td>
+                            <td className="px-3 py-2 text-right font-semibold text-blue-700">{it.requested_qty}</td>
                             <td className="px-3 py-2">
                               <input type="number" step="any"
                                 value={edits[it.id] ?? it.received_qty}
