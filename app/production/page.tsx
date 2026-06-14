@@ -14,10 +14,14 @@ interface Batch {
   factory_code: string
   total_quantity: number
   status: string
+  material_request_id: string | null
   production_batch_items: BatchItem[]
 }
 interface Item { id: string; code: string; description: string; unit: string; type: string }
 interface BomComp { parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean }
+
+// A materials target: a single batch or a combined group of batches (same item + factory)
+interface MatTarget { label: string; item_code: string; factory_code: string; total: number; batchIds: string[] }
 
 const STATUSES = ['Planned', 'Requested', 'In Progress', 'Completed'] as const
 const FILTERS = ['All', ...STATUSES] as const
@@ -36,34 +40,33 @@ export default function ProductionPage() {
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [items, setItems] = useState<Item[]>([])
   const [boms, setBoms] = useState<BomComp[]>([])
-  const [stock, setStock] = useState<Record<string, number>>({}) // `${item_id}|${factory}` -> qty
-  const [requestBatchIds, setRequestBatchIds] = useState<Set<string>>(new Set())
+  const [stock, setStock] = useState<Record<string, number>>({})
   const [filter, setFilter] = useState<Filter>('All')
   const [updating, setUpdating] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
-  const [selected, setSelected] = useState<Batch | null>(null)
+  const [selected, setSelected] = useState<MatTarget | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [groupBy, setGroupBy] = useState<'date' | 'factory'>('date')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [factoryFilter, setFactoryFilter] = useState('')
   const [savingStock, setSavingStock] = useState('')
   const [raising, setRaising] = useState(false)
+  const [combineOn, setCombineOn] = useState(true)
+  const [separated, setSeparated] = useState<Set<string>>(new Set())
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
   useEffect(() => { if (profile) loadAll() }, [profile])
 
   async function loadAll() {
-    const [{ data: b }, { data: f }, { data: it }, { data: bc }, { data: st }, { data: mr }] = await Promise.all([
+    const [{ data: b }, { data: f }, { data: it }, { data: bc }, { data: st }] = await Promise.all([
       supabase.from('production_batches').select('*, production_batch_items(id, customer_name, so_number, quantity)').order('created_at', { ascending: false }),
       supabase.from('factories').select('code, name').order('code'),
       supabase.from('items').select('id, code, description, unit, type'),
       supabase.from('bom_components').select('parent_item_id, component_item_id, quantity, apply_allowance'),
       supabase.from('item_stock').select('item_id, factory_code, quantity'),
-      supabase.from('material_requests').select('batch_id'),
     ])
     setBatches((b as Batch[]) || [])
     setFactories(f || [])
@@ -72,13 +75,11 @@ export default function ProductionPage() {
     const sm: Record<string, number> = {}
     ;(st || []).forEach(r => { sm[`${r.item_id}|${r.factory_code}`] = Number(r.quantity) })
     setStock(sm)
-    setRequestBatchIds(new Set((mr || []).map(r => r.batch_id)))
   }
 
   const factoryName = (code: string) => factories.find(f => f.code === code)?.name || code || '—'
-  // Trim floating-point noise (e.g. 0.0011250000000000001 -> 0.001125)
   const clean = (n: number) => Number(n.toPrecision(12))
-  const BUFFER = 1.1 // request 10% more than the shortfall as a safety margin
+  const BUFFER = 1.1
 
   async function setStatus(b: Batch, status: string) {
     setUpdating(b.id); setError('')
@@ -88,24 +89,20 @@ export default function ProductionPage() {
     setUpdating('')
   }
 
-  // --- material explosion ---
-  function explode(batch: Batch) {
-    const parent = items.find(i => i.code === batch.item_code)
-    if (!parent) return { note: `Item ${batch.item_code} is not in Items Master.`, rows: [] }
+  // Explode a BOM for a given item/factory/quantity
+  function explode(itemCode: string, factoryCode: string, total: number) {
+    const parent = items.find(i => i.code === itemCode)
+    if (!parent) return { note: `Item ${itemCode} is not in Items Master.`, rows: [] }
     const comps = boms.filter(b => b.parent_item_id === parent.id)
     if (comps.length === 0) return { note: 'No BOM defined for this item. Add a recipe in BOM first.', rows: [] }
     const rows = comps.map(c => {
       const ci = items.find(i => i.id === c.component_item_id)
-      const required = c.quantity * batch.total_quantity
-      const key = `${c.component_item_id}|${batch.factory_code}`
+      const required = c.quantity * total
+      const key = `${c.component_item_id}|${factoryCode}`
       const st = stock[key] ?? 0
       const shortfall = Math.max(required - st, 0)
       const requested = c.apply_allowance ? Math.ceil(shortfall * BUFFER) : clean(shortfall)
-      return {
-        item_id: c.component_item_id, key,
-        code: ci?.code || '—', description: ci?.description || '', unit: ci?.unit || '',
-        required, stock: st, shortfall, requested,
-      }
+      return { item_id: c.component_item_id, key, code: ci?.code || '—', description: ci?.description || '', unit: ci?.unit || '', required, stock: st, shortfall, requested }
     })
     return { note: '', rows }
   }
@@ -118,23 +115,22 @@ export default function ProductionPage() {
     setStock(prev => ({ ...prev, [key]: value }))
     setSavingStock('')
     setSuccess('Stock updated.')
-    reloadRequests() // an open request may have auto-refreshed (or cleared)
   }
 
-  async function reloadRequests() {
-    const { data } = await supabase.from('material_requests').select('batch_id')
-    setRequestBatchIds(new Set((data || []).map(r => r.batch_id)))
-  }
-
-  async function raiseRequest(batch: Batch) {
+  async function raiseTarget(t: MatTarget) {
     setRaising(true); setError(''); setSuccess('')
-    const { error: rpcErr } = await supabase.rpc('raise_material_request', { p_batch_id: batch.id })
+    const { error: rpcErr } = t.batchIds.length === 1
+      ? await supabase.rpc('raise_material_request', { p_batch_id: t.batchIds[0] })
+      : await supabase.rpc('raise_combined_material_request', { p_batch_ids: t.batchIds })
     if (rpcErr) { setError(rpcErr.message); setRaising(false); return }
-    setSuccess(`Material request raised for ${batch.batch_no}.`)
-    setRequestBatchIds(prev => new Set(prev).add(batch.id))
-    setBatches(prev => prev.map(x => (x.id === batch.id && x.status === 'Planned' ? { ...x, status: 'Requested' } : x)))
+    setSuccess(`Material request raised for ${t.label}.`)
     setRaising(false)
+    setSelected(null)
+    await loadAll()
   }
+
+  const toggleRow = (id: string) => setExpanded(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleSeparate = (id: string) => setSeparated(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
   if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
@@ -153,25 +149,24 @@ export default function ProductionPage() {
   const counts: Record<string, number> = { Planned: 0, Requested: 0, 'In Progress': 0, Completed: 0 }
   batches.forEach(b => { counts[b.status] = (counts[b.status] || 0) + 1 })
 
-  const exploded = selected ? explode(selected) : null
+  const exploded = selected ? explode(selected.item_code, selected.factory_code, selected.total) : null
   const totalShortfall = exploded ? exploded.rows.reduce((s, r) => s + r.shortfall, 0) : 0
-  const hasRequest = selected ? requestBatchIds.has(selected.id) : false
+  const hasRequest = selected ? selected.batchIds.some(id => batches.find(b => b.id === id)?.material_request_id) : false
 
-  // Group batches by delivery date or factory
-  const byFactory = isHO && groupBy === 'factory'
-  const groupsMap: Record<string, Batch[]> = {}
-  shown.forEach(b => {
-    const k = byFactory ? (b.factory_code || 'Unassigned') : (b.delivery_date || 'No date')
-    ;(groupsMap[k] = groupsMap[k] || []).push(b)
-  })
-  const groupKeys = Object.keys(groupsMap).sort((a, b) => byFactory ? a.localeCompare(b) : dateKey(a) - dateKey(b))
-  const groupLabel = (k: string) => byFactory ? `🏭 ${factoryName(k)}` : `📅 ${k}`
-  const toggleRow = (id: string) => setExpanded(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  // Factories present in the current view (for the combined, factory-grouped layout)
+  const factoriesInView = [...new Set(shown.map(b => b.factory_code))].sort()
+  const singleTarget = (b: Batch): MatTarget => ({ label: b.batch_no, item_code: b.item_code, factory_code: b.factory_code, total: b.total_quantity, batchIds: [b.id] })
 
-  // Which context column to show in rows: factory when grouping by date (HO), delivery date when grouping by factory
-  const showFactoryCol = isHO && !byFactory
-  const showDateCol = byFactory
-  const expandSpan = 5 + (showFactoryCol ? 1 : 0) + (showDateCol ? 1 : 0)
+  // Build display units for a factory's batches when Combine is on
+  function buildUnits(fb: Batch[]) {
+    const combinable = fb.filter(b => b.status === 'Planned' && !b.material_request_id && !separated.has(b.id))
+    const byItem: Record<string, Batch[]> = {}
+    combinable.forEach(b => { (byItem[b.item_code] = byItem[b.item_code] || []).push(b) })
+    const combos = Object.values(byItem).filter(m => m.length >= 2)
+    const comboIds = new Set(combos.flat().map(b => b.id))
+    const singles = fb.filter(b => !comboIds.has(b.id))
+    return { combos, singles }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -206,17 +201,11 @@ export default function ProductionPage() {
           )}
         </div>
 
-        {isHO && (
-          <div className="flex gap-2 mb-5 items-center text-sm">
-            <span className="text-gray-500">Group by:</span>
-            {(['date', 'factory'] as const).map(g => (
-              <button key={g} onClick={() => setGroupBy(g)}
-                className={`px-3 py-1 rounded-lg font-medium border ${groupBy === g ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
-                {g === 'date' ? 'Delivery date' : 'Factory'}
-              </button>
-            ))}
-          </div>
-        )}
+        <label className="flex items-center gap-2 mb-5 text-sm cursor-pointer w-fit">
+          <input type="checkbox" checked={combineOn} onChange={e => setCombineOn(e.target.checked)} className="h-4 w-4" />
+          <span className="text-gray-700 font-medium">Combine same item to run together</span>
+          <span className="text-gray-400">(Planned batches not yet requested, grouped by factory)</span>
+        </label>
 
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
         {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}
@@ -228,89 +217,138 @@ export default function ProductionPage() {
           </div>
         ) : (
           <div className="space-y-6">
-            {groupKeys.map(date => (
-              <div key={date}>
-                <h3 className="font-semibold text-sm text-gray-700 mb-2">
-                  {groupLabel(date)} <span className="text-gray-400 font-normal">· {groupsMap[date].length} batch(es)</span>
-                </h3>
-                <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 border-b">
-                      <tr>
-                        <th className="w-6"></th>
-                        {['Batch', 'Item', 'Total qty', ...(showFactoryCol ? ['Factory'] : []), ...(showDateCol ? ['Delivery date'] : []), 'Status', ''].map(h => (
-                          <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {groupsMap[date].map(b => (
-                        <Fragment key={b.id}>
-                          <tr className={`border-b last:border-0 hover:bg-gray-50 cursor-pointer ${expanded.has(b.id) ? 'bg-blue-50/40' : ''}`} onClick={() => toggleRow(b.id)}>
-                            <td className="pl-3 text-gray-400">{expanded.has(b.id) ? '▾' : '▸'}</td>
-                            <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}</td>
-                            <td className="px-3 py-2">
-                              <span className="font-medium">{b.item_code}</span>
-                              <span className="block text-gray-500 text-xs">{b.description}</span>
-                            </td>
-                            <td className="px-3 py-2 font-semibold whitespace-nowrap">{b.total_quantity}</td>
-                            {showFactoryCol && <td className="px-3 py-2 whitespace-nowrap">{factoryName(b.factory_code)}</td>}
-                            {showDateCol && <td className="px-3 py-2 whitespace-nowrap">{b.delivery_date || '—'}</td>}
-                            <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
-                              <select value={b.status} disabled={updating === b.id}
-                                onChange={e => setStatus(b, e.target.value)}
-                                className={`border rounded-lg px-2 py-1 text-xs ${STATUS_STYLE[b.status] || 'bg-white'}`}>
-                                {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                              </select>
-                            </td>
-                            <td className="px-3 py-2 whitespace-nowrap text-right">
-                              {requestBatchIds.has(b.id) && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">MR</span>}
-                            </td>
-                          </tr>
-                          {expanded.has(b.id) && (
-                            <tr className="bg-gray-50/60 border-b last:border-0">
-                              <td></td>
-                              <td colSpan={expandSpan} className="px-3 py-3">
-                                <div className="text-gray-400 text-xs mb-1">Per customer / order</div>
-                                <ul className="space-y-1 mb-3 max-w-lg">
-                                  {b.production_batch_items?.map(it => (
-                                    <li key={it.id} className="flex justify-between items-baseline gap-2">
-                                      <span className="text-gray-700 truncate min-w-0">{it.customer_name}</span>
-                                      <span className="flex-shrink-0 flex items-baseline gap-2">
-                                        {it.so_number && <span className="text-gray-400 font-mono text-xs">{it.so_number}</span>}
-                                        <span className="font-medium">{it.quantity}</span>
-                                      </span>
-                                    </li>
-                                  ))}
-                                </ul>
-                                <button onClick={() => { setSelected(b); setError(''); setSuccess('') }}
-                                  className="border border-blue-600 text-blue-600 px-4 py-1.5 rounded-lg hover:bg-blue-50 text-sm font-medium">
-                                  Materials
-                                </button>
+            {factoriesInView.map(fc => {
+              const fb = shown.filter(b => b.factory_code === fc)
+              const { combos, singles } = buildUnits(fb)
+              return (
+                <div key={fc}>
+                  {isHO && <h3 className="font-semibold text-sm text-gray-700 mb-2">🏭 {factoryName(fc)} <span className="text-gray-400 font-normal">· {fb.length} batch(es)</span></h3>}
+                  <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 border-b">
+                        <tr>
+                          <th className="w-6"></th>
+                          {['Batch', 'Item', 'Total qty', 'Delivery date', 'Status', ''].map(h => (
+                            <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {/* Combined units (only when Combine is on) */}
+                        {combineOn && combos.map(members => {
+                          const item = members[0].item_code
+                          const key = `combo:${fc}:${item}`
+                          const total = members.reduce((s, m) => s + m.total_quantity, 0)
+                          const dates = [...new Set(members.map(m => m.delivery_date))]
+                          const dateLabel = dates.length === 1 ? dates[0] : 'Multiple'
+                          const target: MatTarget = { label: `${item} (combined ${members.length})`, item_code: item, factory_code: fc, total, batchIds: members.map(m => m.id) }
+                          return (
+                            <Fragment key={key}>
+                              <tr className={`border-b last:border-0 hover:bg-amber-50/40 cursor-pointer ${expanded.has(key) ? 'bg-amber-50/60' : 'bg-amber-50/20'}`} onClick={() => toggleRow(key)}>
+                                <td className="pl-3 text-gray-400">{expanded.has(key) ? '▾' : '▸'}</td>
+                                <td className="px-3 py-2 whitespace-nowrap"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-200 text-amber-800">Combined ×{members.length}</span></td>
+                                <td className="px-3 py-2"><span className="font-medium">{item}</span><span className="block text-gray-500 text-xs">{members[0].description}</span></td>
+                                <td className="px-3 py-2 font-semibold whitespace-nowrap">{total}</td>
+                                <td className="px-3 py-2 whitespace-nowrap">{dateLabel}</td>
+                                <td className="px-3 py-2"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">Planned</span></td>
+                                <td className="px-3 py-2 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                                  <button onClick={() => { setSelected(target); setError(''); setSuccess('') }} className="text-blue-600 hover:underline text-xs font-medium">Materials</button>
+                                </td>
+                              </tr>
+                              {expanded.has(key) && (
+                                <tr className="bg-amber-50/30 border-b last:border-0">
+                                  <td></td>
+                                  <td colSpan={6} className="px-3 py-3">
+                                    <div className="text-gray-500 text-xs mb-2">{members.length} orders combined — remove any to produce it separately:</div>
+                                    <div className="space-y-2 max-w-2xl">
+                                      {members.map(m => (
+                                        <div key={m.id} className="border rounded-lg bg-white p-2">
+                                          <div className="flex justify-between items-center mb-1">
+                                            <span className="text-xs"><span className="font-mono font-semibold">{m.batch_no}</span> · due {m.delivery_date || '—'} · qty <strong>{m.total_quantity}</strong></span>
+                                            <button onClick={() => toggleSeparate(m.id)} className="text-red-600 hover:underline text-xs">✕ Separate</button>
+                                          </div>
+                                          <ul className="space-y-0.5 pl-1">
+                                            {m.production_batch_items?.map(it => (
+                                              <li key={it.id} className="flex justify-between items-baseline gap-2 text-xs">
+                                                <span className="text-gray-600 truncate min-w-0">{it.customer_name}</span>
+                                                <span className="flex-shrink-0 flex items-baseline gap-2">
+                                                  {it.so_number && <span className="text-gray-400 font-mono">{it.so_number}</span>}
+                                                  <span className="font-medium">{it.quantity}</span>
+                                                </span>
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
+                          )
+                        })}
+
+                        {/* Individual batches */}
+                        {singles.map(b => (
+                          <Fragment key={b.id}>
+                            <tr className={`border-b last:border-0 hover:bg-gray-50 cursor-pointer ${expanded.has(b.id) ? 'bg-blue-50/40' : ''}`} onClick={() => toggleRow(b.id)}>
+                              <td className="pl-3 text-gray-400">{expanded.has(b.id) ? '▾' : '▸'}</td>
+                              <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}</td>
+                              <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span></td>
+                              <td className="px-3 py-2 font-semibold whitespace-nowrap">{b.total_quantity}</td>
+                              <td className="px-3 py-2 whitespace-nowrap">{b.delivery_date || '—'}</td>
+                              <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
+                                <select value={b.status} disabled={updating === b.id} onChange={e => setStatus(b, e.target.value)}
+                                  className={`border rounded-lg px-2 py-1 text-xs ${STATUS_STYLE[b.status] || 'bg-white'}`}>
+                                  {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                                </select>
+                              </td>
+                              <td className="px-3 py-2 text-right whitespace-nowrap">
+                                {combineOn && separated.has(b.id) && <button onClick={e => { e.stopPropagation(); toggleSeparate(b.id) }} className="text-blue-600 hover:underline text-xs mr-2">↩ Combine</button>}
+                                {b.material_request_id && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">MR</span>}
                               </td>
                             </tr>
-                          )}
-                        </Fragment>
-                      ))}
-                    </tbody>
-                  </table>
+                            {expanded.has(b.id) && (
+                              <tr className="bg-gray-50/60 border-b last:border-0">
+                                <td></td>
+                                <td colSpan={6} className="px-3 py-3">
+                                  <div className="text-gray-400 text-xs mb-1">Per customer / order</div>
+                                  <ul className="space-y-1 mb-3 max-w-lg">
+                                    {b.production_batch_items?.map(it => (
+                                      <li key={it.id} className="flex justify-between items-baseline gap-2">
+                                        <span className="text-gray-700 truncate min-w-0">{it.customer_name}</span>
+                                        <span className="flex-shrink-0 flex items-baseline gap-2">
+                                          {it.so_number && <span className="text-gray-400 font-mono text-xs">{it.so_number}</span>}
+                                          <span className="font-medium">{it.quantity}</span>
+                                        </span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                  <button onClick={() => { setSelected(singleTarget(b)); setError(''); setSuccess('') }}
+                                    className="border border-blue-600 text-blue-600 px-4 py-1.5 rounded-lg hover:bg-blue-50 text-sm font-medium">Materials</button>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
 
         {selected && exploded && (
           <div className="bg-white rounded-xl shadow-sm border mt-8 p-6">
             <div className="flex items-center justify-between mb-1">
-              <h2 className="font-semibold text-lg">
-                Material requirements — <span className="font-mono">{selected.batch_no}</span>
-              </h2>
+              <h2 className="font-semibold text-lg">Material requirements — <span className="font-mono">{selected.label}</span></h2>
               <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600 text-sm">Close</button>
             </div>
             <p className="text-gray-500 text-sm mb-4">
-              To make <strong>{selected.total_quantity}</strong> of {selected.item_code} at {isHO ? factoryName(selected.factory_code) : (selected.factory_code || 'this factory')}.
-              Enter current stock to see the shortfall.
+              To make <strong>{selected.total}</strong> of {selected.item_code} at {isHO ? factoryName(selected.factory_code) : (selected.factory_code || 'this factory')}.
+              {selected.batchIds.length > 1 && ` (combined from ${selected.batchIds.length} batches)`} Enter current stock to see the shortfall.
             </p>
 
             {exploded.note ? (
@@ -331,8 +369,7 @@ export default function ProductionPage() {
                           <td className="px-3 py-2 text-gray-500">{r.unit}</td>
                           <td className="px-3 py-2 text-right">{clean(r.required)}</td>
                           <td className="px-3 py-2">
-                            <input type="number" step="any"
-                              value={stock[r.key] ?? 0}
+                            <input type="number" step="any" value={stock[r.key] ?? 0}
                               onChange={e => setStock(prev => ({ ...prev, [r.key]: e.target.value === '' ? 0 : Number(e.target.value) }))}
                               className="w-24 border rounded px-2 py-1 text-right" />
                           </td>
@@ -352,13 +389,12 @@ export default function ProductionPage() {
                 <div className="flex items-center justify-between mt-4">
                   <div className="text-sm">
                     {hasRequest
-                      ? <span className="text-purple-700">A material request is already open for this batch — its quantities update automatically as BOM/stock change (until receiving starts). See Material Requests.</span>
+                      ? <span className="text-purple-700">A material request is already open — see Material Requests.</span>
                       : totalShortfall > 0
                         ? <span className="text-red-600">Total shortfall across {exploded.rows.filter(r => r.shortfall > 0).length} material(s).</span>
                         : <span className="text-green-600">Enough stock on hand — no shortfall.</span>}
                   </div>
-                  <button onClick={() => raiseRequest(selected)}
-                    disabled={raising || hasRequest || totalShortfall <= 0}
+                  <button onClick={() => raiseTarget(selected)} disabled={raising || hasRequest || totalShortfall <= 0}
                     className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
                     {raising ? 'Raising…' : 'Raise Material Request'}
                   </button>
