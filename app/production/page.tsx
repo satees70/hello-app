@@ -272,7 +272,7 @@ export default function ProductionPage() {
                               className="w-24 border rounded px-2 py-1 text-right" />
                           </td>
                           <td className={`px-3 py-2 text-right font-semibold ${r.shortfall > 0 ? 'text-red-600' : 'text-green-600'}`}>{clean(r.shortfall)}</td>
-                          <td className="px-3 py-2 text-right font-semibold text-blue-700">{r.shortfall > 0 ? clean(r.shortfall * BUFFER) : 0}</td>
+                          <td className="px-3 py-2 text-right font-semibold text-blue-700">{r.shortfall > 0 ? Math.ceil(r.shortfall * BUFFER) : 0}</td>
                           <td className="px-3 py-2 whitespace-nowrap">
                             <button onClick={() => saveStock(r.item_id, selected.factory_code, r.key, stock[r.key] ?? 0)}
                               disabled={savingStock === r.key}
@@ -298,7 +298,7 @@ export default function ProductionPage() {
                     {raising ? 'Raising…' : 'Raise Material Request'}
                   </button>
                 </div>
-                <p className="text-gray-400 text-xs mt-2">Tip: save your stock figures first, then raise the request — it captures the shortfall at that moment and asks the warehouse for 10% more as a safety margin.</p>
+                <p className="text-gray-400 text-xs mt-2">Tip: save your stock figures first, then raise the request — it captures the shortfall at that moment and asks the warehouse for 10% more (rounded up) as a safety margin.</p>
               </>
             )}
           </div>
