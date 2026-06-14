@@ -71,6 +71,7 @@ export default function SalesOrdersPage() {
   const [confirmations, setConfirmations] = useState<{ factory_code: string; confirmed_by_name: string | null }[]>([])
   const [confirmingFactory, setConfirmingFactory] = useState('')
   const [dupKeys, setDupKeys] = useState<Set<string>>(new Set()) // "so_number||item_code" that appear >1 across all lines
+  const [dupImports, setDupImports] = useState<Record<string, string[]>>({}) // key -> import ids that contain it
   const [docSummary, setDocSummary] = useState<Record<string, { pending: number; dup: number; locations: string[] }>>({})
 
   // Factory display + valid location codes (for the location dropdown)
@@ -190,24 +191,39 @@ export default function SalesOrdersPage() {
     const [{ data: lineData }, { data: crData }, { data: allLines }, { data: confData }] = await Promise.all([
       supabase.from('sales_order_lines').select('*').eq('import_id', doc.id).order('customer_name'),
       supabase.from('change_requests').select('id, line_id, field, status').eq('import_id', doc.id),
-      supabase.from('sales_order_lines').select('so_number, item_code'),
+      supabase.from('sales_order_lines').select('so_number, item_code, import_id'),
       supabase.from('document_confirmations').select('factory_code, confirmed_by_name').eq('import_id', doc.id),
     ])
     setLines(lineData || [])
     setChangeReqs(crData || [])
     setConfirmations(confData || [])
-    // Flag SO number + item code combinations that appear on more than one line anywhere
+    // Flag SO number + item code combinations that appear on more than one line anywhere,
+    // and remember which documents each combination shows up in.
     const counts: Record<string, number> = {}
+    const byKey: Record<string, Set<string>> = {}
     ;(allLines || []).forEach(r => {
       if (!r.so_number) return
       const k = `${r.so_number}||${r.item_code}`
       counts[k] = (counts[k] || 0) + 1
+      if (!byKey[k]) byKey[k] = new Set()
+      byKey[k].add(r.import_id)
     })
     setDupKeys(new Set(Object.keys(counts).filter(k => counts[k] > 1)))
+    const di: Record<string, string[]> = {}
+    Object.keys(byKey).forEach(k => { di[k] = [...byKey[k]] })
+    setDupImports(di)
     setLinesLoading(false)
   }
 
   const isDuplicate = (l: SalesLine) => !!l.so_number && dupKeys.has(`${l.so_number}||${l.item_code}`)
+
+  // Where else this line's SO number + item appears (for the duplicate warning)
+  function dupWhere(l: SalesLine): string {
+    const ids = dupImports[`${l.so_number}||${l.item_code}`] || []
+    const otherNames = [...new Set(ids.filter(id => id !== linesFor?.id)
+      .map(id => imports.find(i => i.id === id)?.file_name).filter(Boolean))]
+    return otherNames.length ? `also in ${otherNames.join(', ')}` : 'appears more than once in this document'
+  }
 
   async function loadChangeReqs(importId: string) {
     const { data } = await supabase.from('change_requests').select('id, line_id, field, status').eq('import_id', importId)
@@ -389,9 +405,14 @@ export default function SalesOrdersPage() {
             <p className="text-gray-500 text-sm mb-3">Lines are read-only. Use <strong>Request change</strong> to propose a correction — Head Office approves it. A document can&apos;t be confirmed while changes are pending.</p>
 
             {lines.filter(isDuplicate).length > 0 && (
-              <p className="text-amber-700 text-sm bg-amber-50 border border-amber-200 p-2 rounded mb-3">
-                ⚠ {lines.filter(isDuplicate).length} line(s) have an SO number + item that also appears on another line (possible duplicate order or re-upload). Please review before confirming.
-              </p>
+              <div className="text-amber-700 text-sm bg-amber-50 border border-amber-200 p-3 rounded mb-3">
+                <p className="font-medium mb-1">⚠ Possible duplicate line(s) — same SO number + item appears elsewhere:</p>
+                <ul className="list-disc ml-5 space-y-0.5">
+                  {lines.filter(isDuplicate).map(l => (
+                    <li key={l.id}><span className="font-mono">{l.item_code}</span> ({l.so_number}) — {dupWhere(l)}</li>
+                  ))}
+                </ul>
+              </div>
             )}
 
             {reqLine && (
@@ -458,7 +479,7 @@ export default function SalesOrdersPage() {
                         <td className="px-3 py-2 text-gray-700 min-w-[160px]">{line.customer_name}</td>
                         <td className="px-3 py-2 font-mono whitespace-nowrap">
                           {line.so_number}
-                          {isDuplicate(line) && <span className="ml-1 text-amber-600" title="Same SO number + item appears on another line">⚠</span>}
+                          {isDuplicate(line) && <span className="ml-1 text-amber-600" title={dupWhere(line)}>⚠</span>}
                         </td>
                         <td className="px-3 py-2 font-medium whitespace-nowrap">{line.item_code}</td>
                         <td className="px-3 py-2 text-gray-600 min-w-[200px]">{line.description}</td>
