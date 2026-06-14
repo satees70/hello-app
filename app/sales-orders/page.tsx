@@ -265,7 +265,8 @@ export default function SalesOrdersPage() {
   if (!profile) return null
 
   const currentDoc = linesFor ? (imports.find(i => i.id === linesFor.id) || linesFor) : null
-  const canConfirm = currentDoc && currentDoc.status !== 'Confirmed' && lines.length > 0 && pendingForDoc === 0
+  const dupCount = lines.filter(isDuplicate).length
+  const canConfirm = currentDoc && currentDoc.status !== 'Confirmed' && lines.length > 0 && pendingForDoc === 0 && dupCount === 0
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -417,7 +418,9 @@ export default function SalesOrdersPage() {
                 <div className="text-sm">
                   {pendingForDoc > 0
                     ? <span className="text-amber-600">⏳ {pendingForDoc} change request(s) pending — resolve them before confirming.</span>
-                    : <span className="text-green-600">No pending changes. Ready to confirm.</span>}
+                    : dupCount > 0
+                      ? <span className="text-amber-600">⚠ {dupCount} duplicate SO+item line(s) — resolve them before confirming.</span>
+                      : <span className="text-green-600">No pending changes. Ready to confirm.</span>}
                 </div>
                 <button onClick={handleConfirm} disabled={!canConfirm || confirming}
                   className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">
