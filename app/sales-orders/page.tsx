@@ -332,15 +332,14 @@ export default function SalesOrdersPage() {
         <div className="bg-white rounded-xl shadow-sm border overflow-hidden mb-8">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
-              <tr>{['File', 'Factory', 'Locations', 'Status', 'Issues', 'Uploaded', 'Actions'].map(h => (
+              <tr>{['File', 'Locations', 'Status', 'Issues', 'Uploaded', 'Actions'].map(h => (
                 <th key={h} className="text-left px-4 py-3 font-medium text-gray-600">{h}</th>))}</tr>
             </thead>
             <tbody>
-              {imports.length === 0 && (<tr><td colSpan={7} className="text-center py-8 text-gray-400">No documents uploaded yet</td></tr>)}
+              {imports.length === 0 && (<tr><td colSpan={6} className="text-center py-8 text-gray-400">No documents uploaded yet</td></tr>)}
               {imports.map(doc => (
                 <tr key={doc.id} className={`border-b last:border-0 hover:bg-gray-50 ${linesFor?.id === doc.id ? 'bg-blue-50' : ''}`}>
                   <td className="px-4 py-3 font-medium">{doc.file_name}</td>
-                  <td className="px-4 py-3 text-gray-600">{doc.factory_code === 'HEAD_OFFICE' ? 'Head Office' : doc.factory_code}</td>
                   <td className="px-4 py-3 text-xs text-gray-600 max-w-[200px]">
                     {docSummary[doc.id]?.locations?.length
                       ? docSummary[doc.id].locations.join(', ')
