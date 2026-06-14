@@ -67,8 +67,9 @@ export default function SalesOrdersPage() {
   const [changeReqs, setChangeReqs] = useState<ChangeRequest[]>([])
   const [confirming, setConfirming] = useState(false)
 
-  // Factory display
+  // Factory display + valid location codes (for the location dropdown)
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
+  const [locationCodes, setLocationCodes] = useState<string[]>([])
 
   // Change-request form
   const [reqLine, setReqLine] = useState<SalesLine | null>(null)
@@ -90,8 +91,12 @@ export default function SalesOrdersPage() {
   }
 
   async function loadRefs() {
-    const { data: f } = await supabase.from('factories').select('code, name').order('code')
+    const [{ data: f }, { data: lm }] = await Promise.all([
+      supabase.from('factories').select('code, name').order('code'),
+      supabase.from('location_map').select('location_code').order('location_code'),
+    ])
     setFactories(f || [])
+    setLocationCodes((lm || []).map(r => r.location_code))
   }
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -178,7 +183,12 @@ export default function SalesOrdersPage() {
 
   function onReqFieldChange(field: keyof SalesLine) {
     setReqField(field)
-    if (reqLine) setReqValue(String(reqLine[field] ?? ''))
+    if (!reqLine) return
+    const current = String(reqLine[field] ?? '')
+    // For location, only allow a valid mapped code — blank it if the current
+    // value isn't in the list (e.g. a mistyped code) so the user must pick one.
+    if (field === 'location_code') setReqValue(locationCodes.includes(current) ? current : '')
+    else setReqValue(current)
   }
 
   async function submitRequest() {
@@ -316,7 +326,16 @@ export default function SalesOrdersPage() {
                   </div>
                   <div>
                     <label className="block text-xs font-medium mb-1">Proposed new value</label>
-                    <input value={reqValue} onChange={e => setReqValue(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-white" />
+                    {reqField === 'location_code' ? (
+                      <select value={reqValue} onChange={e => setReqValue(e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2 text-sm bg-white">
+                        <option value="">Select location…</option>
+                        {locationCodes.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    ) : (
+                      <input value={reqValue} onChange={e => setReqValue(e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2 text-sm bg-white" />
+                    )}
                   </div>
                 </div>
                 <label className="block text-xs font-medium mb-1">Reason</label>
