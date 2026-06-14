@@ -255,7 +255,7 @@ export default function ProductionPage() {
                 <div className="overflow-x-auto border rounded-lg">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b">
-                      <tr>{['Material', 'Description', 'Unit', 'Required', 'Stock', 'Shortfall', 'Request (+10%)', ''].map(h => (
+                      <tr>{['Material', 'Description', 'Unit', 'Required', 'Stock', 'Shortfall', 'Requested', ''].map(h => (
                         <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
                     </thead>
                     <tbody>
@@ -298,7 +298,7 @@ export default function ProductionPage() {
                     {raising ? 'Raising…' : 'Raise Material Request'}
                   </button>
                 </div>
-                <p className="text-gray-400 text-xs mt-2">Tip: save your stock figures first, then raise the request — it captures the shortfall at that moment and asks the warehouse for 10% more (rounded up) as a safety margin.</p>
+                <p className="text-gray-400 text-xs mt-2">Tip: save your stock figures first, then raise the request — it captures the shortfall at that moment and adds a safety margin (rounded up) so the warehouse picks enough.</p>
               </>
             )}
           </div>
