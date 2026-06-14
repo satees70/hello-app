@@ -44,6 +44,7 @@ export default function ProductionPage() {
 
   const [selected, setSelected] = useState<Batch | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [groupBy, setGroupBy] = useState<'date' | 'factory'>('date')
   const [savingStock, setSavingStock] = useState('')
   const [raising, setRaising] = useState(false)
 
@@ -147,10 +148,20 @@ export default function ProductionPage() {
     const m = /^(\d{2})\/(\d{2})\/(\d{2})$/.exec(d || '')
     return m ? new Date(2000 + +m[3], +m[2] - 1, +m[1]).getTime() : Number.MAX_SAFE_INTEGER
   }
+  const byFactory = isHO && groupBy === 'factory'
   const groupsMap: Record<string, Batch[]> = {}
-  shown.forEach(b => { const k = b.delivery_date || 'No date'; (groupsMap[k] = groupsMap[k] || []).push(b) })
-  const groupKeys = Object.keys(groupsMap).sort((a, b) => dateKey(a) - dateKey(b))
+  shown.forEach(b => {
+    const k = byFactory ? (b.factory_code || 'Unassigned') : (b.delivery_date || 'No date')
+    ;(groupsMap[k] = groupsMap[k] || []).push(b)
+  })
+  const groupKeys = Object.keys(groupsMap).sort((a, b) => byFactory ? a.localeCompare(b) : dateKey(a) - dateKey(b))
+  const groupLabel = (k: string) => byFactory ? `🏭 ${factoryName(k)}` : `📅 ${k}`
   const toggleRow = (id: string) => setExpanded(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+
+  // Which context column to show in rows: factory when grouping by date (HO), delivery date when grouping by factory
+  const showFactoryCol = isHO && !byFactory
+  const showDateCol = byFactory
+  const expandSpan = 5 + (showFactoryCol ? 1 : 0) + (showDateCol ? 1 : 0)
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -171,6 +182,18 @@ export default function ProductionPage() {
           ))}
         </div>
 
+        {isHO && (
+          <div className="flex gap-2 mb-5 items-center text-sm">
+            <span className="text-gray-500">Group by:</span>
+            {(['date', 'factory'] as const).map(g => (
+              <button key={g} onClick={() => setGroupBy(g)}
+                className={`px-3 py-1 rounded-lg font-medium border ${groupBy === g ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                {g === 'date' ? 'Delivery date' : 'Factory'}
+              </button>
+            ))}
+          </div>
+        )}
+
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
         {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}
 
@@ -184,14 +207,14 @@ export default function ProductionPage() {
             {groupKeys.map(date => (
               <div key={date}>
                 <h3 className="font-semibold text-sm text-gray-700 mb-2">
-                  📅 {date} <span className="text-gray-400 font-normal">· {groupsMap[date].length} batch(es)</span>
+                  {groupLabel(date)} <span className="text-gray-400 font-normal">· {groupsMap[date].length} batch(es)</span>
                 </h3>
                 <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b">
                       <tr>
                         <th className="w-6"></th>
-                        {['Batch', 'Item', 'Total qty', ...(isHO ? ['Factory'] : []), 'Status', ''].map(h => (
+                        {['Batch', 'Item', 'Total qty', ...(showFactoryCol ? ['Factory'] : []), ...(showDateCol ? ['Delivery date'] : []), 'Status', ''].map(h => (
                           <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
@@ -207,7 +230,8 @@ export default function ProductionPage() {
                               <span className="block text-gray-500 text-xs">{b.description}</span>
                             </td>
                             <td className="px-3 py-2 font-semibold whitespace-nowrap">{b.total_quantity}</td>
-                            {isHO && <td className="px-3 py-2 whitespace-nowrap">{factoryName(b.factory_code)}</td>}
+                            {showFactoryCol && <td className="px-3 py-2 whitespace-nowrap">{factoryName(b.factory_code)}</td>}
+                            {showDateCol && <td className="px-3 py-2 whitespace-nowrap">{b.delivery_date || '—'}</td>}
                             <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
                               <select value={b.status} disabled={updating === b.id}
                                 onChange={e => setStatus(b, e.target.value)}
@@ -222,7 +246,7 @@ export default function ProductionPage() {
                           {expanded.has(b.id) && (
                             <tr className="bg-gray-50/60 border-b last:border-0">
                               <td></td>
-                              <td colSpan={isHO ? 5 : 4} className="px-3 py-3">
+                              <td colSpan={expandSpan} className="px-3 py-3">
                                 <div className="text-gray-400 text-xs mb-1">Per customer / order</div>
                                 <ul className="space-y-1 mb-3 max-w-lg">
                                   {b.production_batch_items?.map(it => (
