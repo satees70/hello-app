@@ -106,12 +106,12 @@ export default function SalesOrdersPage() {
     ])
     const pending: Record<string, number> = {}
     ;(crs || []).forEach(c => { if (c.status === 'Pending') pending[c.import_id] = (pending[c.import_id] || 0) + 1 })
-    const counts: Record<string, number> = {}
-    ;(allLines || []).forEach(l => { if (l.so_number) { const k = `${l.so_number}||${l.item_code}`; counts[k] = (counts[k] || 0) + 1 } })
+    const keyImports: Record<string, Set<string>> = {}
+    ;(allLines || []).forEach(l => { if (l.so_number) { const k = `${l.so_number}||${l.item_code}`; if (!keyImports[k]) keyImports[k] = new Set(); keyImports[k].add(l.import_id) } })
     const dup: Record<string, number> = {}
     const locs: Record<string, Set<string>> = {}
     ;(allLines || []).forEach(l => {
-      if (l.so_number && counts[`${l.so_number}||${l.item_code}`] > 1) dup[l.import_id] = (dup[l.import_id] || 0) + 1
+      if (l.so_number && keyImports[`${l.so_number}||${l.item_code}`].size > 1) dup[l.import_id] = (dup[l.import_id] || 0) + 1
       if (l.location_code) { if (!locs[l.import_id]) locs[l.import_id] = new Set(); locs[l.import_id].add(l.location_code) }
     })
     const summary: Record<string, { pending: number; dup: number; locations: string[] }> = {}
@@ -197,18 +197,16 @@ export default function SalesOrdersPage() {
     setLines(lineData || [])
     setChangeReqs(crData || [])
     setConfirmations(confData || [])
-    // Flag SO number + item code combinations that appear on more than one line anywhere,
-    // and remember which documents each combination shows up in.
-    const counts: Record<string, number> = {}
+    // Flag SO number + item that appears across MORE THAN ONE document (a re-upload).
+    // Repeats within the same document are legitimate separate order lines.
     const byKey: Record<string, Set<string>> = {}
     ;(allLines || []).forEach(r => {
       if (!r.so_number) return
       const k = `${r.so_number}||${r.item_code}`
-      counts[k] = (counts[k] || 0) + 1
       if (!byKey[k]) byKey[k] = new Set()
       byKey[k].add(r.import_id)
     })
-    setDupKeys(new Set(Object.keys(counts).filter(k => counts[k] > 1)))
+    setDupKeys(new Set(Object.keys(byKey).filter(k => byKey[k].size > 1)))
     const di: Record<string, string[]> = {}
     Object.keys(byKey).forEach(k => { di[k] = [...byKey[k]] })
     setDupImports(di)
