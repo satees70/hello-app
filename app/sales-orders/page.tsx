@@ -134,6 +134,22 @@ export default function SalesOrdersPage() {
     window.open(data.signedUrl, '_blank')
   }
 
+  async function handleDelete(doc: SalesImport) {
+    if (!confirm(`Delete "${doc.file_name}"?\n\nThis removes the PDF and all extracted lines. This cannot be undone.`)) return
+    setError(''); setSuccess('')
+
+    // Remove the stored PDF (best effort — don't block the record delete on this).
+    await supabase.storage.from('sales-orders').remove([doc.file_path])
+
+    // Delete the document record; its extracted lines are removed automatically.
+    const { error: delError } = await supabase.from('sales_imports').delete().eq('id', doc.id)
+    if (delError) { setError(`Delete failed: ${delError.message}`); return }
+
+    if (linesFor?.id === doc.id) { setLinesFor(null); setLines([]) }
+    setSuccess(`Deleted "${doc.file_name}".`)
+    loadImports()
+  }
+
   function formatDate(iso: string) {
     return new Date(iso).toLocaleString()
   }
@@ -198,6 +214,9 @@ export default function SalesOrdersPage() {
                     </button>
                     <button onClick={() => handleDownload(doc.file_path)} className="text-blue-600 hover:underline text-xs">
                       View PDF
+                    </button>
+                    <button onClick={() => handleDelete(doc)} className="text-red-600 hover:underline text-xs">
+                      Delete
                     </button>
                   </td>
                 </tr>
