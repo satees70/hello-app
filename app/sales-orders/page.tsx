@@ -37,6 +37,7 @@ const STATUS_STYLES: Record<string, string> = {
   Pending: 'bg-amber-100 text-amber-700',
   Processing: 'bg-blue-100 text-blue-700',
   Review: 'bg-purple-100 text-purple-700',
+  'Partially Confirmed': 'bg-teal-100 text-teal-700',
   Processed: 'bg-green-100 text-green-700',
   Confirmed: 'bg-green-100 text-green-700',
   Error: 'bg-red-100 text-red-700',
@@ -67,7 +68,8 @@ export default function SalesOrdersPage() {
   const [linesFor, setLinesFor] = useState<SalesImport | null>(null)
   const [linesLoading, setLinesLoading] = useState(false)
   const [changeReqs, setChangeReqs] = useState<ChangeRequest[]>([])
-  const [confirming, setConfirming] = useState(false)
+  const [confirmations, setConfirmations] = useState<{ factory_code: string; confirmed_by_name: string | null }[]>([])
+  const [confirmingFactory, setConfirmingFactory] = useState('')
   const [dupKeys, setDupKeys] = useState<Set<string>>(new Set()) // "so_number||item_code" that appear >1 across all lines
   const [docSummary, setDocSummary] = useState<Record<string, { pending: number; dup: number; locations: string[] }>>({})
 
@@ -185,13 +187,15 @@ export default function SalesOrdersPage() {
     setLinesLoading(true)
     setLines([])
     setReqLine(null)
-    const [{ data: lineData }, { data: crData }, { data: allLines }] = await Promise.all([
+    const [{ data: lineData }, { data: crData }, { data: allLines }, { data: confData }] = await Promise.all([
       supabase.from('sales_order_lines').select('*').eq('import_id', doc.id).order('customer_name'),
       supabase.from('change_requests').select('id, line_id, field, status').eq('import_id', doc.id),
       supabase.from('sales_order_lines').select('so_number, item_code'),
+      supabase.from('document_confirmations').select('factory_code, confirmed_by_name').eq('import_id', doc.id),
     ])
     setLines(lineData || [])
     setChangeReqs(crData || [])
+    setConfirmations(confData || [])
     // Flag SO number + item code combinations that appear on more than one line anywhere
     const counts: Record<string, number> = {}
     ;(allLines || []).forEach(r => {
@@ -212,6 +216,14 @@ export default function SalesOrdersPage() {
 
   const pendingForLine = (lineId: string) => changeReqs.filter(c => c.line_id === lineId && c.status === 'Pending').length
   const pendingForDoc = changeReqs.filter(c => c.status === 'Pending').length
+
+  // Per-factory confirmation helpers
+  const factoriesInDoc = [...new Set(lines.map(l => l.factory_code).filter(Boolean))].sort()
+  const factoryOfLine = (lineId: string) => lines.find(l => l.id === lineId)?.factory_code
+  const pendingForFactory = (f: string) => changeReqs.filter(c => c.status === 'Pending' && factoryOfLine(c.line_id) === f).length
+  const dupForFactory = (f: string) => lines.filter(l => l.factory_code === f && isDuplicate(l)).length
+  const isFactoryConfirmed = (f: string) => confirmations.some(c => c.factory_code === f)
+  const confirmedByName = (f: string) => confirmations.find(c => c.factory_code === f)?.confirmed_by_name
 
   function openRequest(line: SalesLine) {
     setReqMode('edit')
@@ -269,13 +281,19 @@ export default function SalesOrdersPage() {
     loadSummary()
   }
 
-  async function handleConfirm() {
+  async function loadConfirmations(importId: string) {
+    const { data } = await supabase.from('document_confirmations').select('factory_code, confirmed_by_name').eq('import_id', importId)
+    setConfirmations(data || [])
+  }
+
+  async function confirmFactory(factory: string) {
     if (!linesFor) return
-    setConfirming(true); setError(''); setSuccess('')
-    const { error: rpcErr } = await supabase.rpc('confirm_document', { p_import_id: linesFor.id })
-    if (rpcErr) { setError(rpcErr.message); setConfirming(false); return }
-    setSuccess(`"${linesFor.file_name}" confirmed and pushed to production planning.`)
-    setConfirming(false)
+    setConfirmingFactory(factory); setError(''); setSuccess('')
+    const { error: rpcErr } = await supabase.rpc('confirm_document_factory', { p_import_id: linesFor.id, p_factory: factory })
+    if (rpcErr) { setError(rpcErr.message); setConfirmingFactory(''); return }
+    setSuccess(`${factory} lines confirmed and pushed to production planning.`)
+    setConfirmingFactory('')
+    loadConfirmations(linesFor.id)
     loadImports()
     loadSummary()
   }
@@ -305,8 +323,6 @@ export default function SalesOrdersPage() {
   if (!profile) return null
 
   const currentDoc = linesFor ? (imports.find(i => i.id === linesFor.id) || linesFor) : null
-  const dupCount = lines.filter(isDuplicate).length
-  const canConfirm = currentDoc && currentDoc.status !== 'Confirmed' && lines.length > 0 && pendingForDoc === 0 && dupCount === 0
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -467,23 +483,39 @@ export default function SalesOrdersPage() {
               </table>
             </div>
 
-            {lines.length > 0 && currentDoc.status !== 'Confirmed' && (
-              <div className="flex items-center justify-between mt-4 mb-12">
-                <div className="text-sm">
-                  {pendingForDoc > 0
-                    ? <span className="text-amber-600">⏳ {pendingForDoc} change request(s) pending — resolve them before confirming.</span>
-                    : dupCount > 0
-                      ? <span className="text-amber-600">⚠ {dupCount} duplicate SO+item line(s) — resolve them before confirming.</span>
-                      : <span className="text-green-600">No pending changes. Ready to confirm.</span>}
+            {factoriesInDoc.length > 0 && (
+              <div className="mt-5 mb-12">
+                <h3 className="font-semibold mb-1">Confirm to production</h3>
+                <p className="text-gray-500 text-sm mb-3">Each factory confirms its own lines. Confirmed lines are pushed to that factory&apos;s production planning.</p>
+                <div className="space-y-2">
+                  {factoriesInDoc.map(f => {
+                    const pend = pendingForFactory(f)
+                    const dup = dupForFactory(f)
+                    const confirmed = isFactoryConfirmed(f)
+                    const ready = !confirmed && pend === 0 && dup === 0
+                    return (
+                      <div key={f} className="flex items-center justify-between border rounded-lg bg-white px-4 py-3">
+                        <div className="text-sm">
+                          <span className="font-medium">{factoryName(f)}</span>
+                          {confirmed
+                            ? <span className="ml-2 text-green-600">✓ Confirmed{confirmedByName(f) ? ` by ${confirmedByName(f)}` : ''}</span>
+                            : pend > 0
+                              ? <span className="ml-2 text-amber-600">⏳ {pend} pending change(s) — resolve first</span>
+                              : dup > 0
+                                ? <span className="ml-2 text-amber-600">⚠ {dup} duplicate line(s) — resolve first</span>
+                                : <span className="ml-2 text-green-600">Ready to confirm</span>}
+                        </div>
+                        {!confirmed && (
+                          <button onClick={() => confirmFactory(f)} disabled={!ready || confirmingFactory === f}
+                            className="bg-green-600 text-white px-5 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium whitespace-nowrap">
+                            {confirmingFactory === f ? 'Confirming…' : `Confirm ${f} lines`}
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
-                <button onClick={handleConfirm} disabled={!canConfirm || confirming}
-                  className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">
-                  {confirming ? 'Confirming…' : 'Confirm Document'}
-                </button>
               </div>
-            )}
-            {currentDoc.status === 'Confirmed' && (
-              <p className="mt-4 mb-12 text-green-700 text-sm font-medium">✓ This document is confirmed and in production planning.</p>
             )}
           </>
         )}
