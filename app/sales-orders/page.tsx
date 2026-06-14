@@ -69,6 +69,7 @@ export default function SalesOrdersPage() {
   const [changeReqs, setChangeReqs] = useState<ChangeRequest[]>([])
   const [confirming, setConfirming] = useState(false)
   const [dupKeys, setDupKeys] = useState<Set<string>>(new Set()) // "so_number||item_code" that appear >1 across all lines
+  const [docSummary, setDocSummary] = useState<Record<string, { pending: number; dup: number }>>({})
 
   // Factory display + valid location codes (for the location dropdown)
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
@@ -83,7 +84,7 @@ export default function SalesOrdersPage() {
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
-    if (profile) { loadImports(); loadRefs() }
+    if (profile) { loadImports(); loadRefs(); loadSummary() }
   }, [profile])
 
   async function loadImports() {
@@ -92,6 +93,25 @@ export default function SalesOrdersPage() {
       .select('*')
       .order('created_at', { ascending: false })
     setImports(data || [])
+  }
+
+  // Per-document overview: open change requests + duplicate SO+item lines
+  async function loadSummary() {
+    const [{ data: crs }, { data: allLines }] = await Promise.all([
+      supabase.from('change_requests').select('import_id, status'),
+      supabase.from('sales_order_lines').select('import_id, so_number, item_code'),
+    ])
+    const pending: Record<string, number> = {}
+    ;(crs || []).forEach(c => { if (c.status === 'Pending') pending[c.import_id] = (pending[c.import_id] || 0) + 1 })
+    const counts: Record<string, number> = {}
+    ;(allLines || []).forEach(l => { if (l.so_number) { const k = `${l.so_number}||${l.item_code}`; counts[k] = (counts[k] || 0) + 1 } })
+    const dup: Record<string, number> = {}
+    ;(allLines || []).forEach(l => { if (l.so_number && counts[`${l.so_number}||${l.item_code}`] > 1) dup[l.import_id] = (dup[l.import_id] || 0) + 1 })
+    const summary: Record<string, { pending: number; dup: number }> = {}
+    new Set([...Object.keys(pending), ...Object.keys(dup)]).forEach(id => {
+      summary[id] = { pending: pending[id] || 0, dup: dup[id] || 0 }
+    })
+    setDocSummary(summary)
   }
 
   async function loadRefs() {
@@ -153,6 +173,7 @@ export default function SalesOrdersPage() {
       setError('Could not reach the extraction service.'); setSuccess('')
     }
     loadImports()
+    loadSummary()
   }
 
   async function viewLines(doc: SalesImport) {
@@ -241,6 +262,7 @@ export default function SalesOrdersPage() {
     setSubmitting(false)
     setReqLine(null)
     loadChangeReqs(linesFor.id)
+    loadSummary()
   }
 
   async function handleConfirm() {
@@ -251,6 +273,7 @@ export default function SalesOrdersPage() {
     setSuccess(`"${linesFor.file_name}" confirmed and pushed to production planning.`)
     setConfirming(false)
     loadImports()
+    loadSummary()
   }
 
   async function handleDownload(path: string) {
@@ -268,6 +291,7 @@ export default function SalesOrdersPage() {
     if (linesFor?.id === doc.id) { setLinesFor(null); setLines([]) }
     setSuccess(`Deleted "${doc.file_name}".`)
     loadImports()
+    loadSummary()
   }
 
   function formatDate(iso: string) { return new Date(iso).toLocaleString() }
@@ -304,16 +328,21 @@ export default function SalesOrdersPage() {
         <div className="bg-white rounded-xl shadow-sm border overflow-hidden mb-8">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
-              <tr>{['File', 'Factory', 'Status', 'Uploaded', 'Actions'].map(h => (
+              <tr>{['File', 'Factory', 'Status', 'Issues', 'Uploaded', 'Actions'].map(h => (
                 <th key={h} className="text-left px-4 py-3 font-medium text-gray-600">{h}</th>))}</tr>
             </thead>
             <tbody>
-              {imports.length === 0 && (<tr><td colSpan={5} className="text-center py-8 text-gray-400">No documents uploaded yet</td></tr>)}
+              {imports.length === 0 && (<tr><td colSpan={6} className="text-center py-8 text-gray-400">No documents uploaded yet</td></tr>)}
               {imports.map(doc => (
                 <tr key={doc.id} className={`border-b last:border-0 hover:bg-gray-50 ${linesFor?.id === doc.id ? 'bg-blue-50' : ''}`}>
                   <td className="px-4 py-3 font-medium">{doc.file_name}</td>
                   <td className="px-4 py-3 text-gray-600">{doc.factory_code === 'HEAD_OFFICE' ? 'Head Office' : doc.factory_code}</td>
                   <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[doc.status] || 'bg-gray-100 text-gray-700'}`}>{doc.status}</span></td>
+                  <td className="px-4 py-3 text-xs whitespace-nowrap space-x-2">
+                    {docSummary[doc.id]?.dup ? <span className="text-amber-600" title="Duplicate SO+item lines">⚠ {docSummary[doc.id].dup} dup</span> : null}
+                    {docSummary[doc.id]?.pending ? <span className="text-amber-600" title="Open change requests">⏳ {docSummary[doc.id].pending} pending</span> : null}
+                    {!docSummary[doc.id]?.dup && !docSummary[doc.id]?.pending && <span className="text-gray-300">—</span>}
+                  </td>
                   <td className="px-4 py-3 text-gray-600">{formatDate(doc.created_at)}</td>
                   <td className="px-4 py-3 space-x-3 whitespace-nowrap">
                     <button onClick={() => viewLines(doc)} className="text-blue-600 hover:underline text-xs">View Lines</button>
