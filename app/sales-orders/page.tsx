@@ -69,7 +69,7 @@ export default function SalesOrdersPage() {
   const [changeReqs, setChangeReqs] = useState<ChangeRequest[]>([])
   const [confirming, setConfirming] = useState(false)
   const [dupKeys, setDupKeys] = useState<Set<string>>(new Set()) // "so_number||item_code" that appear >1 across all lines
-  const [docSummary, setDocSummary] = useState<Record<string, { pending: number; dup: number }>>({})
+  const [docSummary, setDocSummary] = useState<Record<string, { pending: number; dup: number; locations: string[] }>>({})
 
   // Factory display + valid location codes (for the location dropdown)
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
@@ -99,17 +99,21 @@ export default function SalesOrdersPage() {
   async function loadSummary() {
     const [{ data: crs }, { data: allLines }] = await Promise.all([
       supabase.from('change_requests').select('import_id, status'),
-      supabase.from('sales_order_lines').select('import_id, so_number, item_code'),
+      supabase.from('sales_order_lines').select('import_id, so_number, item_code, location_code'),
     ])
     const pending: Record<string, number> = {}
     ;(crs || []).forEach(c => { if (c.status === 'Pending') pending[c.import_id] = (pending[c.import_id] || 0) + 1 })
     const counts: Record<string, number> = {}
     ;(allLines || []).forEach(l => { if (l.so_number) { const k = `${l.so_number}||${l.item_code}`; counts[k] = (counts[k] || 0) + 1 } })
     const dup: Record<string, number> = {}
-    ;(allLines || []).forEach(l => { if (l.so_number && counts[`${l.so_number}||${l.item_code}`] > 1) dup[l.import_id] = (dup[l.import_id] || 0) + 1 })
-    const summary: Record<string, { pending: number; dup: number }> = {}
-    new Set([...Object.keys(pending), ...Object.keys(dup)]).forEach(id => {
-      summary[id] = { pending: pending[id] || 0, dup: dup[id] || 0 }
+    const locs: Record<string, Set<string>> = {}
+    ;(allLines || []).forEach(l => {
+      if (l.so_number && counts[`${l.so_number}||${l.item_code}`] > 1) dup[l.import_id] = (dup[l.import_id] || 0) + 1
+      if (l.location_code) { if (!locs[l.import_id]) locs[l.import_id] = new Set(); locs[l.import_id].add(l.location_code) }
+    })
+    const summary: Record<string, { pending: number; dup: number; locations: string[] }> = {}
+    new Set([...Object.keys(pending), ...Object.keys(dup), ...Object.keys(locs)]).forEach(id => {
+      summary[id] = { pending: pending[id] || 0, dup: dup[id] || 0, locations: locs[id] ? [...locs[id]].sort() : [] }
     })
     setDocSummary(summary)
   }
@@ -328,15 +332,20 @@ export default function SalesOrdersPage() {
         <div className="bg-white rounded-xl shadow-sm border overflow-hidden mb-8">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
-              <tr>{['File', 'Factory', 'Status', 'Issues', 'Uploaded', 'Actions'].map(h => (
+              <tr>{['File', 'Factory', 'Locations', 'Status', 'Issues', 'Uploaded', 'Actions'].map(h => (
                 <th key={h} className="text-left px-4 py-3 font-medium text-gray-600">{h}</th>))}</tr>
             </thead>
             <tbody>
-              {imports.length === 0 && (<tr><td colSpan={6} className="text-center py-8 text-gray-400">No documents uploaded yet</td></tr>)}
+              {imports.length === 0 && (<tr><td colSpan={7} className="text-center py-8 text-gray-400">No documents uploaded yet</td></tr>)}
               {imports.map(doc => (
                 <tr key={doc.id} className={`border-b last:border-0 hover:bg-gray-50 ${linesFor?.id === doc.id ? 'bg-blue-50' : ''}`}>
                   <td className="px-4 py-3 font-medium">{doc.file_name}</td>
                   <td className="px-4 py-3 text-gray-600">{doc.factory_code === 'HEAD_OFFICE' ? 'Head Office' : doc.factory_code}</td>
+                  <td className="px-4 py-3 text-xs text-gray-600 max-w-[200px]">
+                    {docSummary[doc.id]?.locations?.length
+                      ? docSummary[doc.id].locations.join(', ')
+                      : <span className="text-gray-300">—</span>}
+                  </td>
                   <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[doc.status] || 'bg-gray-100 text-gray-700'}`}>{doc.status}</span></td>
                   <td className="px-4 py-3 text-xs whitespace-nowrap space-x-2">
                     {docSummary[doc.id]?.dup ? <span className="text-amber-600" title="Duplicate SO+item lines">⚠ {docSummary[doc.id].dup} dup</span> : null}
