@@ -18,6 +18,8 @@ export default function BomPage() {
   const [addQty, setAddQty] = useState('1')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (!profile) return
@@ -37,6 +39,7 @@ export default function BomPage() {
   async function loadComponents() {
     const { data } = await supabase.from('bom_components').select('*').eq('parent_item_id', parentId)
     setComponents(data || [])
+    setDirty(false)
   }
 
   const itemById = (id: string) => items.find(i => i.id === id)
@@ -53,38 +56,42 @@ export default function BomPage() {
     if (!addComponentId) { setError('Choose a component item.'); return }
     const qty = Number(addQty)
     if (!qty || qty <= 0) { setError('Enter a quantity greater than 0.'); return }
-    const { error: insErr } = await supabase.from('bom_components').insert({
+    const { data: inserted, error: insErr } = await supabase.from('bom_components').insert({
       parent_item_id: parentId, component_item_id: addComponentId, quantity: qty,
-    })
-    if (insErr) { setError(insErr.message); return }
+    }).select().single()
+    if (insErr || !inserted) { setError(insErr?.message || 'Could not add component.'); return }
+    setComponents(prev => [...prev, inserted])
     setAddComponentId(''); setAddQty('1')
     setSuccess('Component added.')
-    loadComponents()
   }
 
   function setRowQty(id: string, value: string) {
     setComponents(prev => prev.map(c => (c.id === id ? { ...c, quantity: value === '' ? 0 : Number(value) } : c)))
+    setDirty(true)
   }
 
-  async function saveRow(c: BomComponent) {
-    setError(''); setSuccess('')
-    const { error: updErr } = await supabase.from('bom_components').update({ quantity: Number(c.quantity) || 0 }).eq('id', c.id)
-    if (updErr) { setError(updErr.message); return }
-    setSuccess('Quantity updated.')
+  function setRowAllowance(id: string) {
+    setComponents(prev => prev.map(c => (c.id === id ? { ...c, apply_allowance: !c.apply_allowance } : c)))
+    setDirty(true)
   }
 
-  async function toggleAllowance(c: BomComponent) {
-    setError(''); setSuccess('')
-    const { error: updErr } = await supabase.from('bom_components').update({ apply_allowance: !c.apply_allowance }).eq('id', c.id)
-    if (updErr) { setError(updErr.message); return }
-    setComponents(prev => prev.map(x => (x.id === c.id ? { ...x, apply_allowance: !x.apply_allowance } : x)))
+  async function saveAll() {
+    setError(''); setSuccess(''); setSaving(true)
+    const results = await Promise.all(components.map(c =>
+      supabase.from('bom_components').update({ quantity: Number(c.quantity) || 0, apply_allowance: c.apply_allowance }).eq('id', c.id)
+    ))
+    const failed = results.find(r => r.error)
+    if (failed?.error) { setError(failed.error.message); setSaving(false); return }
+    setDirty(false); setSaving(false)
+    setSuccess('All changes saved.')
   }
 
   async function removeRow(id: string) {
     if (!confirm('Remove this component from the recipe?')) return
     setError(''); setSuccess('')
-    await supabase.from('bom_components').delete().eq('id', id)
-    loadComponents()
+    const { error: delErr } = await supabase.from('bom_components').delete().eq('id', id)
+    if (delErr) { setError(delErr.message); return }
+    setComponents(prev => prev.filter(c => c.id !== id))
   }
 
   if (loading) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
@@ -176,12 +183,11 @@ export default function BomPage() {
                         </td>
                         <td className="px-4 py-3">
                           <label className="inline-flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={c.apply_allowance} onChange={() => toggleAllowance(c)} className="h-4 w-4" />
+                            <input type="checkbox" checked={c.apply_allowance} onChange={() => setRowAllowance(c.id)} className="h-4 w-4" />
                             <span className="text-xs text-gray-500">{c.apply_allowance ? '+10%' : 'none'}</span>
                           </label>
                         </td>
-                        <td className="px-4 py-3 space-x-3 whitespace-nowrap">
-                          <button onClick={() => saveRow(c)} className="text-blue-600 hover:underline text-xs">Save</button>
+                        <td className="px-4 py-3 whitespace-nowrap">
                           <button onClick={() => removeRow(c.id)} className="text-red-500 hover:underline text-xs">Remove</button>
                         </td>
                       </tr>
@@ -190,6 +196,18 @@ export default function BomPage() {
                 </tbody>
               </table>
             </div>
+
+            {components.length > 0 && (
+              <div className="flex items-center gap-3 mt-4">
+                <button onClick={saveAll} disabled={!dirty || saving}
+                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
+                  {saving ? 'Saving…' : 'Save all changes'}
+                </button>
+                {dirty
+                  ? <span className="text-amber-600 text-sm">You have unsaved changes.</span>
+                  : <span className="text-green-600 text-sm">All changes saved.</span>}
+              </div>
+            )}
           </>
         )}
       </div>
