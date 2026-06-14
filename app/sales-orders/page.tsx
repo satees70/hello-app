@@ -475,11 +475,11 @@ export default function SalesOrdersPage() {
                   {lines.map(line => {
                     const pend = pendingForLine(line.id)
                     return (
-                      <tr key={line.id} className="border-b last:border-0 hover:bg-gray-50 align-top">
+                      <tr key={line.id} className={`border-b last:border-0 align-top ${isDuplicate(line) ? 'bg-amber-50' : 'hover:bg-gray-50'}`}>
                         <td className="px-3 py-2 text-gray-700 min-w-[160px]">{line.customer_name}</td>
                         <td className="px-3 py-2 font-mono whitespace-nowrap">
                           {line.so_number}
-                          {isDuplicate(line) && <span className="ml-1 text-amber-600" title={dupWhere(line)}>⚠</span>}
+                          {isDuplicate(line) && <span className="ml-1.5 inline-block align-middle bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded text-[11px] font-bold" title={dupWhere(line)}>⚠ DUP</span>}
                         </td>
                         <td className="px-3 py-2 font-medium whitespace-nowrap">{line.item_code}</td>
                         <td className="px-3 py-2 text-gray-600 min-w-[200px]">{line.description}</td>
