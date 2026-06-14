@@ -52,7 +52,20 @@ export default function PendingChangesPage() {
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
-  useEffect(() => { if (profile) loadRequests() }, [profile])
+  useEffect(() => {
+    if (!profile) return
+    loadRequests()
+    // Live refresh on any change-request activity, with a poll fallback
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) supabase.realtime.setAuth(data.session.access_token)
+    })
+    const channel = supabase
+      .channel('changes-page-feed')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'change_requests' }, () => loadRequests())
+      .subscribe()
+    const timer = setInterval(loadRequests, 20000)
+    return () => { supabase.removeChannel(channel); clearInterval(timer) }
+  }, [profile])
 
   async function loadRequests() {
     const { data } = await supabase
