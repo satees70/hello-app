@@ -25,6 +25,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     { href: '/admin/items', label: 'Items' },
     { href: '/sales-orders', label: 'Sales Orders' },
     { href: '/sales-orders/changes', label: 'Pending Changes' },
+    { href: '/production', label: 'Production' },
     ...(isHO ? [
       { href: '/admin/bom', label: 'BOM' },
       { href: '/admin/location-map', label: 'Location Map' },

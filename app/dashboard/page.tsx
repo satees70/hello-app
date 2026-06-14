@@ -17,6 +17,7 @@ export default function DashboardPage() {
     { href: '/admin/items', label: 'Items Master', desc: 'View and manage all items', show: true },
     { href: '/sales-orders', label: 'Sales Orders', desc: 'Upload and track sales order PDFs', show: true },
     { href: '/sales-orders/changes', label: isHO ? 'Pending Changes' : 'My Change Requests', desc: isHO ? 'Approve or reject line change requests' : 'Track change requests you raised', show: true },
+    { href: '/production', label: 'Production Board', desc: 'Production batches from confirmed orders', show: true },
     { href: '/admin/bom', label: 'Bill of Materials', desc: 'Define recipes for manufactured items', show: isHO },
     { href: '/admin/location-map', label: 'Location Map', desc: 'Map location codes to factories', show: isHO },
     { href: '/admin/users', label: 'User Management', desc: 'Create and manage user accounts', show: isHO && isAdmin },
