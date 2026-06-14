@@ -206,12 +206,12 @@ export default function ProductionPage() {
                   <div className="text-gray-400 text-xs mb-1">Per customer / order</div>
                   <ul className="space-y-1">
                     {b.production_batch_items?.map(it => (
-                      <li key={it.id} className="flex justify-between text-sm gap-2">
-                        <span className="text-gray-700 truncate">
-                          {it.customer_name}
-                          {it.so_number ? <span className="text-gray-400 font-mono"> · {it.so_number}</span> : ''}
+                      <li key={it.id} className="flex justify-between items-baseline text-sm gap-2">
+                        <span className="text-gray-700 truncate min-w-0">{it.customer_name}</span>
+                        <span className="flex-shrink-0 flex items-baseline gap-2">
+                          {it.so_number && <span className="text-gray-400 font-mono text-xs">{it.so_number}</span>}
+                          <span className="font-medium">{it.quantity}</span>
                         </span>
-                        <span className="font-medium whitespace-nowrap">{it.quantity}</span>
                       </li>
                     ))}
                   </ul>
