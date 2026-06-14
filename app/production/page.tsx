@@ -183,17 +183,12 @@ export default function ProductionPage() {
           {isHO ? ' Showing all factories.' : ` Showing factory ${profile.factory_code}.`}
         </p>
 
-        <div className="flex gap-2 mb-5">
-          {FILTERS.map(f => (
-            <button key={f} onClick={() => setFilter(f)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${filter === f ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
-              {f}{f !== 'All' && counts[f] ? ` (${counts[f]})` : ''}
-            </button>
-          ))}
-        </div>
-
         <div className="flex flex-wrap gap-2 items-center mb-4 text-sm">
-          <span className="text-gray-500">Delivery date:</span>
+          <span className="text-gray-500">Status:</span>
+          <select value={filter} onChange={e => setFilter(e.target.value as Filter)} className="border rounded-lg px-2 py-1 bg-white">
+            {FILTERS.map(f => <option key={f} value={f}>{f}{f !== 'All' && counts[f] ? ` (${counts[f]})` : ''}</option>)}
+          </select>
+          <span className="text-gray-500 ml-3">Delivery date:</span>
           <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="border rounded-lg px-2 py-1 bg-white" />
           <span className="text-gray-400">to</span>
           <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="border rounded-lg px-2 py-1 bg-white" />
@@ -206,8 +201,8 @@ export default function ProductionPage() {
               </select>
             </>
           )}
-          {(dateFrom || dateTo || factoryFilter) && (
-            <button onClick={() => { setDateFrom(''); setDateTo(''); setFactoryFilter('') }} className="text-blue-600 hover:underline ml-1">Clear filters</button>
+          {(dateFrom || dateTo || factoryFilter || filter !== 'All') && (
+            <button onClick={() => { setDateFrom(''); setDateTo(''); setFactoryFilter(''); setFilter('All') }} className="text-blue-600 hover:underline ml-1">Clear filters</button>
           )}
         </div>
 
