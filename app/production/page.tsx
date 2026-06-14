@@ -4,7 +4,7 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { supabase } from '@/lib/supabase'
 
-interface BatchItem { id: string; customer_name: string; quantity: number }
+interface BatchItem { id: string; customer_name: string; so_number: string; quantity: number }
 interface Batch {
   id: string
   batch_no: string
@@ -57,7 +57,7 @@ export default function ProductionPage() {
 
   async function loadAll() {
     const [{ data: b }, { data: f }, { data: it }, { data: bc }, { data: st }, { data: mr }] = await Promise.all([
-      supabase.from('production_batches').select('*, production_batch_items(id, customer_name, quantity)').order('created_at', { ascending: false }),
+      supabase.from('production_batches').select('*, production_batch_items(id, customer_name, so_number, quantity)').order('created_at', { ascending: false }),
       supabase.from('factories').select('code, name').order('code'),
       supabase.from('items').select('id, code, description, unit, type'),
       supabase.from('bom_components').select('parent_item_id, component_item_id, quantity, apply_allowance'),
@@ -203,11 +203,14 @@ export default function ProductionPage() {
                 </div>
 
                 <div className="border-t pt-3 mb-3">
-                  <div className="text-gray-400 text-xs mb-1">Per customer</div>
+                  <div className="text-gray-400 text-xs mb-1">Per customer / order</div>
                   <ul className="space-y-1">
                     {b.production_batch_items?.map(it => (
-                      <li key={it.id} className="flex justify-between text-sm">
-                        <span className="text-gray-700 truncate pr-2">{it.customer_name}</span>
+                      <li key={it.id} className="flex justify-between text-sm gap-2">
+                        <span className="text-gray-700 truncate">
+                          {it.customer_name}
+                          {it.so_number ? <span className="text-gray-400 font-mono"> · {it.so_number}</span> : ''}
+                        </span>
                         <span className="font-medium whitespace-nowrap">{it.quantity}</span>
                       </li>
                     ))}

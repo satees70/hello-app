@@ -26,6 +26,7 @@ const EXTRACTION_TOOL: Anthropic.Tool = {
           type: 'object',
           properties: {
             customer_name: { type: 'string', description: 'The customer this line belongs to. A document can list several customers; each one appears as a header above its lines.' },
+            so_number: { type: 'string', description: 'The sales order / document number for THIS line, from the "Doc No" column, e.g. SO-40434.' },
             item_code: { type: 'string', description: 'The item / product code, e.g. HE4424-25UN/PACK.' },
             description: { type: 'string', description: 'The full item description.' },
             quantity: { type: 'number', description: 'The original order quantity (Orig Qty).' },
@@ -33,7 +34,7 @@ const EXTRACTION_TOOL: Anthropic.Tool = {
             delivery_date: { type: 'string', description: 'The delivery date exactly as printed, e.g. 13/06/26.' },
             location_code: { type: 'string', description: 'The LOCATION code for THIS line, e.g. AVINA14 or AVINA102. This is per line, not per document.' },
           },
-          required: ['customer_name', 'item_code', 'description', 'quantity', 'outstanding_qty', 'delivery_date', 'location_code'],
+          required: ['customer_name', 'so_number', 'item_code', 'description', 'quantity', 'outstanding_qty', 'delivery_date', 'location_code'],
         },
       },
     },
@@ -51,7 +52,8 @@ How customers work — read this carefully:
 Other rules:
 - The LOCATION code (e.g. AVINA14, AVINA102) is PER LINE, not per document — read it from the LOCATION column for that specific row.
 - Ignore the "Back Order Summary" section at the bottom; only extract the main numbered line-item rows.
-- For each line capture: customer name, item code, description, original quantity (Orig Qty), outstanding quantity (O/Stding), delivery date, and location code.
+- The SO NUMBER comes from the "Doc No" column (e.g. SO-40434) and is per line — production staff use it to know which order a line is for.
+- For each line capture: customer name, SO number (Doc No), item code, description, original quantity (Orig Qty), outstanding quantity (O/Stding), delivery date, and location code.
 
 Call the record_sales_order_lines tool with one entry per numbered line item, in the order they appear.`
 
@@ -131,6 +133,7 @@ async function markError(importId: string) {
 
 interface SalesLine {
   customer_name: string
+  so_number: string
   item_code: string
   description: string
   quantity: number

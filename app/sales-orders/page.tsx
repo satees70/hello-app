@@ -16,6 +16,7 @@ interface SalesImport {
 interface SalesLine {
   id: string
   customer_name: string
+  so_number: string
   item_code: string
   description: string
   quantity: number
@@ -43,6 +44,7 @@ const STATUS_STYLES: Record<string, string> = {
 
 const FIELDS: { value: keyof SalesLine; label: string }[] = [
   { value: 'customer_name', label: 'Customer' },
+  { value: 'so_number', label: 'SO No' },
   { value: 'item_code', label: 'Item Code' },
   { value: 'description', label: 'Description' },
   { value: 'quantity', label: 'Qty' },
@@ -355,17 +357,18 @@ export default function SalesOrdersPage() {
             <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="bg-gray-50 border-b">
-                  <tr>{['Customer', 'Item Code', 'Description', 'Qty', 'Outstanding', 'Delivery Date', 'Location', 'Factory', ''].map(h => (
+                  <tr>{['Customer', 'SO No', 'Item Code', 'Description', 'Qty', 'Outstanding', 'Delivery Date', 'Location', 'Factory', ''].map(h => (
                     <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
                 </thead>
                 <tbody>
-                  {linesLoading && (<tr><td colSpan={9} className="text-center py-8 text-gray-400">Loading…</td></tr>)}
-                  {!linesLoading && lines.length === 0 && (<tr><td colSpan={9} className="text-center py-8 text-gray-400">No lines for this document.</td></tr>)}
+                  {linesLoading && (<tr><td colSpan={10} className="text-center py-8 text-gray-400">Loading…</td></tr>)}
+                  {!linesLoading && lines.length === 0 && (<tr><td colSpan={10} className="text-center py-8 text-gray-400">No lines for this document.</td></tr>)}
                   {lines.map(line => {
                     const pend = pendingForLine(line.id)
                     return (
                       <tr key={line.id} className="border-b last:border-0 hover:bg-gray-50 align-top">
                         <td className="px-3 py-2 text-gray-700 min-w-[160px]">{line.customer_name}</td>
+                        <td className="px-3 py-2 font-mono whitespace-nowrap">{line.so_number}</td>
                         <td className="px-3 py-2 font-medium whitespace-nowrap">{line.item_code}</td>
                         <td className="px-3 py-2 text-gray-600 min-w-[200px]">{line.description}</td>
                         <td className="px-3 py-2 text-right">{line.quantity}</td>
