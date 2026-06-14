@@ -45,6 +45,8 @@ export default function ProductionPage() {
   const [selected, setSelected] = useState<Batch | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [groupBy, setGroupBy] = useState<'date' | 'factory'>('date')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [savingStock, setSavingStock] = useState('')
   const [raising, setRaising] = useState(false)
 
@@ -135,7 +137,15 @@ export default function ProductionPage() {
   if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
   if (!profile) return null
 
-  const shown = filter === 'All' ? batches : batches.filter(b => b.status === filter)
+  const dateKey = (d: string) => {
+    const m = /^(\d{2})\/(\d{2})\/(\d{2})$/.exec(d || '')
+    return m ? new Date(2000 + +m[3], +m[2] - 1, +m[1]).getTime() : Number.MAX_SAFE_INTEGER
+  }
+  const fromTs = dateFrom ? new Date(dateFrom + 'T00:00:00').getTime() : null
+  const toTs = dateTo ? new Date(dateTo + 'T00:00:00').getTime() : null
+  let shown = filter === 'All' ? batches : batches.filter(b => b.status === filter)
+  if (fromTs !== null) shown = shown.filter(b => { const k = dateKey(b.delivery_date); return k !== Number.MAX_SAFE_INTEGER && k >= fromTs })
+  if (toTs !== null) shown = shown.filter(b => { const k = dateKey(b.delivery_date); return k !== Number.MAX_SAFE_INTEGER && k <= toTs })
   const counts: Record<string, number> = { Planned: 0, 'In Progress': 0, Completed: 0 }
   batches.forEach(b => { counts[b.status] = (counts[b.status] || 0) + 1 })
 
@@ -143,11 +153,7 @@ export default function ProductionPage() {
   const totalShortfall = exploded ? exploded.rows.reduce((s, r) => s + r.shortfall, 0) : 0
   const hasRequest = selected ? requestBatchIds.has(selected.id) : false
 
-  // Group batches by delivery date, sorted chronologically (date format dd/mm/yy)
-  const dateKey = (d: string) => {
-    const m = /^(\d{2})\/(\d{2})\/(\d{2})$/.exec(d || '')
-    return m ? new Date(2000 + +m[3], +m[2] - 1, +m[1]).getTime() : Number.MAX_SAFE_INTEGER
-  }
+  // Group batches by delivery date or factory
   const byFactory = isHO && groupBy === 'factory'
   const groupsMap: Record<string, Batch[]> = {}
   shown.forEach(b => {
@@ -180,6 +186,16 @@ export default function ProductionPage() {
               {f}{f !== 'All' && counts[f] ? ` (${counts[f]})` : ''}
             </button>
           ))}
+        </div>
+
+        <div className="flex flex-wrap gap-2 items-center mb-4 text-sm">
+          <span className="text-gray-500">Delivery date:</span>
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="border rounded-lg px-2 py-1 bg-white" />
+          <span className="text-gray-400">to</span>
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="border rounded-lg px-2 py-1 bg-white" />
+          {(dateFrom || dateTo) && (
+            <button onClick={() => { setDateFrom(''); setDateTo('') }} className="text-blue-600 hover:underline">Clear</button>
+          )}
         </div>
 
         {isHO && (
