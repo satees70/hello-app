@@ -19,12 +19,13 @@ interface Batch {
 interface Item { id: string; code: string; description: string; unit: string; type: string }
 interface BomComp { parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean }
 
-const STATUSES = ['Planned', 'In Progress', 'Completed'] as const
+const STATUSES = ['Planned', 'Requested', 'In Progress', 'Completed'] as const
 const FILTERS = ['All', ...STATUSES] as const
 type Filter = typeof FILTERS[number]
 
 const STATUS_STYLE: Record<string, string> = {
   Planned: 'bg-blue-100 text-blue-700',
+  Requested: 'bg-indigo-100 text-indigo-700',
   'In Progress': 'bg-amber-100 text-amber-700',
   Completed: 'bg-green-100 text-green-700',
 }
@@ -131,6 +132,7 @@ export default function ProductionPage() {
     if (rpcErr) { setError(rpcErr.message); setRaising(false); return }
     setSuccess(`Material request raised for ${batch.batch_no}.`)
     setRequestBatchIds(prev => new Set(prev).add(batch.id))
+    setBatches(prev => prev.map(x => (x.id === batch.id && x.status === 'Planned' ? { ...x, status: 'Requested' } : x)))
     setRaising(false)
   }
 
@@ -148,7 +150,7 @@ export default function ProductionPage() {
   if (fromTs !== null) shown = shown.filter(b => { const k = dateKey(b.delivery_date); return k !== Number.MAX_SAFE_INTEGER && k >= fromTs })
   if (toTs !== null) shown = shown.filter(b => { const k = dateKey(b.delivery_date); return k !== Number.MAX_SAFE_INTEGER && k <= toTs })
   if (isHO && factoryFilter) shown = shown.filter(b => b.factory_code === factoryFilter)
-  const counts: Record<string, number> = { Planned: 0, 'In Progress': 0, Completed: 0 }
+  const counts: Record<string, number> = { Planned: 0, Requested: 0, 'In Progress': 0, Completed: 0 }
   batches.forEach(b => { counts[b.status] = (counts[b.status] || 0) + 1 })
 
   const exploded = selected ? explode(selected) : null
