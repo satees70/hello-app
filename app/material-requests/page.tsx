@@ -87,6 +87,7 @@ export default function MaterialRequestsPage() {
           Shortfall materials requested from the warehouse.
           {isHO ? ' Showing all factories.' : ` Showing factory ${profile.factory_code}.`}
         </p>
+        <p className="text-gray-400 text-xs mb-5 -mt-3">Open requests refresh automatically when the BOM or stock changes. Once you start recording received quantities, the request is frozen.</p>
 
         <div className="flex gap-2 mb-5">
           {FILTERS.map(f => (

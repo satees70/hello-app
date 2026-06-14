@@ -114,6 +114,12 @@ export default function ProductionPage() {
     setStock(prev => ({ ...prev, [key]: value }))
     setSavingStock('')
     setSuccess('Stock updated.')
+    reloadRequests() // an open request may have auto-refreshed (or cleared)
+  }
+
+  async function reloadRequests() {
+    const { data } = await supabase.from('material_requests').select('batch_id')
+    setRequestBatchIds(new Set((data || []).map(r => r.batch_id)))
   }
 
   async function raiseRequest(batch: Batch) {
@@ -279,7 +285,7 @@ export default function ProductionPage() {
                 <div className="flex items-center justify-between mt-4">
                   <div className="text-sm">
                     {hasRequest
-                      ? <span className="text-purple-700">A material request has already been raised for this batch — see Material Requests.</span>
+                      ? <span className="text-purple-700">A material request is already open for this batch — its quantities update automatically as BOM/stock change (until receiving starts). See Material Requests.</span>
                       : totalShortfall > 0
                         ? <span className="text-red-600">Total shortfall across {exploded.rows.filter(r => r.shortfall > 0).length} material(s).</span>
                         : <span className="text-green-600">Enough stock on hand — no shortfall.</span>}
