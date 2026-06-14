@@ -1,4 +1,5 @@
 'use client'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -14,6 +15,23 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const pathname = usePathname()
   const isHO = factoryCode === 'HEAD_OFFICE'
   const isAdmin = role === 'admin'
+  const [pendingCount, setPendingCount] = useState(0)
+
+  // Head Office: keep a live-ish count of change requests waiting for approval
+  useEffect(() => {
+    if (!isHO) return
+    let active = true
+    const fetchCount = async () => {
+      const { count } = await supabase
+        .from('change_requests')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'Pending')
+      if (active) setPendingCount(count || 0)
+    }
+    fetchCount()
+    const timer = setInterval(fetchCount, 30000)
+    return () => { active = false; clearInterval(timer) }
+  }, [isHO, pathname])
 
   async function handleLogout() {
     await supabase.auth.signOut()
@@ -40,8 +58,13 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
         <span className="font-bold text-lg">AVINA</span>
         {links.map(l => (
           <Link key={l.href} href={l.href}
-            className={`text-sm hover:text-blue-200 ${pathname === l.href ? 'underline font-semibold' : ''}`}>
+            className={`text-sm hover:text-blue-200 inline-flex items-center ${pathname === l.href ? 'underline font-semibold' : ''}`}>
             {l.label}
+            {l.href === '/sales-orders/changes' && isHO && pendingCount > 0 && (
+              <span className="ml-1.5 bg-red-500 text-white text-xs font-semibold rounded-full min-w-[1.25rem] text-center px-1.5 py-0.5 leading-none">
+                {pendingCount}
+              </span>
+            )}
           </Link>
         ))}
       </div>
