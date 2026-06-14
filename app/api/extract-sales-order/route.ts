@@ -41,15 +41,19 @@ const EXTRACTION_TOOL: Anthropic.Tool = {
   },
 }
 
-const PROMPT = `This is an "Outstanding Sales Order Listing" PDF. Extract every line item.
+const PROMPT = `This is an "Outstanding Sales Order Listing" PDF. Extract every numbered line item (the rows with sequence numbers 1, 2, 3, …).
 
-Important rules:
-- The document can contain MULTIPLE customers. Each customer name appears as a header row, and the line items below it belong to that customer until the next customer header appears.
-- The LOCATION code (e.g. AVINA14, AVINA102) is PER LINE, not per document — read it from the LOCATION column for each individual line.
-- Ignore the "Back Order Summary" section at the bottom; only extract the main line-item rows.
-- For each line capture: customer name, item code, description, original quantity, outstanding quantity, delivery date, and location code.
+How customers work — read this carefully:
+- The company whose name and registration number appear at the very TOP of the listing (e.g. "SRRI EASWARI MILLS SDN BHD (198601008174 (157367-T))") is the SELLER / our own company. Do NOT treat it as a customer.
+- The CUSTOMER is the buyer. Customer names appear as header rows above their line items, often prefixed by a document number like "SO-40434" (e.g. "SO-40434 MY HERO HYPERMARKET SDN. BHD."). The customer name is the company name itself, without the SO number.
+- The document can contain MULTIPLE customers. Each numbered line item belongs to the customer header that appears above it, and keeps belonging to that customer until the next customer header appears.
 
-Call the record_sales_order_lines tool with one entry per line item.`
+Other rules:
+- The LOCATION code (e.g. AVINA14, AVINA102) is PER LINE, not per document — read it from the LOCATION column for that specific row.
+- Ignore the "Back Order Summary" section at the bottom; only extract the main numbered line-item rows.
+- For each line capture: customer name, item code, description, original quantity (Orig Qty), outstanding quantity (O/Stding), delivery date, and location code.
+
+Call the record_sales_order_lines tool with one entry per numbered line item, in the order they appear.`
 
 export async function POST(request: Request) {
   const { importId, filePath } = await request.json()
