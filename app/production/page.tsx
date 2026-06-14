@@ -75,6 +75,8 @@ export default function ProductionPage() {
   }
 
   const factoryName = (code: string) => factories.find(f => f.code === code)?.name || code || '—'
+  // Trim floating-point noise (e.g. 0.0011250000000000001 -> 0.001125)
+  const clean = (n: number) => Number(n.toPrecision(12))
 
   async function setStatus(b: Batch, status: string) {
     setUpdating(b.id); setError('')
@@ -255,14 +257,14 @@ export default function ProductionPage() {
                           <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{r.code}</td>
                           <td className="px-3 py-2 text-gray-600">{r.description}</td>
                           <td className="px-3 py-2 text-gray-500">{r.unit}</td>
-                          <td className="px-3 py-2 text-right">{r.required}</td>
+                          <td className="px-3 py-2 text-right">{clean(r.required)}</td>
                           <td className="px-3 py-2">
                             <input type="number" step="any"
                               value={stock[r.key] ?? 0}
                               onChange={e => setStock(prev => ({ ...prev, [r.key]: e.target.value === '' ? 0 : Number(e.target.value) }))}
                               className="w-24 border rounded px-2 py-1 text-right" />
                           </td>
-                          <td className={`px-3 py-2 text-right font-semibold ${r.shortfall > 0 ? 'text-red-600' : 'text-green-600'}`}>{r.shortfall}</td>
+                          <td className={`px-3 py-2 text-right font-semibold ${r.shortfall > 0 ? 'text-red-600' : 'text-green-600'}`}>{clean(r.shortfall)}</td>
                           <td className="px-3 py-2 whitespace-nowrap">
                             <button onClick={() => saveStock(r.item_id, selected.factory_code, r.key, stock[r.key] ?? 0)}
                               disabled={savingStock === r.key}
