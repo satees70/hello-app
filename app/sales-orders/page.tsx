@@ -68,6 +68,7 @@ export default function SalesOrdersPage() {
   const [linesLoading, setLinesLoading] = useState(false)
   const [changeReqs, setChangeReqs] = useState<ChangeRequest[]>([])
   const [confirming, setConfirming] = useState(false)
+  const [dupKeys, setDupKeys] = useState<Set<string>>(new Set()) // "so_number||item_code" that appear >1 across all lines
 
   // Factory display + valid location codes (for the location dropdown)
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
@@ -158,14 +159,25 @@ export default function SalesOrdersPage() {
     setLinesLoading(true)
     setLines([])
     setReqLine(null)
-    const [{ data: lineData }, { data: crData }] = await Promise.all([
+    const [{ data: lineData }, { data: crData }, { data: allLines }] = await Promise.all([
       supabase.from('sales_order_lines').select('*').eq('import_id', doc.id).order('customer_name'),
       supabase.from('change_requests').select('id, line_id, field, status').eq('import_id', doc.id),
+      supabase.from('sales_order_lines').select('so_number, item_code'),
     ])
     setLines(lineData || [])
     setChangeReqs(crData || [])
+    // Flag SO number + item code combinations that appear on more than one line anywhere
+    const counts: Record<string, number> = {}
+    ;(allLines || []).forEach(r => {
+      if (!r.so_number) return
+      const k = `${r.so_number}||${r.item_code}`
+      counts[k] = (counts[k] || 0) + 1
+    })
+    setDupKeys(new Set(Object.keys(counts).filter(k => counts[k] > 1)))
     setLinesLoading(false)
   }
+
+  const isDuplicate = (l: SalesLine) => !!l.so_number && dupKeys.has(`${l.so_number}||${l.item_code}`)
 
   async function loadChangeReqs(importId: string) {
     const { data } = await supabase.from('change_requests').select('id, line_id, field, status').eq('import_id', importId)
@@ -310,6 +322,12 @@ export default function SalesOrdersPage() {
             </div>
             <p className="text-gray-500 text-sm mb-3">Lines are read-only. Use <strong>Request change</strong> to propose a correction — Head Office approves it. A document can&apos;t be confirmed while changes are pending.</p>
 
+            {lines.filter(isDuplicate).length > 0 && (
+              <p className="text-amber-700 text-sm bg-amber-50 border border-amber-200 p-2 rounded mb-3">
+                ⚠ {lines.filter(isDuplicate).length} line(s) have an SO number + item that also appears on another line (possible duplicate order or re-upload). Please review before confirming.
+              </p>
+            )}
+
             {reqLine && (
               <div className="bg-white rounded-xl shadow-sm border p-5 mb-4">
                 <h3 className="font-semibold mb-1">Request a change</h3>
@@ -368,7 +386,10 @@ export default function SalesOrdersPage() {
                     return (
                       <tr key={line.id} className="border-b last:border-0 hover:bg-gray-50 align-top">
                         <td className="px-3 py-2 text-gray-700 min-w-[160px]">{line.customer_name}</td>
-                        <td className="px-3 py-2 font-mono whitespace-nowrap">{line.so_number}</td>
+                        <td className="px-3 py-2 font-mono whitespace-nowrap">
+                          {line.so_number}
+                          {isDuplicate(line) && <span className="ml-1 text-amber-600" title="Same SO number + item appears on another line">⚠</span>}
+                        </td>
                         <td className="px-3 py-2 font-medium whitespace-nowrap">{line.item_code}</td>
                         <td className="px-3 py-2 text-gray-600 min-w-[200px]">{line.description}</td>
                         <td className="px-3 py-2 text-right">{line.quantity}</td>
