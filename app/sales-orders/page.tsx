@@ -22,6 +22,14 @@ interface SalesLine {
   outstanding_qty: number
   delivery_date: string
   location_code: string
+  factory_code: string
+}
+
+interface ChangeRequest {
+  id: string
+  line_id: string
+  field: string
+  status: string
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -29,8 +37,19 @@ const STATUS_STYLES: Record<string, string> = {
   Processing: 'bg-blue-100 text-blue-700',
   Review: 'bg-purple-100 text-purple-700',
   Processed: 'bg-green-100 text-green-700',
+  Confirmed: 'bg-green-100 text-green-700',
   Error: 'bg-red-100 text-red-700',
 }
+
+const FIELDS: { value: keyof SalesLine; label: string }[] = [
+  { value: 'customer_name', label: 'Customer' },
+  { value: 'item_code', label: 'Item Code' },
+  { value: 'description', label: 'Description' },
+  { value: 'quantity', label: 'Qty' },
+  { value: 'outstanding_qty', label: 'Outstanding' },
+  { value: 'delivery_date', label: 'Delivery Date' },
+  { value: 'location_code', label: 'Location' },
+]
 
 export default function SalesOrdersPage() {
   const { profile, loading, error: profileError } = useProfile()
@@ -41,16 +60,22 @@ export default function SalesOrdersPage() {
   const [success, setSuccess] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Confirmation / editing state
+  // Lines / review state
   const [lines, setLines] = useState<SalesLine[]>([])
   const [linesFor, setLinesFor] = useState<SalesImport | null>(null)
   const [linesLoading, setLinesLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
+  const [changeReqs, setChangeReqs] = useState<ChangeRequest[]>([])
+  const [confirming, setConfirming] = useState(false)
 
-  // Reference data for the factory auto-fill
-  const [locationMap, setLocationMap] = useState<Record<string, string>>({})
+  // Factory display
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
-  const [addSel, setAddSel] = useState<Record<string, string>>({}) // location_code -> chosen factory
+
+  // Change-request form
+  const [reqLine, setReqLine] = useState<SalesLine | null>(null)
+  const [reqField, setReqField] = useState<keyof SalesLine>('customer_name')
+  const [reqValue, setReqValue] = useState('')
+  const [reqReason, setReqReason] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
     if (profile) { loadImports(); loadRefs() }
@@ -65,21 +90,12 @@ export default function SalesOrdersPage() {
   }
 
   async function loadRefs() {
-    const [{ data: lm }, { data: f }] = await Promise.all([
-      supabase.from('location_map').select('location_code, factory_code'),
-      supabase.from('factories').select('code, name').order('code'),
-    ])
-    const map: Record<string, string> = {}
-    ;(lm || []).forEach(r => { map[r.location_code] = r.factory_code })
-    setLocationMap(map)
+    const { data: f } = await supabase.from('factories').select('code, name').order('code')
     setFactories(f || [])
   }
 
-  // --- factory lookup helpers ---
-  const factoryFor = (loc: string) => locationMap[loc] || ''
+  const isHO = profile?.factory_code === 'HEAD_OFFICE'
   const factoryName = (code: string) => factories.find(f => f.code === code)?.name || code
-  const isUnmapped = (loc: string) => !locationMap[loc]
-  const unmappedCodes = [...new Set(lines.filter(l => isUnmapped(l.location_code)).map(l => l.location_code))]
 
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault()
@@ -93,9 +109,7 @@ export default function SalesOrdersPage() {
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
     const path = `${profile.factory_code}/${Date.now()}-${safeName}`
 
-    const { error: uploadError } = await supabase.storage
-      .from('sales-orders')
-      .upload(path, file)
+    const { error: uploadError } = await supabase.storage.from('sales-orders').upload(path, file)
     if (uploadError) { setError(`Upload failed: ${uploadError.message}`); setUploading(false); return }
 
     const { data: inserted, error: insertError } = await supabase
@@ -117,7 +131,6 @@ export default function SalesOrdersPage() {
     setUploading(false)
     loadImports()
 
-    // Kick off extraction on the server.
     try {
       const res = await fetch('/api/extract-sales-order', {
         method: 'POST',
@@ -125,16 +138,10 @@ export default function SalesOrdersPage() {
         body: JSON.stringify({ importId: inserted.id, filePath: path }),
       })
       const result = await res.json()
-      if (!res.ok) {
-        setError(`Extraction failed: ${result.error || 'Unknown error'}`)
-        setSuccess('')
-      } else {
-        setSuccess(`Extracted ${result.count} line(s) from "${inserted.file_name}". Review and confirm them below.`)
-        viewLines(inserted)
-      }
+      if (!res.ok) { setError(`Extraction failed: ${result.error || 'Unknown error'}`); setSuccess('') }
+      else { setSuccess(`Extracted ${result.count} line(s) from "${inserted.file_name}".`); viewLines(inserted) }
     } catch {
-      setError('Could not reach the extraction service.')
-      setSuccess('')
+      setError('Could not reach the extraction service.'); setSuccess('')
     }
     loadImports()
   }
@@ -143,79 +150,81 @@ export default function SalesOrdersPage() {
     setLinesFor(doc)
     setLinesLoading(true)
     setLines([])
-    setAddSel({})
-    const { data } = await supabase
-      .from('sales_order_lines')
-      .select('*')
-      .eq('import_id', doc.id)
-      .order('customer_name', { ascending: true })
-    setLines(data || [])
+    setReqLine(null)
+    const [{ data: lineData }, { data: crData }] = await Promise.all([
+      supabase.from('sales_order_lines').select('*').eq('import_id', doc.id).order('customer_name'),
+      supabase.from('change_requests').select('id, line_id, field, status').eq('import_id', doc.id),
+    ])
+    setLines(lineData || [])
+    setChangeReqs(crData || [])
     setLinesLoading(false)
   }
 
-  function updateLine(id: string, field: keyof SalesLine, value: string | number) {
-    setLines(prev => prev.map(l => (l.id === id ? { ...l, [field]: value } : l)))
+  async function loadChangeReqs(importId: string) {
+    const { data } = await supabase.from('change_requests').select('id, line_id, field, status').eq('import_id', importId)
+    setChangeReqs(data || [])
   }
 
-  async function addMapping(locationCode: string) {
-    const factoryCode = addSel[locationCode]
-    if (!factoryCode) { setError(`Pick a factory for ${locationCode} first.`); return }
+  const pendingForLine = (lineId: string) => changeReqs.filter(c => c.line_id === lineId && c.status === 'Pending').length
+  const pendingForDoc = changeReqs.filter(c => c.status === 'Pending').length
+
+  function openRequest(line: SalesLine) {
+    setReqLine(line)
+    setReqField('customer_name')
+    setReqValue(String(line.customer_name ?? ''))
+    setReqReason('')
     setError('')
-    const { error: addErr } = await supabase
-      .from('location_map')
-      .insert({ location_code: locationCode, factory_code: factoryCode })
-    if (addErr) { setError(`Could not add ${locationCode} to the map: ${addErr.message}`); return }
-    setLocationMap(prev => ({ ...prev, [locationCode]: factoryCode }))
-    setAddSel(prev => { const n = { ...prev }; delete n[locationCode]; return n })
-    setSuccess(`Added ${locationCode} → ${factoryName(factoryCode)} to the location map.`)
+  }
+
+  function onReqFieldChange(field: keyof SalesLine) {
+    setReqField(field)
+    if (reqLine) setReqValue(String(reqLine[field] ?? ''))
+  }
+
+  async function submitRequest() {
+    if (!reqLine || !profile || !linesFor) return
+    if (!reqValue.trim()) { setError('Enter the proposed new value.'); return }
+    if (!reqReason.trim()) { setError('Please give a reason for the change.'); return }
+    setSubmitting(true); setError(''); setSuccess('')
+
+    const { error: insErr } = await supabase.from('change_requests').insert({
+      line_id: reqLine.id,
+      import_id: linesFor.id,
+      field: reqField,
+      old_value: String(reqLine[reqField] ?? ''),
+      new_value: reqValue.trim(),
+      reason: reqReason.trim(),
+      status: 'Pending',
+      requested_by: profile.id,
+      requested_by_email: profile.email,
+      factory_code: reqLine.factory_code || profile.factory_code,
+    })
+    if (insErr) { setError(`Could not submit request: ${insErr.message}`); setSubmitting(false); return }
+
+    setSuccess('Change request submitted for Head Office approval.')
+    setSubmitting(false)
+    setReqLine(null)
+    loadChangeReqs(linesFor.id)
   }
 
   async function handleConfirm() {
-    if (!linesFor || lines.length === 0) return
-    if (unmappedCodes.length > 0) {
-      setError(`Add these location codes to the map before confirming: ${unmappedCodes.join(', ')}`)
-      return
-    }
-    setSaving(true); setError(''); setSuccess('')
-
-    // Save every edited line with its auto-filled factory.
-    const results = await Promise.all(lines.map(l =>
-      supabase.from('sales_order_lines').update({
-        customer_name: l.customer_name,
-        item_code: l.item_code,
-        description: l.description,
-        quantity: Number(l.quantity) || 0,
-        outstanding_qty: Number(l.outstanding_qty) || 0,
-        delivery_date: l.delivery_date,
-        location_code: l.location_code,
-        factory_code: factoryFor(l.location_code),
-      }).eq('id', l.id)
-    ))
-    const failed = results.find(r => r.error)
-    if (failed?.error) { setError(`Save failed: ${failed.error.message}`); setSaving(false); return }
-
-    // Only now does the document become Processed.
-    const { error: stErr } = await supabase
-      .from('sales_imports')
-      .update({ status: 'Processed' })
-      .eq('id', linesFor.id)
-    if (stErr) { setError(`Save failed: ${stErr.message}`); setSaving(false); return }
-
-    setSuccess(`Confirmed and saved ${lines.length} line(s) for "${linesFor.file_name}".`)
-    setSaving(false)
+    if (!linesFor) return
+    setConfirming(true); setError(''); setSuccess('')
+    const { error: rpcErr } = await supabase.rpc('confirm_document', { p_import_id: linesFor.id })
+    if (rpcErr) { setError(rpcErr.message); setConfirming(false); return }
+    setSuccess(`"${linesFor.file_name}" confirmed and pushed to production planning.`)
+    setConfirming(false)
     loadImports()
   }
 
   async function handleDownload(path: string) {
-    const { data, error: signError } = await supabase.storage
-      .from('sales-orders')
-      .createSignedUrl(path, 60)
+    const { data, error: signError } = await supabase.storage.from('sales-orders').createSignedUrl(path, 60)
     if (signError || !data) { setError('Could not open file.'); return }
     window.open(data.signedUrl, '_blank')
   }
 
   async function handleDelete(doc: SalesImport) {
-    if (!confirm(`Delete "${doc.file_name}"?\n\nThis removes the PDF and all extracted lines. This cannot be undone.`)) return
+    if (!confirm(`Delete "${doc.file_name}"?\n\nThis removes the PDF, all extracted lines and their change requests. This cannot be undone.`)) return
     setError(''); setSuccess('')
     await supabase.storage.from('sales-orders').remove([doc.file_path])
     const { error: delError } = await supabase.from('sales_imports').delete().eq('id', doc.id)
@@ -225,35 +234,27 @@ export default function SalesOrdersPage() {
     loadImports()
   }
 
-  function formatDate(iso: string) {
-    return new Date(iso).toLocaleString()
-  }
-
-  const inputCls = 'w-full border rounded px-2 py-1 text-xs bg-white'
+  function formatDate(iso: string) { return new Date(iso).toLocaleString() }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
   if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
   if (!profile) return null
 
-  // Latest status for the doc being reviewed (kept fresh from the imports list).
   const currentDoc = linesFor ? (imports.find(i => i.id === linesFor.id) || linesFor) : null
+  const canConfirm = currentDoc && currentDoc.status !== 'Confirmed' && lines.length > 0 && pendingForDoc === 0
 
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
       <div className="max-w-7xl mx-auto px-6 py-8">
         <h1 className="text-2xl font-bold mb-1">Sales Orders</h1>
-        <p className="text-gray-500 text-sm mb-6">Upload a sales order PDF. It is read automatically, then you review and confirm each line before it is saved.</p>
+        <p className="text-gray-500 text-sm mb-6">Upload a sales order PDF. It is read automatically. To correct a line, raise a change request for Head Office to approve.</p>
 
         <form onSubmit={handleUpload} className="bg-white rounded-xl shadow-sm border p-6 mb-8">
           <label className="block text-sm font-medium mb-2">Sales Order PDF</label>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/pdf"
+          <input ref={fileInputRef} type="file" accept="application/pdf"
             onChange={e => setFile(e.target.files?.[0] || null)}
-            className="block w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 file:font-medium hover:file:bg-blue-100 mb-4"
-          />
+            className="block w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 file:font-medium hover:file:bg-blue-100 mb-4" />
           {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
           {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}
           <button type="submit" disabled={!file || uploading}
@@ -266,38 +267,21 @@ export default function SalesOrdersPage() {
         <div className="bg-white rounded-xl shadow-sm border overflow-hidden mb-8">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
-              <tr>
-                {['File', 'Factory', 'Status', 'Uploaded', 'Actions'].map(h => (
-                  <th key={h} className="text-left px-4 py-3 font-medium text-gray-600">{h}</th>
-                ))}
-              </tr>
+              <tr>{['File', 'Factory', 'Status', 'Uploaded', 'Actions'].map(h => (
+                <th key={h} className="text-left px-4 py-3 font-medium text-gray-600">{h}</th>))}</tr>
             </thead>
             <tbody>
-              {imports.length === 0 && (
-                <tr><td colSpan={5} className="text-center py-8 text-gray-400">No documents uploaded yet</td></tr>
-              )}
+              {imports.length === 0 && (<tr><td colSpan={5} className="text-center py-8 text-gray-400">No documents uploaded yet</td></tr>)}
               {imports.map(doc => (
                 <tr key={doc.id} className={`border-b last:border-0 hover:bg-gray-50 ${linesFor?.id === doc.id ? 'bg-blue-50' : ''}`}>
                   <td className="px-4 py-3 font-medium">{doc.file_name}</td>
-                  <td className="px-4 py-3 text-gray-600">
-                    {doc.factory_code === 'HEAD_OFFICE' ? 'Head Office' : doc.factory_code}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[doc.status] || 'bg-gray-100 text-gray-700'}`}>
-                      {doc.status}
-                    </span>
-                  </td>
+                  <td className="px-4 py-3 text-gray-600">{doc.factory_code === 'HEAD_OFFICE' ? 'Head Office' : doc.factory_code}</td>
+                  <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[doc.status] || 'bg-gray-100 text-gray-700'}`}>{doc.status}</span></td>
                   <td className="px-4 py-3 text-gray-600">{formatDate(doc.created_at)}</td>
                   <td className="px-4 py-3 space-x-3 whitespace-nowrap">
-                    <button onClick={() => viewLines(doc)} className="text-blue-600 hover:underline text-xs">
-                      {doc.status === 'Review' ? 'Review & Confirm' : 'View / Edit Lines'}
-                    </button>
-                    <button onClick={() => handleDownload(doc.file_path)} className="text-blue-600 hover:underline text-xs">
-                      View PDF
-                    </button>
-                    <button onClick={() => handleDelete(doc)} className="text-red-600 hover:underline text-xs">
-                      Delete
-                    </button>
+                    <button onClick={() => viewLines(doc)} className="text-blue-600 hover:underline text-xs">View Lines</button>
+                    <button onClick={() => handleDownload(doc.file_path)} className="text-blue-600 hover:underline text-xs">View PDF</button>
+                    {isHO && <button onClick={() => handleDelete(doc)} className="text-red-600 hover:underline text-xs">Delete</button>}
                   </td>
                 </tr>
               ))}
@@ -308,91 +292,75 @@ export default function SalesOrdersPage() {
         {currentDoc && (
           <>
             <div className="flex items-center gap-3 mb-2">
-              <h2 className="font-semibold text-lg">
-                {currentDoc.status === 'Processed' ? 'Edit Lines' : 'Confirm Lines'} —{' '}
-                <span className="text-gray-500 font-normal">{currentDoc.file_name}</span>
-              </h2>
-              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[currentDoc.status] || 'bg-gray-100 text-gray-700'}`}>
-                {currentDoc.status}
-              </span>
+              <h2 className="font-semibold text-lg">Lines — <span className="text-gray-500 font-normal">{currentDoc.file_name}</span></h2>
+              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[currentDoc.status] || 'bg-gray-100 text-gray-700'}`}>{currentDoc.status}</span>
+              {pendingForDoc > 0 && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{pendingForDoc} pending change(s)</span>}
             </div>
-            <p className="text-gray-500 text-sm mb-3">
-              Every field is editable. The factory fills in automatically from each line&apos;s location code.
-              Nothing is saved as <strong>Processed</strong> until you click <strong>Confirm &amp; Save</strong>.
-            </p>
+            <p className="text-gray-500 text-sm mb-3">Lines are read-only. Use <strong>Request change</strong> to propose a correction — Head Office approves it. A document can&apos;t be confirmed while changes are pending.</p>
+
+            {reqLine && (
+              <div className="bg-white rounded-xl shadow-sm border p-5 mb-4">
+                <h3 className="font-semibold mb-1">Request a change</h3>
+                <p className="text-gray-500 text-xs mb-4">Line: <span className="font-mono">{reqLine.item_code}</span> — {reqLine.description}</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                  <div>
+                    <label className="block text-xs font-medium mb-1">Field to change</label>
+                    <select value={reqField} onChange={e => onReqFieldChange(e.target.value as keyof SalesLine)}
+                      className="w-full border rounded-lg px-3 py-2 text-sm bg-white">
+                      {FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1">Current value</label>
+                    <input value={String(reqLine[reqField] ?? '')} disabled className="w-full border rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1">Proposed new value</label>
+                    <input value={reqValue} onChange={e => setReqValue(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-white" />
+                  </div>
+                </div>
+                <label className="block text-xs font-medium mb-1">Reason</label>
+                <textarea value={reqReason} onChange={e => setReqReason(e.target.value)} rows={2}
+                  className="w-full border rounded-lg px-3 py-2 text-sm bg-white mb-4" placeholder="Why does this need to change?" />
+                {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
+                <div className="flex gap-3">
+                  <button onClick={submitRequest} disabled={submitting}
+                    className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">
+                    {submitting ? 'Submitting…' : 'Submit request'}
+                  </button>
+                  <button onClick={() => setReqLine(null)} className="border px-5 py-2 rounded-lg hover:bg-gray-50 text-sm">Cancel</button>
+                </div>
+              </div>
+            )}
 
             <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="bg-gray-50 border-b">
-                  <tr>
-                    {['Customer', 'Item Code', 'Description', 'Qty', 'Outstanding', 'Delivery Date', 'Location', 'Factory'].map(h => (
-                      <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
+                  <tr>{['Customer', 'Item Code', 'Description', 'Qty', 'Outstanding', 'Delivery Date', 'Location', 'Factory', ''].map(h => (
+                    <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
                 </thead>
                 <tbody>
-                  {linesLoading && (
-                    <tr><td colSpan={8} className="text-center py-8 text-gray-400">Loading…</td></tr>
-                  )}
-                  {!linesLoading && lines.length === 0 && (
-                    <tr><td colSpan={8} className="text-center py-8 text-gray-400">No lines for this document.</td></tr>
-                  )}
+                  {linesLoading && (<tr><td colSpan={9} className="text-center py-8 text-gray-400">Loading…</td></tr>)}
+                  {!linesLoading && lines.length === 0 && (<tr><td colSpan={9} className="text-center py-8 text-gray-400">No lines for this document.</td></tr>)}
                   {lines.map(line => {
-                    const unmapped = isUnmapped(line.location_code)
+                    const pend = pendingForLine(line.id)
                     return (
-                      <tr key={line.id} className={`border-b last:border-0 align-top ${unmapped ? 'bg-red-50' : ''}`}>
-                        <td className="px-3 py-2 min-w-[180px]">
-                          <input className={inputCls} value={line.customer_name}
-                            onChange={e => updateLine(line.id, 'customer_name', e.target.value)} />
+                      <tr key={line.id} className="border-b last:border-0 hover:bg-gray-50 align-top">
+                        <td className="px-3 py-2 text-gray-700 min-w-[160px]">{line.customer_name}</td>
+                        <td className="px-3 py-2 font-medium whitespace-nowrap">{line.item_code}</td>
+                        <td className="px-3 py-2 text-gray-600 min-w-[200px]">{line.description}</td>
+                        <td className="px-3 py-2 text-right">{line.quantity}</td>
+                        <td className="px-3 py-2 text-right">{line.outstanding_qty}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">{line.delivery_date}</td>
+                        <td className="px-3 py-2"><span className="font-mono">{line.location_code}</span></td>
+                        <td className="px-3 py-2">
+                          {line.factory_code
+                            ? <span className="inline-block bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{factoryName(line.factory_code)}</span>
+                            : <span className="text-red-600">⚠ Unmapped</span>}
                         </td>
-                        <td className="px-3 py-2 min-w-[130px]">
-                          <input className={inputCls} value={line.item_code}
-                            onChange={e => updateLine(line.id, 'item_code', e.target.value)} />
-                        </td>
-                        <td className="px-3 py-2 min-w-[220px]">
-                          <input className={inputCls} value={line.description}
-                            onChange={e => updateLine(line.id, 'description', e.target.value)} />
-                        </td>
-                        <td className="px-3 py-2 w-20">
-                          <input type="number" className={`${inputCls} text-right`} value={line.quantity}
-                            onChange={e => updateLine(line.id, 'quantity', Number(e.target.value))} />
-                        </td>
-                        <td className="px-3 py-2 w-20">
-                          <input type="number" className={`${inputCls} text-right`} value={line.outstanding_qty}
-                            onChange={e => updateLine(line.id, 'outstanding_qty', Number(e.target.value))} />
-                        </td>
-                        <td className="px-3 py-2 w-28">
-                          <input className={inputCls} value={line.delivery_date}
-                            onChange={e => updateLine(line.id, 'delivery_date', e.target.value)} />
-                        </td>
-                        <td className="px-3 py-2 w-28">
-                          <input className={`${inputCls} font-mono uppercase`} value={line.location_code}
-                            onChange={e => updateLine(line.id, 'location_code', e.target.value.toUpperCase())} />
-                        </td>
-                        <td className="px-3 py-2 min-w-[170px]">
-                          {!unmapped ? (
-                            <span className="inline-block bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
-                              {factoryName(factoryFor(line.location_code))}
-                            </span>
-                          ) : (
-                            <div className="space-y-1">
-                              <span className="block text-red-600 font-medium">⚠ Not in map</span>
-                              <div className="flex gap-1">
-                                <select
-                                  className="border rounded px-1 py-1 text-xs bg-white"
-                                  value={addSel[line.location_code] || ''}
-                                  onChange={e => setAddSel(prev => ({ ...prev, [line.location_code]: e.target.value }))}
-                                >
-                                  <option value="">Factory…</option>
-                                  {factories.map(f => <option key={f.code} value={f.code}>{f.name}</option>)}
-                                </select>
-                                <button type="button" onClick={() => addMapping(line.location_code)}
-                                  className="bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 text-xs">
-                                  Add
-                                </button>
-                              </div>
-                            </div>
-                          )}
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          {pend > 0 && <span className="mr-2 text-amber-600">⏳ {pend}</span>}
+                          <button onClick={() => openRequest(line)} className="text-blue-600 hover:underline">Request change</button>
                         </td>
                       </tr>
                     )
@@ -401,22 +369,21 @@ export default function SalesOrdersPage() {
               </table>
             </div>
 
-            {lines.length > 0 && (
+            {lines.length > 0 && currentDoc.status !== 'Confirmed' && (
               <div className="flex items-center justify-between mt-4 mb-12">
                 <div className="text-sm">
-                  {unmappedCodes.length > 0 ? (
-                    <span className="text-red-600">
-                      ⚠ {unmappedCodes.length} location code(s) not in the map: {unmappedCodes.join(', ')} — add them before confirming.
-                    </span>
-                  ) : (
-                    <span className="text-green-600">All locations mapped to a factory. Ready to confirm.</span>
-                  )}
+                  {pendingForDoc > 0
+                    ? <span className="text-amber-600">⏳ {pendingForDoc} change request(s) pending — resolve them before confirming.</span>
+                    : <span className="text-green-600">No pending changes. Ready to confirm.</span>}
                 </div>
-                <button onClick={handleConfirm} disabled={saving || unmappedCodes.length > 0}
+                <button onClick={handleConfirm} disabled={!canConfirm || confirming}
                   className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">
-                  {saving ? 'Saving…' : 'Confirm & Save'}
+                  {confirming ? 'Confirming…' : 'Confirm Document'}
                 </button>
               </div>
+            )}
+            {currentDoc.status === 'Confirmed' && (
+              <p className="mt-4 mb-12 text-green-700 text-sm font-medium">✓ This document is confirmed and in production planning.</p>
             )}
           </>
         )}

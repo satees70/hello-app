@@ -16,6 +16,7 @@ export default function DashboardPage() {
   const cards = [
     { href: '/admin/items', label: 'Items Master', desc: 'View and manage all items', show: true },
     { href: '/sales-orders', label: 'Sales Orders', desc: 'Upload and track sales order PDFs', show: true },
+    { href: '/sales-orders/changes', label: isHO ? 'Pending Changes' : 'My Change Requests', desc: isHO ? 'Approve or reject line change requests' : 'Track change requests you raised', show: true },
     { href: '/admin/location-map', label: 'Location Map', desc: 'Map location codes to factories', show: isHO },
     { href: '/admin/users', label: 'User Management', desc: 'Create and manage user accounts', show: isHO && isAdmin },
   ].filter(c => c.show)
