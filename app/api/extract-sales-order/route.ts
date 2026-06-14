@@ -91,18 +91,22 @@ export async function POST(request: Request) {
     }
     const lines = (toolUse.input as { lines: SalesLine[] }).lines || []
 
-    // 3. Look up the import so each line inherits its factory (for RLS).
-    const { data: imp } = await supabaseAdmin
-      .from('sales_imports')
-      .select('factory_code')
-      .eq('id', importId)
-      .single()
-    const factory_code = imp?.factory_code || 'HEAD_OFFICE'
+    // 3. Auto-fill each line's factory by looking its location code up in the map.
+    const { data: lmRows } = await supabaseAdmin
+      .from('location_map')
+      .select('location_code, factory_code')
+    const lmMap = new Map((lmRows || []).map(r => [r.location_code, r.factory_code]))
 
     // 4. Replace any previous lines for this import, then insert the fresh set.
+    //    Unmapped locations get an empty factory; the user resolves them on the
+    //    confirmation screen before anything is marked Processed.
     await supabaseAdmin.from('sales_order_lines').delete().eq('import_id', importId)
     if (lines.length > 0) {
-      const rows = lines.map(l => ({ ...l, import_id: importId, factory_code }))
+      const rows = lines.map(l => ({
+        ...l,
+        import_id: importId,
+        factory_code: lmMap.get(l.location_code) || '',
+      }))
       const { error: insErr } = await supabaseAdmin.from('sales_order_lines').insert(rows)
       if (insErr) {
         await markError(importId)
@@ -110,8 +114,8 @@ export async function POST(request: Request) {
       }
     }
 
-    // 5. Mark the document as processed.
-    await supabaseAdmin.from('sales_imports').update({ status: 'Processed' }).eq('id', importId)
+    // 5. Mark the document for review — NOT processed. The user confirms.
+    await supabaseAdmin.from('sales_imports').update({ status: 'Review' }).eq('id', importId)
 
     return NextResponse.json({ success: true, count: lines.length })
   } catch (e) {
