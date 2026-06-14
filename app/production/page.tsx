@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { supabase } from '@/lib/supabase'
@@ -28,11 +28,6 @@ const STATUS_STYLE: Record<string, string> = {
   'In Progress': 'bg-amber-100 text-amber-700',
   Completed: 'bg-green-100 text-green-700',
 }
-const STATUS_BORDER: Record<string, string> = {
-  Planned: 'border-l-blue-400',
-  'In Progress': 'border-l-amber-400',
-  Completed: 'border-l-green-400',
-}
 
 export default function ProductionPage() {
   const { profile, loading, error: profileError } = useProfile()
@@ -48,6 +43,7 @@ export default function ProductionPage() {
   const [success, setSuccess] = useState('')
 
   const [selected, setSelected] = useState<Batch | null>(null)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [savingStock, setSavingStock] = useState('')
   const [raising, setRaising] = useState(false)
 
@@ -146,6 +142,16 @@ export default function ProductionPage() {
   const totalShortfall = exploded ? exploded.rows.reduce((s, r) => s + r.shortfall, 0) : 0
   const hasRequest = selected ? requestBatchIds.has(selected.id) : false
 
+  // Group batches by delivery date, sorted chronologically (date format dd/mm/yy)
+  const dateKey = (d: string) => {
+    const m = /^(\d{2})\/(\d{2})\/(\d{2})$/.exec(d || '')
+    return m ? new Date(2000 + +m[3], +m[2] - 1, +m[1]).getTime() : Number.MAX_SAFE_INTEGER
+  }
+  const groupsMap: Record<string, Batch[]> = {}
+  shown.forEach(b => { const k = b.delivery_date || 'No date'; (groupsMap[k] = groupsMap[k] || []).push(b) })
+  const groupKeys = Object.keys(groupsMap).sort((a, b) => dateKey(a) - dateKey(b))
+  const toggleRow = (id: string) => setExpanded(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
@@ -174,66 +180,72 @@ export default function ProductionPage() {
             <br />Confirm a sales order document to generate production demand.
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {shown.map(b => (
-              <div key={b.id} className={`bg-white rounded-xl shadow-sm border border-l-4 ${STATUS_BORDER[b.status] || 'border-l-gray-300'} ${selected?.id === b.id ? 'ring-2 ring-blue-300' : ''} p-5`}>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-mono font-semibold text-sm">{b.batch_no}</span>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[b.status] || 'bg-gray-100 text-gray-700'}`}>{b.status}</span>
-                </div>
-
-                <div className="mb-3">
-                  <div className="font-semibold">{b.item_code}</div>
-                  <div className="text-gray-500 text-sm">{b.description}</div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 text-sm mb-3">
-                  <div>
-                    <div className="text-gray-400 text-xs">Total qty</div>
-                    <div className="font-semibold text-lg">{b.total_quantity}</div>
-                  </div>
-                  <div>
-                    <div className="text-gray-400 text-xs">Delivery</div>
-                    <div className="font-medium">{b.delivery_date || '—'}</div>
-                  </div>
-                  <div>
-                    <div className="text-gray-400 text-xs">Factory</div>
-                    <div className="font-medium">{isHO ? factoryName(b.factory_code) : (b.factory_code || '—')}</div>
-                  </div>
-                </div>
-
-                <div className="border-t pt-3 mb-3">
-                  <div className="text-gray-400 text-xs mb-1">Per customer / order</div>
-                  <ul className="space-y-1">
-                    {b.production_batch_items?.map(it => (
-                      <li key={it.id} className="flex justify-between items-baseline text-sm gap-2">
-                        <span className="text-gray-700 truncate min-w-0">{it.customer_name}</span>
-                        <span className="flex-shrink-0 flex items-baseline gap-2">
-                          {it.so_number && <span className="text-gray-400 font-mono text-xs">{it.so_number}</span>}
-                          <span className="font-medium">{it.quantity}</span>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                <div className="flex items-center gap-2 mb-3">
-                  <button onClick={() => { setSelected(b); setError(''); setSuccess('') }}
-                    className="flex-1 border border-blue-600 text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-50 text-sm font-medium">
-                    Materials
-                  </button>
-                  {requestBatchIds.has(b.id) && (
-                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 whitespace-nowrap">MR raised</span>
-                  )}
-                </div>
-
-                <div>
-                  <label className="text-gray-400 text-xs block mb-1">Status</label>
-                  <select value={b.status} disabled={updating === b.id}
-                    onChange={e => setStatus(b, e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm bg-white">
-                    {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
+          <div className="space-y-6">
+            {groupKeys.map(date => (
+              <div key={date}>
+                <h3 className="font-semibold text-sm text-gray-700 mb-2">
+                  📅 {date} <span className="text-gray-400 font-normal">· {groupsMap[date].length} batch(es)</span>
+                </h3>
+                <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b">
+                      <tr>
+                        <th className="w-6"></th>
+                        {['Batch', 'Item', 'Total qty', ...(isHO ? ['Factory'] : []), 'Status', ''].map(h => (
+                          <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {groupsMap[date].map(b => (
+                        <Fragment key={b.id}>
+                          <tr className={`border-b last:border-0 hover:bg-gray-50 cursor-pointer ${expanded.has(b.id) ? 'bg-blue-50/40' : ''}`} onClick={() => toggleRow(b.id)}>
+                            <td className="pl-3 text-gray-400">{expanded.has(b.id) ? '▾' : '▸'}</td>
+                            <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}</td>
+                            <td className="px-3 py-2">
+                              <span className="font-medium">{b.item_code}</span>
+                              <span className="block text-gray-500 text-xs">{b.description}</span>
+                            </td>
+                            <td className="px-3 py-2 font-semibold whitespace-nowrap">{b.total_quantity}</td>
+                            {isHO && <td className="px-3 py-2 whitespace-nowrap">{factoryName(b.factory_code)}</td>}
+                            <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
+                              <select value={b.status} disabled={updating === b.id}
+                                onChange={e => setStatus(b, e.target.value)}
+                                className={`border rounded-lg px-2 py-1 text-xs ${STATUS_STYLE[b.status] || 'bg-white'}`}>
+                                {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                              </select>
+                            </td>
+                            <td className="px-3 py-2 whitespace-nowrap text-right">
+                              {requestBatchIds.has(b.id) && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">MR</span>}
+                            </td>
+                          </tr>
+                          {expanded.has(b.id) && (
+                            <tr className="bg-gray-50/60 border-b last:border-0">
+                              <td></td>
+                              <td colSpan={isHO ? 5 : 4} className="px-3 py-3">
+                                <div className="text-gray-400 text-xs mb-1">Per customer / order</div>
+                                <ul className="space-y-1 mb-3 max-w-lg">
+                                  {b.production_batch_items?.map(it => (
+                                    <li key={it.id} className="flex justify-between items-baseline gap-2">
+                                      <span className="text-gray-700 truncate min-w-0">{it.customer_name}</span>
+                                      <span className="flex-shrink-0 flex items-baseline gap-2">
+                                        {it.so_number && <span className="text-gray-400 font-mono text-xs">{it.so_number}</span>}
+                                        <span className="font-medium">{it.quantity}</span>
+                                      </span>
+                                    </li>
+                                  ))}
+                                </ul>
+                                <button onClick={() => { setSelected(b); setError(''); setSuccess('') }}
+                                  className="border border-blue-600 text-blue-600 px-4 py-1.5 rounded-lg hover:bg-blue-50 text-sm font-medium">
+                                  Materials
+                                </button>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             ))}
