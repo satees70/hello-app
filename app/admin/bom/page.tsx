@@ -53,6 +53,7 @@ export default function BomPage() {
   const [copyFromId, setCopyFromId] = useState('')
   const [copying, setCopying] = useState(false)
   const [bomParents, setBomParents] = useState<Set<string>>(new Set())
+  const [editRowId, setEditRowId] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [dirty, setDirty] = useState(false)
@@ -191,10 +192,19 @@ export default function BomPage() {
     setDirty(true)
   }
 
+  function setRowComponent(id: string, newComponentId: string) {
+    if (!newComponentId) return
+    if (components.some(c => c.id !== id && c.component_item_id === newComponentId)) {
+      setError('That component is already in this recipe.'); return
+    }
+    setComponents(prev => prev.map(c => (c.id === id ? { ...c, component_item_id: newComponentId } : c)))
+    setDirty(true); setEditRowId(''); setError('')
+  }
+
   async function saveAll() {
     setError(''); setSuccess(''); setSaving(true)
     const results = await Promise.all(components.map(c =>
-      supabase.from('bom_components').update({ quantity: Number(c.quantity) || 0, apply_allowance: c.apply_allowance }).eq('id', c.id)
+      supabase.from('bom_components').update({ component_item_id: c.component_item_id, quantity: Number(c.quantity) || 0, apply_allowance: c.apply_allowance }).eq('id', c.id)
     ))
     const failed = results.find(r => r.error)
     if (failed?.error) { setError(failed.error.message); setSaving(false); return }
@@ -323,8 +333,28 @@ export default function BomPage() {
                     const ci = itemById(c.component_item_id)
                     return (
                       <tr key={c.id} className="border-b last:border-0 hover:bg-gray-50">
-                        <td className="px-4 py-3 font-mono font-medium">{ci?.code || '—'}</td>
-                        <td className="px-4 py-3 text-gray-700">{ci?.description || '(item not found)'}</td>
+                        {editRowId === c.id ? (
+                          <td className="px-4 py-3" colSpan={2}>
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 min-w-[16rem]">
+                                <ItemCombo
+                                  items={items.filter(i => i.id !== parentId && (i.id === c.component_item_id || !usedIds.has(i.id)))}
+                                  value={c.component_item_id}
+                                  onChange={newId => setRowComponent(c.id, newId)}
+                                  placeholder="Type the replacement item…" />
+                              </div>
+                              <button onClick={() => setEditRowId('')} className="text-gray-500 hover:underline text-xs">Cancel</button>
+                            </div>
+                          </td>
+                        ) : (
+                          <>
+                            <td className="px-4 py-3 font-mono font-medium">
+                              {ci?.code || '—'}
+                              <button onClick={() => { setEditRowId(c.id); setError('') }} className="ml-2 text-blue-600 hover:underline text-xs font-sans font-normal">change</button>
+                            </td>
+                            <td className="px-4 py-3 text-gray-700">{ci?.description || '(item not found)'}</td>
+                          </>
+                        )}
                         <td className="px-4 py-3">
                           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ci?.type === 'Manufactured' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
                             {ci?.type || '—'}
