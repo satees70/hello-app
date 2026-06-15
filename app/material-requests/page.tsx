@@ -49,10 +49,11 @@ export default function MaterialRequestsPage() {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [factoryItems, setFactoryItems] = useState<Set<string>>(new Set()) // item codes supplied by the factory
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
-  useEffect(() => { if (profile) { load(); loadFactories() } }, [profile])
+  useEffect(() => { if (profile) { load(); loadFactories(); loadFactoryItems() } }, [profile])
 
   async function load() {
     const { data } = await supabase
@@ -60,6 +61,10 @@ export default function MaterialRequestsPage() {
       .select('*, production_batches!batch_id(batch_no, item_code), material_request_items(*)')
       .order('created_at', { ascending: false })
     setRequests((data as MaterialRequest[]) || [])
+  }
+  async function loadFactoryItems() {
+    const { data } = await supabase.from('items').select('code').eq('supplied_by_factory', true)
+    setFactoryItems(new Set((data || []).map(r => r.code)))
   }
   async function loadFactories() {
     const { data } = await supabase.from('factories').select('code, name').order('code')
@@ -109,7 +114,7 @@ export default function MaterialRequestsPage() {
   }
 
   // Build a printable Material Picking List PDF for a released run, and download it
-  async function downloadPickRunPdf(runNo: string, factory: string, released_at: string, mats: MatMap) {
+  async function downloadPickRunPdf(runNo: string, factory: string, released_at: string, mats: MatMap, audience: string) {
     const { default: jsPDF } = await import('jspdf')
     const { default: autoTable } = await import('jspdf-autotable')
     const list = Object.values(mats).sort((a, b) => a.code.localeCompare(b.code))
@@ -117,7 +122,7 @@ export default function MaterialRequestsPage() {
     doc.setFontSize(14); doc.setFont('helvetica', 'bold')
     doc.text('SRRI EASWARI MILLS SDN BHD', 14, 16)
     doc.setFontSize(11); doc.setFont('helvetica', 'normal')
-    doc.text('Material Picking List', 14, 23)
+    doc.text(`Material List — for ${audience}`, 14, 23)
     doc.setFontSize(10)
     doc.text(`Pick run: ${runNo}`, 14, 32)
     doc.text(`Factory: ${factoryName(factory)} (${factory})`, 14, 38)
@@ -134,7 +139,7 @@ export default function MaterialRequestsPage() {
     const endY = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY) + 16
     doc.text('Picked by: ____________________   Date: __________', 14, endY)
     doc.text('Received by: ___________________   Date: __________', 14, endY + 10)
-    doc.save(`PickRun_${runNo.replace(/\//g, '-')}_${factory}.pdf`)
+    doc.save(`PickRun_${runNo.replace(/\//g, '-')}_${factory}_${audience}.pdf`)
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
@@ -171,6 +176,13 @@ export default function MaterialRequestsPage() {
   const waitingFactories = Object.keys(waiting).sort()
   const runList = Object.values(runs).sort((a, b) => b.released_at.localeCompare(a.released_at) || a.factory.localeCompare(b.factory))
   const hasCombined = waitingFactories.length > 0 || runList.length > 0
+
+  // Split a material pool into warehouse-picked vs factory-supplied (e.g. printed labels)
+  const splitBySource = (mats: MatMap) => {
+    const warehouse: MatMap = {}, factory: MatMap = {}
+    Object.entries(mats).forEach(([code, g]) => { (factoryItems.has(code) ? factory : warehouse)[code] = g })
+    return { warehouse, factory }
+  }
 
   // One material table; editable=true adds the Received/Remaining columns + receiving (released runs only)
   const renderMatTable = (mats: MatMap, prefix: string, editable: boolean) => {
@@ -281,18 +293,34 @@ export default function MaterialRequestsPage() {
                   <div className="space-y-4">
                     {runList.map(run => {
                       const rkey = run.runNo
+                      const { warehouse, factory } = splitBySource(run.mats)
                       return (
                         <div key={rkey} className="bg-white rounded-xl shadow-sm border p-5">
-                          <div className="flex flex-wrap items-center gap-3 mb-3">
+                          <div className="flex flex-wrap items-center gap-3 mb-4">
                             <span className="font-semibold">{isHO ? factoryName(run.factory) : run.factory}</span>
                             <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 font-mono">{run.runNo}</span>
                             <span className="text-sm text-gray-400">released {new Date(run.released_at).toLocaleString()}</span>
-                            <button onClick={() => downloadPickRunPdf(run.runNo, run.factory, run.released_at, run.mats)}
-                              className="ml-auto border border-blue-600 text-blue-600 px-3 py-1 rounded-lg hover:bg-blue-50 text-sm font-medium">
-                              ⬇ Download PDF
-                            </button>
                           </div>
-                          {renderMatTable(run.mats, rkey, true)}
+                          {Object.keys(warehouse).length > 0 && (
+                            <div className="mb-5">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-sm font-semibold text-gray-700">📦 From warehouse</span>
+                                <button onClick={() => downloadPickRunPdf(run.runNo, run.factory, run.released_at, warehouse, 'Warehouse')}
+                                  className="ml-auto border border-blue-600 text-blue-600 px-3 py-1 rounded-lg hover:bg-blue-50 text-xs font-medium">⬇ Warehouse PDF</button>
+                              </div>
+                              {renderMatTable(warehouse, `${rkey}|wh`, true)}
+                            </div>
+                          )}
+                          {Object.keys(factory).length > 0 && (
+                            <div>
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-sm font-semibold text-purple-700">🏭 Made at factory</span>
+                                <button onClick={() => downloadPickRunPdf(run.runNo, run.factory, run.released_at, factory, 'Factory')}
+                                  className="ml-auto border border-purple-600 text-purple-600 px-3 py-1 rounded-lg hover:bg-purple-50 text-xs font-medium">⬇ Factory PDF</button>
+                              </div>
+                              {renderMatTable(factory, `${rkey}|fac`, true)}
+                            </div>
+                          )}
                         </div>
                       )
                     })}
