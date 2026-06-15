@@ -22,6 +22,7 @@ interface MaterialRequest {
   status: string
   created_at: string
   released_at: string | null
+  pick_run_no: string | null
   production_batches: { batch_no: string; item_code: string } | null
   material_request_items: MRItem[]
 }
@@ -100,13 +101,40 @@ export default function MaterialRequestsPage() {
   async function release(factory: string) {
     const key = `release|${factory}`
     setBusy(key); setError(''); setSuccess('')
-    const { error: relErr } = await supabase.from('material_requests')
-      .update({ released_at: new Date().toISOString() })
-      .is('released_at', null).eq('factory_code', factory)
+    const { data, error: relErr } = await supabase.rpc('release_pick_run', { p_factory: factory })
     if (relErr) { setError(relErr.message); setBusy(''); return }
-    setSuccess('Released to the warehouse as a new pick run.')
+    setSuccess(`Released to the warehouse as pick run ${data}.`)
     setBusy('')
     load()
+  }
+
+  // Build a printable Material Picking List PDF for a released run, and download it
+  async function downloadPickRunPdf(runNo: string, factory: string, released_at: string, mats: MatMap) {
+    const { default: jsPDF } = await import('jspdf')
+    const { default: autoTable } = await import('jspdf-autotable')
+    const list = Object.values(mats).sort((a, b) => a.code.localeCompare(b.code))
+    const doc = new jsPDF()
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold')
+    doc.text('SRRI EASWARI MILLS SDN BHD', 14, 16)
+    doc.setFontSize(11); doc.setFont('helvetica', 'normal')
+    doc.text('Material Picking List', 14, 23)
+    doc.setFontSize(10)
+    doc.text(`Pick run: ${runNo}`, 14, 32)
+    doc.text(`Factory: ${factoryName(factory)} (${factory})`, 14, 38)
+    doc.text(`Released: ${new Date(released_at).toLocaleString()}`, 14, 44)
+    doc.text(`Printed: ${new Date().toLocaleString()}`, 120, 44)
+    autoTable(doc, {
+      startY: 50,
+      head: [['#', 'Material', 'Description', 'Unit', 'Qty to pick', 'Picked', 'Remarks']],
+      body: list.map((g, i) => [String(i + 1), g.code, g.description, g.unit, String(g.requested), '', '']),
+      styles: { fontSize: 9, cellPadding: 2 },
+      headStyles: { fillColor: [37, 99, 235] },
+      columnStyles: { 4: { halign: 'right' } },
+    })
+    const endY = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY) + 16
+    doc.text('Picked by: ____________________   Date: __________', 14, endY)
+    doc.text('Received by: ___________________   Date: __________', 14, endY + 10)
+    doc.save(`PickRun_${runNo}_${factory}.pdf`)
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
@@ -129,10 +157,11 @@ export default function MaterialRequestsPage() {
     g.items.push({ id: it.id, requested_qty: Number(it.requested_qty), received_qty: Number(it.received_qty) })
   }
   const waiting: Record<string, MatMap> = {}                                  // factory -> materials not yet released
-  const runs: Record<string, { factory: string; released_at: string; mats: MatMap }> = {} // factory|released_at -> run
+  const runs: Record<string, { runNo: string; factory: string; released_at: string; mats: MatMap }> = {} // run id -> run
   requests.filter(r => ACTIVE.includes(r.status)).forEach(r => {
+    const runId = r.pick_run_no || (r.released_at ? `${r.factory_code}|${r.released_at}` : '')
     const target = r.released_at
-      ? (runs[`${r.factory_code}|${r.released_at}`] = runs[`${r.factory_code}|${r.released_at}`] || { factory: r.factory_code, released_at: r.released_at, mats: {} }).mats
+      ? (runs[runId] = runs[runId] || { runNo: r.pick_run_no || '(unnumbered)', factory: r.factory_code, released_at: r.released_at, mats: {} }).mats
       : (waiting[r.factory_code] = waiting[r.factory_code] || {})
     r.material_request_items?.forEach(it => addItem(target, it))
   })
@@ -166,9 +195,9 @@ export default function MaterialRequestsPage() {
                   <td className="px-3 py-2 text-right font-semibold text-blue-700">{g.requested}</td>
                   {editable && <>
                     <td className="px-3 py-2">
-                      <input type="number" step="any"
+                      <input type="number" step="any" min="0"
                         value={combinedEdits[key] ?? g.received}
-                        onChange={e => setCombinedEdits(prev => ({ ...prev, [key]: e.target.value === '' ? 0 : Number(e.target.value) }))}
+                        onChange={e => setCombinedEdits(prev => ({ ...prev, [key]: e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)) }))}
                         className="w-24 border rounded px-2 py-1 text-right" />
                     </td>
                     <td className={`px-3 py-2 text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{remaining}</td>
@@ -251,13 +280,17 @@ export default function MaterialRequestsPage() {
                   </p>
                   <div className="space-y-4">
                     {runList.map(run => {
-                      const rkey = `${run.factory}|${run.released_at}`
+                      const rkey = run.runNo
                       return (
                         <div key={rkey} className="bg-white rounded-xl shadow-sm border p-5">
                           <div className="flex flex-wrap items-center gap-3 mb-3">
                             <span className="font-semibold">{isHO ? factoryName(run.factory) : run.factory}</span>
-                            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700">Pick run</span>
+                            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 font-mono">{run.runNo}</span>
                             <span className="text-sm text-gray-400">released {new Date(run.released_at).toLocaleString()}</span>
+                            <button onClick={() => downloadPickRunPdf(run.runNo, run.factory, run.released_at, run.mats)}
+                              className="ml-auto border border-blue-600 text-blue-600 px-3 py-1 rounded-lg hover:bg-blue-50 text-sm font-medium">
+                              ⬇ Download PDF
+                            </button>
                           </div>
                           {renderMatTable(run.mats, rkey, true)}
                         </div>
