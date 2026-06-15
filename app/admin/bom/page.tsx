@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import Papa from 'papaparse'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
-import { supabase } from '@/lib/supabase'
+import { supabase, fetchAll } from '@/lib/supabase'
 
 interface Item { id: string; code: string; description: string; unit: string; type: string }
 interface BomComponent { id: string; parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean }
@@ -36,8 +36,7 @@ export default function BomPage() {
   }, [parentId])
 
   async function loadItems() {
-    const { data } = await supabase.from('items').select('id, code, description, unit, type').order('code')
-    setItems(data || [])
+    setItems(await fetchAll<Item>('items', 'id, code, description, unit, type', 'code'))
   }
 
   async function loadComponents() {

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import Papa from 'papaparse'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
-import { supabase } from '@/lib/supabase'
+import { supabase, fetchAll } from '@/lib/supabase'
 
 interface Item { id: string; code: string; description: string; unit: string; type: string; stock_group: string }
 const EMPTY = { code: '', description: '', unit: '', type: 'Material', stock_group: '' }
@@ -28,8 +28,7 @@ export default function ItemsPage() {
   useEffect(() => { if (profile) loadItems() }, [profile])
 
   async function loadItems() {
-    const { data } = await supabase.from('items').select('*').order('code')
-    setItems(data || [])
+    setItems(await fetchAll<Item>('items', '*', 'code'))
   }
 
   function openCreate() { setEditing(null); setForm(EMPTY); setError(''); setShowForm(true) }

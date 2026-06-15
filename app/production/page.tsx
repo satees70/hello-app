@@ -2,7 +2,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
-import { supabase } from '@/lib/supabase'
+import { supabase, fetchAll } from '@/lib/supabase'
 
 interface BatchItem { id: string; customer_name: string; so_number: string; quantity: number }
 interface Batch {
@@ -62,17 +62,17 @@ export default function ProductionPage() {
   useEffect(() => { if (profile) loadAll() }, [profile])
 
   async function loadAll() {
-    const [{ data: b }, { data: f }, { data: it }, { data: bc }, { data: st }] = await Promise.all([
+    const [{ data: b }, { data: f }, it, bc, { data: st }] = await Promise.all([
       supabase.from('production_batches').select('*, production_batch_items(id, customer_name, so_number, quantity)').order('created_at', { ascending: false }),
       supabase.from('factories').select('code, name').order('code'),
-      supabase.from('items').select('id, code, description, unit, type'),
-      supabase.from('bom_components').select('parent_item_id, component_item_id, quantity, apply_allowance'),
+      fetchAll<Item>('items', 'id, code, description, unit, type'),
+      fetchAll<BomComp>('bom_components', 'parent_item_id, component_item_id, quantity, apply_allowance'),
       supabase.from('item_stock').select('item_id, factory_code, quantity'),
     ])
     setBatches((b as Batch[]) || [])
     setFactories(f || [])
-    setItems(it || [])
-    setBoms((bc as BomComp[]) || [])
+    setItems(it)
+    setBoms(bc)
     const sm: Record<string, number> = {}
     ;(st || []).forEach(r => { sm[`${r.item_id}|${r.factory_code}`] = Number(r.quantity) })
     setStock(sm)
