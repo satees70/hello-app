@@ -52,6 +52,7 @@ export default function BomPage() {
   const [addQty, setAddQty] = useState('1')
   const [copyFromId, setCopyFromId] = useState('')
   const [copying, setCopying] = useState(false)
+  const [bomParents, setBomParents] = useState<Set<string>>(new Set())
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [dirty, setDirty] = useState(false)
@@ -63,8 +64,13 @@ export default function BomPage() {
   useEffect(() => {
     if (!profile) return
     if (profile.factory_code !== 'HEAD_OFFICE') { router.replace('/dashboard'); return }
-    loadItems()
+    loadItems(); loadBomParents()
   }, [profile])
+
+  async function loadBomParents() {
+    const rows = await fetchAll<{ parent_item_id: string }>('bom_components', 'parent_item_id')
+    setBomParents(new Set(rows.map(r => r.parent_item_id)))
+  }
 
   useEffect(() => {
     if (parentId) loadComponents(); else setComponents([])
@@ -194,6 +200,7 @@ export default function BomPage() {
     if (failed?.error) { setError(failed.error.message); setSaving(false); return }
     setDirty(false); setSaving(false)
     setSuccess('All changes saved.')
+    loadBomParents()
   }
 
   async function copyRecipe() {
@@ -207,7 +214,7 @@ export default function BomPage() {
     if (upErr) { setError(upErr.message); setCopying(false); return }
     setCopyFromId(''); setCopying(false)
     setSuccess(`Copied ${rows.length} component(s) from ${itemById(copyFromId)?.code}. Adjust below, then Save all changes.`)
-    loadComponents()
+    loadComponents(); loadBomParents()
   }
 
   async function removeRow(id: string) {
@@ -271,7 +278,7 @@ export default function BomPage() {
               <p className="text-gray-400 text-xs mb-3">Start from an existing recipe, then adjust the components below.</p>
               <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
                 <div className="flex-1">
-                  <ItemCombo items={manufactured.filter(i => i.id !== parentId)} value={copyFromId} onChange={setCopyFromId} placeholder="Type the item to copy from…" />
+                  <ItemCombo items={manufactured.filter(i => i.id !== parentId && bomParents.has(i.id))} value={copyFromId} onChange={setCopyFromId} placeholder="Type an item that already has a recipe…" />
                 </div>
                 <button onClick={copyRecipe} disabled={copying || !copyFromId}
                   className="bg-gray-800 text-white px-5 py-2 rounded-lg hover:bg-gray-900 disabled:opacity-50 text-sm font-medium">
