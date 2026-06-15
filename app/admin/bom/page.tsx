@@ -50,6 +50,8 @@ export default function BomPage() {
   const [components, setComponents] = useState<BomComponent[]>([])
   const [addComponentId, setAddComponentId] = useState('')
   const [addQty, setAddQty] = useState('1')
+  const [copyFromId, setCopyFromId] = useState('')
+  const [copying, setCopying] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [dirty, setDirty] = useState(false)
@@ -194,6 +196,20 @@ export default function BomPage() {
     setSuccess('All changes saved.')
   }
 
+  async function copyRecipe() {
+    if (!parentId || !copyFromId) { setError('Pick an item to copy the recipe from.'); return }
+    if (copyFromId === parentId) { setError('Choose a different item to copy from.'); return }
+    setCopying(true); setError(''); setSuccess('')
+    const { data: src } = await supabase.from('bom_components').select('component_item_id, quantity, apply_allowance').eq('parent_item_id', copyFromId)
+    if (!src || src.length === 0) { setError('That item has no recipe to copy.'); setCopying(false); return }
+    const rows = src.map(s => ({ parent_item_id: parentId, component_item_id: s.component_item_id, quantity: s.quantity, apply_allowance: s.apply_allowance }))
+    const { error: upErr } = await supabase.from('bom_components').upsert(rows, { onConflict: 'parent_item_id,component_item_id' })
+    if (upErr) { setError(upErr.message); setCopying(false); return }
+    setCopyFromId(''); setCopying(false)
+    setSuccess(`Copied ${rows.length} component(s) from ${itemById(copyFromId)?.code}. Adjust below, then Save all changes.`)
+    loadComponents()
+  }
+
   async function removeRow(id: string) {
     if (!confirm('Remove this component from the recipe?')) return
     setError(''); setSuccess('')
@@ -248,6 +264,20 @@ export default function BomPage() {
             <div className="mb-3">
               <h2 className="font-semibold text-lg">Recipe for <span className="font-mono">{parent.code}</span></h2>
               <p className="text-gray-500 text-sm">Components needed to make <strong>1 {parentUnit}</strong> of {parent.description}.</p>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border p-5 mb-6">
+              <h3 className="font-medium mb-1 text-sm">Copy recipe from another item</h3>
+              <p className="text-gray-400 text-xs mb-3">Start from an existing recipe, then adjust the components below.</p>
+              <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+                <div className="flex-1">
+                  <ItemCombo items={manufactured.filter(i => i.id !== parentId)} value={copyFromId} onChange={setCopyFromId} placeholder="Type the item to copy from…" />
+                </div>
+                <button onClick={copyRecipe} disabled={copying || !copyFromId}
+                  className="bg-gray-800 text-white px-5 py-2 rounded-lg hover:bg-gray-900 disabled:opacity-50 text-sm font-medium">
+                  {copying ? 'Copying…' : 'Copy recipe'}
+                </button>
+              </div>
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border p-5 mb-6">
