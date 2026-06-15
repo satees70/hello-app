@@ -1,5 +1,6 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import Papa from 'papaparse'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { supabase } from '@/lib/supabase'
@@ -16,6 +17,9 @@ export default function ItemsPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkMsg, setBulkMsg] = useState('')
+  const bulkRef = useRef<HTMLInputElement>(null)
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
@@ -48,6 +52,50 @@ export default function ItemsPage() {
     loadItems()
   }
 
+  function downloadTemplate() {
+    const csv = 'code,description,unit,sql_account_code,type\nABC123,EXAMPLE ITEM 1KG,KG,5000,Material\nXYZ789,EXAMPLE MANUFACTURED ITEM,PACK,5000,Manufactured\n'
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+    const a = document.createElement('a'); a.href = url; a.download = 'items-template.csv'; a.click(); URL.revokeObjectURL(url)
+  }
+
+  function handleBulkUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setBulkBusy(true); setBulkMsg(''); setError('')
+    Papa.parse<Record<string, string>>(file, {
+      header: true, skipEmptyLines: true,
+      complete: async (res) => {
+        const pick = (r: Record<string, string>, ...keys: string[]) => {
+          for (const k of Object.keys(r)) { if (keys.includes(k.trim().toLowerCase())) return (r[k] || '').trim() }
+          return ''
+        }
+        const rows = res.data
+          .map(r => ({
+            code: pick(r, 'code', 'item code', 'item_code'),
+            description: pick(r, 'description', 'desc'),
+            unit: pick(r, 'unit', 'uom'),
+            sql_account_code: pick(r, 'sql_account_code', 'sql account code', 'account code'),
+            type: /man/i.test(pick(r, 'type')) ? 'Manufactured' : 'Material',
+          }))
+          .filter(r => r.code)
+        if (rows.length === 0) { setBulkMsg('No rows with an item code were found. Check the column headers.'); setBulkBusy(false); if (bulkRef.current) bulkRef.current.value = ''; return }
+
+        let ok = 0; let firstErr = ''
+        for (let i = 0; i < rows.length; i += 500) {
+          const chunk = rows.slice(i, i + 500)
+          const { error: upErr } = await supabase.from('items').upsert(chunk, { onConflict: 'code' })
+          if (upErr) { if (!firstErr) firstErr = upErr.message } else ok += chunk.length
+        }
+        setBulkBusy(false)
+        if (bulkRef.current) bulkRef.current.value = ''
+        if (firstErr) setBulkMsg(`Imported ${ok} of ${rows.length}. Some failed: ${firstErr}`)
+        else setBulkMsg(`Imported ${ok} item(s) successfully (existing codes were updated).`)
+        loadItems()
+      },
+      error: (err) => { setBulkMsg(`Could not read file: ${err.message}`); setBulkBusy(false) },
+    })
+  }
+
   const filtered = items.filter(i =>
     i.code.toLowerCase().includes(search.toLowerCase()) ||
     i.description.toLowerCase().includes(search.toLowerCase())
@@ -69,6 +117,23 @@ export default function ItemsPage() {
             </button>
           )}
         </div>
+
+        {isHO && (
+          <div className="bg-white rounded-xl shadow-sm border p-5 mb-6">
+            <h2 className="font-semibold mb-1">Bulk upload from CSV</h2>
+            <p className="text-gray-500 text-sm mb-3">
+              Add or update many items at once. Columns: <span className="font-mono text-xs">code, description, unit, sql_account_code, type</span> (type = Material or Manufactured).
+              Existing item codes are updated; new ones are added.
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <button onClick={downloadTemplate} className="border px-4 py-2 rounded-lg hover:bg-gray-50 text-sm">Download template</button>
+              <input ref={bulkRef} type="file" accept=".csv,text/csv" disabled={bulkBusy} onChange={handleBulkUpload}
+                className="block text-sm text-gray-700 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 file:font-medium hover:file:bg-blue-100" />
+              {bulkBusy && <span className="text-blue-600 text-sm">Importing…</span>}
+            </div>
+            {bulkMsg && <p className="text-sm mt-3 bg-gray-50 border rounded p-2">{bulkMsg}</p>}
+          </div>
+        )}
 
         {showForm && isHO && (
           <form onSubmit={handleSave} className="bg-white rounded-xl shadow-sm border p-6 mb-6 space-y-4">
