@@ -81,6 +81,15 @@ export default function ProductionPage() {
   const clean = (n: number) => Number(n.toPrecision(12))
   const BUFFER = 1.1
 
+  // Flag batches whose item can't be exploded into materials
+  function bomBadge(itemCode: string) {
+    const it = items.find(i => i.code === itemCode)
+    if (!it) return <span className="inline-block mt-0.5 bg-red-100 text-red-700 px-1.5 py-0.5 rounded text-[11px] font-medium">⚠ Not in Items Master</span>
+    if (it.type !== 'Manufactured') return null
+    const hasBom = boms.some(b => b.parent_item_id === it.id)
+    return hasBom ? null : <span className="inline-block mt-0.5 bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[11px] font-medium">⚠ No BOM set</span>
+  }
+
   async function setStatus(b: Batch, status: string) {
     setUpdating(b.id); setError('')
     const { error: updErr } = await supabase.from('production_batches').update({ status }).eq('id', b.id)
@@ -247,7 +256,7 @@ export default function ProductionPage() {
                               <tr className={`border-b last:border-0 hover:bg-amber-50/40 cursor-pointer ${expanded.has(key) ? 'bg-amber-50/60' : 'bg-amber-50/20'}`} onClick={() => toggleRow(key)}>
                                 <td className="pl-3 text-gray-400">{expanded.has(key) ? '▾' : '▸'}</td>
                                 <td className="px-3 py-2 whitespace-nowrap"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-200 text-amber-800">Combined ×{members.length}</span></td>
-                                <td className="px-3 py-2"><span className="font-medium">{item}</span><span className="block text-gray-500 text-xs">{members[0].description}</span></td>
+                                <td className="px-3 py-2"><span className="font-medium">{item}</span><span className="block text-gray-500 text-xs">{members[0].description}</span>{bomBadge(item)}</td>
                                 <td className="px-3 py-2 font-semibold whitespace-nowrap">{total}</td>
                                 <td className="px-3 py-2 whitespace-nowrap">{dateLabel}</td>
                                 <td className="px-3 py-2"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">Planned</span></td>
@@ -294,7 +303,7 @@ export default function ProductionPage() {
                             <tr className={`border-b last:border-0 hover:bg-gray-50 cursor-pointer ${expanded.has(b.id) ? 'bg-blue-50/40' : ''}`} onClick={() => toggleRow(b.id)}>
                               <td className="pl-3 text-gray-400">{expanded.has(b.id) ? '▾' : '▸'}</td>
                               <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}</td>
-                              <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span></td>
+                              <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span>{bomBadge(b.item_code)}</td>
                               <td className="px-3 py-2 font-semibold whitespace-nowrap">{b.total_quantity}</td>
                               <td className="px-3 py-2 whitespace-nowrap">{b.delivery_date || '—'}</td>
                               <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
