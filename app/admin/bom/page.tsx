@@ -35,6 +35,13 @@ export default function BomPage() {
     if (parentId) loadComponents(); else setComponents([])
   }, [parentId])
 
+  // Pre-select a manufactured item when arriving from "Create BOM →" (?item=CODE)
+  useEffect(() => {
+    if (items.length === 0) return
+    const code = new URLSearchParams(window.location.search).get('item')
+    if (code) { const it = items.find(i => i.code === code); if (it) setParentId(it.id) }
+  }, [items])
+
   async function loadItems() {
     setItems(await fetchAll<Item>('items', 'id, code, description, unit, type', 'code'))
   }
