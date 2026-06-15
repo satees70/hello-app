@@ -5,8 +5,8 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { supabase } from '@/lib/supabase'
 
-interface Item { id: string; code: string; description: string; unit: string; sql_account_code: string; type: string }
-const EMPTY = { code: '', description: '', unit: '', sql_account_code: '', type: 'Material' }
+interface Item { id: string; code: string; description: string; unit: string; type: string }
+const EMPTY = { code: '', description: '', unit: '', type: 'Material' }
 
 export default function ItemsPage() {
   const { profile, loading } = useProfile()
@@ -31,7 +31,7 @@ export default function ItemsPage() {
   }
 
   function openCreate() { setEditing(null); setForm(EMPTY); setError(''); setShowForm(true) }
-  function openEdit(item: Item) { setEditing(item); setForm({ code: item.code, description: item.description, unit: item.unit, sql_account_code: item.sql_account_code, type: item.type }); setError(''); setShowForm(true) }
+  function openEdit(item: Item) { setEditing(item); setForm({ code: item.code, description: item.description, unit: item.unit, type: item.type }); setError(''); setShowForm(true) }
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
@@ -53,7 +53,7 @@ export default function ItemsPage() {
   }
 
   function downloadTemplate() {
-    const csv = 'code,description,unit,sql_account_code,type\nABC123,EXAMPLE ITEM 1KG,KG,5000,Material\nXYZ789,EXAMPLE MANUFACTURED ITEM,PACK,5000,Manufactured\n'
+    const csv = 'code,description,unit,type\nABC123,EXAMPLE ITEM 1KG,KG,Material\nXYZ789,EXAMPLE MANUFACTURED ITEM,PACK,Manufactured\n'
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
     const a = document.createElement('a'); a.href = url; a.download = 'items-template.csv'; a.click(); URL.revokeObjectURL(url)
   }
@@ -74,7 +74,6 @@ export default function ItemsPage() {
             code: pick(r, 'code', 'item code', 'item_code'),
             description: pick(r, 'description', 'desc'),
             unit: pick(r, 'unit', 'uom'),
-            sql_account_code: pick(r, 'sql_account_code', 'sql account code', 'account code'),
             type: /man/i.test(pick(r, 'type')) ? 'Manufactured' : 'Material',
           }))
           .filter(r => r.code)
@@ -122,7 +121,7 @@ export default function ItemsPage() {
           <div className="bg-white rounded-xl shadow-sm border p-5 mb-6">
             <h2 className="font-semibold mb-1">Bulk upload from CSV</h2>
             <p className="text-gray-500 text-sm mb-3">
-              Add or update many items at once. Columns: <span className="font-mono text-xs">code, description, unit, sql_account_code, type</span> (type = Material or Manufactured).
+              Add or update many items at once. Columns: <span className="font-mono text-xs">code, description, unit, type</span> (type = Material or Manufactured).
               Existing item codes are updated; new ones are added.
             </p>
             <div className="flex flex-wrap items-center gap-3">
@@ -155,11 +154,6 @@ export default function ItemsPage() {
                   className="w-full border rounded-lg px-3 py-2" />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">SQL Account Code</label>
-                <input value={form.sql_account_code} onChange={e => setForm({ ...form, sql_account_code: e.target.value })}
-                  className="w-full border rounded-lg px-3 py-2" />
-              </div>
-              <div>
                 <label className="block text-sm font-medium mb-1">Type</label>
                 <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}
                   className="w-full border rounded-lg px-3 py-2">
@@ -189,21 +183,20 @@ export default function ItemsPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>
-                {['Code', 'Description', 'Unit', 'SQL Account Code', 'Type', ...(isHO ? ['Actions'] : [])].map(h => (
+                {['Code', 'Description', 'Unit', 'Type', ...(isHO ? ['Actions'] : [])].map(h => (
                   <th key={h} className="text-left px-4 py-3 font-medium text-gray-600">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={6} className="text-center py-8 text-gray-400">No items found</td></tr>
+                <tr><td colSpan={5} className="text-center py-8 text-gray-400">No items found</td></tr>
               )}
               {filtered.map(item => (
                 <tr key={item.id} className="border-b last:border-0 hover:bg-gray-50">
                   <td className="px-4 py-3 font-mono font-medium">{item.code}</td>
                   <td className="px-4 py-3">{item.description}</td>
                   <td className="px-4 py-3 text-gray-600">{item.unit || '—'}</td>
-                  <td className="px-4 py-3 text-gray-600">{item.sql_account_code || '—'}</td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${item.type === 'Material' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
                       {item.type}
