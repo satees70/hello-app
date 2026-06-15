@@ -381,7 +381,8 @@ export default function ProductionPage() {
         )}
 
         {selected && exploded && (
-          <div className="bg-white rounded-xl shadow-sm border mt-8 p-6">
+          <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setSelected(null)}>
+          <div className="bg-white rounded-xl shadow-xl border w-full max-w-4xl my-8 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-1">
               <h2 className="font-semibold text-lg">Material requirements — <span className="font-mono">{selected.label}</span></h2>
               <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600 text-sm">Close</button>
@@ -442,6 +443,7 @@ export default function ProductionPage() {
                 <p className="text-gray-400 text-xs mt-2">Tip: save your stock figures first, then raise the request — it captures the shortfall at that moment and adds a safety margin (rounded up) so the warehouse picks enough.</p>
               </>
             )}
+          </div>
           </div>
         )}
       </div>
