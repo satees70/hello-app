@@ -134,7 +134,7 @@ export default function MaterialRequestsPage() {
     const endY = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY) + 16
     doc.text('Picked by: ____________________   Date: __________', 14, endY)
     doc.text('Received by: ___________________   Date: __________', 14, endY + 10)
-    doc.save(`PickRun_${runNo}_${factory}.pdf`)
+    doc.save(`PickRun_${runNo.replace(/\//g, '-')}_${factory}.pdf`)
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
