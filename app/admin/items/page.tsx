@@ -19,6 +19,7 @@ export default function ItemsPage() {
   const [search, setSearch] = useState('')
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkMsg, setBulkMsg] = useState('')
+  const [existingMode, setExistingMode] = useState<'update' | 'skip'>('update')
   const bulkRef = useRef<HTMLInputElement>(null)
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -88,16 +89,18 @@ export default function ItemsPage() {
           ? ` ⚠ ${dups.size} duplicate code(s) in your file were merged (kept the last row each): ${[...dups].slice(0, 8).join(', ')}${dups.size > 8 ? '…' : ''}.`
           : ''
 
-        let ok = 0; let firstErr = ''
+        const skip = existingMode === 'skip'
+        let processed = 0; let firstErr = ''
         for (let i = 0; i < deduped.length; i += 500) {
           const chunk = deduped.slice(i, i + 500)
-          const { error: upErr } = await supabase.from('items').upsert(chunk, { onConflict: 'code' })
-          if (upErr) { if (!firstErr) firstErr = upErr.message } else ok += chunk.length
+          const { data: ret, error: upErr } = await supabase.from('items').upsert(chunk, { onConflict: 'code', ignoreDuplicates: skip }).select('code')
+          if (upErr) { if (!firstErr) firstErr = upErr.message } else processed += (ret?.length || 0)
         }
         setBulkBusy(false)
         if (bulkRef.current) bulkRef.current.value = ''
-        if (firstErr) setBulkMsg(`Imported ${ok} of ${deduped.length}. Some failed: ${firstErr}${dupNote}`)
-        else setBulkMsg(`Imported ${ok} item(s) (existing codes were updated).${dupNote}`)
+        if (firstErr) { setBulkMsg(`Error during import: ${firstErr}${dupNote}`); loadItems(); return }
+        if (skip) setBulkMsg(`Added ${processed} new item(s); skipped ${deduped.length - processed} that already existed.${dupNote}`)
+        else setBulkMsg(`Imported ${processed} item(s) — new added, existing updated.${dupNote}`)
         loadItems()
       },
       error: (err) => { setBulkMsg(`Could not read file: ${err.message}`); setBulkBusy(false) },
@@ -133,6 +136,14 @@ export default function ItemsPage() {
               Add or update many items at once. Columns: <span className="font-mono text-xs">code, description, unit, type</span> (type = Material or Manufactured).
               Existing item codes are updated; new ones are added.
             </p>
+            <div className="flex items-center gap-2 mb-3 text-sm">
+              <span className="text-gray-600">If an item code already exists:</span>
+              <select value={existingMode} onChange={e => setExistingMode(e.target.value as 'update' | 'skip')} disabled={bulkBusy}
+                className="border rounded-lg px-2 py-1 bg-white">
+                <option value="update">Update it (fix the data)</option>
+                <option value="skip">Skip it (keep existing)</option>
+              </select>
+            </div>
             <div className="flex flex-wrap items-center gap-3">
               <button onClick={downloadTemplate} className="border px-4 py-2 rounded-lg hover:bg-gray-50 text-sm">Download template</button>
               <input ref={bulkRef} type="file" accept=".csv,text/csv" disabled={bulkBusy} onChange={handleBulkUpload}
