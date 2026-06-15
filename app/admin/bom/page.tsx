@@ -17,8 +17,9 @@ function ItemCombo({ items, value, onChange, placeholder }: {
   const [open, setOpen] = useState(false)
   const selected = items.find(i => i.id === value)
   const text = open ? q : (selected ? `${selected.code} — ${selected.description}` : '')
-  const matches = (open && q.trim()
-    ? items.filter(i => `${i.code} ${i.description}`.toLowerCase().includes(q.toLowerCase()))
+  const terms = q.toLowerCase().split(/\s+/).filter(Boolean)
+  const matches = (open && terms.length
+    ? items.filter(i => { const hay = `${i.code} ${i.description}`.toLowerCase(); return terms.every(t => hay.includes(t)) })
     : items).slice(0, 50)
   return (
     <div className="relative">
