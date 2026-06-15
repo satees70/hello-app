@@ -51,7 +51,7 @@ export default function MaterialRequestsPage() {
   async function load() {
     const { data } = await supabase
       .from('material_requests')
-      .select('*, production_batches(batch_no, item_code), material_request_items(*)')
+      .select('*, production_batches!batch_id(batch_no, item_code), material_request_items(*)')
       .order('created_at', { ascending: false })
     setRequests((data as MaterialRequest[]) || [])
   }
