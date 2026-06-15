@@ -79,16 +79,25 @@ export default function ItemsPage() {
           .filter(r => r.code)
         if (rows.length === 0) { setBulkMsg('No rows with an item code were found. Check the column headers.'); setBulkBusy(false); if (bulkRef.current) bulkRef.current.value = ''; return }
 
+        // Detect & merge duplicate codes within the file (keep the last entry)
+        const seen = new Map<string, typeof rows[number]>()
+        const dups = new Set<string>()
+        rows.forEach(r => { if (seen.has(r.code)) dups.add(r.code); seen.set(r.code, r) })
+        const deduped = [...seen.values()]
+        const dupNote = dups.size > 0
+          ? ` ⚠ ${dups.size} duplicate code(s) in your file were merged (kept the last row each): ${[...dups].slice(0, 8).join(', ')}${dups.size > 8 ? '…' : ''}.`
+          : ''
+
         let ok = 0; let firstErr = ''
-        for (let i = 0; i < rows.length; i += 500) {
-          const chunk = rows.slice(i, i + 500)
+        for (let i = 0; i < deduped.length; i += 500) {
+          const chunk = deduped.slice(i, i + 500)
           const { error: upErr } = await supabase.from('items').upsert(chunk, { onConflict: 'code' })
           if (upErr) { if (!firstErr) firstErr = upErr.message } else ok += chunk.length
         }
         setBulkBusy(false)
         if (bulkRef.current) bulkRef.current.value = ''
-        if (firstErr) setBulkMsg(`Imported ${ok} of ${rows.length}. Some failed: ${firstErr}`)
-        else setBulkMsg(`Imported ${ok} item(s) successfully (existing codes were updated).`)
+        if (firstErr) setBulkMsg(`Imported ${ok} of ${deduped.length}. Some failed: ${firstErr}${dupNote}`)
+        else setBulkMsg(`Imported ${ok} item(s) (existing codes were updated).${dupNote}`)
         loadItems()
       },
       error: (err) => { setBulkMsg(`Could not read file: ${err.message}`); setBulkBusy(false) },
