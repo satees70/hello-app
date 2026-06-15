@@ -55,6 +55,7 @@ export default function ProductionPage() {
   const [raising, setRaising] = useState(false)
   const [combineOn, setCombineOn] = useState(true)
   const [separated, setSeparated] = useState<Set<string>>(new Set())
+  const [sortBy, setSortBy] = useState<'due_asc' | 'due_desc' | 'batch'>('due_asc')
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
@@ -162,6 +163,13 @@ export default function ProductionPage() {
   const totalShortfall = exploded ? exploded.rows.reduce((s, r) => s + r.shortfall, 0) : 0
   const hasRequest = selected ? selected.batchIds.some(id => batches.find(b => b.id === id)?.material_request_id) : false
 
+  // Sort comparator for batches within a factory
+  const cmp = (a: Batch, b: Batch) => {
+    if (sortBy === 'batch') return a.batch_no.localeCompare(b.batch_no)
+    const d = dateKey(a.delivery_date) - dateKey(b.delivery_date)
+    return sortBy === 'due_desc' ? -d : d
+  }
+
   // Factories present in the current view (for the combined, factory-grouped layout)
   const factoriesInView = [...new Set(shown.map(b => b.factory_code))].sort()
   const singleTarget = (b: Batch): MatTarget => ({ label: b.batch_no, item_code: b.item_code, factory_code: b.factory_code, total: b.total_quantity, batchIds: [b.id] })
@@ -205,6 +213,12 @@ export default function ProductionPage() {
               </select>
             </>
           )}
+          <span className="text-gray-500 ml-3">Sort:</span>
+          <select value={sortBy} onChange={e => setSortBy(e.target.value as 'due_asc' | 'due_desc' | 'batch')} className="border rounded-lg px-2 py-1 bg-white">
+            <option value="due_asc">Due date (earliest)</option>
+            <option value="due_desc">Due date (latest)</option>
+            <option value="batch">Batch number</option>
+          </select>
           {(dateFrom || dateTo || factoryFilter || filter !== 'All') && (
             <button onClick={() => { setDateFrom(''); setDateTo(''); setFactoryFilter(''); setFilter('All') }} className="text-blue-600 hover:underline ml-1">Clear filters</button>
           )}
@@ -227,7 +241,7 @@ export default function ProductionPage() {
         ) : (
           <div className="space-y-6">
             {factoriesInView.map(fc => {
-              const fb = shown.filter(b => b.factory_code === fc)
+              const fb = [...shown.filter(b => b.factory_code === fc)].sort(cmp)
               const { combos, singles } = buildUnits(fb)
               return (
                 <div key={fc}>
