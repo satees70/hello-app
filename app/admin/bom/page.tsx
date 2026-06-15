@@ -1,6 +1,7 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Papa from 'papaparse'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { supabase } from '@/lib/supabase'
@@ -20,6 +21,9 @@ export default function BomPage() {
   const [success, setSuccess] = useState('')
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkMsg, setBulkMsg] = useState('')
+  const bulkRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!profile) return
@@ -45,6 +49,71 @@ export default function BomPage() {
   const itemById = (id: string) => items.find(i => i.id === id)
   const manufactured = items.filter(i => i.type === 'Manufactured')
   const parent = itemById(parentId)
+
+  function downloadBomTemplate() {
+    const csv = 'parent_code,component_code,quantity,allowance\nA0501-40PKT,BK1055-H,20,yes\nA0501-40PKT,P95337,0.015,yes\nA0501-40PKT,PA0501,40,no\n'
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+    const a = document.createElement('a'); a.href = url; a.download = 'bom-template.csv'; a.click(); URL.revokeObjectURL(url)
+  }
+
+  function handleBulkUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setBulkBusy(true); setBulkMsg(''); setError('')
+    const byCode = new Map(items.map(i => [i.code, i]))
+    Papa.parse<Record<string, string>>(file, {
+      header: true, skipEmptyLines: true,
+      complete: async (res) => {
+        const pick = (r: Record<string, string>, ...keys: string[]) => {
+          for (const k of Object.keys(r)) { if (keys.includes(k.trim().toLowerCase())) return (r[k] || '').trim() }
+          return ''
+        }
+        const valid: { parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean }[] = []
+        const unknown = new Set<string>()
+        let selfRef = 0, badQty = 0
+        res.data.forEach(r => {
+          const pc = pick(r, 'parent_code', 'parent', 'manufactured_code', 'manufactured item code')
+          const cc = pick(r, 'component_code', 'component', 'material_code')
+          if (!pc || !cc) return
+          const p = byCode.get(pc); const c = byCode.get(cc)
+          if (!p) { unknown.add(pc); return }
+          if (!c) { unknown.add(cc); return }
+          if (p.id === c.id) { selfRef++; return }
+          const qty = Number(pick(r, 'quantity', 'qty', 'qty per unit'))
+          if (!qty || qty <= 0) { badQty++; return }
+          const a = pick(r, 'allowance', 'apply_allowance').toLowerCase()
+          const apply_allowance = !(a === 'no' || a === 'n' || a === 'false' || a === '0' || a === 'none' || a === 'off')
+          valid.push({ parent_item_id: p.id, component_item_id: c.id, quantity: qty, apply_allowance })
+        })
+        // de-dup by parent+component (keep last)
+        const seen = new Map<string, typeof valid[number]>()
+        const dups = new Set<string>()
+        valid.forEach(v => { const k = `${v.parent_item_id}|${v.component_item_id}`; if (seen.has(k)) dups.add(k); seen.set(k, v) })
+        const rows = [...seen.values()]
+        if (rows.length === 0) {
+          setBulkMsg(`No valid recipe rows found.${unknown.size ? ` Unknown item codes: ${[...unknown].slice(0, 8).join(', ')}.` : ''}`)
+          setBulkBusy(false); if (bulkRef.current) bulkRef.current.value = ''; return
+        }
+        let ok = 0; let firstErr = ''
+        for (let i = 0; i < rows.length; i += 500) {
+          const chunk = rows.slice(i, i + 500)
+          const { error: upErr } = await supabase.from('bom_components').upsert(chunk, { onConflict: 'parent_item_id,component_item_id' })
+          if (upErr) { if (!firstErr) firstErr = upErr.message } else ok += chunk.length
+        }
+        setBulkBusy(false); if (bulkRef.current) bulkRef.current.value = ''
+        const notes = [
+          unknown.size ? `${unknown.size} unknown item code(s) skipped: ${[...unknown].slice(0, 8).join(', ')}${unknown.size > 8 ? '…' : ''}` : '',
+          selfRef ? `${selfRef} row(s) skipped (item listed as its own component)` : '',
+          badQty ? `${badQty} row(s) skipped (missing/invalid quantity)` : '',
+          dups.size ? `${dups.size} duplicate recipe line(s) merged` : '',
+        ].filter(Boolean).join('. ')
+        if (firstErr) setBulkMsg(`Error during import: ${firstErr}`)
+        else setBulkMsg(`Imported ${ok} recipe line(s).${notes ? ' ⚠ ' + notes + '.' : ''}`)
+        if (parentId) loadComponents()
+      },
+      error: (err) => { setBulkMsg(`Could not read file: ${err.message}`); setBulkBusy(false) },
+    })
+  }
 
   // Items that can still be added (not the parent, not already a component)
   const usedIds = new Set(components.map(c => c.component_item_id))
@@ -105,6 +174,21 @@ export default function BomPage() {
       <div className="max-w-5xl mx-auto px-6 py-8">
         <h1 className="text-2xl font-bold mb-1">Bill of Materials</h1>
         <p className="text-gray-500 text-sm mb-6">Define the recipe for each manufactured item — the components and quantity needed to make one unit.</p>
+
+        <div className="bg-white rounded-xl shadow-sm border p-5 mb-6">
+          <h2 className="font-semibold mb-1">Bulk upload recipes from CSV</h2>
+          <p className="text-gray-500 text-sm mb-3">
+            Set up many recipes at once. One row per component. Columns: <span className="font-mono text-xs">parent_code, component_code, quantity, allowance</span> (allowance = yes/no for the 10% buffer).
+            Item codes must already exist in Items Master. Re-uploading a recipe line updates its quantity/allowance.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <button onClick={downloadBomTemplate} className="border px-4 py-2 rounded-lg hover:bg-gray-50 text-sm">Download template</button>
+            <input ref={bulkRef} type="file" accept=".csv,text/csv" disabled={bulkBusy} onChange={handleBulkUpload}
+              className="block text-sm text-gray-700 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 file:font-medium hover:file:bg-blue-100" />
+            {bulkBusy && <span className="text-blue-600 text-sm">Importing…</span>}
+          </div>
+          {bulkMsg && <p className="text-sm mt-3 bg-gray-50 border rounded p-2">{bulkMsg}</p>}
+        </div>
 
         <div className="bg-white rounded-xl shadow-sm border p-6 mb-6">
           <label className="block text-sm font-medium mb-1">Manufactured item</label>
