@@ -18,6 +18,8 @@ export default function ItemsPage() {
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [groupFilter, setGroupFilter] = useState('')
+  const [needBom, setNeedBom] = useState(false)
+  const [bomParents, setBomParents] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkMsg, setBulkMsg] = useState('')
   const [existingMode, setExistingMode] = useState<'update' | 'skip'>('update')
@@ -25,10 +27,15 @@ export default function ItemsPage() {
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
-  useEffect(() => { if (profile) loadItems() }, [profile])
+  useEffect(() => { if (profile) { loadItems(); loadBomParents() } }, [profile])
 
   async function loadItems() {
     setItems(await fetchAll<Item>('items', '*', 'code'))
+  }
+
+  async function loadBomParents() {
+    const rows = await fetchAll<{ parent_item_id: string }>('bom_components', 'parent_item_id')
+    setBomParents(new Set(rows.map(r => r.parent_item_id)))
   }
 
   function openCreate() { setEditing(null); setForm(EMPTY); setError(''); setShowForm(true) }
@@ -108,10 +115,13 @@ export default function ItemsPage() {
     })
   }
 
+  const missingBom = (i: Item) => i.type === 'Manufactured' && !bomParents.has(i.id)
+  const missingBomCount = items.filter(missingBom).length
   const filtered = items.filter(i =>
     (i.code.toLowerCase().includes(search.toLowerCase()) ||
       i.description.toLowerCase().includes(search.toLowerCase())) &&
-    (!groupFilter || i.stock_group === groupFilter)
+    (!groupFilter || i.stock_group === groupFilter) &&
+    (!needBom || missingBom(i))
   )
 
   if (loading) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
@@ -208,6 +218,10 @@ export default function ItemsPage() {
             <option value="">All stock groups</option>
             {[...new Set(items.map(i => i.stock_group).filter(Boolean))].sort().map(g => <option key={g} value={g}>{g}</option>)}
           </select>
+          <label className="flex items-center gap-2 text-sm cursor-pointer ml-1">
+            <input type="checkbox" checked={needBom} onChange={e => setNeedBom(e.target.checked)} className="h-4 w-4" />
+            <span className="text-gray-700">Manufactured without BOM ({missingBomCount})</span>
+          </label>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
