@@ -9,6 +9,39 @@ import { supabase, fetchAll } from '@/lib/supabase'
 interface Item { id: string; code: string; description: string; unit: string; type: string }
 interface BomComponent { id: string; parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean }
 
+// Type-to-search item picker (replaces a huge native dropdown)
+function ItemCombo({ items, value, onChange, placeholder }: {
+  items: Item[]; value: string; onChange: (id: string) => void; placeholder?: string
+}) {
+  const [q, setQ] = useState('')
+  const [open, setOpen] = useState(false)
+  const selected = items.find(i => i.id === value)
+  const text = open ? q : (selected ? `${selected.code} — ${selected.description}` : '')
+  const matches = (open && q.trim()
+    ? items.filter(i => `${i.code} ${i.description}`.toLowerCase().includes(q.toLowerCase()))
+    : items).slice(0, 50)
+  return (
+    <div className="relative">
+      <input value={text} placeholder={placeholder}
+        onChange={e => { setQ(e.target.value); setOpen(true); if (value) onChange('') }}
+        onFocus={() => { setOpen(true); setQ('') }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        className="w-full border rounded-lg px-3 py-2 text-sm bg-white" />
+      {open && (
+        <ul className="absolute z-20 mt-1 w-full max-h-64 overflow-auto bg-white border rounded-lg shadow-lg text-sm">
+          {matches.length === 0 && <li className="px-3 py-2 text-gray-400">No matches</li>}
+          {matches.map(i => (
+            <li key={i.id} onMouseDown={() => { onChange(i.id); setOpen(false) }}
+              className="px-3 py-2 hover:bg-blue-50 cursor-pointer">
+              <span className="font-mono">{i.code}</span> <span className="text-gray-500">— {i.description}{i.type === 'Manufactured' ? ' (Manufactured)' : ''}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 export default function BomPage() {
   const { profile, loading } = useProfile()
   const router = useRouter()
@@ -198,11 +231,10 @@ export default function BomPage() {
 
         <div className="bg-white rounded-xl shadow-sm border p-6 mb-6">
           <label className="block text-sm font-medium mb-1">Manufactured item</label>
-          <select value={parentId} onChange={e => { setParentId(e.target.value); setError(''); setSuccess('') }}
-            className="w-full sm:w-[28rem] border rounded-lg px-3 py-2 bg-white">
-            <option value="">-- Select a manufactured item --</option>
-            {manufactured.map(i => <option key={i.id} value={i.id}>{i.code} — {i.description}</option>)}
-          </select>
+          <div className="w-full sm:w-[28rem]">
+            <ItemCombo items={manufactured} value={parentId} placeholder="Type a manufactured item code or name…"
+              onChange={id => { setParentId(id); setError(''); setSuccess('') }} />
+          </div>
           {manufactured.length === 0 && (
             <p className="text-gray-400 text-sm mt-2">No items are flagged &quot;Manufactured&quot; yet. Set an item&apos;s type to Manufactured in Items Master first.</p>
           )}
@@ -223,11 +255,7 @@ export default function BomPage() {
               <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
                 <div className="flex-1">
                   <label className="block text-xs font-medium mb-1">Component item</label>
-                  <select value={addComponentId} onChange={e => setAddComponentId(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm bg-white">
-                    <option value="">-- Choose item --</option>
-                    {available.map(i => <option key={i.id} value={i.id}>{i.code} — {i.description}{i.type === 'Manufactured' ? ' (Manufactured)' : ''}</option>)}
-                  </select>
+                  <ItemCombo items={available} value={addComponentId} onChange={setAddComponentId} placeholder="Type a code or name…" />
                 </div>
                 <div className="w-32">
                   <label className="block text-xs font-medium mb-1">Qty per unit</label>
