@@ -25,8 +25,11 @@ interface MaterialRequest {
   material_request_items: MRItem[]
 }
 
-const FILTERS = ['Open', 'Partially Received', 'Fulfilled', 'All'] as const
+const FILTERS = ['Open', 'Partially Received', 'Fulfilled', 'All', 'Combined picking'] as const
 type Filter = typeof FILTERS[number]
+
+// Statuses that still need picking — pooled into the combined list
+const ACTIVE = ['Open', 'Partially Received']
 
 const STATUS_STYLE: Record<string, string> = {
   Open: 'bg-amber-100 text-amber-700',
@@ -40,6 +43,7 @@ export default function MaterialRequestsPage() {
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [filter, setFilter] = useState<Filter>('Open')
   const [edits, setEdits] = useState<Record<string, number>>({}) // item id -> received qty being typed
+  const [combinedEdits, setCombinedEdits] = useState<Record<string, number>>({}) // factory|item_code -> total received being typed
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -71,13 +75,51 @@ export default function MaterialRequestsPage() {
     load()
   }
 
+  // Combined receiving: warehouse enters ONE total received for a material; we split it
+  // back across the underlying request lines (oldest request first) and recompute each.
+  async function receiveCombined(key: string, total: number, items: { id: string; requested_qty: number; received_qty: number }[]) {
+    setBusy(key); setError(''); setSuccess('')
+    let remaining = total
+    for (const it of items) {
+      const alloc = Math.max(0, Math.min(remaining, it.requested_qty))
+      remaining -= alloc
+      if (alloc !== it.received_qty) {
+        const { error: rpcErr } = await supabase.rpc('receive_material_item', { p_item_id: it.id, p_received: alloc })
+        if (rpcErr) { setError(rpcErr.message); setBusy(''); return }
+      }
+    }
+    setSuccess('Combined receipt saved — split across the underlying requests.')
+    setBusy('')
+    setCombinedEdits(prev => { const n = { ...prev }; delete n[key]; return n })
+    load()
+  }
+
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
   if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
   if (!profile) return null
 
-  const shown = filter === 'All' ? requests : requests.filter(r => r.status === filter)
+  const shown = filter === 'All' || filter === 'Combined picking' ? requests : requests.filter(r => r.status === filter)
   const counts: Record<string, number> = { Open: 0, 'Partially Received': 0, Fulfilled: 0 }
   requests.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1 })
+
+  // Pool all active requests by factory -> material, summing quantities. The warehouse
+  // picks (and receives) against these totals; underlying request lines stay intact.
+  interface CombMat { code: string; description: string; unit: string; required: number; requested: number; received: number; items: { id: string; requested_qty: number; received_qty: number }[] }
+  const combined: Record<string, Record<string, CombMat>> = {}
+  requests.filter(r => ACTIVE.includes(r.status)).forEach(r => {
+    r.material_request_items?.forEach(it => {
+      const fac = r.factory_code
+      const mats = (combined[fac] = combined[fac] || {})
+      const g = (mats[it.item_code] = mats[it.item_code] || { code: it.item_code, description: it.description, unit: it.unit, required: 0, requested: 0, received: 0, items: [] })
+      g.required += Number(it.required_qty)
+      g.requested += Number(it.requested_qty)
+      g.received += Number(it.received_qty)
+      g.items.push({ id: it.id, requested_qty: Number(it.requested_qty), received_qty: Number(it.received_qty) })
+    })
+  })
+  // Oldest request first for allocation: requests already arrive newest-first, so reverse the lines
+  Object.values(combined).forEach(mats => Object.values(mats).forEach(g => g.items.reverse()))
+  const combinedFactories = Object.keys(combined).sort()
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -102,7 +144,66 @@ export default function MaterialRequestsPage() {
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
         {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}
 
-        {shown.length === 0 ? (
+        {filter === 'Combined picking' ? (
+          combinedFactories.length === 0 ? (
+            <div className="bg-white rounded-xl shadow-sm border p-10 text-center text-gray-400">
+              Nothing to pick — no open requests.
+              <br />Raise material requests from batches on the Production board.
+            </div>
+          ) : (
+            <div className="space-y-5">
+              <p className="text-gray-600 text-sm bg-blue-50 border border-blue-100 rounded-lg p-3">
+                The same material from every open request, added up per factory — pick these totals in one trip.
+                Type the <strong>total received</strong> for a material and it is split back across the original requests automatically.
+              </p>
+              {combinedFactories.map(fac => {
+                const mats = Object.values(combined[fac]).sort((a, b) => a.code.localeCompare(b.code))
+                return (
+                  <div key={fac} className="bg-white rounded-xl shadow-sm border p-5">
+                    <div className="flex items-center gap-3 mb-3">
+                      <span className="font-semibold">{isHO ? factoryName(fac) : fac}</span>
+                      <span className="text-sm text-gray-400">· {mats.length} material(s) to pick</span>
+                    </div>
+                    <div className="overflow-x-auto border rounded-lg">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 border-b">
+                          <tr>{['Material', 'Description', 'Unit', 'To pick', 'Received', 'Remaining', ''].map(h => (
+                            <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+                        </thead>
+                        <tbody>
+                          {mats.map(g => {
+                            const key = `${fac}|${g.code}`
+                            const remaining = Math.max(0, g.requested - g.received)
+                            const done = g.received >= g.requested
+                            return (
+                              <tr key={key} className={`border-b last:border-0 ${done ? 'bg-green-50/40' : ''}`}>
+                                <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{g.code}</td>
+                                <td className="px-3 py-2 text-gray-600">{g.description}</td>
+                                <td className="px-3 py-2 text-gray-500">{g.unit}</td>
+                                <td className="px-3 py-2 text-right font-semibold text-blue-700">{g.requested}</td>
+                                <td className="px-3 py-2">
+                                  <input type="number" step="any"
+                                    value={combinedEdits[key] ?? g.received}
+                                    onChange={e => setCombinedEdits(prev => ({ ...prev, [key]: e.target.value === '' ? 0 : Number(e.target.value) }))}
+                                    className="w-24 border rounded px-2 py-1 text-right" />
+                                </td>
+                                <td className={`px-3 py-2 text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{remaining}</td>
+                                <td className="px-3 py-2 whitespace-nowrap">
+                                  <button onClick={() => receiveCombined(key, combinedEdits[key] ?? g.received, g.items)} disabled={busy === key}
+                                    className="text-blue-600 hover:underline text-xs disabled:opacity-50">Save</button>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )
+        ) : shown.length === 0 ? (
           <div className="bg-white rounded-xl shadow-sm border p-10 text-center text-gray-400">
             No {filter !== 'All' ? filter.toLowerCase() : ''} material requests.
             <br />Raise one from a batch on the Production board.
