@@ -5,8 +5,8 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { supabase } from '@/lib/supabase'
 
-interface Item { id: string; code: string; description: string; unit: string; type: string }
-const EMPTY = { code: '', description: '', unit: '', type: 'Material' }
+interface Item { id: string; code: string; description: string; unit: string; type: string; stock_group: string }
+const EMPTY = { code: '', description: '', unit: '', type: 'Material', stock_group: '' }
 
 export default function ItemsPage() {
   const { profile, loading } = useProfile()
@@ -17,6 +17,7 @@ export default function ItemsPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
+  const [groupFilter, setGroupFilter] = useState('')
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkMsg, setBulkMsg] = useState('')
   const [existingMode, setExistingMode] = useState<'update' | 'skip'>('update')
@@ -32,7 +33,7 @@ export default function ItemsPage() {
   }
 
   function openCreate() { setEditing(null); setForm(EMPTY); setError(''); setShowForm(true) }
-  function openEdit(item: Item) { setEditing(item); setForm({ code: item.code, description: item.description, unit: item.unit, type: item.type }); setError(''); setShowForm(true) }
+  function openEdit(item: Item) { setEditing(item); setForm({ code: item.code, description: item.description, unit: item.unit, type: item.type, stock_group: item.stock_group || '' }); setError(''); setShowForm(true) }
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
@@ -54,7 +55,7 @@ export default function ItemsPage() {
   }
 
   function downloadTemplate() {
-    const csv = 'code,description,unit,type\nABC123,EXAMPLE ITEM 1KG,KG,Material\nXYZ789,EXAMPLE MANUFACTURED ITEM,PACK,Manufactured\n'
+    const csv = 'code,description,unit,type,stock_group\nABC123,EXAMPLE ITEM 1KG,KG,Material,Spices\nXYZ789,EXAMPLE MANUFACTURED ITEM,PACK,Manufactured,Salt\n'
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
     const a = document.createElement('a'); a.href = url; a.download = 'items-template.csv'; a.click(); URL.revokeObjectURL(url)
   }
@@ -76,6 +77,7 @@ export default function ItemsPage() {
             description: pick(r, 'description', 'desc'),
             unit: pick(r, 'unit', 'uom'),
             type: /man/i.test(pick(r, 'type')) ? 'Manufactured' : 'Material',
+            stock_group: pick(r, 'stock_group', 'stock group', 'group'),
           }))
           .filter(r => r.code)
         if (rows.length === 0) { setBulkMsg('No rows with an item code were found. Check the column headers.'); setBulkBusy(false); if (bulkRef.current) bulkRef.current.value = ''; return }
@@ -108,8 +110,9 @@ export default function ItemsPage() {
   }
 
   const filtered = items.filter(i =>
-    i.code.toLowerCase().includes(search.toLowerCase()) ||
-    i.description.toLowerCase().includes(search.toLowerCase())
+    (i.code.toLowerCase().includes(search.toLowerCase()) ||
+      i.description.toLowerCase().includes(search.toLowerCase())) &&
+    (!groupFilter || i.stock_group === groupFilter)
   )
 
   if (loading) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
@@ -133,7 +136,7 @@ export default function ItemsPage() {
           <div className="bg-white rounded-xl shadow-sm border p-5 mb-6">
             <h2 className="font-semibold mb-1">Bulk upload from CSV</h2>
             <p className="text-gray-500 text-sm mb-3">
-              Add or update many items at once. Columns: <span className="font-mono text-xs">code, description, unit, type</span> (type = Material or Manufactured).
+              Add or update many items at once. Columns: <span className="font-mono text-xs">code, description, unit, type, stock_group</span> (type = Material or Manufactured).
               Existing item codes are updated; new ones are added.
             </p>
             <div className="flex items-center gap-2 mb-3 text-sm">
@@ -181,6 +184,11 @@ export default function ItemsPage() {
                   <option value="Manufactured">Manufactured</option>
                 </select>
               </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Stock Group</label>
+                <input value={form.stock_group} onChange={e => setForm({ ...form, stock_group: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2" placeholder="e.g. Spices, Salt, Packaging" />
+              </div>
             </div>
             {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded">{error}</p>}
             <div className="flex gap-3">
@@ -194,29 +202,34 @@ export default function ItemsPage() {
           </form>
         )}
 
-        <div className="mb-4">
+        <div className="mb-4 flex flex-wrap gap-2 items-center">
           <input placeholder="Search by code or description..." value={search} onChange={e => setSearch(e.target.value)}
             className="w-full sm:w-80 border rounded-lg px-3 py-2 text-sm bg-white" />
+          <select value={groupFilter} onChange={e => setGroupFilter(e.target.value)} className="border rounded-lg px-3 py-2 text-sm bg-white">
+            <option value="">All stock groups</option>
+            {[...new Set(items.map(i => i.stock_group).filter(Boolean))].sort().map(g => <option key={g} value={g}>{g}</option>)}
+          </select>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>
-                {['Code', 'Description', 'Unit', 'Type', ...(isHO ? ['Actions'] : [])].map(h => (
+                {['Code', 'Description', 'Unit', 'Stock Group', 'Type', ...(isHO ? ['Actions'] : [])].map(h => (
                   <th key={h} className="text-left px-4 py-3 font-medium text-gray-600">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={5} className="text-center py-8 text-gray-400">No items found</td></tr>
+                <tr><td colSpan={6} className="text-center py-8 text-gray-400">No items found</td></tr>
               )}
               {filtered.map(item => (
                 <tr key={item.id} className="border-b last:border-0 hover:bg-gray-50">
                   <td className="px-4 py-3 font-mono font-medium">{item.code}</td>
                   <td className="px-4 py-3">{item.description}</td>
                   <td className="px-4 py-3 text-gray-600">{item.unit || '—'}</td>
+                  <td className="px-4 py-3 text-gray-600">{item.stock_group || '—'}</td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${item.type === 'Material' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
                       {item.type}
