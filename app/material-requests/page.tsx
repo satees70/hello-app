@@ -23,7 +23,7 @@ interface MaterialRequest {
   created_at: string
   released_at: string | null
   pick_run_no: string | null
-  production_batches: { batch_no: string; item_code: string } | null
+  production_batches: { batch_no: string; item_code: string; description: string; exp_date: string | null } | null
   material_request_items: MRItem[]
 }
 
@@ -58,7 +58,7 @@ export default function MaterialRequestsPage() {
   async function load() {
     const { data } = await supabase
       .from('material_requests')
-      .select('*, production_batches!batch_id(batch_no, item_code), material_request_items(*)')
+      .select('*, production_batches!batch_id(batch_no, item_code, description, exp_date), material_request_items(*)')
       .order('created_at', { ascending: false })
     setRequests((data as MaterialRequest[]) || [])
   }
@@ -142,6 +142,42 @@ export default function MaterialRequestsPage() {
     doc.save(`PickRun_${runNo.replace(/\//g, '-')}_${factory}_${audience}.pdf`)
   }
 
+  // Factory list PDF: one row per product so labels carry the product + expiry date (not combined)
+  async function downloadFactoryPdf(runNo: string, factory: string, released_at: string, reqs: MaterialRequest[]) {
+    const { default: jsPDF } = await import('jspdf')
+    const { default: autoTable } = await import('jspdf-autotable')
+    const doc = new jsPDF()
+    const body: string[][] = []
+    let n = 1
+    reqs.forEach(r => {
+      (r.material_request_items || []).filter(it => factoryItems.has(it.item_code)).forEach(it => {
+        body.push([String(n++), r.production_batches?.item_code || '', r.production_batches?.exp_date || '—',
+          it.item_code, it.description, it.unit, String(it.requested_qty), '', ''])
+      })
+    })
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold')
+    doc.text('SRRI EASWARI MILLS SDN BHD', 14, 16)
+    doc.setFontSize(11); doc.setFont('helvetica', 'normal')
+    doc.text('Material List — for Factory (labels)', 14, 23)
+    doc.setFontSize(10)
+    doc.text(`Pick run: ${runNo}`, 14, 32)
+    doc.text(`Factory: ${factoryName(factory)} (${factory})`, 14, 38)
+    doc.text(`Released: ${new Date(released_at).toLocaleString()}`, 14, 44)
+    doc.text(`Printed: ${new Date().toLocaleString()}`, 120, 44)
+    autoTable(doc, {
+      startY: 50,
+      head: [['#', 'Product', 'EXP date', 'Material', 'Description', 'Unit', 'Qty to make', 'Made', 'Remarks']],
+      body,
+      styles: { fontSize: 9, cellPadding: 2 },
+      headStyles: { fillColor: [126, 58, 242] },
+      columnStyles: { 6: { halign: 'right' } },
+    })
+    const endY = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY) + 16
+    doc.text('Prepared by: __________________   Date: __________', 14, endY)
+    doc.text('Received by: ___________________   Date: __________', 14, endY + 10)
+    doc.save(`PickRun_${runNo.replace(/\//g, '-')}_${factory}_Factory.pdf`)
+  }
+
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
   if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
   if (!profile) return null
@@ -162,13 +198,17 @@ export default function MaterialRequestsPage() {
     g.items.push({ id: it.id, requested_qty: Number(it.requested_qty), received_qty: Number(it.received_qty) })
   }
   const waiting: Record<string, MatMap> = {}                                  // factory -> materials not yet released
-  const runs: Record<string, { runNo: string; factory: string; released_at: string; mats: MatMap }> = {} // run id -> run
+  const runs: Record<string, { runNo: string; factory: string; released_at: string; mats: MatMap; reqs: MaterialRequest[] }> = {} // run id -> run
   requests.filter(r => ACTIVE.includes(r.status)).forEach(r => {
     const runId = r.pick_run_no || (r.released_at ? `${r.factory_code}|${r.released_at}` : '')
-    const target = r.released_at
-      ? (runs[runId] = runs[runId] || { runNo: r.pick_run_no || '(unnumbered)', factory: r.factory_code, released_at: r.released_at, mats: {} }).mats
-      : (waiting[r.factory_code] = waiting[r.factory_code] || {})
-    r.material_request_items?.forEach(it => addItem(target, it))
+    if (r.released_at) {
+      const run = (runs[runId] = runs[runId] || { runNo: r.pick_run_no || '(unnumbered)', factory: r.factory_code, released_at: r.released_at, mats: {}, reqs: [] })
+      run.reqs.push(r)
+      r.material_request_items?.forEach(it => addItem(run.mats, it))
+    } else {
+      const target = (waiting[r.factory_code] = waiting[r.factory_code] || {})
+      r.material_request_items?.forEach(it => addItem(target, it))
+    }
   })
   // Oldest request first for allocation: requests arrive newest-first, so reverse the pooled lines
   const allMaps = [...Object.values(waiting), ...Object.values(runs).map(run => run.mats)]
@@ -293,7 +333,8 @@ export default function MaterialRequestsPage() {
                   <div className="space-y-4">
                     {runList.map(run => {
                       const rkey = run.runNo
-                      const { warehouse, factory } = splitBySource(run.mats)
+                      const { warehouse } = splitBySource(run.mats)
+                      const facReqs = run.reqs.filter(r => (r.material_request_items || []).some(it => factoryItems.has(it.item_code)))
                       return (
                         <div key={rkey} className="bg-white rounded-xl shadow-sm border p-5">
                           <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -311,14 +352,60 @@ export default function MaterialRequestsPage() {
                               {renderMatTable(warehouse, `${rkey}|wh`, true)}
                             </div>
                           )}
-                          {Object.keys(factory).length > 0 && (
+                          {facReqs.length > 0 && (
                             <div>
                               <div className="flex items-center gap-2 mb-2">
-                                <span className="text-sm font-semibold text-purple-700">🏭 Made at factory</span>
-                                <button onClick={() => downloadPickRunPdf(run.runNo, run.factory, run.released_at, factory, 'Factory')}
+                                <span className="text-sm font-semibold text-purple-700">🏭 Made at factory <span className="font-normal text-gray-400">— per product (not combined)</span></span>
+                                <button onClick={() => downloadFactoryPdf(run.runNo, run.factory, run.released_at, facReqs)}
                                   className="ml-auto border border-purple-600 text-purple-600 px-3 py-1 rounded-lg hover:bg-purple-50 text-xs font-medium">⬇ Factory PDF</button>
                               </div>
-                              {renderMatTable(factory, `${rkey}|fac`, true)}
+                              <div className="space-y-3">
+                                {facReqs.map(r => {
+                                  const facItems = (r.material_request_items || []).filter(it => factoryItems.has(it.item_code))
+                                  return (
+                                    <div key={r.id} className="border rounded-lg p-3">
+                                      <div className="flex flex-wrap items-center gap-2 mb-2 text-sm">
+                                        <span className="font-semibold">{r.production_batches?.item_code}</span>
+                                        <span className="text-gray-500">{r.production_batches?.description}</span>
+                                        {r.production_batches?.exp_date
+                                          ? <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-700 text-xs font-medium">EXP {r.production_batches.exp_date}</span>
+                                          : <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-500 text-xs">no EXP date</span>}
+                                        <span className="text-gray-400 text-xs font-mono ml-auto">{r.request_no}</span>
+                                      </div>
+                                      <div className="overflow-x-auto border rounded-lg">
+                                        <table className="w-full text-sm">
+                                          <thead className="bg-gray-50 border-b">
+                                            <tr>{['Material', 'Description', 'Unit', 'To make', 'Made', ''].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr>
+                                          </thead>
+                                          <tbody>
+                                            {facItems.map(it => {
+                                              const done = it.received_qty >= it.requested_qty
+                                              return (
+                                                <tr key={it.id} className={`border-b last:border-0 ${done ? 'bg-green-50/40' : ''}`}>
+                                                  <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{it.item_code}</td>
+                                                  <td className="px-3 py-2 text-gray-600">{it.description}</td>
+                                                  <td className="px-3 py-2 text-gray-500">{it.unit}</td>
+                                                  <td className="px-3 py-2 text-right font-semibold text-purple-700">{it.requested_qty}</td>
+                                                  <td className="px-3 py-2">
+                                                    <input type="number" step="any" min="0"
+                                                      value={edits[it.id] ?? it.received_qty}
+                                                      onChange={e => setEdits(prev => ({ ...prev, [it.id]: e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)) }))}
+                                                      className="w-24 border rounded px-2 py-1 text-right" />
+                                                  </td>
+                                                  <td className="px-3 py-2 whitespace-nowrap">
+                                                    <button onClick={() => receive(it)} disabled={busy === it.id}
+                                                      className="text-blue-600 hover:underline text-xs disabled:opacity-50">Save</button>
+                                                  </td>
+                                                </tr>
+                                              )
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </div>
                             </div>
                           )}
                         </div>

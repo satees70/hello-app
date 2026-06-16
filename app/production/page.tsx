@@ -53,6 +53,7 @@ export default function ProductionPage() {
   const [factoryFilter, setFactoryFilter] = useState('')
   const [savingStock, setSavingStock] = useState('')
   const [raising, setRaising] = useState(false)
+  const [expDate, setExpDate] = useState('')
   const [combineOn, setCombineOn] = useState(true)
   const [separated, setSeparated] = useState<Set<string>>(new Set())
   const [sortBy, setSortBy] = useState<'due_asc' | 'due_desc' | 'batch'>('due_asc')
@@ -146,6 +147,10 @@ export default function ProductionPage() {
 
   async function raiseTarget(t: MatTarget) {
     setRaising(true); setError(''); setSuccess('')
+    // Save the product expiry date onto the batch(es) first — it flows to the factory/label list
+    const { error: expErr } = await supabase.from('production_batches')
+      .update({ exp_date: expDate || null }).in('id', t.batchIds)
+    if (expErr) { setError(expErr.message); setRaising(false); return }
     const { error: rpcErr } = t.batchIds.length === 1
       ? await supabase.rpc('raise_material_request', { p_batch_id: t.batchIds[0] })
       : await supabase.rpc('raise_combined_material_request', { p_batch_ids: t.batchIds })
@@ -153,6 +158,7 @@ export default function ProductionPage() {
     setSuccess(`Material request raised for ${t.label}.`)
     setRaising(false)
     setSelected(null)
+    setExpDate('')
     await loadAll()
   }
 
@@ -427,7 +433,7 @@ export default function ProductionPage() {
                   </table>
                 </div>
 
-                <div className="flex items-center justify-between mt-4">
+                <div className="flex flex-wrap items-end justify-between gap-3 mt-4">
                   <div className="text-sm">
                     {hasRequest
                       ? <span className="text-purple-700">A material request is already open — see Material Requests.</span>
@@ -435,10 +441,17 @@ export default function ProductionPage() {
                         ? <span className="text-red-600">Total shortfall across {exploded.rows.filter(r => r.shortfall > 0).length} material(s).</span>
                         : <span className="text-green-600">Enough stock on hand — no shortfall.</span>}
                   </div>
-                  <button onClick={() => raiseTarget(selected)} disabled={raising || hasRequest || totalShortfall <= 0}
-                    className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
-                    {raising ? 'Raising…' : 'Raise Material Request'}
-                  </button>
+                  <div className="flex items-end gap-3">
+                    <label className="text-sm">
+                      <span className="block text-gray-600 mb-1">Product expiry date <span className="text-gray-400">(for labels)</span></span>
+                      <input type="date" value={expDate} onChange={e => setExpDate(e.target.value)}
+                        className="border rounded-lg px-2 py-1.5" />
+                    </label>
+                    <button onClick={() => raiseTarget(selected)} disabled={raising || hasRequest || totalShortfall <= 0}
+                      className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
+                      {raising ? 'Raising…' : 'Raise Material Request'}
+                    </button>
+                  </div>
                 </div>
                 <p className="text-gray-400 text-xs mt-2">Tip: save your stock figures first, then raise the request — it captures the shortfall at that moment and adds a safety margin (rounded up) so the warehouse picks enough.</p>
               </>
