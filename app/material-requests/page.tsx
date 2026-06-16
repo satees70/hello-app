@@ -71,6 +71,11 @@ export default function MaterialRequestsPage() {
     setFactories(data || [])
   }
   const factoryName = (code: string) => factories.find(f => f.code === code)?.name || code || '—'
+  // Show stored dates (YYYY-MM-DD) as DD/MM/YYYY
+  const fmtExp = (d: string | null | undefined) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || '')
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : (d || '')
+  }
 
   async function receive(item: MRItem) {
     const val = edits[item.id] ?? item.received_qty
@@ -151,7 +156,7 @@ export default function MaterialRequestsPage() {
     let n = 1
     reqs.forEach(r => {
       (r.material_request_items || []).filter(it => factoryItems.has(it.item_code)).forEach(it => {
-        body.push([String(n++), r.production_batches?.item_code || '', r.production_batches?.exp_date || '—',
+        body.push([String(n++), r.production_batches?.item_code || '', fmtExp(r.production_batches?.exp_date) || '—',
           it.item_code, it.description, it.unit, String(it.requested_qty), '', ''])
       })
     })
@@ -368,7 +373,7 @@ export default function MaterialRequestsPage() {
                                         <span className="font-semibold">{r.production_batches?.item_code}</span>
                                         <span className="text-gray-500">{r.production_batches?.description}</span>
                                         {r.production_batches?.exp_date
-                                          ? <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-700 text-xs font-medium">EXP {r.production_batches.exp_date}</span>
+                                          ? <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-700 text-xs font-medium">EXP {fmtExp(r.production_batches.exp_date)}</span>
                                           : <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-500 text-xs">no EXP date</span>}
                                         <span className="text-gray-400 text-xs font-mono ml-auto">{r.request_no}</span>
                                       </div>
