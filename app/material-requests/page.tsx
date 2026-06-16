@@ -147,40 +147,41 @@ export default function MaterialRequestsPage() {
     doc.save(`PickRun_${runNo.replace(/\//g, '-')}_${factory}_${audience}.pdf`)
   }
 
-  // Factory list PDF: one row per product so labels carry the product + expiry date (not combined)
+  // Factory (label) list PDF: one row per product so labels carry the product name + expiry date (not combined)
   async function downloadFactoryPdf(runNo: string, factory: string, released_at: string, reqs: MaterialRequest[]) {
     const { default: jsPDF } = await import('jspdf')
     const { default: autoTable } = await import('jspdf-autotable')
-    const doc = new jsPDF()
+    const docNo = `L${runNo}`
+    const doc = new jsPDF({ orientation: 'landscape' })
     const body: string[][] = []
     let n = 1
     reqs.forEach(r => {
       (r.material_request_items || []).filter(it => factoryItems.has(it.item_code)).forEach(it => {
-        body.push([String(n++), r.production_batches?.item_code || '', fmtExp(r.production_batches?.exp_date) || '—',
-          it.item_code, it.description, it.unit, String(it.requested_qty), '', ''])
+        body.push([String(n++), r.production_batches?.item_code || '', r.production_batches?.description || '',
+          fmtExp(r.production_batches?.exp_date) || '—', it.item_code, it.description, it.unit, String(it.requested_qty), ''])
       })
     })
     doc.setFontSize(14); doc.setFont('helvetica', 'bold')
     doc.text('SRRI EASWARI MILLS SDN BHD', 14, 16)
     doc.setFontSize(11); doc.setFont('helvetica', 'normal')
-    doc.text('Material List — for Factory (labels)', 14, 23)
+    doc.text('Label Request — for Factory', 14, 23)
     doc.setFontSize(10)
-    doc.text(`Pick run: ${runNo}`, 14, 32)
+    doc.text(`Document: ${docNo}`, 14, 32)
     doc.text(`Factory: ${factoryName(factory)} (${factory})`, 14, 38)
-    doc.text(`Released: ${new Date(released_at).toLocaleString()}`, 14, 44)
-    doc.text(`Printed: ${new Date().toLocaleString()}`, 120, 44)
+    doc.text(`Released: ${new Date(released_at).toLocaleString()}`, 150, 32)
+    doc.text(`Printed: ${new Date().toLocaleString()}`, 150, 38)
     autoTable(doc, {
-      startY: 50,
-      head: [['#', 'Product', 'EXP date', 'Material', 'Description', 'Unit', 'Qty to make', 'Made', 'Remarks']],
+      startY: 44,
+      head: [['#', 'Product', 'Product name', 'EXP date', 'Material', 'Description', 'Unit', 'Qty to make', 'Made']],
       body,
       styles: { fontSize: 9, cellPadding: 2 },
       headStyles: { fillColor: [126, 58, 242] },
-      columnStyles: { 6: { halign: 'right' } },
+      columnStyles: { 7: { halign: 'right' } },
     })
     const endY = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY) + 16
     doc.text('Prepared by: __________________   Date: __________', 14, endY)
     doc.text('Received by: ___________________   Date: __________', 14, endY + 10)
-    doc.save(`PickRun_${runNo.replace(/\//g, '-')}_${factory}_Factory.pdf`)
+    doc.save(`${docNo.replace(/\//g, '-')}_${factory}.pdf`)
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
@@ -359,8 +360,9 @@ export default function MaterialRequestsPage() {
                           )}
                           {facReqs.length > 0 && (
                             <div>
-                              <div className="flex items-center gap-2 mb-2">
+                              <div className="flex flex-wrap items-center gap-2 mb-2">
                                 <span className="text-sm font-semibold text-purple-700">🏭 Made at factory <span className="font-normal text-gray-400">— per product (not combined)</span></span>
+                                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 font-mono">L{run.runNo}</span>
                                 <button onClick={() => downloadFactoryPdf(run.runNo, run.factory, run.released_at, facReqs)}
                                   className="ml-auto border border-purple-600 text-purple-600 px-3 py-1 rounded-lg hover:bg-purple-50 text-xs font-medium">⬇ Factory PDF</button>
                               </div>

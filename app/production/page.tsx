@@ -443,16 +443,19 @@ export default function ProductionPage() {
                   </div>
                   <div className="flex items-end gap-3">
                     <label className="text-sm">
-                      <span className="block text-gray-600 mb-1">Product expiry date <span className="text-gray-400">(for labels)</span></span>
+                      <span className="block text-gray-600 mb-1">Product expiry date <span className="text-red-500">*required</span></span>
                       <input type="date" value={expDate} onChange={e => setExpDate(e.target.value)}
-                        className="border rounded-lg px-2 py-1.5" />
+                        className={`border rounded-lg px-2 py-1.5 ${!expDate && !hasRequest ? 'border-red-400 bg-red-50' : ''}`} />
                     </label>
-                    <button onClick={() => raiseTarget(selected)} disabled={raising || hasRequest || totalShortfall <= 0}
+                    <button onClick={() => raiseTarget(selected)} disabled={raising || hasRequest || totalShortfall <= 0 || !expDate}
                       className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
                       {raising ? 'Raising…' : 'Raise Material Request'}
                     </button>
                   </div>
                 </div>
+                {!expDate && !hasRequest && totalShortfall > 0 && (
+                  <p className="text-red-600 text-xs mt-2">Enter the product expiry date before raising — it prints on the labels.</p>
+                )}
                 <p className="text-gray-400 text-xs mt-2">Tip: save your stock figures first, then raise the request — it captures the shortfall at that moment and adds a safety margin (rounded up) so the warehouse picks enough.</p>
               </>
             )}
