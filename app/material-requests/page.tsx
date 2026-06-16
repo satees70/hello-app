@@ -23,6 +23,7 @@ interface MaterialRequest {
   created_at: string
   released_at: string | null
   pick_run_no: string | null
+  batch_id: string
   production_batches: { batch_no: string; item_code: string; description: string; exp_date: string | null } | null
   material_request_items: MRItem[]
 }
@@ -50,6 +51,7 @@ export default function MaterialRequestsPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [factoryItems, setFactoryItems] = useState<Set<string>>(new Set()) // item codes supplied by the factory
+  const [expEdits, setExpEdits] = useState<Record<string, string>>({}) // request id -> EXP date being typed
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
@@ -115,6 +117,19 @@ export default function MaterialRequestsPage() {
     if (relErr) { setError(relErr.message); setBusy(''); return }
     setSuccess(`Released to the warehouse as pick run ${data}.`)
     setBusy('')
+    load()
+  }
+
+  // Save an expiry date entered inline on the factory list (writes to the product's batch)
+  async function saveExp(r: MaterialRequest) {
+    const val = expEdits[r.id] ?? r.production_batches?.exp_date ?? ''
+    if (!val) { setError('Pick an expiry date first.'); return }
+    setBusy(`exp|${r.id}`); setError(''); setSuccess('')
+    const { error: upErr } = await supabase.from('production_batches').update({ exp_date: val }).eq('id', r.batch_id)
+    if (upErr) { setError(upErr.message); setBusy(''); return }
+    setSuccess(`Expiry date saved for ${r.production_batches?.item_code}.`)
+    setBusy('')
+    setExpEdits(prev => { const n = { ...prev }; delete n[r.id]; return n })
     load()
   }
 
@@ -358,7 +373,9 @@ export default function MaterialRequestsPage() {
                               {renderMatTable(warehouse, `${rkey}|wh`, true)}
                             </div>
                           )}
-                          {facReqs.length > 0 && (
+                          {facReqs.length > 0 && (() => {
+                            const missingExp = facReqs.some(r => !r.production_batches?.exp_date)
+                            return (
                             <div>
                               <div className="flex flex-wrap items-center gap-2 mb-2">
                                 <span className="text-sm font-semibold text-purple-700">🏭 Made at factory <span className="font-normal text-gray-400">— per product (not combined)</span></span>
@@ -366,17 +383,30 @@ export default function MaterialRequestsPage() {
                                 <button onClick={() => downloadFactoryPdf(run.runNo, run.factory, run.released_at, facReqs)}
                                   className="ml-auto border border-purple-600 text-purple-600 px-3 py-1 rounded-lg hover:bg-purple-50 text-xs font-medium">⬇ Factory PDF</button>
                               </div>
+                              {missingExp && (
+                                <p className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg p-2 mb-2">
+                                  ⚠ Some products have no expiry date. Enter it below before sending the labels to the factory.
+                                </p>
+                              )}
                               <div className="space-y-3">
                                 {facReqs.map(r => {
                                   const facItems = (r.material_request_items || []).filter(it => factoryItems.has(it.item_code))
+                                  const hasExp = !!r.production_batches?.exp_date
                                   return (
-                                    <div key={r.id} className="border rounded-lg p-3">
+                                    <div key={r.id} className={`border rounded-lg p-3 ${hasExp ? '' : 'border-red-300'}`}>
                                       <div className="flex flex-wrap items-center gap-2 mb-2 text-sm">
                                         <span className="font-semibold">{r.production_batches?.item_code}</span>
                                         <span className="text-gray-500">{r.production_batches?.description}</span>
-                                        {r.production_batches?.exp_date
-                                          ? <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-700 text-xs font-medium">EXP {fmtExp(r.production_batches.exp_date)}</span>
-                                          : <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-500 text-xs">no EXP date</span>}
+                                        <span className="flex items-center gap-1 ml-1">
+                                          <span className={`text-xs font-medium ${hasExp ? 'text-gray-500' : 'text-red-600'}`}>EXP</span>
+                                          <input type="date"
+                                            value={expEdits[r.id] ?? r.production_batches?.exp_date ?? ''}
+                                            onChange={e => setExpEdits(prev => ({ ...prev, [r.id]: e.target.value }))}
+                                            className={`border rounded px-2 py-1 text-xs ${hasExp ? '' : 'border-red-400 bg-red-50'}`} />
+                                          <button onClick={() => saveExp(r)} disabled={busy === `exp|${r.id}`}
+                                            className="text-blue-600 hover:underline text-xs disabled:opacity-50">Save</button>
+                                          {hasExp && <span className="text-gray-400 text-xs">({fmtExp(r.production_batches?.exp_date)})</span>}
+                                        </span>
                                         <span className="text-gray-400 text-xs font-mono ml-auto">{r.request_no}</span>
                                       </div>
                                       <div className="overflow-x-auto border rounded-lg">
@@ -414,7 +444,7 @@ export default function MaterialRequestsPage() {
                                 })}
                               </div>
                             </div>
-                          )}
+                          ) })()}
                         </div>
                       )
                     })}
