@@ -124,6 +124,9 @@ export default function MaterialRequestsPage() {
   async function saveExp(r: MaterialRequest) {
     const val = expEdits[r.id] ?? r.production_batches?.exp_date ?? ''
     if (!val) { setError('Pick an expiry date first.'); return }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(val) || val < '2020-01-01' || val > '2100-12-31') {
+      setError('Enter a valid expiry date (year between 2020 and 2100).'); return
+    }
     setBusy(`exp|${r.id}`); setError(''); setSuccess('')
     const { error: upErr } = await supabase.from('production_batches').update({ exp_date: val }).eq('id', r.batch_id)
     if (upErr) { setError(upErr.message); setBusy(''); return }
@@ -399,7 +402,7 @@ export default function MaterialRequestsPage() {
                                         <span className="text-gray-500">{r.production_batches?.description}</span>
                                         <span className="flex items-center gap-1 ml-1">
                                           <span className={`text-xs font-medium ${hasExp ? 'text-gray-500' : 'text-red-600'}`}>EXP</span>
-                                          <input type="date"
+                                          <input type="date" min="2020-01-01" max="2100-12-31"
                                             value={expEdits[r.id] ?? r.production_batches?.exp_date ?? ''}
                                             onChange={e => setExpEdits(prev => ({ ...prev, [r.id]: e.target.value }))}
                                             className={`border rounded px-2 py-1 text-xs ${hasExp ? '' : 'border-red-400 bg-red-50'}`} />

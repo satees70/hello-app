@@ -146,6 +146,9 @@ export default function ProductionPage() {
   }
 
   async function raiseTarget(t: MatTarget) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(expDate) || expDate < '2020-01-01' || expDate > '2100-12-31') {
+      setError('Enter a valid expiry date (year between 2020 and 2100).'); return
+    }
     setRaising(true); setError(''); setSuccess('')
     // Save the product expiry date onto the batch(es) first — it flows to the factory/label list
     const { error: expErr } = await supabase.from('production_batches')
@@ -444,7 +447,7 @@ export default function ProductionPage() {
                   <div className="flex items-end gap-3">
                     <label className="text-sm">
                       <span className="block text-gray-600 mb-1">Product expiry date <span className="text-red-500">*required</span></span>
-                      <input type="date" value={expDate} onChange={e => setExpDate(e.target.value)}
+                      <input type="date" value={expDate} min="2020-01-01" max="2100-12-31" onChange={e => setExpDate(e.target.value)}
                         className={`border rounded-lg px-2 py-1.5 ${!expDate && !hasRequest ? 'border-red-400 bg-red-50' : ''}`} />
                     </label>
                     <button onClick={() => raiseTarget(selected)} disabled={raising || hasRequest || totalShortfall <= 0 || !expDate}
