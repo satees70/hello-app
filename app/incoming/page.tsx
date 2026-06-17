@@ -260,7 +260,7 @@ export default function IncomingPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
-      <div className="max-w-6xl mx-auto px-6 py-8">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
         <h1 className="text-2xl font-bold mb-1">Goods Received — Delivery Orders</h1>
         <p className="text-gray-500 text-sm mb-5">Upload the warehouse Delivery Order PDF. It is read automatically; review the lines, then receive into stock.</p>
 

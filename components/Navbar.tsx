@@ -101,12 +101,12 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
 
   return (
     <>
-      <nav className="bg-blue-700 text-white px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          <span className="font-bold text-lg">AVINA</span>
+      <nav className="bg-blue-700 text-white px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap min-w-0 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <span className="font-bold text-lg shrink-0">AVINA</span>
           {links.map(l => (
             <Link key={l.href} href={l.href}
-              className={`text-sm hover:text-blue-200 inline-flex items-center ${pathname === l.href ? 'underline font-semibold' : ''}`}>
+              className={`text-sm hover:text-blue-200 inline-flex items-center shrink-0 ${pathname === l.href ? 'underline font-semibold' : ''}`}>
               {l.label}
               {l.href === '/sales-orders/changes' && isHO && pendingCount > 0 && (
                 <span className="ml-1.5 bg-red-500 text-white text-xs font-semibold rounded-full min-w-[1.25rem] text-center px-1.5 py-0.5 leading-none">
@@ -116,11 +116,11 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
             </Link>
           ))}
         </div>
-        <div className="flex items-center gap-4 text-sm">
-          <span className="bg-blue-800 px-3 py-1 rounded-full text-xs">
+        <div className="flex items-center gap-2 sm:gap-4 text-sm shrink-0">
+          <span className="bg-blue-800 px-2 sm:px-3 py-1 rounded-full text-xs whitespace-nowrap">
             {isHO ? 'Head Office' : factoryCode}
           </span>
-          <span>{fullName || 'User'}</span>
+          <span className="hidden md:inline">{fullName || 'User'}</span>
           <button onClick={handleLogout} className="bg-white text-blue-700 px-3 py-1 rounded hover:bg-blue-50 text-xs font-medium">
             Logout
           </button>
