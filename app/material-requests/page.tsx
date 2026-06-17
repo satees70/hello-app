@@ -71,6 +71,7 @@ export default function MaterialRequestsPage() {
   const [doData, setDoData] = useState<DeliveryOrder | null>(null) // extracted delivery order awaiting review
   const [doBusy, setDoBusy] = useState(false)
   const [kgPerBag, setKgPerBag] = useState<Record<string, number>>({}) // item code -> KG/bag override
+  const [doItems, setDoItems] = useState<Record<string, string>>({}) // item code -> unit, for codes on the current DO
   const doFileRef = useRef<HTMLInputElement>(null)
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -186,7 +187,15 @@ export default function MaterialRequestsPage() {
     return kgPerBag[code] ?? kgPerBag[baseCode(code)] ?? parseKgPerBag(code, desc)
   }
 
-  // Upload a Delivery Order PDF → Claude reads the lines → opens the review modal
+  // Resolve a DO line code to the actual item in the Master (exact or base). null = unknown item.
+  const resolveItem = (code: string): { code: string; unit: string } | null => {
+    if (doItems[code] != null) return { code, unit: doItems[code] }
+    const b = baseCode(code)
+    if (doItems[b] != null) return { code: b, unit: doItems[b] }
+    return null
+  }
+
+  // Upload a Delivery Order PDF → Claude reads the lines → look up the items → open the review modal
   async function onDoFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (file) {
@@ -195,15 +204,23 @@ export default function MaterialRequestsPage() {
         const b64 = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(file) })
         const resp = await fetch('/api/extract-delivery-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pdfBase64: b64 }) })
         const data = await resp.json()
-        if (!resp.ok) setError(data.error || 'Could not read the document.')
-        else setDoData(data as DeliveryOrder)
+        if (!resp.ok) { setError(data.error || 'Could not read the document.'); setDoBusy(false); if (doFileRef.current) doFileRef.current.value = ''; return }
+        const dd = data as DeliveryOrder
+        // Look up the units of every code (and its base code) so we know what's a real item
+        const codes = [...new Set(dd.lines.flatMap(l => [l.item_code, baseCode(l.item_code)]))]
+        const { data: items } = await supabase.from('items').select('code, unit').in('code', codes)
+        const m: Record<string, string> = {}
+        ;(items || []).forEach(r => { m[r.code] = r.unit || '' })
+        setDoItems(m)
+        setDoData(dd)
       } catch { setError('Upload failed — please try again.') }
       setDoBusy(false)
     }
     if (doFileRef.current) doFileRef.current.value = ''
   }
 
-  // Apply the reviewed delivery order: receive each matched item (sum qty, carry the batch no)
+  // Apply the reviewed delivery order. Matched → receive against the request; known-but-unrequested →
+  // receive into stock flagged "unplanned"; unknown code → skipped with a warning.
   async function applyDo() {
     if (!doData) return
     setDoBusy(true); setError(''); setSuccess('')
@@ -213,22 +230,32 @@ export default function MaterialRequestsPage() {
       g.qty += Number(l.quantity) || 0
       if (!g.batch) g.batch = l.batch_no
     })
-    let applied = 0, skipped = 0, needFactor = 0
+    let applied = 0, unplanned = 0, needFactor = 0
+    const unknown: string[] = []
     for (const code of Object.keys(byCode)) {
-      const lines = matchLines(code)
-      if (lines.length === 0) { skipped++; continue }
       const g = byCode[code]
-      const factor = bagFactor(code, g.desc, g.unit, lines[0].unit)
-      if (factor === null) { needFactor++; continue }            // bag→kg but pack size unknown
-      const qtyInReqUnit = g.qty * factor
-      const { error: e } = await supabase.rpc('receive_combined_lot', { p_item_ids: lines.map(l => l.id), p_qty: qtyInReqUnit, p_batch_no: g.batch || null, p_exp_date: null })
-      if (e) { setError(`${code}: ${e.message}`); setDoBusy(false); return }
-      applied++
+      const lines = matchLines(code)
+      if (lines.length > 0) {
+        const factor = bagFactor(code, g.desc, g.unit, lines[0].unit)
+        if (factor === null) { needFactor++; continue }
+        const { error: e } = await supabase.rpc('receive_combined_lot', { p_item_ids: lines.map(l => l.id), p_qty: g.qty * factor, p_batch_no: g.batch || null, p_exp_date: null })
+        if (e) { setError(`${code}: ${e.message}`); setDoBusy(false); return }
+        applied++
+      } else {
+        const item = resolveItem(code)
+        if (!item) { unknown.push(code); continue }
+        const factor = bagFactor(code, g.desc, g.unit, item.unit)
+        if (factor === null) { needFactor++; continue }
+        const { error: e } = await supabase.rpc('receive_stock_direct', { p_item_code: item.code, p_factory: doFactory, p_qty: g.qty * factor, p_batch_no: g.batch || null, p_exp_date: null })
+        if (e) { setError(`${code}: ${e.message}`); setDoBusy(false); return }
+        unplanned++
+      }
     }
     setDoBusy(false); setDoData(null)
-    setSuccess(`Delivery order ${doData.do_number} applied — received ${applied} item(s)`
-      + `${skipped ? `, ${skipped} not in any open request` : ''}`
-      + `${needFactor ? `, ${needFactor} need a "KG per bag" set first` : ''}.`)
+    setSuccess(`Delivery order ${doData.do_number} applied — ${applied} against order(s)`
+      + `${unplanned ? `, ${unplanned} into stock (unplanned)` : ''}`
+      + `${needFactor ? `, ${needFactor} need a "KG per bag" set first` : ''}`
+      + `${unknown.length ? `, skipped unknown item(s): ${unknown.join(', ')}` : ''}.`)
     load()
   }
 
@@ -611,7 +638,7 @@ export default function MaterialRequestsPage() {
               </div>
               <p className="text-gray-500 text-sm mb-4">
                 Dated {doData.do_date || '—'} · delivering to <strong>{isHO ? factoryName(doFactory) : doFactory}</strong>.
-                Each matched item will be received into stock with its batch number. Items not in an open request are skipped.
+                Matched items are received against their order; known items with no order go into stock flagged <em>unplanned</em>; unknown codes are skipped.
               </p>
               <div className="overflow-x-auto border rounded-lg">
                 <table className="w-full text-sm">
@@ -623,8 +650,10 @@ export default function MaterialRequestsPage() {
                     {doData.lines.map((l, i) => {
                       const lines = matchLines(l.item_code)
                       const matched = lines.length > 0
-                      const reqUnit = lines[0]?.unit
-                      const factor = matched ? bagFactor(l.item_code, l.description, l.unit, reqUnit) : 1
+                      const item = matched ? null : resolveItem(l.item_code)
+                      const reqUnit = matched ? lines[0]?.unit : item?.unit
+                      const known = matched || !!item
+                      const factor = known ? bagFactor(l.item_code, l.description, l.unit, reqUnit) : 1
                       const intoStock = factor === null ? null : num(Number(l.quantity) * factor)
                       return (
                         <tr key={i} className="border-b last:border-0">
@@ -636,14 +665,14 @@ export default function MaterialRequestsPage() {
                           <td className="px-3 py-2 text-right font-semibold whitespace-nowrap">{l.quantity} {l.unit}</td>
                           <td className="px-3 py-2 font-mono">{l.batch_no || '—'}</td>
                           <td className="px-3 py-2 text-right whitespace-nowrap">
-                            {!matched ? '—'
-                              : factor === null ? <span className="text-amber-600">?</span>
+                            {!known || factor === null ? '—'
                               : <span className="font-semibold text-blue-700">{intoStock} {reqUnit}{factor !== 1 ? <span className="text-gray-400 font-normal"> ({l.quantity}×{factor})</span> : null}</span>}
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap">
-                            {!matched ? <span className="text-amber-600">⚠ not in an open request</span>
+                            {!known ? <span className="text-red-600">⚠ unknown item — skip</span>
                               : factor === null ? <span className="text-amber-600">⚠ set KG per bag for this item</span>
-                              : <span className="text-green-600">✓ will receive</span>}
+                              : matched ? <span className="text-green-600">✓ against order</span>
+                              : <span className="text-indigo-600">→ stock (unplanned)</span>}
                           </td>
                         </tr>
                       )
@@ -653,9 +682,13 @@ export default function MaterialRequestsPage() {
               </div>
               <div className="flex items-center justify-end gap-3 mt-4">
                 <button onClick={() => setDoData(null)} disabled={doBusy} className="border px-5 py-2 rounded-lg hover:bg-gray-50 disabled:opacity-50">Cancel</button>
-                <button onClick={applyDo} disabled={doBusy || !doData.lines.some(l => { const ls = matchLines(l.item_code); return ls.length > 0 && bagFactor(l.item_code, l.description, l.unit, ls[0].unit) !== null })}
+                <button onClick={applyDo} disabled={doBusy || !doData.lines.some(l => {
+                  const ls = matchLines(l.item_code)
+                  const reqUnit = ls.length > 0 ? ls[0].unit : resolveItem(l.item_code)?.unit
+                  return (ls.length > 0 || resolveItem(l.item_code)) && bagFactor(l.item_code, l.description, l.unit, reqUnit) !== null
+                })}
                   className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
-                  {doBusy ? 'Receiving…' : 'Receive matched items'}
+                  {doBusy ? 'Receiving…' : 'Receive items'}
                 </button>
               </div>
             </div>

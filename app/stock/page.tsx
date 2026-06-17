@@ -15,6 +15,7 @@ interface Lot {
   qty_received: number
   qty_remaining: number
   received_at: string
+  unplanned: boolean
 }
 
 export default function StockPage() {
@@ -117,7 +118,7 @@ export default function StockPage() {
                                   const expired = r.exp_date && r.exp_date < today
                                   return (
                                     <tr key={r.id} className={`border-b last:border-0 ${expired ? 'bg-red-50' : ''}`}>
-                                      <td className="px-3 py-2 font-mono">{r.batch_no || '—'}</td>
+                                      <td className="px-3 py-2 font-mono">{r.batch_no || '—'}{r.unplanned && <span className="ml-2 px-1.5 py-0.5 rounded text-[11px] font-medium bg-indigo-100 text-indigo-700">unplanned</span>}</td>
                                       <td className={`px-3 py-2 ${expired ? 'text-red-600 font-medium' : ''}`}>{fmt(r.exp_date)}{expired ? ' (expired)' : ''}</td>
                                       <td className="px-3 py-2 text-right font-semibold">{num(r.qty_remaining)}</td>
                                       <td className="px-3 py-2 text-right text-gray-500">{num(r.qty_received)}</td>
