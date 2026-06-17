@@ -16,6 +16,8 @@ interface Batch {
   produced_qty: number
   status: string
   material_request_id: string | null
+  pack_line: string | null
+  pack_date: string | null
   production_batch_items: BatchItem[]
 }
 interface ConsRow { id: string; item_code: string; description: string | null; batch_no: string | null; exp_date: string | null; qty_consumed: number; consumed_at: string }
@@ -59,6 +61,8 @@ export default function ProductionPage() {
   const [separated, setSeparated] = useState<Set<string>>(new Set())
   const [sortBy, setSortBy] = useState<'due_asc' | 'due_desc' | 'batch'>('due_asc')
   const [consumption, setConsumption] = useState<Record<string, ConsRow[]>>({}) // batch id -> consumed lots
+  const [packEdit, setPackEdit] = useState<Record<string, { line: string; date: string }>>({}) // batch id -> pack plan being edited
+  const [savingPlan, setSavingPlan] = useState('')
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
@@ -176,6 +180,16 @@ export default function ProductionPage() {
   })
   const toggleSeparate = (id: string) => setSeparated(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
 
+  // Save the pack plan (line + date) for a batch
+  async function savePackPlan(b: Batch) {
+    const e = packEdit[b.id] ?? { line: b.pack_line || '', date: b.pack_date || '' }
+    setSavingPlan(b.id); setError(''); setSuccess('')
+    const { error: upErr } = await supabase.from('production_batches').update({ pack_line: e.line || null, pack_date: e.date || null }).eq('id', b.id)
+    if (upErr) { setError(upErr.message); setSavingPlan(''); return }
+    setBatches(prev => prev.map(x => (x.id === b.id ? { ...x, pack_line: e.line || null, pack_date: e.date || null } : x)))
+    setSavingPlan(''); setSuccess(`Pack plan saved for ${b.batch_no}.`)
+  }
+
   async function loadConsumption(batchId: string) {
     const { data } = await supabase.from('production_consumption')
       .select('id, item_code, description, batch_no, exp_date, qty_consumed, consumed_at')
@@ -231,9 +245,9 @@ export default function ProductionPage() {
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
       <div className="max-w-7xl mx-auto px-6 py-8">
-        <h1 className="text-2xl font-bold mb-1">Production Board</h1>
+        <h1 className="text-2xl font-bold mb-1">Order Board</h1>
         <p className="text-gray-500 text-sm mb-5">
-          Production batches generated from confirmed sales orders.
+          Orders from confirmed sales orders. Once materials are received, plan which line packs each item and when.
           {isHO ? ' Showing all factories.' : ` Showing factory ${profile.factory_code}.`}
         </p>
 
@@ -359,7 +373,7 @@ export default function ProductionPage() {
                             <tr className={`border-b last:border-0 hover:bg-gray-50 cursor-pointer ${expanded.has(b.id) ? 'bg-blue-50/40' : ''}`} onClick={() => toggleRow(b.id)}>
                               <td className="pl-3 text-gray-400">{expanded.has(b.id) ? '▾' : '▸'}</td>
                               <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}</td>
-                              <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span>{bomBadge(b.item_code)}</td>
+                              <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span>{bomBadge(b.item_code)}{(b.pack_line || b.pack_date) && <span className="mt-0.5 inline-block bg-teal-100 text-teal-700 px-1.5 py-0.5 rounded text-[11px] font-medium">📅 {b.pack_line || 'line ?'}{b.pack_date ? ` · ${b.pack_date.split('-').reverse().join('/')}` : ''}</span>}</td>
                               <td className="px-3 py-2 font-semibold whitespace-nowrap">{b.total_quantity}</td>
                               <td className="px-3 py-2 whitespace-nowrap">{b.delivery_date || '—'}</td>
                               <td className="px-3 py-2">
@@ -386,6 +400,15 @@ export default function ProductionPage() {
                                       </li>
                                     ))}
                                   </ul>
+                                  <div className="flex flex-wrap items-end gap-3 mb-3 bg-teal-50/50 border border-teal-100 rounded-lg p-3">
+                                    <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Pack line</span>
+                                      <input value={packEdit[b.id]?.line ?? b.pack_line ?? ''} onChange={e => setPackEdit(p => ({ ...p, [b.id]: { line: e.target.value, date: p[b.id]?.date ?? b.pack_date ?? '' } }))} placeholder="e.g. Line 1" className="border rounded px-2 py-1 text-sm" /></div>
+                                    <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Pack date</span>
+                                      <input type="date" value={packEdit[b.id]?.date ?? b.pack_date ?? ''} onChange={e => setPackEdit(p => ({ ...p, [b.id]: { line: p[b.id]?.line ?? b.pack_line ?? '', date: e.target.value } }))} className="border rounded px-2 py-1 text-sm" /></div>
+                                    <button onClick={() => savePackPlan(b)} disabled={savingPlan === b.id} className="bg-teal-600 text-white px-4 py-1.5 rounded-lg hover:bg-teal-700 disabled:opacity-50 text-sm font-medium">{savingPlan === b.id ? 'Saving…' : 'Save pack plan'}</button>
+                                    <span className="text-gray-400 text-xs">which line packs this & when</span>
+                                  </div>
+
                                   <button onClick={() => { setSelected(singleTarget(b)); setError(''); setSuccess('') }}
                                     className="border border-blue-600 text-blue-600 px-4 py-1.5 rounded-lg hover:bg-blue-50 text-sm font-medium">Materials</button>
                                   <a href={`/inspection?batch=${b.id}`}
