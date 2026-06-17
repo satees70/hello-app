@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { supabase } from '@/lib/supabase'
@@ -15,8 +15,6 @@ interface MRItem {
   requested_qty: number
   received_qty: number
 }
-interface DoLine { item_code: string; description: string; quantity: number; unit: string; batch_no: string }
-interface DeliveryOrder { do_number: string; do_date: string; factory_no: string; lines: DoLine[] }
 interface MaterialRequest {
   id: string
   request_no: string
@@ -68,15 +66,10 @@ export default function MaterialRequestsPage() {
   const [success, setSuccess] = useState('')
   const [factoryItems, setFactoryItems] = useState<Set<string>>(new Set()) // item codes supplied by the factory
   const [expEdits, setExpEdits] = useState<Record<string, string>>({}) // request id -> EXP date being typed
-  const [doData, setDoData] = useState<DeliveryOrder | null>(null) // extracted delivery order awaiting review
-  const [doBusy, setDoBusy] = useState(false)
-  const [kgPerBag, setKgPerBag] = useState<Record<string, number>>({}) // item code -> KG/bag override
-  const [doItems, setDoItems] = useState<Record<string, string>>({}) // item code -> unit, for codes on the current DO
-  const doFileRef = useRef<HTMLInputElement>(null)
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
-  useEffect(() => { if (profile) { load(); loadFactories(); loadFactoryItems(); loadKgPerBag() } }, [profile])
+  useEffect(() => { if (profile) { load(); loadFactories(); loadFactoryItems() } }, [profile])
 
   async function load() {
     const { data } = await supabase
@@ -89,13 +82,6 @@ export default function MaterialRequestsPage() {
     const { data } = await supabase.from('items').select('code').eq('supplied_by_factory', true)
     setFactoryItems(new Set((data || []).map(r => r.code)))
   }
-  // Per-item KG-per-bag OVERRIDES (for codes that don't show the pack size); code is read automatically otherwise
-  async function loadKgPerBag() {
-    const { data } = await supabase.from('items').select('code, kg_per_bag').not('kg_per_bag', 'is', null)
-    const m: Record<string, number> = {}
-    ;(data || []).forEach(r => { if (r.kg_per_bag) m[r.code] = Number(r.kg_per_bag) })
-    setKgPerBag(m)
-  }
   async function loadFactories() {
     const { data } = await supabase.from('factories').select('code, name').order('code')
     setFactories(data || [])
@@ -106,7 +92,6 @@ export default function MaterialRequestsPage() {
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || '')
     return m ? `${m[3]}/${m[2]}/${m[1]}` : (d || '')
   }
-  const num = (n: number) => Number(Number(n).toPrecision(12))
 
   const validExp = (exp: string) => !exp || (/^\d{4}-\d{2}-\d{2}$/.test(exp) && exp >= '2020-01-01' && exp <= '2100-12-31')
 
@@ -159,105 +144,6 @@ export default function MaterialRequestsPage() {
     load()
   }
 
-  // The factory a delivery order is for: the branch number in its header (HO), else the user's factory
-  const doFactory = doData ? (isHO ? `AVINA${doData.factory_no}` : profile?.factory_code || '') : ''
-  // A DO code like S104-1-35KG/BAG or D323-P-8KG/CTN = item S104-1 / D323-P in a 35KG / 8KG pack —
-  // strip the trailing "-<n>KG/<BAG|CTN|CARTON>" to get the base code the recipe uses
-  const PACK = 'BAG|CTN|CARTON'
-  const baseCode = (code: string) => code.replace(new RegExp(`[-\\s]*\\d+(?:\\.\\d+)?\\s*KG\\s*\\/\\s*(?:${PACK})\\s*$`, 'i'), '').trim()
-  // Open/partial request LINES for that factory matching the DO code (exact OR base), OLDEST first
-  const matchLines = (code: string): MRItem[] => {
-    const base = baseCode(code)
-    const out: MRItem[] = []
-    ;[...requests].reverse().filter(r => ACTIVE.includes(r.status) && r.factory_code === doFactory)
-      .forEach(r => (r.material_request_items || []).forEach(it => { if (it.item_code === code || it.item_code === base) out.push(it) }))
-    return out
-  }
-  // Read KG-per-pack from the "<n>KG/<BAG|CTN|CARTON>" suffix (e.g. D323-P-8KG/CTN → 8). null = unknown.
-  const parseKgPerBag = (code: string, desc: string) => {
-    const m = new RegExp(`(\\d+(?:\\.\\d+)?)\\s*KG\\s*\\/\\s*(?:${PACK})`, 'i').exec(`${code} ${desc || ''}`)
-    return m ? Number(m[1]) : null
-  }
-  // Conversion factor: convert when the request is in KG and the delivery is NOT already in KG.
-  // 1 = no conversion; null = need a per-pack KG (delivery is in packs but the size is unknown).
-  const bagFactor = (code: string, desc: string, doUnit: string, reqUnit: string | undefined): number | null => {
-    const wantsKg = /kg/i.test(reqUnit || '')
-    const doInKg = /kg/i.test(doUnit || '')
-    if (!wantsKg || doInKg) return 1
-    return kgPerBag[code] ?? kgPerBag[baseCode(code)] ?? parseKgPerBag(code, desc)
-  }
-
-  // Resolve a DO line code to the actual item in the Master (exact or base). null = unknown item.
-  const resolveItem = (code: string): { code: string; unit: string } | null => {
-    if (doItems[code] != null) return { code, unit: doItems[code] }
-    const b = baseCode(code)
-    if (doItems[b] != null) return { code: b, unit: doItems[b] }
-    return null
-  }
-
-  // Upload a Delivery Order PDF → Claude reads the lines → look up the items → open the review modal
-  async function onDoFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (file) {
-      setDoBusy(true); setError(''); setSuccess('')
-      try {
-        const b64 = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(file) })
-        const resp = await fetch('/api/extract-delivery-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pdfBase64: b64 }) })
-        const data = await resp.json()
-        if (!resp.ok) { setError(data.error || 'Could not read the document.'); setDoBusy(false); if (doFileRef.current) doFileRef.current.value = ''; return }
-        const dd = data as DeliveryOrder
-        // Look up the units of every code (and its base code) so we know what's a real item
-        const codes = [...new Set(dd.lines.flatMap(l => [l.item_code, baseCode(l.item_code)]))]
-        const { data: items } = await supabase.from('items').select('code, unit').in('code', codes)
-        const m: Record<string, string> = {}
-        ;(items || []).forEach(r => { m[r.code] = r.unit || '' })
-        setDoItems(m)
-        setDoData(dd)
-      } catch { setError('Upload failed — please try again.') }
-      setDoBusy(false)
-    }
-    if (doFileRef.current) doFileRef.current.value = ''
-  }
-
-  // Apply the reviewed delivery order. Matched → receive against the request; known-but-unrequested →
-  // receive into stock flagged "unplanned"; unknown code → skipped with a warning.
-  async function applyDo() {
-    if (!doData) return
-    setDoBusy(true); setError(''); setSuccess('')
-    const byCode: Record<string, { qty: number; unit: string; desc: string; batch: string }> = {}
-    doData.lines.forEach(l => {
-      const g = (byCode[l.item_code] = byCode[l.item_code] || { qty: 0, unit: l.unit, desc: l.description, batch: '' })
-      g.qty += Number(l.quantity) || 0
-      if (!g.batch) g.batch = l.batch_no
-    })
-    let applied = 0, unplanned = 0, needFactor = 0
-    const unknown: string[] = []
-    for (const code of Object.keys(byCode)) {
-      const g = byCode[code]
-      const lines = matchLines(code)
-      if (lines.length > 0) {
-        const factor = bagFactor(code, g.desc, g.unit, lines[0].unit)
-        if (factor === null) { needFactor++; continue }
-        const { error: e } = await supabase.rpc('receive_combined_lot', { p_item_ids: lines.map(l => l.id), p_qty: g.qty * factor, p_batch_no: g.batch || null, p_exp_date: null, p_do_number: doData.do_number || null })
-        if (e) { setError(`${code}: ${e.message}`); setDoBusy(false); return }
-        applied++
-      } else {
-        const item = resolveItem(code)
-        if (!item) { unknown.push(code); continue }
-        const factor = bagFactor(code, g.desc, g.unit, item.unit)
-        if (factor === null) { needFactor++; continue }
-        const { error: e } = await supabase.rpc('receive_stock_direct', { p_item_code: item.code, p_factory: doFactory, p_qty: g.qty * factor, p_batch_no: g.batch || null, p_exp_date: null, p_do_number: doData.do_number || null })
-        if (e) { setError(`${code}: ${e.message}`); setDoBusy(false); return }
-        unplanned++
-      }
-    }
-    setDoBusy(false); setDoData(null)
-    setSuccess(`Delivery order ${doData.do_number} applied — ${applied} against order(s)`
-      + `${unplanned ? `, ${unplanned} into stock (unplanned)` : ''}`
-      + `${needFactor ? `, ${needFactor} need a "KG per bag" set first` : ''}`
-      + `${unknown.length ? `, skipped unknown item(s): ${unknown.join(', ')}` : ''}.`)
-    load()
-  }
 
   // Build a printable Material Picking List PDF for a released run, and download it
   async function downloadPickRunPdf(runNo: string, factory: string, released_at: string, mats: MatMap, audience: string) {
@@ -417,16 +303,7 @@ export default function MaterialRequestsPage() {
           Shortfall materials requested from the warehouse.
           {isHO ? ' Showing all factories.' : ` Showing factory ${profile.factory_code}.`}
         </p>
-        <p className="text-gray-400 text-xs mb-5 -mt-3">Open requests refresh automatically when the BOM or stock changes. Once you start recording received quantities, the request is frozen.</p>
-
-        <div className="flex flex-wrap items-center gap-3 mb-5 bg-blue-50 border border-blue-100 rounded-lg p-3">
-          <span className="text-sm text-gray-700">📄 <strong>Receive from a Delivery Order</strong> — upload the warehouse PDF and it fills in the received quantities & batch numbers automatically.</span>
-          <input ref={doFileRef} type="file" accept=".pdf,application/pdf" className="hidden" onChange={onDoFile} />
-          <button onClick={() => doFileRef.current?.click()} disabled={doBusy}
-            className="ml-auto bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">
-            {doBusy ? 'Reading…' : 'Upload Delivery Order PDF'}
-          </button>
-        </div>
+        <p className="text-gray-400 text-xs mb-5 -mt-3">Open requests refresh automatically when the BOM or stock changes. Once you start recording received quantities, the request is frozen. To receive a whole Delivery Order at once, use the <strong>Goods Received</strong> tab.</p>
 
         <div className="flex gap-2 mb-5">
           {FILTERS.map(f => (
@@ -629,71 +506,6 @@ export default function MaterialRequestsPage() {
           </div>
         )}
 
-        {doData && (
-          <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => !doBusy && setDoData(null)}>
-            <div className="bg-white rounded-xl shadow-xl border w-full max-w-3xl my-8 p-6" onClick={e => e.stopPropagation()}>
-              <div className="flex items-center justify-between mb-1">
-                <h2 className="font-semibold text-lg">Delivery Order — <span className="font-mono">{doData.do_number || '—'}</span></h2>
-                <button onClick={() => setDoData(null)} disabled={doBusy} className="text-gray-400 hover:text-gray-600 text-sm disabled:opacity-50">Close</button>
-              </div>
-              <p className="text-gray-500 text-sm mb-4">
-                Dated {doData.do_date || '—'} · delivering to <strong>{isHO ? factoryName(doFactory) : doFactory}</strong>.
-                Matched items are received against their order; known items with no order go into stock flagged <em>unplanned</em>; unknown codes are skipped.
-              </p>
-              <div className="overflow-x-auto border rounded-lg">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b">
-                    <tr>{['Item', 'Description', 'Delivered', 'Batch', 'Into stock', 'Status'].map(h => (
-                      <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
-                  </thead>
-                  <tbody>
-                    {doData.lines.map((l, i) => {
-                      const lines = matchLines(l.item_code)
-                      const matched = lines.length > 0
-                      const item = matched ? null : resolveItem(l.item_code)
-                      const reqUnit = matched ? lines[0]?.unit : item?.unit
-                      const known = matched || !!item
-                      const factor = known ? bagFactor(l.item_code, l.description, l.unit, reqUnit) : 1
-                      const intoStock = factor === null ? null : num(Number(l.quantity) * factor)
-                      return (
-                        <tr key={i} className="border-b last:border-0">
-                          <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">
-                            {l.item_code}
-                            {baseCode(l.item_code) !== l.item_code && <span className="block text-gray-400 font-normal text-xs">→ {baseCode(l.item_code)}</span>}
-                          </td>
-                          <td className="px-3 py-2 text-gray-600">{l.description}</td>
-                          <td className="px-3 py-2 text-right font-semibold whitespace-nowrap">{l.quantity} {l.unit}</td>
-                          <td className="px-3 py-2 font-mono">{l.batch_no || '—'}</td>
-                          <td className="px-3 py-2 text-right whitespace-nowrap">
-                            {!known || factor === null ? '—'
-                              : <span className="font-semibold text-blue-700">{intoStock} {reqUnit}{factor !== 1 ? <span className="text-gray-400 font-normal"> ({l.quantity}×{factor})</span> : null}</span>}
-                          </td>
-                          <td className="px-3 py-2 whitespace-nowrap">
-                            {!known ? <span className="text-red-600">⚠ unknown item — skip</span>
-                              : factor === null ? <span className="text-amber-600">⚠ set KG per bag for this item</span>
-                              : matched ? <span className="text-green-600">✓ against order</span>
-                              : <span className="text-indigo-600">→ stock (unplanned)</span>}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <div className="flex items-center justify-end gap-3 mt-4">
-                <button onClick={() => setDoData(null)} disabled={doBusy} className="border px-5 py-2 rounded-lg hover:bg-gray-50 disabled:opacity-50">Cancel</button>
-                <button onClick={applyDo} disabled={doBusy || !doData.lines.some(l => {
-                  const ls = matchLines(l.item_code)
-                  const reqUnit = ls.length > 0 ? ls[0].unit : resolveItem(l.item_code)?.unit
-                  return (ls.length > 0 || resolveItem(l.item_code)) && bagFactor(l.item_code, l.description, l.unit, reqUnit) !== null
-                })}
-                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
-                  {doBusy ? 'Receiving…' : 'Receive items'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )
