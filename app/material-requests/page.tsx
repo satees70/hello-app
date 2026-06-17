@@ -40,22 +40,6 @@ const STATUS_STYLE: Record<string, string> = {
   Fulfilled: 'bg-green-100 text-green-700',
 }
 
-// Inline control to record one received delivery: quantity + batch no + expiry date
-function ReceiveControl({ disabled, onReceive }: { disabled: boolean; onReceive: (qty: number, batch: string, exp: string) => Promise<boolean> }) {
-  const [qty, setQty] = useState('')
-  const [batch, setBatch] = useState('')
-  const [exp, setExp] = useState('')
-  return (
-    <div className="flex items-center gap-1">
-      <input type="number" step="any" min="0" placeholder="qty" value={qty} onChange={e => setQty(e.target.value)} className="w-16 border rounded px-2 py-1 text-right text-xs" />
-      <input placeholder="batch #" value={batch} onChange={e => setBatch(e.target.value)} className="w-24 border rounded px-2 py-1 text-xs" />
-      <input type="date" min="2020-01-01" max="2100-12-31" value={exp} onChange={e => setExp(e.target.value)} className="border rounded px-2 py-1 text-xs" title="Expiry date of the received batch" />
-      <button disabled={disabled} onClick={async () => { const ok = await onReceive(Number(qty || 0), batch.trim(), exp); if (ok) { setQty(''); setBatch(''); setExp('') } }}
-        className="bg-blue-600 text-white px-3 py-1 rounded text-xs disabled:opacity-50 whitespace-nowrap">Receive</button>
-    </div>
-  )
-}
-
 export default function MaterialRequestsPage() {
   const { profile, loading, error: profileError } = useProfile()
   const [requests, setRequests] = useState<MaterialRequest[]>([])
@@ -91,29 +75,6 @@ export default function MaterialRequestsPage() {
   const fmtExp = (d: string | null | undefined) => {
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || '')
     return m ? `${m[3]}/${m[2]}/${m[1]}` : (d || '')
-  }
-
-  const validExp = (exp: string) => !exp || (/^\d{4}-\d{2}-\d{2}$/.test(exp) && exp >= '2020-01-01' && exp <= '2100-12-31')
-
-  // Record one received delivery against a single request line: makes a stock lot,
-  // bumps the factory's stock, and updates the request (Open → Partially Received → Fulfilled).
-  async function doReceiveItem(item: MRItem, qty: number, batch: string, exp: string): Promise<boolean> {
-    if (!(qty > 0)) { setError('Enter a received quantity greater than zero.'); return false }
-    if (!validExp(exp)) { setError('Enter a valid expiry date (year 2020–2100) or leave it blank.'); return false }
-    setBusy(item.id); setError(''); setSuccess('')
-    const { error: e } = await supabase.rpc('receive_material_lot', { p_item_id: item.id, p_qty: qty, p_batch_no: batch || null, p_exp_date: exp || null })
-    if (e) { setError(e.message); setBusy(''); return false }
-    setSuccess(`Received ${qty} ${item.item_code} into stock.`); setBusy(''); load(); return true
-  }
-
-  // Combined warehouse receiving: one physical delivery (one lot) split across the underlying lines.
-  async function doReceiveCombined(key: string, items: { id: string }[], qty: number, batch: string, exp: string): Promise<boolean> {
-    if (!(qty > 0)) { setError('Enter a received quantity greater than zero.'); return false }
-    if (!validExp(exp)) { setError('Enter a valid expiry date (year 2020–2100) or leave it blank.'); return false }
-    setBusy(key); setError(''); setSuccess('')
-    const { error: e } = await supabase.rpc('receive_combined_lot', { p_item_ids: items.map(i => i.id), p_qty: qty, p_batch_no: batch || null, p_exp_date: exp || null })
-    if (e) { setError(e.message); setBusy(''); return false }
-    setSuccess(`Received ${qty} into stock and applied to the request(s).`); setBusy(''); load(); return true
   }
 
   // Release the waiting (unreleased) requests of a factory to the warehouse as one pick run,
@@ -260,7 +221,7 @@ export default function MaterialRequestsPage() {
   // One material table; editable=true adds the Received/Remaining columns + receiving (released runs only)
   const renderMatTable = (mats: MatMap, prefix: string, editable: boolean) => {
     const list = Object.values(mats).sort((a, b) => a.code.localeCompare(b.code))
-    const heads = ['Material', 'Description', 'Unit', 'To pick', ...(editable ? ['Received', 'Remaining', 'Add received (qty · batch · expiry)'] : [])]
+    const heads = ['Material', 'Description', 'Unit', 'To pick', ...(editable ? ['Received', 'Remaining'] : [])]
     return (
       <div className="overflow-x-auto border rounded-lg">
         <table className="w-full text-sm">
@@ -281,9 +242,6 @@ export default function MaterialRequestsPage() {
                   {editable && <>
                     <td className="px-3 py-2 text-right text-gray-700">{g.received}</td>
                     <td className={`px-3 py-2 text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{remaining}</td>
-                    <td className="px-3 py-2">
-                      <ReceiveControl disabled={busy === key} onReceive={(q, b, e) => doReceiveCombined(key, g.items, q, b, e)} />
-                    </td>
                   </>}
                 </tr>
               )
@@ -418,7 +376,7 @@ export default function MaterialRequestsPage() {
                                       <div className="overflow-x-auto border rounded-lg">
                                         <table className="w-full text-sm">
                                           <thead className="bg-gray-50 border-b">
-                                            <tr>{['Material', 'Description', 'Unit', 'To make', 'Made', 'Remaining', 'Add received (qty · batch · expiry)'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr>
+                                            <tr>{['Material', 'Description', 'Unit', 'To make', 'Made', 'Remaining'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr>
                                           </thead>
                                           <tbody>
                                             {facItems.map(it => {
@@ -432,9 +390,6 @@ export default function MaterialRequestsPage() {
                                                   <td className="px-3 py-2 text-right font-semibold text-purple-700">{it.requested_qty}</td>
                                                   <td className="px-3 py-2 text-right text-gray-700">{it.received_qty}</td>
                                                   <td className={`px-3 py-2 text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{remaining}</td>
-                                                  <td className="px-3 py-2">
-                                                    <ReceiveControl disabled={busy === it.id} onReceive={(q, b, e) => doReceiveItem(it, q, b, e)} />
-                                                  </td>
                                                 </tr>
                                               )
                                             })}
@@ -477,7 +432,7 @@ export default function MaterialRequestsPage() {
                 <div className="overflow-x-auto border rounded-lg">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b">
-                      <tr>{['Material', 'Description', 'Unit', 'Requested', 'Received', 'Remaining', 'Add received (qty · batch · expiry)'].map(h => (
+                      <tr>{['Material', 'Description', 'Unit', 'Requested', 'Received', 'Remaining'].map(h => (
                         <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
                     </thead>
                     <tbody>
@@ -492,9 +447,6 @@ export default function MaterialRequestsPage() {
                             <td className="px-3 py-2 text-right font-semibold text-blue-700">{it.requested_qty}</td>
                             <td className="px-3 py-2 text-right text-gray-700">{it.received_qty}</td>
                             <td className={`px-3 py-2 text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{remaining}</td>
-                            <td className="px-3 py-2">
-                              <ReceiveControl disabled={busy === it.id} onReceive={(q, b, e) => doReceiveItem(it, q, b, e)} />
-                            </td>
                           </tr>
                         )
                       })}
