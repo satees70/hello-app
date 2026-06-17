@@ -19,6 +19,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const isAdmin = role === 'admin'
   const [pendingCount, setPendingCount] = useState(0)
   const [toasts, setToasts] = useState<Toast[]>([])
+  const [menuOpen, setMenuOpen] = useState(false)
 
   function addToast(title: string, message: string) {
     const id = Date.now() + Math.random()
@@ -100,23 +101,21 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       ...(isAdmin ? [{ href: '/admin/users', label: 'Users' }] : []),
     ] : []),
   ]
+  const currentLabel = links.find(l => l.href === pathname)?.label || ''
 
   return (
     <>
-      <nav className="bg-blue-700 text-white px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap min-w-0 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <nav className="bg-blue-700 text-white px-4 sm:px-6 py-3 flex items-center justify-between gap-3 relative">
+        <div className="flex items-center gap-3 min-w-0">
           <span className="font-bold text-lg shrink-0">AVINA</span>
-          {links.map(l => (
-            <Link key={l.href} href={l.href}
-              className={`text-sm hover:text-blue-200 inline-flex items-center shrink-0 ${pathname === l.href ? 'underline font-semibold' : ''}`}>
-              {l.label}
-              {l.href === '/sales-orders/changes' && isHO && pendingCount > 0 && (
-                <span className="ml-1.5 bg-red-500 text-white text-xs font-semibold rounded-full min-w-[1.25rem] text-center px-1.5 py-0.5 leading-none">
-                  {pendingCount}
-                </span>
-              )}
-            </Link>
-          ))}
+          <button onClick={() => setMenuOpen(o => !o)}
+            className="inline-flex items-center gap-2 bg-blue-800 hover:bg-blue-900 rounded-lg px-3 py-1.5 text-sm font-medium min-w-0">
+            <span className="text-base leading-none">☰</span>
+            <span className="truncate max-w-[45vw] sm:max-w-none">{currentLabel || 'Menu'}</span>
+            {isHO && pendingCount > 0 && !menuOpen && (
+              <span className="bg-red-500 text-white text-xs font-semibold rounded-full min-w-[1.25rem] text-center px-1.5 py-0.5 leading-none">{pendingCount}</span>
+            )}
+          </button>
         </div>
         <div className="flex items-center gap-2 sm:gap-4 text-sm shrink-0">
           <span className="bg-blue-800 px-2 sm:px-3 py-1 rounded-full text-xs whitespace-nowrap">
@@ -127,6 +126,24 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
             Logout
           </button>
         </div>
+
+        {menuOpen && (
+          <>
+            {/* click-away backdrop */}
+            <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+            <div className="absolute left-4 sm:left-6 top-full mt-1 z-50 w-60 bg-white text-gray-800 rounded-xl shadow-xl border py-1.5">
+              {links.map(l => (
+                <Link key={l.href} href={l.href} onClick={() => setMenuOpen(false)}
+                  className={`flex items-center justify-between px-4 py-2 text-sm hover:bg-blue-50 ${pathname === l.href ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700'}`}>
+                  <span>{l.label}</span>
+                  {l.href === '/sales-orders/changes' && isHO && pendingCount > 0 && (
+                    <span className="bg-red-500 text-white text-xs font-semibold rounded-full min-w-[1.25rem] text-center px-1.5 py-0.5 leading-none">{pendingCount}</span>
+                  )}
+                </Link>
+              ))}
+            </div>
+          </>
+        )}
       </nav>
 
       {toasts.length > 0 && (
