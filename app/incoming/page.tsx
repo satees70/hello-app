@@ -14,13 +14,14 @@ interface DeliveryOrder {
   status: string
   created_at: string
 }
-interface DoLine { id: string; item_code: string; description: string; quantity: number; unit: string; batch_no: string; qc_checked: boolean; photo_path: string | null }
+interface DoLine { id: string; item_code: string; description: string; quantity: number; unit: string; batch_no: string; qc_checked: boolean; photo_path: string | null; received_at: string | null }
 interface MRItem { id: string; item_code: string; unit: string; requested_qty: number; received_qty: number }
 interface MatReq { id: string; factory_code: string; status: string; material_request_items: MRItem[] }
 
 const STATUS_STYLES: Record<string, string> = {
   Processing: 'bg-blue-100 text-blue-700',
   Review: 'bg-purple-100 text-purple-700',
+  'Partially Received': 'bg-teal-100 text-teal-700',
   Received: 'bg-green-100 text-green-700',
   Error: 'bg-red-100 text-red-700',
 }
@@ -250,40 +251,69 @@ export default function IncomingPage() {
       )}
     </span>
   )
+  // Per-line Receive button (partial receiving): enabled once QC-ticked + photo + receivable
+  const receiveBtn = (l: DoLine) => {
+    if (l.received_at) return <span className="text-green-600 text-xs font-medium whitespace-nowrap">✓ Received</span>
+    const c = lineCalc(l)
+    const ready = l.qc_checked && !!l.photo_path && c.known && c.factor !== null
+    return (
+      <button onClick={() => receiveLine(l)} disabled={!ready || busyLine === l.id}
+        className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-medium disabled:opacity-40 whitespace-nowrap">
+        {busyLine === l.id ? '…' : 'Receive'}
+      </button>
+    )
+  }
 
-  async function receiveDoc() {
+  // Recompute the document's status from its lines (Review → Partially Received → Received)
+  async function refreshDoStatus(currentLines: DoLine[]) {
+    if (!linesFor) return
+    const receivable = currentLines.filter(l => { const c = lineCalc(l); return c.known && c.factor !== null })
+    const anyReceived = currentLines.some(l => l.received_at)
+    const allReceived = receivable.length > 0 && receivable.every(l => l.received_at)
+    const status = allReceived ? 'Received' : anyReceived ? 'Partially Received' : 'Review'
+    await supabase.from('delivery_orders').update({ status }).eq('id', linesFor.id)
+    setLinesFor({ ...linesFor, status })
+    loadDocs()
+  }
+
+  // Receive ONE line into stock (partial receiving). Requires QC tick + photo.
+  async function receiveLine(l: DoLine, silent = false) {
+    if (!linesFor || l.received_at) return
+    const c = lineCalc(l)
+    if (!c.known || c.factor === null) { setError(`${l.item_code}: cannot be received (unknown item or pack size).`); return }
+    if (!l.qc_checked || !l.photo_path) { setError(`${l.item_code}: tick QC and add a photo first.`); return }
+    if (!silent) { setBusyLine(l.id); setError(''); setSuccess('') }
+    const qty = Number(l.quantity) * c.factor
+    const ml = matchLines(l.item_code)
+    let err
+    if (ml.length > 0) {
+      ;({ error: err } = await supabase.rpc('receive_combined_lot', { p_item_ids: ml.map(x => x.id), p_qty: qty, p_batch_no: l.batch_no || null, p_exp_date: null, p_do_number: linesFor.do_number || null }))
+    } else {
+      const item = resolveItem(l.item_code)!
+      ;({ error: err } = await supabase.rpc('receive_stock_direct', { p_item_code: item.code, p_factory: linesFor.factory_code, p_qty: qty, p_batch_no: l.batch_no || null, p_exp_date: null, p_do_number: linesFor.do_number || null }))
+    }
+    if (err) { setError(`${l.item_code}: ${err.message}`); setBusyLine(''); return }
+    await supabase.from('delivery_order_lines').update({ received_at: new Date().toISOString() }).eq('id', l.id)
+    if (!silent) {
+      const { data } = await supabase.from('delivery_order_lines').select('*').eq('do_id', linesFor.id).order('item_code')
+      const fresh = (data as DoLine[]) || []
+      setLines(fresh); setBusyLine('')
+      await refreshDoStatus(fresh)
+      setSuccess(`Received ${l.item_code}.`)
+    }
+  }
+
+  // Receive every line that's ready (QC-ticked + photo + receivable) and not yet received
+  async function receiveAllReady() {
     if (!linesFor) return
     setReceiving(true); setError(''); setSuccess('')
-    const byCode: Record<string, { qty: number; unit: string; desc: string; batch: string }> = {}
-    lines.forEach(l => { const g = (byCode[l.item_code] = byCode[l.item_code] || { qty: 0, unit: l.unit, desc: l.description, batch: '' }); g.qty += Number(l.quantity) || 0; if (!g.batch) g.batch = l.batch_no })
-    let applied = 0, unplanned = 0, needFactor = 0
-    const unknown: string[] = []
-    for (const code of Object.keys(byCode)) {
-      const g = byCode[code]
-      const ml = matchLines(code)
-      if (ml.length > 0) {
-        const factor = bagFactor(code, g.desc, g.unit)
-        if (factor === null) { needFactor++; continue }
-        const { error: e } = await supabase.rpc('receive_combined_lot', { p_item_ids: ml.map(l => l.id), p_qty: g.qty * factor, p_batch_no: g.batch || null, p_exp_date: null, p_do_number: linesFor.do_number || null })
-        if (e) { setError(`${code}: ${e.message}`); setReceiving(false); return }
-        applied++
-      } else {
-        const item = resolveItem(code)
-        if (!item) { unknown.push(code); continue }
-        const factor = bagFactor(code, g.desc, g.unit)
-        if (factor === null) { needFactor++; continue }
-        const { error: e } = await supabase.rpc('receive_stock_direct', { p_item_code: item.code, p_factory: linesFor.factory_code, p_qty: g.qty * factor, p_batch_no: g.batch || null, p_exp_date: null, p_do_number: linesFor.do_number || null })
-        if (e) { setError(`${code}: ${e.message}`); setReceiving(false); return }
-        unplanned++
-      }
-    }
-    await supabase.from('delivery_orders').update({ status: 'Received' }).eq('id', linesFor.id)
-    setReceiving(false); setLinesFor(null)
-    setSuccess(`Received ${linesFor.do_number || linesFor.file_name} — ${applied} against order(s)`
-      + `${unplanned ? `, ${unplanned} into stock (unplanned)` : ''}`
-      + `${needFactor ? `, ${needFactor} need a "KG per bag" set first` : ''}`
-      + `${unknown.length ? `, skipped unknown: ${unknown.join(', ')}` : ''}.`)
-    loadDocs()
+    const ready = lines.filter(l => !l.received_at && l.qc_checked && l.photo_path && (() => { const c = lineCalc(l); return c.known && c.factor !== null })())
+    for (const l of ready) await receiveLine(l, true)
+    const { data } = await supabase.from('delivery_order_lines').select('*').eq('do_id', linesFor.id).order('item_code')
+    const fresh = (data as DoLine[]) || []
+    setLines(fresh); setReceiving(false)
+    await refreshDoStatus(fresh)
+    setSuccess(`Received ${ready.length} item(s) into stock.`)
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
@@ -344,15 +374,15 @@ export default function IncomingPage() {
               <h2 className="font-semibold text-lg">{linesFor.do_number || linesFor.file_name} <span className="text-gray-400 font-normal text-sm">· {isHO ? factoryName(linesFor.factory_code) : linesFor.factory_code} · {linesFor.do_date || '—'}</span></h2>
               <button onClick={() => setLinesFor(null)} className="text-gray-400 hover:text-gray-600 text-sm">Close</button>
             </div>
-            <p className="text-gray-500 text-sm mb-3">QC must <strong>tick</strong> and add a <strong>photo</strong> for every line before it can be received. Matched items go against their order; known items with no order go into stock flagged <em>unplanned</em>; unknown codes are skipped. Bag/carton quantities convert to KG.</p>
+            <p className="text-gray-500 text-sm mb-3">For each line: QC <strong>ticks</strong> and adds a <strong>photo</strong>, then <strong>Receive</strong> that item. You can receive some now and the rest later (partial). Matched items go against their order; known items with no order go into stock flagged <em>unplanned</em>; unknown codes are skipped. Bag/carton quantities convert to KG.</p>
             {/* Mobile: one card per line (no side-scrolling) */}
             <div className="md:hidden space-y-3">
               {lines.length === 0 && <p className="text-center py-6 text-gray-400 border rounded-lg">No lines read from this document.</p>}
               {lines.map(l => {
                 const c = lineCalc(l)
-                const editable = linesFor.status !== 'Received'
+                const editable = !l.received_at
                 return (
-                  <div key={l.id} className={`border rounded-lg p-3 ${l.qc_checked && l.photo_path ? 'border-green-300 bg-green-50/40' : ''}`}>
+                  <div key={l.id} className={`border rounded-lg p-3 ${l.received_at ? 'border-green-300 bg-green-50/60' : (l.qc_checked && l.photo_path ? 'border-green-200 bg-green-50/30' : '')}`}>
                     <div className="flex items-start justify-between gap-2">
                       <div className="font-mono font-medium text-sm">{l.item_code}{baseCode(l.item_code) !== l.item_code && <span className="block text-gray-400 font-normal text-xs">→ {baseCode(l.item_code)}</span>}</div>
                       <div className="text-xs text-right">{statusNode(c.known, c.factor, c.matched)}</div>
@@ -363,9 +393,10 @@ export default function IncomingPage() {
                       <span className="text-gray-500">Batch: <span className="font-mono">{l.batch_no || '—'}</span></span>
                       {c.known && c.factor !== null && <span className="text-gray-500">Into stock: <strong className="text-blue-700">{c.into} {c.unit}</strong>{c.factor !== 1 ? <span className="text-gray-400"> ({l.quantity}×{c.factor})</span> : null}</span>}
                     </div>
-                    <div className="flex items-center justify-between mt-3 pt-2 border-t">
+                    <div className="mt-3 pt-2 border-t flex flex-wrap items-center gap-3">
                       <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">{qcBox(l, editable)} QC checked</label>
                       {photoCtl(l, editable)}
+                      <span className="ml-auto">{receiveBtn(l)}</span>
                     </div>
                   </div>
                 )
@@ -376,16 +407,16 @@ export default function IncomingPage() {
             <div className="hidden md:block overflow-x-auto border rounded-lg">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b">
-                  <tr>{['QC', 'Photo', 'Item', 'Description', 'Delivered', 'Batch', 'Into stock', 'Status'].map(h => (
-                    <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+                  <tr>{['QC', 'Photo', 'Item', 'Description', 'Delivered', 'Batch', 'Into stock', 'Status', ''].map((h, i) => (
+                    <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
                 </thead>
                 <tbody>
-                  {lines.length === 0 && <tr><td colSpan={8} className="text-center py-6 text-gray-400">No lines read from this document.</td></tr>}
+                  {lines.length === 0 && <tr><td colSpan={9} className="text-center py-6 text-gray-400">No lines read from this document.</td></tr>}
                   {lines.map(l => {
                     const c = lineCalc(l)
-                    const editable = linesFor.status !== 'Received'
+                    const editable = !l.received_at
                     return (
-                      <tr key={l.id} className="border-b last:border-0">
+                      <tr key={l.id} className={`border-b last:border-0 ${l.received_at ? 'bg-green-50/40' : ''}`}>
                         <td className="px-3 py-2 text-center">{qcBox(l, editable)}</td>
                         <td className="px-3 py-2 whitespace-nowrap">{photoCtl(l, editable)}</td>
                         <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{l.item_code}{baseCode(l.item_code) !== l.item_code && <span className="block text-gray-400 font-normal text-xs">→ {baseCode(l.item_code)}</span>}</td>
@@ -394,26 +425,26 @@ export default function IncomingPage() {
                         <td className="px-3 py-2 font-mono">{l.batch_no || '—'}</td>
                         <td className="px-3 py-2 text-right whitespace-nowrap">{!c.known || c.factor === null ? '—' : <span className="font-semibold text-blue-700">{c.into} {c.unit}{c.factor !== 1 ? <span className="text-gray-400 font-normal"> ({l.quantity}×{c.factor})</span> : null}</span>}</td>
                         <td className="px-3 py-2 whitespace-nowrap">{statusNode(c.known, c.factor, c.matched)}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">{receiveBtn(l)}</td>
                       </tr>
                     )
                   })}
                 </tbody>
               </table>
             </div>
-            {linesFor.status !== 'Received' ? (() => {
-              const allReady = lines.length > 0 && lines.every(l => l.qc_checked && l.photo_path)
+            {(() => {
+              const receivedCount = lines.filter(l => l.received_at).length
+              const readyCount = lines.filter(l => !l.received_at && l.qc_checked && l.photo_path && (() => { const c = lineCalc(l); return c.known && c.factor !== null })()).length
               return (
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3 mt-4">
-                  {!allReady && <span className="text-amber-600 text-sm sm:mr-auto">⚠ Tick QC and add a photo for every line before receiving.</span>}
-                  <button onClick={receiveDoc} disabled={receiving || !allReady}
-                    className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium w-full sm:w-auto">
-                    {receiving ? 'Receiving…' : 'Receive into stock'}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3 mt-4">
+                  <span className="text-sm text-gray-500">{receivedCount} of {lines.length} item(s) received{readyCount ? ` · ${readyCount} ready` : ''}.</span>
+                  <button onClick={receiveAllReady} disabled={receiving || readyCount === 0}
+                    className="sm:ml-auto bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium w-full sm:w-auto">
+                    {receiving ? 'Receiving…' : `Receive all ready${readyCount ? ` (${readyCount})` : ''}`}
                   </button>
                 </div>
               )
-            })() : (
-              <p className="text-green-600 text-sm mt-4">✓ This delivery order has been received.</p>
-            )}
+            })()}
           </div>
         )}
       </div>
