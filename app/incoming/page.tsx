@@ -218,6 +218,39 @@ export default function IncomingPage() {
   const intoUnit = (factor: number, fallback: string | undefined) => factor === 1 ? (fallback || '') : 'KG'
   const num = (n: number) => Number(Number(n).toPrecision(12))
 
+  // Per-line computed display values (shared by the desktop table and mobile cards)
+  const lineCalc = (l: DoLine) => {
+    const ml = matchLines(l.item_code)
+    const matched = ml.length > 0
+    const item = matched ? null : resolveItem(l.item_code)
+    const known = matched || !!item
+    const factor = known ? bagFactor(l.item_code, l.description, l.unit) : 1
+    const into = factor === null ? null : num(Number(l.quantity) * factor)
+    const unit = factor === null ? '' : intoUnit(factor, matched ? ml[0]?.unit : item?.unit)
+    return { matched, known, factor, into, unit }
+  }
+  const statusNode = (known: boolean, factor: number | null, matched: boolean) =>
+    !known ? <span className="text-red-600">⚠ unknown item — skip</span>
+      : factor === null ? <span className="text-amber-600">⚠ set KG per bag</span>
+        : matched ? <span className="text-green-600">✓ against order</span>
+          : <span className="text-indigo-600">→ stock (unplanned)</span>
+  const qcBox = (l: DoLine, editable: boolean) => (
+    <input type="checkbox" checked={l.qc_checked} disabled={!editable} onChange={() => toggleQc(l)} className="h-5 w-5" />
+  )
+  const photoCtl = (l: DoLine, editable: boolean) => (
+    <span className="inline-flex items-center gap-2 whitespace-nowrap">
+      {l.photo_path
+        ? <button onClick={() => viewLinePhoto(l.photo_path!)} className="text-green-600 hover:underline text-xs">✓ View{editable ? ' / retake' : ''}</button>
+        : <span className="text-amber-600 text-xs">no photo</span>}
+      {editable && (
+        <label className="cursor-pointer text-blue-600 hover:underline text-xs">
+          {busyLine === l.id ? '…' : '📷 Photo'}
+          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) onLinePhoto(l, f); e.target.value = '' }} />
+        </label>
+      )}
+    </span>
+  )
+
   async function receiveDoc() {
     if (!linesFor) return
     setReceiving(true); setError(''); setSuccess('')
@@ -312,7 +345,35 @@ export default function IncomingPage() {
               <button onClick={() => setLinesFor(null)} className="text-gray-400 hover:text-gray-600 text-sm">Close</button>
             </div>
             <p className="text-gray-500 text-sm mb-3">QC must <strong>tick</strong> and add a <strong>photo</strong> for every line before it can be received. Matched items go against their order; known items with no order go into stock flagged <em>unplanned</em>; unknown codes are skipped. Bag/carton quantities convert to KG.</p>
-            <div className="overflow-x-auto border rounded-lg">
+            {/* Mobile: one card per line (no side-scrolling) */}
+            <div className="md:hidden space-y-3">
+              {lines.length === 0 && <p className="text-center py-6 text-gray-400 border rounded-lg">No lines read from this document.</p>}
+              {lines.map(l => {
+                const c = lineCalc(l)
+                const editable = linesFor.status !== 'Received'
+                return (
+                  <div key={l.id} className={`border rounded-lg p-3 ${l.qc_checked && l.photo_path ? 'border-green-300 bg-green-50/40' : ''}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="font-mono font-medium text-sm">{l.item_code}{baseCode(l.item_code) !== l.item_code && <span className="block text-gray-400 font-normal text-xs">→ {baseCode(l.item_code)}</span>}</div>
+                      <div className="text-xs text-right">{statusNode(c.known, c.factor, c.matched)}</div>
+                    </div>
+                    <div className="text-gray-600 text-sm mt-1">{l.description}</div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm mt-2">
+                      <span className="text-gray-500">Delivered: <strong className="text-gray-800">{l.quantity} {l.unit}</strong></span>
+                      <span className="text-gray-500">Batch: <span className="font-mono">{l.batch_no || '—'}</span></span>
+                      {c.known && c.factor !== null && <span className="text-gray-500">Into stock: <strong className="text-blue-700">{c.into} {c.unit}</strong>{c.factor !== 1 ? <span className="text-gray-400"> ({l.quantity}×{c.factor})</span> : null}</span>}
+                    </div>
+                    <div className="flex items-center justify-between mt-3 pt-2 border-t">
+                      <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">{qcBox(l, editable)} QC checked</label>
+                      {photoCtl(l, editable)}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Desktop: table */}
+            <div className="hidden md:block overflow-x-auto border rounded-lg">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b">
                   <tr>{['QC', 'Photo', 'Item', 'Description', 'Delivered', 'Batch', 'Into stock', 'Status'].map(h => (
@@ -321,41 +382,18 @@ export default function IncomingPage() {
                 <tbody>
                   {lines.length === 0 && <tr><td colSpan={8} className="text-center py-6 text-gray-400">No lines read from this document.</td></tr>}
                   {lines.map(l => {
-                    const ml = matchLines(l.item_code)
-                    const matched = ml.length > 0
-                    const item = matched ? null : resolveItem(l.item_code)
-                    const known = matched || !!item
-                    const factor = known ? bagFactor(l.item_code, l.description, l.unit) : 1
-                    const into = factor === null ? null : num(Number(l.quantity) * factor)
-                    const unit = factor === null ? '' : intoUnit(factor, matched ? ml[0]?.unit : item?.unit)
+                    const c = lineCalc(l)
                     const editable = linesFor.status !== 'Received'
                     return (
                       <tr key={l.id} className="border-b last:border-0">
-                        <td className="px-3 py-2 text-center">
-                          <input type="checkbox" checked={l.qc_checked} disabled={!editable} onChange={() => toggleQc(l)} className="h-4 w-4" />
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          {l.photo_path
-                            ? <button onClick={() => viewLinePhoto(l.photo_path!)} className="text-green-600 hover:underline text-xs">✓ View{editable ? ' / retake' : ''}</button>
-                            : <span className="text-amber-600 text-xs">no photo</span>}
-                          {editable && (
-                            <label className="ml-2 cursor-pointer text-blue-600 hover:underline text-xs">
-                              {busyLine === l.id ? '…' : '📷'}
-                              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) onLinePhoto(l, f); e.target.value = '' }} />
-                            </label>
-                          )}
-                        </td>
+                        <td className="px-3 py-2 text-center">{qcBox(l, editable)}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">{photoCtl(l, editable)}</td>
                         <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{l.item_code}{baseCode(l.item_code) !== l.item_code && <span className="block text-gray-400 font-normal text-xs">→ {baseCode(l.item_code)}</span>}</td>
                         <td className="px-3 py-2 text-gray-600">{l.description}</td>
                         <td className="px-3 py-2 text-right font-semibold whitespace-nowrap">{l.quantity} {l.unit}</td>
                         <td className="px-3 py-2 font-mono">{l.batch_no || '—'}</td>
-                        <td className="px-3 py-2 text-right whitespace-nowrap">{!known || factor === null ? '—' : <span className="font-semibold text-blue-700">{into} {unit}{factor !== 1 ? <span className="text-gray-400 font-normal"> ({l.quantity}×{factor})</span> : null}</span>}</td>
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          {!known ? <span className="text-red-600">⚠ unknown item — skip</span>
-                            : factor === null ? <span className="text-amber-600">⚠ set KG per bag</span>
-                            : matched ? <span className="text-green-600">✓ against order</span>
-                            : <span className="text-indigo-600">→ stock (unplanned)</span>}
-                        </td>
+                        <td className="px-3 py-2 text-right whitespace-nowrap">{!c.known || c.factor === null ? '—' : <span className="font-semibold text-blue-700">{c.into} {c.unit}{c.factor !== 1 ? <span className="text-gray-400 font-normal"> ({l.quantity}×{c.factor})</span> : null}</span>}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">{statusNode(c.known, c.factor, c.matched)}</td>
                       </tr>
                     )
                   })}
@@ -365,10 +403,10 @@ export default function IncomingPage() {
             {linesFor.status !== 'Received' ? (() => {
               const allReady = lines.length > 0 && lines.every(l => l.qc_checked && l.photo_path)
               return (
-                <div className="flex items-center justify-end gap-3 mt-4">
-                  {!allReady && <span className="text-amber-600 text-sm mr-auto">⚠ Tick QC and add a photo for every line before receiving.</span>}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3 mt-4">
+                  {!allReady && <span className="text-amber-600 text-sm sm:mr-auto">⚠ Tick QC and add a photo for every line before receiving.</span>}
                   <button onClick={receiveDoc} disabled={receiving || !allReady}
-                    className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
+                    className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium w-full sm:w-auto">
                     {receiving ? 'Receiving…' : 'Receive into stock'}
                   </button>
                 </div>
