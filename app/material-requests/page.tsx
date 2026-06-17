@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { supabase } from '@/lib/supabase'
@@ -15,6 +15,8 @@ interface MRItem {
   requested_qty: number
   received_qty: number
 }
+interface DoLine { item_code: string; description: string; quantity: number; unit: string; batch_no: string }
+interface DeliveryOrder { do_number: string; do_date: string; factory_no: string; lines: DoLine[] }
 interface MaterialRequest {
   id: string
   request_no: string
@@ -66,6 +68,9 @@ export default function MaterialRequestsPage() {
   const [success, setSuccess] = useState('')
   const [factoryItems, setFactoryItems] = useState<Set<string>>(new Set()) // item codes supplied by the factory
   const [expEdits, setExpEdits] = useState<Record<string, string>>({}) // request id -> EXP date being typed
+  const [doData, setDoData] = useState<DeliveryOrder | null>(null) // extracted delivery order awaiting review
+  const [doBusy, setDoBusy] = useState(false)
+  const doFileRef = useRef<HTMLInputElement>(null)
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
@@ -141,6 +146,56 @@ export default function MaterialRequestsPage() {
     setSuccess(`Expiry date saved for ${r.production_batches?.item_code}.`)
     setBusy('')
     setExpEdits(prev => { const n = { ...prev }; delete n[r.id]; return n })
+    load()
+  }
+
+  // The factory a delivery order is for: the branch number in its header (HO), else the user's factory
+  const doFactory = doData ? (isHO ? `AVINA${doData.factory_no}` : profile?.factory_code || '') : ''
+  // Open/partial request lines for that factory + item code, OLDEST first (for receive distribution)
+  const matchItems = (code: string) => {
+    const ids: string[] = []
+    ;[...requests].reverse().filter(r => ACTIVE.includes(r.status) && r.factory_code === doFactory)
+      .forEach(r => (r.material_request_items || []).forEach(it => { if (it.item_code === code) ids.push(it.id) }))
+    return ids
+  }
+
+  // Upload a Delivery Order PDF → Claude reads the lines → opens the review modal
+  async function onDoFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (file) {
+      setDoBusy(true); setError(''); setSuccess('')
+      try {
+        const b64 = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(file) })
+        const resp = await fetch('/api/extract-delivery-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pdfBase64: b64 }) })
+        const data = await resp.json()
+        if (!resp.ok) setError(data.error || 'Could not read the document.')
+        else setDoData(data as DeliveryOrder)
+      } catch { setError('Upload failed — please try again.') }
+      setDoBusy(false)
+    }
+    if (doFileRef.current) doFileRef.current.value = ''
+  }
+
+  // Apply the reviewed delivery order: receive each matched item (sum qty, carry the batch no)
+  async function applyDo() {
+    if (!doData) return
+    setDoBusy(true); setError(''); setSuccess('')
+    const byCode: Record<string, { qty: number; batch: string }> = {}
+    doData.lines.forEach(l => {
+      const g = (byCode[l.item_code] = byCode[l.item_code] || { qty: 0, batch: '' })
+      g.qty += Number(l.quantity) || 0
+      if (!g.batch) g.batch = l.batch_no
+    })
+    let applied = 0, skipped = 0
+    for (const code of Object.keys(byCode)) {
+      const ids = matchItems(code)
+      if (ids.length === 0) { skipped++; continue }
+      const { error: e } = await supabase.rpc('receive_combined_lot', { p_item_ids: ids, p_qty: byCode[code].qty, p_batch_no: byCode[code].batch || null, p_exp_date: null })
+      if (e) { setError(`${code}: ${e.message}`); setDoBusy(false); return }
+      applied++
+    }
+    setDoBusy(false); setDoData(null)
+    setSuccess(`Delivery order ${doData.do_number} applied — received ${applied} item(s)${skipped ? `, ${skipped} not in any open request (skipped)` : ''}.`)
     load()
   }
 
@@ -303,6 +358,15 @@ export default function MaterialRequestsPage() {
           {isHO ? ' Showing all factories.' : ` Showing factory ${profile.factory_code}.`}
         </p>
         <p className="text-gray-400 text-xs mb-5 -mt-3">Open requests refresh automatically when the BOM or stock changes. Once you start recording received quantities, the request is frozen.</p>
+
+        <div className="flex flex-wrap items-center gap-3 mb-5 bg-blue-50 border border-blue-100 rounded-lg p-3">
+          <span className="text-sm text-gray-700">📄 <strong>Receive from a Delivery Order</strong> — upload the warehouse PDF and it fills in the received quantities & batch numbers automatically.</span>
+          <input ref={doFileRef} type="file" accept=".pdf,application/pdf" className="hidden" onChange={onDoFile} />
+          <button onClick={() => doFileRef.current?.click()} disabled={doBusy}
+            className="ml-auto bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">
+            {doBusy ? 'Reading…' : 'Upload Delivery Order PDF'}
+          </button>
+        </div>
 
         <div className="flex gap-2 mb-5">
           {FILTERS.map(f => (
@@ -502,6 +566,54 @@ export default function MaterialRequestsPage() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {doData && (
+          <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => !doBusy && setDoData(null)}>
+            <div className="bg-white rounded-xl shadow-xl border w-full max-w-3xl my-8 p-6" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-1">
+                <h2 className="font-semibold text-lg">Delivery Order — <span className="font-mono">{doData.do_number || '—'}</span></h2>
+                <button onClick={() => setDoData(null)} disabled={doBusy} className="text-gray-400 hover:text-gray-600 text-sm disabled:opacity-50">Close</button>
+              </div>
+              <p className="text-gray-500 text-sm mb-4">
+                Dated {doData.do_date || '—'} · delivering to <strong>{isHO ? factoryName(doFactory) : doFactory}</strong>.
+                Each matched item will be received into stock with its batch number. Items not in an open request are skipped.
+              </p>
+              <div className="overflow-x-auto border rounded-lg">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b">
+                    <tr>{['Item', 'Description', 'Qty', 'Batch', 'Status'].map(h => (
+                      <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+                  </thead>
+                  <tbody>
+                    {doData.lines.map((l, i) => {
+                      const matched = matchItems(l.item_code).length > 0
+                      return (
+                        <tr key={i} className="border-b last:border-0">
+                          <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{l.item_code}</td>
+                          <td className="px-3 py-2 text-gray-600">{l.description}</td>
+                          <td className="px-3 py-2 text-right font-semibold">{l.quantity}</td>
+                          <td className="px-3 py-2 font-mono">{l.batch_no || '—'}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            {matched
+                              ? <span className="text-green-600">✓ will receive</span>
+                              : <span className="text-amber-600">⚠ not in an open request</span>}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center justify-end gap-3 mt-4">
+                <button onClick={() => setDoData(null)} disabled={doBusy} className="border px-5 py-2 rounded-lg hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+                <button onClick={applyDo} disabled={doBusy || !doData.lines.some(l => matchItems(l.item_code).length > 0)}
+                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
+                  {doBusy ? 'Receiving…' : 'Receive matched items'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
