@@ -19,7 +19,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const isAdmin = role === 'admin'
   const [pendingCount, setPendingCount] = useState(0)
   const [toasts, setToasts] = useState<Toast[]>([])
-  const [menuOpen, setMenuOpen] = useState(false)
+  const [openMenu, setOpenMenu] = useState<string | null>(null)
 
   function addToast(title: string, message: string) {
     const id = Date.now() + Math.random()
@@ -115,22 +115,46 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       ...(isHO && isAdmin ? [{ href: '/admin/users', label: 'Users' }] : []),
     ] },
   ].filter(g => g.items.length > 0)
-  const links = menuGroups.flatMap(g => g.items)
-  const currentLabel = links.find(l => l.href === pathname)?.label || ''
-
   return (
     <>
-      <nav className="bg-blue-700 text-white px-4 sm:px-6 py-3 flex items-center justify-between gap-3 relative">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="font-bold text-lg shrink-0">AVINA</span>
-          <button onClick={() => setMenuOpen(o => !o)}
-            className="inline-flex items-center gap-2 bg-blue-800 hover:bg-blue-900 rounded-lg px-3 py-1.5 text-sm font-medium min-w-0">
-            <span className="text-base leading-none">☰</span>
-            <span className="truncate max-w-[45vw] sm:max-w-none">{currentLabel || 'Menu'}</span>
-            {isHO && pendingCount > 0 && !menuOpen && (
-              <span className="bg-red-500 text-white text-xs font-semibold rounded-full min-w-[1.25rem] text-center px-1.5 py-0.5 leading-none">{pendingCount}</span>
-            )}
-          </button>
+      <nav className="bg-blue-700 text-white px-4 sm:px-6 flex items-center justify-between gap-3 relative z-50">
+        <div className="flex items-stretch gap-0.5 min-w-0 overflow-x-auto whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <span className="font-bold text-lg shrink-0 self-center mr-3">AVINA</span>
+          {menuGroups.map((g, gi) => {
+            // Top-level group with no header → render its items as direct bar links
+            if (!g.header) return g.items.map(l => (
+              <Link key={l.href} href={l.href} onClick={() => setOpenMenu(null)}
+                className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-3 text-sm hover:bg-blue-800 ${pathname === l.href ? 'bg-blue-800 font-semibold' : ''}`}>
+                {l.label}
+                {l.href === '/sales-orders/changes' && isHO && pendingCount > 0 && (
+                  <span className="bg-red-500 text-white text-xs font-semibold rounded-full min-w-[1.25rem] text-center px-1.5 py-0.5 leading-none">{pendingCount}</span>
+                )}
+              </Link>
+            ))
+            // Otherwise → a top menu button that opens a dropdown
+            const open = openMenu === g.header
+            const activeHere = g.items.some(l => l.href === pathname)
+            return (
+              <div key={gi} className="relative shrink-0">
+                <button
+                  onClick={() => setOpenMenu(open ? null : g.header!)}
+                  onMouseEnter={() => { if (openMenu) setOpenMenu(g.header!) }}
+                  className={`inline-flex items-center gap-1 px-3 py-3 text-sm hover:bg-blue-800 ${open || activeHere ? 'bg-blue-800 font-semibold' : ''}`}>
+                  {g.header}<span className="text-[10px] opacity-80">▾</span>
+                </button>
+                {open && (
+                  <div className="absolute left-0 top-full z-50 w-56 bg-white text-gray-800 rounded-b-lg shadow-xl border py-1.5">
+                    {g.items.map(l => (
+                      <Link key={l.href} href={l.href} onClick={() => setOpenMenu(null)}
+                        className={`flex items-center justify-between px-4 py-2 text-sm hover:bg-blue-50 ${pathname === l.href ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700'}`}>
+                        <span>{l.label}</span>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
         <div className="flex items-center gap-2 sm:gap-4 text-sm shrink-0">
           <span className="bg-blue-800 px-2 sm:px-3 py-1 rounded-full text-xs whitespace-nowrap">
@@ -141,32 +165,9 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
             Logout
           </button>
         </div>
-
-        {menuOpen && (
-          <>
-            {/* click-away backdrop */}
-            <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
-            <div className="absolute left-4 sm:left-6 top-full mt-1 z-50 w-60 bg-white text-gray-800 rounded-xl shadow-xl border py-1.5 max-h-[80vh] overflow-y-auto">
-              {menuGroups.map((g, gi) => (
-                <div key={gi} className={gi > 0 ? 'border-t mt-1 pt-1' : ''}>
-                  {g.header && (
-                    <div className="px-4 pt-1.5 pb-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{g.header}</div>
-                  )}
-                  {g.items.map(l => (
-                    <Link key={l.href} href={l.href} onClick={() => setMenuOpen(false)}
-                      className={`flex items-center justify-between px-4 py-2 text-sm hover:bg-blue-50 ${pathname === l.href ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700'}`}>
-                      <span>{l.label}</span>
-                      {l.href === '/sales-orders/changes' && isHO && pendingCount > 0 && (
-                        <span className="bg-red-500 text-white text-xs font-semibold rounded-full min-w-[1.25rem] text-center px-1.5 py-0.5 leading-none">{pendingCount}</span>
-                      )}
-                    </Link>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </>
-        )}
       </nav>
+      {/* click-away backdrop (below the nav so other top menus stay clickable) */}
+      {openMenu && <div className="fixed inset-0 z-40" onClick={() => setOpenMenu(null)} />}
 
       {toasts.length > 0 && (
         <div className="fixed bottom-4 right-4 z-50 space-y-2">
