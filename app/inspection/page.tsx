@@ -10,6 +10,7 @@ type Form = Record<string, string | boolean | Hourly[]>
 const blankHour = (): Hourly => ({ time: '', weight: '', ink: '', temp: '', speed: '', bubble: '', drop: '', alu: '', speed_belt: '', fe: '', nonfe: '', ss: '', remarks: '' })
 const EMPTY: Form = {
   date: '', area_machine: '', no: '', code: '', product: '',
+  prod_start: '', prod_end: '', qty_produced: '',
   bn_raw_material: '', rm_weight_in: '', total_used: '', plastic: '', bn_plastic: '', wastage: '',
   moisture_pct: '', moisture_max: '', temp_in: '', temp_out: '', speed_in: '', speed_out: '', time_in: '', time_out: '',
   printing_clear: false, product_weigh: '', exp_in: '', exp_out: '', bubble: '', broken: '', ok: '',
@@ -29,6 +30,11 @@ export default function InspectionPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [factoryCode, setFactoryCode] = useState('')
+  const [batchNo, setBatchNo] = useState('')
+  const [planned, setPlanned] = useState(0)
+  const [produced, setProduced] = useState(0)   // total produced on the batch so far
+  const [recordedQty, setRecordedQty] = useState(0) // qty already recorded by THIS inspection record
+  const [recording, setRecording] = useState(false)
 
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get('batch') || ''
@@ -38,13 +44,15 @@ export default function InspectionPage() {
   useEffect(() => { if (profile && batchId) loadForBatch(batchId) }, [profile, batchId])
 
   async function loadForBatch(id: string) {
-    const { data: batch } = await supabase.from('production_batches').select('item_code, description, factory_code, exp_date, produced_qty').eq('id', id).single()
-    if (batch) setFactoryCode(batch.factory_code)
+    const { data: batch } = await supabase.from('production_batches').select('batch_no, item_code, description, factory_code, exp_date, total_quantity, produced_qty').eq('id', id).single()
+    if (batch) { setFactoryCode(batch.factory_code); setBatchNo(batch.batch_no); setPlanned(Number(batch.total_quantity || 0)); setProduced(Number(batch.produced_qty || 0)) }
     // existing inspection record for this batch?
     const { data: rec } = await supabase.from('inspection_records').select('*').eq('production_batch_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle()
     if (rec) {
       setRecordId(rec.id)
-      setF({ ...EMPTY, ...(rec.data as Form) })
+      const d = rec.data as Record<string, unknown>
+      setRecordedQty(Number(d.recorded_qty || 0))
+      setF({ ...EMPTY, ...(d as Form) })
       return
     }
     // new — prefill from the batch + the raw-material batches we consumed
@@ -65,18 +73,40 @@ export default function InspectionPage() {
   })
   const addHour = () => setF(prev => ({ ...prev, hourly: [...(prev.hourly as Hourly[]), blankHour()] }))
 
+  // Save the form (incl. recorded_qty); returns the record id
+  async function persist(recQty: number): Promise<string | null> {
+    if (!profile) return null
+    const payload = { production_batch_id: batchId || null, factory_code: factoryCode || profile.factory_code, data: { ...f, recorded_qty: recQty }, updated_at: new Date().toISOString() }
+    if (recordId) { const { error: e } = await supabase.from('inspection_records').update(payload).eq('id', recordId); if (e) { setError(e.message); return null } return recordId }
+    const { data, error: e } = await supabase.from('inspection_records').insert({ ...payload, created_by: profile.id }).select('id').single()
+    if (e || !data) { setError(e?.message || 'Save failed'); return null }
+    setRecordId(data.id); return data.id
+  }
+
   async function save() {
-    if (!profile) return
     setBusy(true); setError(''); setSuccess('')
-    const payload = { production_batch_id: batchId || null, factory_code: factoryCode || profile.factory_code, data: f, updated_at: new Date().toISOString() }
-    let err
-    if (recordId) ({ error: err } = await supabase.from('inspection_records').update(payload).eq('id', recordId))
-    else {
-      const { data, error: e } = await supabase.from('inspection_records').insert({ ...payload, created_by: profile.id }).select('id').single()
-      err = e; if (data) setRecordId(data.id)
-    }
-    if (err) { setError(err.message); setBusy(false); return }
-    setSuccess('Inspection record saved.'); setBusy(false)
+    const id = await persist(recordedQty)
+    setBusy(false); if (id) setSuccess('Inspection record saved.')
+  }
+
+  // Record production into stock from the inspection's "quantity produced" — consumes raw materials (FEFO).
+  // Records the delta vs what this inspection already booked, so pressing again only books the new amount.
+  async function recordProductionFromForm() {
+    if (!batchId) { setError('No production batch linked.'); return }
+    const qty = Number(s('qty_produced') || 0)
+    if (!(qty > 0)) { setError('Enter the quantity produced first.'); return }
+    const delta = qty - recordedQty
+    if (delta <= 0) { setError(`This inspection has already recorded ${recordedQty}. Increase the quantity produced to record more.`); return }
+    setRecording(true); setError(''); setSuccess('')
+    const id = await persist(qty)
+    if (!id) { setRecording(false); return }
+    const { data, error: rpcErr } = await supabase.rpc('record_production', { p_batch_id: batchId, p_qty: delta })
+    if (rpcErr) { setError(rpcErr.message); await persist(recordedQty); setRecording(false); return } // roll the stored qty back on failure
+    const short = (data as { shortfalls?: { item_code: string; short: number }[] })?.shortfalls || []
+    setRecordedQty(qty); setProduced(p => p + delta)
+    setSuccess(`Recorded ${delta} produced (total ${qty}). Raw materials consumed from stock.`
+      + (short.length ? ` ⚠ Short on: ${short.map(x => `${x.item_code} (${x.short})`).join(', ')}.` : ''))
+    setRecording(false)
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
@@ -130,6 +160,30 @@ export default function InspectionPage() {
             <Field label="B/N Plastic"><In k="bn_plastic" /></Field>
             <Field label="Weigh of wastage & type"><In k="wastage" /></Field>
           </div>
+
+          {/* Production run — start/end + quantity produced (drives stock consumption) */}
+          {batchId && (
+            <div className="border-t pt-3 bg-blue-50/40 -mx-5 px-5 py-3">
+              <div className="font-semibold text-sm mb-2">Production run <span className="font-normal text-gray-500">· batch {batchNo}</span></div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-2">
+                <Field label="Production start"><In k="prod_start" type="datetime-local" /></Field>
+                <Field label="Production end"><In k="prod_end" type="datetime-local" /></Field>
+                <Field label="Quantity produced"><In k="qty_produced" type="number" /></Field>
+                <div className="flex items-end">
+                  <button onClick={recordProductionFromForm} disabled={recording} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium w-full no-print">
+                    {recording ? 'Recording…' : 'Record production'}
+                  </button>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-4 text-xs text-gray-600">
+                <span>Planned: <strong>{planned}</strong></span>
+                <span>Produced so far: <strong className="text-green-700">{produced}</strong></span>
+                <span>Backorder: <strong className={planned - produced > 0 ? 'text-red-600' : 'text-green-600'}>{Math.max(0, planned - produced)}</strong></span>
+                {recordedQty > 0 && <span className="text-gray-400 no-print">(this record has booked {recordedQty})</span>}
+                <span className="text-gray-400 no-print">Recording consumes raw materials (earliest expiry / oldest batch first) from stock.</span>
+              </div>
+            </div>
+          )}
 
           {/* Process */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 border-t pt-3">

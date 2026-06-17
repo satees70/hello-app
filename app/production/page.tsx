@@ -59,8 +59,6 @@ export default function ProductionPage() {
   const [combineOn, setCombineOn] = useState(true)
   const [separated, setSeparated] = useState<Set<string>>(new Set())
   const [sortBy, setSortBy] = useState<'due_asc' | 'due_desc' | 'batch'>('due_asc')
-  const [prodQty, setProdQty] = useState<Record<string, string>>({}) // batch id -> qty being recorded
-  const [recording, setRecording] = useState('')
   const [consumption, setConsumption] = useState<Record<string, ConsRow[]>>({}) // batch id -> consumed lots
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -184,20 +182,6 @@ export default function ProductionPage() {
     setConsumption(prev => ({ ...prev, [batchId]: (data as ConsRow[]) || [] }))
   }
 
-  // Record produced quantity → consume raw materials FEFO from this factory's stock (traceable)
-  async function recordProduction(b: Batch) {
-    const qty = Number(prodQty[b.id] || 0)
-    if (!(qty > 0)) { setError('Enter a produced quantity greater than zero.'); return }
-    setRecording(b.id); setError(''); setSuccess('')
-    const { data, error: rpcErr } = await supabase.rpc('record_production', { p_batch_id: b.id, p_qty: qty })
-    if (rpcErr) { setError(rpcErr.message); setRecording(''); return }
-    const res = data as { shortfalls?: { item_code: string; short: number }[] }
-    const short = res?.shortfalls || []
-    setSuccess(`Recorded ${qty} produced for ${b.batch_no}.`
-      + (short.length ? ` ⚠ Not enough stock for: ${short.map(s => `${s.item_code} (short ${clean(s.short)})`).join(', ')}.` : ' Raw materials consumed from stock (earliest expiry / oldest batch first).'))
-    setRecording(''); setProdQty(p => { const n = { ...p }; delete n[b.id]; return n })
-    await loadAll(); await loadConsumption(b.id)
-  }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
   if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
@@ -415,15 +399,7 @@ export default function ProductionPage() {
                                       <span className="text-gray-500">Produced: <strong className="text-green-700">{clean(b.produced_qty || 0)}</strong></span>
                                       <span className="text-gray-500">Backorder: <strong className={b.total_quantity - (b.produced_qty || 0) > 0 ? 'text-red-600' : 'text-green-600'}>{clean(Math.max(0, b.total_quantity - (b.produced_qty || 0)))}</strong></span>
                                     </div>
-                                    <div className="flex flex-wrap items-center gap-2 mb-3">
-                                      <input type="number" step="any" min="0" placeholder="qty produced" value={prodQty[b.id] ?? ''}
-                                        onChange={e => setProdQty(p => ({ ...p, [b.id]: e.target.value }))} className="w-32 border rounded px-2 py-1.5 text-sm" />
-                                      <button onClick={() => recordProduction(b)} disabled={recording === b.id}
-                                        className="bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">
-                                        {recording === b.id ? 'Recording…' : 'Record production'}
-                                      </button>
-                                      <span className="text-gray-400 text-xs">consumes raw materials (earliest expiry / oldest batch first) from {factoryName(b.factory_code)} stock</span>
-                                    </div>
+                                    <p className="text-gray-400 text-xs mb-3">Production is recorded in the <strong>Inspection Record</strong> (start/end + actual quantity produced). Recording there consumes raw materials (earliest expiry / oldest batch first) from {factoryName(b.factory_code)} stock.</p>
                                     {consumption[b.id] && consumption[b.id].length > 0 && (
                                       <div className="overflow-x-auto border rounded-lg bg-white max-w-3xl">
                                         <table className="w-full text-xs">
