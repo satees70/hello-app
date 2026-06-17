@@ -160,15 +160,17 @@ export default function MaterialRequestsPage() {
 
   // The factory a delivery order is for: the branch number in its header (HO), else the user's factory
   const doFactory = doData ? (isHO ? `AVINA${doData.factory_no}` : profile?.factory_code || '') : ''
-  // Open/partial request LINES for that factory + item code, OLDEST first (for receive distribution)
+  // A DO code like S104-1-35KG/BAG is item S104-1 in a 35KG bag — strip the bag suffix to the base code
+  const baseCode = (code: string) => code.replace(/[-\s]*\d+(?:\.\d+)?\s*KG\s*\/\s*BAG\s*$/i, '').trim()
+  // Open/partial request LINES for that factory matching the DO code (exact OR base), OLDEST first
   const matchLines = (code: string): MRItem[] => {
+    const base = baseCode(code)
     const out: MRItem[] = []
     ;[...requests].reverse().filter(r => ACTIVE.includes(r.status) && r.factory_code === doFactory)
-      .forEach(r => (r.material_request_items || []).forEach(it => { if (it.item_code === code) out.push(it) }))
+      .forEach(r => (r.material_request_items || []).forEach(it => { if (it.item_code === code || it.item_code === base) out.push(it) }))
     return out
   }
-  // Read "KG per bag" only from the explicit "<n>KG/BAG" pattern (e.g. D982-3KG/BAG → 3),
-  // which is what genuine bulk bags use. Anything else returns null (set an override instead).
+  // Read "KG per bag" from the "<n>KG/BAG" suffix (e.g. S104-1-35KG/BAG → 35). null = unknown.
   const parseKgPerBag = (code: string, desc: string) => {
     const m = /(\d+(?:\.\d+)?)\s*KG\s*\/\s*BAG/i.exec(`${code} ${desc || ''}`)
     return m ? Number(m[1]) : null
@@ -179,7 +181,7 @@ export default function MaterialRequestsPage() {
     const isBag = /bag/i.test(doUnit || '')
     const wantsKg = /kg/i.test(reqUnit || '')
     if (!(isBag && wantsKg)) return 1
-    return kgPerBag[code] ?? parseKgPerBag(code, desc)
+    return kgPerBag[code] ?? kgPerBag[baseCode(code)] ?? parseKgPerBag(code, desc)
   }
 
   // Upload a Delivery Order PDF → Claude reads the lines → opens the review modal
@@ -624,7 +626,10 @@ export default function MaterialRequestsPage() {
                       const intoStock = factor === null ? null : num(Number(l.quantity) * factor)
                       return (
                         <tr key={i} className="border-b last:border-0">
-                          <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{l.item_code}</td>
+                          <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">
+                            {l.item_code}
+                            {baseCode(l.item_code) !== l.item_code && <span className="block text-gray-400 font-normal text-xs">→ {baseCode(l.item_code)}</span>}
+                          </td>
                           <td className="px-3 py-2 text-gray-600">{l.description}</td>
                           <td className="px-3 py-2 text-right font-semibold whitespace-nowrap">{l.quantity} {l.unit}</td>
                           <td className="px-3 py-2 font-mono">{l.batch_no || '—'}</td>
