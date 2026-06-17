@@ -406,6 +406,8 @@ export default function ProductionPage() {
                                   </ul>
                                   <button onClick={() => { setSelected(singleTarget(b)); setError(''); setSuccess('') }}
                                     className="border border-blue-600 text-blue-600 px-4 py-1.5 rounded-lg hover:bg-blue-50 text-sm font-medium">Materials</button>
+                                  <a href={`/inspection?batch=${b.id}`}
+                                    className="ml-2 border border-green-600 text-green-700 px-4 py-1.5 rounded-lg hover:bg-green-50 text-sm font-medium inline-block">📋 Inspection Record</a>
 
                                   <div className="mt-4 border-t pt-3">
                                     <div className="flex flex-wrap items-center gap-4 text-sm mb-2">
