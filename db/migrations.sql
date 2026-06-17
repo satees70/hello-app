@@ -184,6 +184,61 @@ end $$;
 grant execute on function public.receive_stock_direct(text, text, numeric, text, date, text) to authenticated;
 
 
+-- ============================================================================
+-- 2026-06 · Delivery Orders as stored documents (like Sales Orders)
+-- ============================================================================
+
+-- PDF storage bucket for delivery orders + access for logged-in users.
+insert into storage.buckets (id, name) values ('delivery-orders', 'delivery-orders') on conflict (id) do nothing;
+drop policy if exists delivery_orders_obj_all on storage.objects;
+create policy delivery_orders_obj_all on storage.objects for all to authenticated
+  using (bucket_id = 'delivery-orders') with check (bucket_id = 'delivery-orders');
+
+-- Document header (one row per uploaded DO).
+create table if not exists public.delivery_orders (
+  id uuid primary key default gen_random_uuid(),
+  file_name text not null,
+  file_path text not null,
+  do_number text,
+  do_date text,
+  factory_code text not null,
+  status text not null default 'Processing',   -- Processing → Review → Received (or Error)
+  uploaded_by uuid,
+  created_at timestamptz not null default now()
+);
+grant select, insert, update, delete on public.delivery_orders to authenticated, anon, service_role;
+alter table public.delivery_orders enable row level security;
+drop policy if exists do_read on public.delivery_orders;
+create policy do_read on public.delivery_orders for select
+  using (my_factory_code() = 'HEAD_OFFICE' or factory_code = my_factory_code());
+drop policy if exists do_write on public.delivery_orders;
+create policy do_write on public.delivery_orders for all
+  using (my_factory_code() = 'HEAD_OFFICE' or factory_code = my_factory_code())
+  with check (my_factory_code() = 'HEAD_OFFICE' or factory_code = my_factory_code());
+
+-- Extracted lines for each DO.
+create table if not exists public.delivery_order_lines (
+  id uuid primary key default gen_random_uuid(),
+  do_id uuid not null references public.delivery_orders(id) on delete cascade,
+  item_code text not null,
+  description text,
+  quantity numeric,
+  unit text,
+  batch_no text,
+  created_at timestamptz not null default now()
+);
+create index if not exists delivery_order_lines_do on public.delivery_order_lines(do_id);
+grant select, insert, update, delete on public.delivery_order_lines to authenticated, anon, service_role;
+alter table public.delivery_order_lines enable row level security;
+drop policy if exists dol_read on public.delivery_order_lines;
+create policy dol_read on public.delivery_order_lines for select
+  using (exists (select 1 from public.delivery_orders d where d.id = do_id and (my_factory_code() = 'HEAD_OFFICE' or d.factory_code = my_factory_code())));
+drop policy if exists dol_write on public.delivery_order_lines;
+create policy dol_write on public.delivery_order_lines for all
+  using (exists (select 1 from public.delivery_orders d where d.id = do_id and (my_factory_code() = 'HEAD_OFFICE' or d.factory_code = my_factory_code())))
+  with check (exists (select 1 from public.delivery_orders d where d.id = do_id and (my_factory_code() = 'HEAD_OFFICE' or d.factory_code = my_factory_code())));
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.
