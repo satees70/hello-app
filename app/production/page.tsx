@@ -44,7 +44,6 @@ export default function ProductionPage() {
   const [boms, setBoms] = useState<BomComp[]>([])
   const [stock, setStock] = useState<Record<string, number>>({})
   const [filter, setFilter] = useState<Filter>('All')
-  const [updating, setUpdating] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
@@ -112,12 +111,14 @@ export default function ProductionPage() {
     )
   }
 
-  async function setStatus(b: Batch, status: string) {
-    setUpdating(b.id); setError('')
-    const { error: updErr } = await supabase.from('production_batches').update({ status }).eq('id', b.id)
-    if (updErr) { setError(updErr.message); setUpdating(''); return }
-    setBatches(prev => prev.map(x => (x.id === b.id ? { ...x, status } : x)))
-    setUpdating('')
+  // Status is automatic — derived from the workflow, never set by hand:
+  // produced fully → Completed; some produced → In Progress; request raised → Requested; else Planned.
+  function derivedStatus(b: Batch): string {
+    const produced = Number(b.produced_qty || 0)
+    if (produced >= b.total_quantity && b.total_quantity > 0) return 'Completed'
+    if (produced > 0) return 'In Progress'
+    if (b.material_request_id) return 'Requested'
+    return 'Planned'
   }
 
   // Explode a BOM for a given item/factory/quantity
@@ -193,12 +194,12 @@ export default function ProductionPage() {
   }
   const fromTs = dateFrom ? new Date(dateFrom + 'T00:00:00').getTime() : null
   const toTs = dateTo ? new Date(dateTo + 'T00:00:00').getTime() : null
-  let shown = filter === 'All' ? batches : batches.filter(b => b.status === filter)
+  let shown = filter === 'All' ? batches : batches.filter(b => derivedStatus(b) === filter)
   if (fromTs !== null) shown = shown.filter(b => { const k = dateKey(b.delivery_date); return k !== Number.MAX_SAFE_INTEGER && k >= fromTs })
   if (toTs !== null) shown = shown.filter(b => { const k = dateKey(b.delivery_date); return k !== Number.MAX_SAFE_INTEGER && k <= toTs })
   if (isHO && factoryFilter) shown = shown.filter(b => b.factory_code === factoryFilter)
   const counts: Record<string, number> = { Planned: 0, Requested: 0, 'In Progress': 0, Completed: 0 }
-  batches.forEach(b => { counts[b.status] = (counts[b.status] || 0) + 1 })
+  batches.forEach(b => { const st = derivedStatus(b); counts[st] = (counts[st] || 0) + 1 })
 
   const exploded = selected ? explode(selected.item_code, selected.factory_code, selected.total) : null
   const totalShortfall = exploded ? exploded.rows.reduce((s, r) => s + r.shortfall, 0) : 0
@@ -217,7 +218,7 @@ export default function ProductionPage() {
 
   // Build display units for a factory's batches when Combine is on
   function buildUnits(fb: Batch[]) {
-    const combinable = fb.filter(b => b.status === 'Planned' && !b.material_request_id && !separated.has(b.id))
+    const combinable = fb.filter(b => derivedStatus(b) === 'Planned' && !b.material_request_id && !separated.has(b.id))
     const byItem: Record<string, Batch[]> = {}
     combinable.forEach(b => { (byItem[b.item_code] = byItem[b.item_code] || []).push(b) })
     const combos = Object.values(byItem).filter(m => m.length >= 2)
@@ -361,11 +362,8 @@ export default function ProductionPage() {
                               <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span>{bomBadge(b.item_code)}</td>
                               <td className="px-3 py-2 font-semibold whitespace-nowrap">{b.total_quantity}</td>
                               <td className="px-3 py-2 whitespace-nowrap">{b.delivery_date || '—'}</td>
-                              <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
-                                <select value={b.status} disabled={updating === b.id} onChange={e => setStatus(b, e.target.value)}
-                                  className={`border rounded-lg px-2 py-1 text-xs ${STATUS_STYLE[b.status] || 'bg-white'}`}>
-                                  {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                                </select>
+                              <td className="px-3 py-2">
+                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[derivedStatus(b)] || 'bg-gray-100 text-gray-700'}`}>{derivedStatus(b)}</span>
                               </td>
                               <td className="px-3 py-2 text-right whitespace-nowrap">
                                 {combineOn && separated.has(b.id) && <button onClick={e => { e.stopPropagation(); toggleSeparate(b.id) }} className="text-blue-600 hover:underline text-xs mr-2">↩ Combine</button>}
