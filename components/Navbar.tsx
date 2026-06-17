@@ -93,6 +93,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     { href: '/material-requests', label: 'Material Requests' },
     { href: '/incoming', label: 'Goods Received' },
     { href: '/stock', label: 'Stock' },
+    { href: '/traceability', label: 'Traceability' },
     ...(isHO ? [
       { href: '/admin/bom', label: 'BOM' },
       { href: '/admin/location-map', label: 'Location Map' },
