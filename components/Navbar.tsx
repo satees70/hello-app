@@ -89,6 +89,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     { href: '/sales-orders', label: 'Sales Orders' },
     { href: '/sales-orders/changes', label: 'Pending Changes' },
     { href: '/production', label: 'Order Board' },
+    { href: '/packing', label: 'Packing Schedule' },
     { href: '/material-requests', label: 'Material Requests' },
     { href: '/incoming', label: 'Goods Received' },
     { href: '/stock', label: 'Stock' },
