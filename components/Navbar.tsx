@@ -84,23 +84,35 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     router.replace('/login')
   }
 
-  const links = [
-    { href: '/dashboard', label: 'Dashboard' },
-    { href: '/admin/items', label: 'Items' },
-    { href: '/sales-orders', label: 'Sales Orders' },
-    { href: '/sales-orders/changes', label: 'Pending Changes' },
-    { href: '/production', label: 'Order Board' },
-    { href: '/packing', label: 'Packing Schedule' },
-    { href: '/material-requests', label: 'Material Requests' },
-    { href: '/incoming', label: 'Goods Received' },
-    { href: '/stock', label: 'Stock' },
-    { href: '/traceability', label: 'Traceability' },
-    ...(isHO ? [
-      { href: '/admin/bom', label: 'BOM' },
-      { href: '/admin/location-map', label: 'Location Map' },
-      ...(isAdmin ? [{ href: '/admin/users', label: 'Users' }] : []),
-    ] : []),
+  // Menu grouped by area so it's easy to scan (group with no header = top-level)
+  const menuGroups: { header?: string; items: { href: string; label: string }[] }[] = [
+    { items: [{ href: '/dashboard', label: 'Dashboard' }] },
+    { header: 'Sales', items: [
+      { href: '/sales-orders', label: 'Sales Orders' },
+      { href: '/sales-orders/changes', label: 'Pending Changes' },
+    ] },
+    { header: 'Production', items: [
+      { href: '/production', label: 'Order Board' },
+      { href: '/packing', label: 'Packing Schedule' },
+    ] },
+    { header: 'Receiving', items: [
+      { href: '/material-requests', label: 'Material Requests' },
+      { href: '/incoming', label: 'Goods Received' },
+      { href: '/stock', label: 'Stock' },
+    ] },
+    { header: 'Reports', items: [
+      { href: '/traceability', label: 'Traceability' },
+    ] },
+    { header: 'Setup', items: [
+      { href: '/admin/items', label: 'Items' },
+      ...(isHO ? [
+        { href: '/admin/bom', label: 'BOM' },
+        { href: '/admin/location-map', label: 'Location Map' },
+        ...(isAdmin ? [{ href: '/admin/users', label: 'Users' }] : []),
+      ] : []),
+    ] },
   ]
+  const links = menuGroups.flatMap(g => g.items)
   const currentLabel = links.find(l => l.href === pathname)?.label || ''
 
   return (
@@ -131,15 +143,22 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
           <>
             {/* click-away backdrop */}
             <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
-            <div className="absolute left-4 sm:left-6 top-full mt-1 z-50 w-60 bg-white text-gray-800 rounded-xl shadow-xl border py-1.5">
-              {links.map(l => (
-                <Link key={l.href} href={l.href} onClick={() => setMenuOpen(false)}
-                  className={`flex items-center justify-between px-4 py-2 text-sm hover:bg-blue-50 ${pathname === l.href ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700'}`}>
-                  <span>{l.label}</span>
-                  {l.href === '/sales-orders/changes' && isHO && pendingCount > 0 && (
-                    <span className="bg-red-500 text-white text-xs font-semibold rounded-full min-w-[1.25rem] text-center px-1.5 py-0.5 leading-none">{pendingCount}</span>
+            <div className="absolute left-4 sm:left-6 top-full mt-1 z-50 w-60 bg-white text-gray-800 rounded-xl shadow-xl border py-1.5 max-h-[80vh] overflow-y-auto">
+              {menuGroups.map((g, gi) => (
+                <div key={gi} className={gi > 0 ? 'border-t mt-1 pt-1' : ''}>
+                  {g.header && (
+                    <div className="px-4 pt-1.5 pb-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{g.header}</div>
                   )}
-                </Link>
+                  {g.items.map(l => (
+                    <Link key={l.href} href={l.href} onClick={() => setMenuOpen(false)}
+                      className={`flex items-center justify-between px-4 py-2 text-sm hover:bg-blue-50 ${pathname === l.href ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700'}`}>
+                      <span>{l.label}</span>
+                      {l.href === '/sales-orders/changes' && isHO && pendingCount > 0 && (
+                        <span className="bg-red-500 text-white text-xs font-semibold rounded-full min-w-[1.25rem] text-center px-1.5 py-0.5 leading-none">{pendingCount}</span>
+                      )}
+                    </Link>
+                  ))}
+                </div>
               ))}
             </div>
           </>
