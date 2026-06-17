@@ -160,8 +160,10 @@ export default function MaterialRequestsPage() {
 
   // The factory a delivery order is for: the branch number in its header (HO), else the user's factory
   const doFactory = doData ? (isHO ? `AVINA${doData.factory_no}` : profile?.factory_code || '') : ''
-  // A DO code like S104-1-35KG/BAG is item S104-1 in a 35KG bag — strip the bag suffix to the base code
-  const baseCode = (code: string) => code.replace(/[-\s]*\d+(?:\.\d+)?\s*KG\s*\/\s*BAG\s*$/i, '').trim()
+  // A DO code like S104-1-35KG/BAG or D323-P-8KG/CTN = item S104-1 / D323-P in a 35KG / 8KG pack —
+  // strip the trailing "-<n>KG/<BAG|CTN|CARTON>" to get the base code the recipe uses
+  const PACK = 'BAG|CTN|CARTON'
+  const baseCode = (code: string) => code.replace(new RegExp(`[-\\s]*\\d+(?:\\.\\d+)?\\s*KG\\s*\\/\\s*(?:${PACK})\\s*$`, 'i'), '').trim()
   // Open/partial request LINES for that factory matching the DO code (exact OR base), OLDEST first
   const matchLines = (code: string): MRItem[] => {
     const base = baseCode(code)
@@ -170,17 +172,17 @@ export default function MaterialRequestsPage() {
       .forEach(r => (r.material_request_items || []).forEach(it => { if (it.item_code === code || it.item_code === base) out.push(it) }))
     return out
   }
-  // Read "KG per bag" from the "<n>KG/BAG" suffix (e.g. S104-1-35KG/BAG → 35). null = unknown.
+  // Read KG-per-pack from the "<n>KG/<BAG|CTN|CARTON>" suffix (e.g. D323-P-8KG/CTN → 8). null = unknown.
   const parseKgPerBag = (code: string, desc: string) => {
-    const m = /(\d+(?:\.\d+)?)\s*KG\s*\/\s*BAG/i.exec(`${code} ${desc || ''}`)
+    const m = new RegExp(`(\\d+(?:\\.\\d+)?)\\s*KG\\s*\\/\\s*(?:${PACK})`, 'i').exec(`${code} ${desc || ''}`)
     return m ? Number(m[1]) : null
   }
-  // Conversion factor for a DO line vs the matching request unit. 1 = no conversion;
-  // null = the delivery is in bags & request is in KG but the bag size is unknown.
+  // Conversion factor: convert when the request is in KG and the delivery is NOT already in KG.
+  // 1 = no conversion; null = need a per-pack KG (delivery is in packs but the size is unknown).
   const bagFactor = (code: string, desc: string, doUnit: string, reqUnit: string | undefined): number | null => {
-    const isBag = /bag/i.test(doUnit || '')
     const wantsKg = /kg/i.test(reqUnit || '')
-    if (!(isBag && wantsKg)) return 1
+    const doInKg = /kg/i.test(doUnit || '')
+    if (!wantsKg || doInKg) return 1
     return kgPerBag[code] ?? kgPerBag[baseCode(code)] ?? parseKgPerBag(code, desc)
   }
 

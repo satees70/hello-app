@@ -207,10 +207,10 @@ export default function ItemsPage() {
                 </label>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">KG per bag <span className="text-gray-400 font-normal">(optional)</span></label>
+                <label className="block text-sm font-medium mb-1">KG per bag / carton <span className="text-gray-400 font-normal">(optional)</span></label>
                 <input type="number" step="any" min="0" value={form.kg_per_bag} onChange={e => setForm({ ...form, kg_per_bag: e.target.value })}
                   className="w-full border rounded-lg px-3 py-2" placeholder="e.g. 3 — only if the code doesn't show it" />
-                <p className="text-xs text-gray-400 mt-1">Used to convert a Delivery Order's BAG quantities into KG. Normally read from the code (e.g. 3KG/BAG); set this only for exceptions.</p>
+                <p className="text-xs text-gray-400 mt-1">Used to convert a Delivery Order's BAG/CTN quantities into KG. Normally read from the code (e.g. 3KG/BAG, 8KG/CTN); set this only for exceptions.</p>
               </div>
             </div>
             {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded">{error}</p>}
