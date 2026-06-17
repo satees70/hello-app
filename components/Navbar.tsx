@@ -118,7 +118,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   return (
     <>
       <nav className="bg-blue-700 text-white px-4 sm:px-6 flex items-center justify-between gap-3 relative z-50">
-        <div className="flex items-stretch gap-0.5 min-w-0 overflow-x-auto whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="flex items-stretch flex-wrap gap-0.5 min-w-0">
           <span className="font-bold text-lg shrink-0 self-center mr-3">AVINA</span>
           {menuGroups.map((g, gi) => {
             // Top-level group with no header → render its items as direct bar links
