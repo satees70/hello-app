@@ -13,16 +13,36 @@ export default function DashboardPage() {
   const isHO = profile.factory_code === 'HEAD_OFFICE'
   const isAdmin = profile.role === 'admin'
 
-  const cards = [
-    { href: '/admin/items', label: 'Items Master', desc: 'View and manage all items', show: true },
-    { href: '/sales-orders', label: 'Sales Orders', desc: 'Upload and track sales order PDFs', show: true },
-    { href: '/sales-orders/changes', label: isHO ? 'Pending Changes' : 'My Change Requests', desc: isHO ? 'Approve or reject line change requests' : 'Track change requests you raised', show: true },
-    { href: '/production', label: 'Production Board', desc: 'Production batches from confirmed orders', show: true },
-    { href: '/material-requests', label: 'Material Requests', desc: 'Material shortfalls requested from the warehouse', show: true },
-    { href: '/admin/bom', label: 'Bill of Materials', desc: 'Define recipes for manufactured items', show: isHO },
-    { href: '/admin/location-map', label: 'Location Map', desc: 'Map location codes to factories', show: isHO },
-    { href: '/admin/users', label: 'User Management', desc: 'Create and manage user accounts', show: isHO && isAdmin },
-  ].filter(c => c.show)
+  // Same grouping as the top menu (group with no header = shown first, no heading)
+  type Card = { href: string; label: string; desc: string }
+  const groups: { header?: string; items: Card[] }[] = [
+    { items: [
+      { href: '/sales-orders/changes', label: isHO ? 'Pending Changes' : 'My Change Requests', desc: isHO ? 'Approve or reject line change requests' : 'Track change requests you raised' },
+    ] },
+    { header: 'Sales', items: [
+      { href: '/sales-orders', label: 'Sales Orders', desc: 'Upload and track sales order PDFs' },
+    ] },
+    { header: 'Receiving', items: [
+      { href: '/material-requests', label: 'Material Requests', desc: 'Material shortfalls requested from the warehouse' },
+      { href: '/incoming', label: 'Goods Received', desc: 'Receive deliveries (DO) into stock' },
+    ] },
+    { header: 'Production', items: [
+      { href: '/production', label: 'Order Board', desc: 'Production batches from confirmed orders' },
+      { href: '/packing', label: 'Packing Schedule', desc: 'What to pack today, by line' },
+    ] },
+    { header: 'Reports', items: [
+      { href: '/stock', label: 'Stock', desc: 'Stock on hand by batch and expiry' },
+      { href: '/traceability', label: 'Traceability', desc: 'Recall report — trace batches & materials' },
+      { href: '/admin/items', label: 'Items Master', desc: 'View and manage all items' },
+      ...(isHO ? [
+        { href: '/admin/bom', label: 'Bill of Materials', desc: 'Define recipes for manufactured items' },
+        { href: '/admin/location-map', label: 'Location Map', desc: 'Map location codes to factories' },
+      ] : []),
+    ] },
+    { header: 'Setup', items: [
+      ...(isHO && isAdmin ? [{ href: '/admin/users', label: 'User Management', desc: 'Create and manage user accounts' }] : []),
+    ] },
+  ].filter(g => g.items.length > 0)
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -32,13 +52,21 @@ export default function DashboardPage() {
         <p className="text-gray-500 mb-8">
           {isHO ? 'Head Office — you can see all factories' : `Factory: ${profile.factory_code}`}
         </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {cards.map(card => (
-            <Link key={card.href} href={card.href}
-              className="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition">
-              <h2 className="font-semibold text-lg mb-1">{card.label}</h2>
-              <p className="text-gray-500 text-sm">{card.desc}</p>
-            </Link>
+
+        <div className="space-y-7">
+          {groups.map((g, gi) => (
+            <div key={gi}>
+              {g.header && <h2 className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-2">{g.header}</h2>}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {g.items.map(card => (
+                  <Link key={card.href} href={card.href}
+                    className="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition">
+                    <h3 className="font-semibold text-lg mb-1">{card.label}</h3>
+                    <p className="text-gray-500 text-sm">{card.desc}</p>
+                  </Link>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       </div>
