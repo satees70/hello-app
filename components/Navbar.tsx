@@ -84,34 +84,37 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     router.replace('/login')
   }
 
-  // Menu grouped by area so it's easy to scan (group with no header = top-level)
+  // Menu grouped by area so it's easy to scan (group with no header = top-level).
+  // Empty groups (e.g. Setup for non-HO users) are dropped below.
   const menuGroups: { header?: string; items: { href: string; label: string }[] }[] = [
-    { items: [{ href: '/dashboard', label: 'Dashboard' }] },
+    { items: [
+      { href: '/dashboard', label: 'Dashboard' },
+      { href: '/sales-orders/changes', label: 'Pending Changes' },
+    ] },
     { header: 'Sales', items: [
       { href: '/sales-orders', label: 'Sales Orders' },
-      { href: '/sales-orders/changes', label: 'Pending Changes' },
+    ] },
+    { header: 'Receiving', items: [
+      { href: '/material-requests', label: 'Material Requests' },
+      { href: '/incoming', label: 'Goods Received' },
     ] },
     { header: 'Production', items: [
       { href: '/production', label: 'Order Board' },
       { href: '/packing', label: 'Packing Schedule' },
     ] },
-    { header: 'Receiving', items: [
-      { href: '/material-requests', label: 'Material Requests' },
-      { href: '/incoming', label: 'Goods Received' },
-      { href: '/stock', label: 'Stock' },
-    ] },
     { header: 'Reports', items: [
+      { href: '/stock', label: 'Stock' },
       { href: '/traceability', label: 'Traceability' },
-    ] },
-    { header: 'Setup', items: [
       { href: '/admin/items', label: 'Items' },
       ...(isHO ? [
         { href: '/admin/bom', label: 'BOM' },
         { href: '/admin/location-map', label: 'Location Map' },
-        ...(isAdmin ? [{ href: '/admin/users', label: 'Users' }] : []),
       ] : []),
     ] },
-  ]
+    { header: 'Setup', items: [
+      ...(isHO && isAdmin ? [{ href: '/admin/users', label: 'Users' }] : []),
+    ] },
+  ].filter(g => g.items.length > 0)
   const links = menuGroups.flatMap(g => g.items)
   const currentLabel = links.find(l => l.href === pathname)?.label || ''
 
