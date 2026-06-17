@@ -8,7 +8,12 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
-const MODEL = 'claude-opus-4-8'
+// A delivery order is a clean table — Sonnet reads it accurately and much faster than Opus,
+// which avoids the serverless timeout that left documents stuck on "Processing".
+const MODEL = 'claude-sonnet-4-6'
+
+// Allow up to 60s for Claude to read the PDF (default can be as low as 10s).
+export const maxDuration = 60
 
 interface DoLine { item_code: string; description: string; quantity: number; unit: string; batch_no: string }
 

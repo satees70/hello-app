@@ -106,6 +106,20 @@ export default function IncomingPage() {
     const u: Record<string, string> = {}; (items || []).forEach(r => { u[r.code] = r.unit || '' }); setDoItems(u)
   }
 
+  // Re-run extraction for a document stuck on Processing or Error
+  async function reExtract(doc: DeliveryOrder) {
+    setError(''); setSuccess('')
+    await supabase.from('delivery_orders').update({ status: 'Processing' }).eq('id', doc.id)
+    loadDocs()
+    try {
+      const res = await fetch('/api/extract-delivery-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doId: doc.id, filePath: doc.file_path }) })
+      const r = await res.json()
+      if (!res.ok) setError(`Read failed: ${r.error || 'Unknown error'}`)
+      else setSuccess(`Read ${r.count} line(s) from "${doc.file_name}". Click View Lines to review.`)
+    } catch { setError('Could not reach the extraction service.') }
+    loadDocs()
+  }
+
   async function handleViewPdf(path: string) {
     const { data, error: e } = await supabase.storage.from('delivery-orders').createSignedUrl(path, 60)
     if (e || !data) { setError('Could not open the PDF.'); return }
@@ -220,6 +234,9 @@ export default function IncomingPage() {
                   <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{new Date(doc.created_at).toLocaleString()}</td>
                   <td className="px-4 py-3 whitespace-nowrap flex gap-3">
                     <button onClick={() => viewLines(doc)} className="text-blue-600 hover:underline text-xs">View Lines</button>
+                    {(doc.status === 'Processing' || doc.status === 'Error') && (
+                      <button onClick={() => reExtract(doc)} className="text-blue-600 hover:underline text-xs">Re-read</button>
+                    )}
                     <button onClick={() => handleViewPdf(doc.file_path)} className="text-blue-600 hover:underline text-xs">View PDF</button>
                     <button onClick={() => handleDelete(doc)} className="text-red-500 hover:underline text-xs">Delete</button>
                   </td>
