@@ -239,6 +239,14 @@ create policy dol_write on public.delivery_order_lines for all
   with check (exists (select 1 from public.delivery_orders d where d.id = do_id and (my_factory_code() = 'HEAD_OFFICE' or d.factory_code = my_factory_code())));
 
 
+-- ============================================================================
+-- 2026-06 · Delivery Order: QC tick, per-line photo, partial receiving
+-- ============================================================================
+alter table delivery_order_lines add column if not exists qc_checked boolean not null default false;
+alter table delivery_order_lines add column if not exists photo_path text;   -- one photo per line in the delivery-orders bucket
+alter table delivery_order_lines add column if not exists received_at timestamptz; -- set when that line is received (partial receiving)
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.
