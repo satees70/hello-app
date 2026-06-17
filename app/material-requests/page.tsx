@@ -167,10 +167,10 @@ export default function MaterialRequestsPage() {
       .forEach(r => (r.material_request_items || []).forEach(it => { if (it.item_code === code) out.push(it) }))
     return out
   }
-  // Read "KG per bag" from the code/description (e.g. D982-3KG/BAG → 3), else null
+  // Read "KG per bag" only from the explicit "<n>KG/BAG" pattern (e.g. D982-3KG/BAG → 3),
+  // which is what genuine bulk bags use. Anything else returns null (set an override instead).
   const parseKgPerBag = (code: string, desc: string) => {
-    const hay = `${code} ${desc || ''}`
-    const m = /(\d+(?:\.\d+)?)\s*KG\s*\/?\s*BAG/i.exec(hay) || /(\d+(?:\.\d+)?)\s*KG\b/i.exec(hay)
+    const m = /(\d+(?:\.\d+)?)\s*KG\s*\/\s*BAG/i.exec(`${code} ${desc || ''}`)
     return m ? Number(m[1]) : null
   }
   // Conversion factor for a DO line vs the matching request unit. 1 = no conversion;
