@@ -280,6 +280,33 @@ create policy pc_write on public.production_consumption for all
 -- {consumed[], shortfalls[]}. (Full body in the SQL Editor snippet / git commit.)
 
 
+-- ============================================================================
+-- 2026-06 · Packing & Finished Good Inspection Record (P07-F01)
+-- ============================================================================
+-- Digital QC inspection form tied to a production batch; all fields stored as
+-- jsonb (form a header/process/sealing/metal-detector/yield/sign-offs + form b
+-- hourly log). UI: /inspection?batch=<id>, opened from a production batch.
+create table if not exists public.inspection_records (
+  id uuid primary key default gen_random_uuid(),
+  production_batch_id uuid references public.production_batches(id) on delete set null,
+  factory_code text not null,
+  data jsonb not null default '{}'::jsonb,
+  created_by uuid,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists inspection_records_batch on public.inspection_records(production_batch_id);
+grant select, insert, update, delete on public.inspection_records to authenticated, anon, service_role;
+alter table public.inspection_records enable row level security;
+drop policy if exists ir_read on public.inspection_records;
+create policy ir_read on public.inspection_records for select
+  using (my_factory_code()='HEAD_OFFICE' or factory_code = my_factory_code());
+drop policy if exists ir_write on public.inspection_records;
+create policy ir_write on public.inspection_records for all
+  using (my_factory_code()='HEAD_OFFICE' or factory_code = my_factory_code())
+  with check (my_factory_code()='HEAD_OFFICE' or factory_code = my_factory_code());
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.
