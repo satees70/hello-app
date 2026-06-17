@@ -13,10 +13,12 @@ interface Batch {
   delivery_date: string
   factory_code: string
   total_quantity: number
+  produced_qty: number
   status: string
   material_request_id: string | null
   production_batch_items: BatchItem[]
 }
+interface ConsRow { id: string; item_code: string; description: string | null; batch_no: string | null; exp_date: string | null; qty_consumed: number; consumed_at: string }
 interface Item { id: string; code: string; description: string; unit: string; type: string }
 interface BomComp { parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean }
 
@@ -57,6 +59,9 @@ export default function ProductionPage() {
   const [combineOn, setCombineOn] = useState(true)
   const [separated, setSeparated] = useState<Set<string>>(new Set())
   const [sortBy, setSortBy] = useState<'due_asc' | 'due_desc' | 'batch'>('due_asc')
+  const [prodQty, setProdQty] = useState<Record<string, string>>({}) // batch id -> qty being recorded
+  const [recording, setRecording] = useState('')
+  const [consumption, setConsumption] = useState<Record<string, ConsRow[]>>({}) // batch id -> consumed lots
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
@@ -165,8 +170,34 @@ export default function ProductionPage() {
     await loadAll()
   }
 
-  const toggleRow = (id: string) => setExpanded(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleRow = (id: string) => setExpanded(prev => {
+    const n = new Set(prev); const had = n.has(id); had ? n.delete(id) : n.add(id)
+    if (!had && !id.startsWith('combo:') && !consumption[id]) loadConsumption(id) // load consumed batches on expand
+    return n
+  })
   const toggleSeparate = (id: string) => setSeparated(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+
+  async function loadConsumption(batchId: string) {
+    const { data } = await supabase.from('production_consumption')
+      .select('id, item_code, description, batch_no, exp_date, qty_consumed, consumed_at')
+      .eq('production_batch_id', batchId).order('consumed_at')
+    setConsumption(prev => ({ ...prev, [batchId]: (data as ConsRow[]) || [] }))
+  }
+
+  // Record produced quantity → consume raw materials FEFO from this factory's stock (traceable)
+  async function recordProduction(b: Batch) {
+    const qty = Number(prodQty[b.id] || 0)
+    if (!(qty > 0)) { setError('Enter a produced quantity greater than zero.'); return }
+    setRecording(b.id); setError(''); setSuccess('')
+    const { data, error: rpcErr } = await supabase.rpc('record_production', { p_batch_id: b.id, p_qty: qty })
+    if (rpcErr) { setError(rpcErr.message); setRecording(''); return }
+    const res = data as { shortfalls?: { item_code: string; short: number }[] }
+    const short = res?.shortfalls || []
+    setSuccess(`Recorded ${qty} produced for ${b.batch_no}.`
+      + (short.length ? ` ⚠ Not enough stock for: ${short.map(s => `${s.item_code} (short ${clean(s.short)})`).join(', ')}.` : ' Raw materials consumed from stock (earliest expiry / oldest batch first).'))
+    setRecording(''); setProdQty(p => { const n = { ...p }; delete n[b.id]; return n })
+    await loadAll(); await loadConsumption(b.id)
+  }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
   if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
@@ -375,6 +406,43 @@ export default function ProductionPage() {
                                   </ul>
                                   <button onClick={() => { setSelected(singleTarget(b)); setError(''); setSuccess('') }}
                                     className="border border-blue-600 text-blue-600 px-4 py-1.5 rounded-lg hover:bg-blue-50 text-sm font-medium">Materials</button>
+
+                                  <div className="mt-4 border-t pt-3">
+                                    <div className="flex flex-wrap items-center gap-4 text-sm mb-2">
+                                      <span className="text-gray-500">Planned: <strong className="text-gray-800">{b.total_quantity}</strong></span>
+                                      <span className="text-gray-500">Produced: <strong className="text-green-700">{clean(b.produced_qty || 0)}</strong></span>
+                                      <span className="text-gray-500">Backorder: <strong className={b.total_quantity - (b.produced_qty || 0) > 0 ? 'text-red-600' : 'text-green-600'}>{clean(Math.max(0, b.total_quantity - (b.produced_qty || 0)))}</strong></span>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                                      <input type="number" step="any" min="0" placeholder="qty produced" value={prodQty[b.id] ?? ''}
+                                        onChange={e => setProdQty(p => ({ ...p, [b.id]: e.target.value }))} className="w-32 border rounded px-2 py-1.5 text-sm" />
+                                      <button onClick={() => recordProduction(b)} disabled={recording === b.id}
+                                        className="bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">
+                                        {recording === b.id ? 'Recording…' : 'Record production'}
+                                      </button>
+                                      <span className="text-gray-400 text-xs">consumes raw materials (earliest expiry / oldest batch first) from {factoryName(b.factory_code)} stock</span>
+                                    </div>
+                                    {consumption[b.id] && consumption[b.id].length > 0 && (
+                                      <div className="overflow-x-auto border rounded-lg bg-white max-w-3xl">
+                                        <table className="w-full text-xs">
+                                          <thead className="bg-gray-50 border-b">
+                                            <tr>{['Material', 'Batch', 'Expiry', 'Consumed', 'When'].map(h => <th key={h} className="text-left px-3 py-1.5 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr>
+                                          </thead>
+                                          <tbody>
+                                            {consumption[b.id].map(cn => (
+                                              <tr key={cn.id} className="border-b last:border-0">
+                                                <td className="px-3 py-1.5 font-mono">{cn.item_code}<span className="text-gray-400 font-sans ml-1">{cn.description}</span></td>
+                                                <td className="px-3 py-1.5 font-mono">{cn.batch_no || '—'}</td>
+                                                <td className="px-3 py-1.5">{cn.exp_date ? cn.exp_date.split('-').reverse().join('/') : '—'}</td>
+                                                <td className="px-3 py-1.5 text-right font-semibold">{clean(cn.qty_consumed)}</td>
+                                                <td className="px-3 py-1.5 text-gray-400 whitespace-nowrap">{new Date(cn.consumed_at).toLocaleDateString()}</td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                             )}
