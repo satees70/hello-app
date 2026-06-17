@@ -33,6 +33,7 @@ export default function StockPage() {
     const { data } = await supabase.from('stock_lots').select('*')
       .gt('qty_remaining', 0)
       .order('exp_date', { ascending: true, nullsFirst: false })
+      .order('received_at', { ascending: true }) // no expiry → oldest received (batch) first
     setLots((data as Lot[]) || [])
   }
   async function loadFactories() {
@@ -67,7 +68,7 @@ export default function StockPage() {
       <div className="max-w-6xl mx-auto px-6 py-8">
         <h1 className="text-2xl font-bold mb-1">Stock on hand</h1>
         <p className="text-gray-500 text-sm mb-5">
-          Current stock per item, broken down by received batch and expiry date (earliest expiry first).
+          Current stock per item, broken down by received batch — used earliest-expiry first, or oldest batch first when there's no expiry (raw materials).
           {isHO ? ' Showing all factories.' : ` Showing factory ${profile.factory_code}.`}
         </p>
 
@@ -97,7 +98,7 @@ export default function StockPage() {
                   {isHO && <h2 className="font-semibold text-gray-700 mb-2">🏭 {factoryName(fc)}</h2>}
                   <div className="space-y-4">
                     {codes.map(code => {
-                      const rows = [...items[code]].sort((a, b) => (a.exp_date || '9999').localeCompare(b.exp_date || '9999'))
+                      const rows = [...items[code]].sort((a, b) => (a.exp_date || '9999').localeCompare(b.exp_date || '9999') || a.received_at.localeCompare(b.received_at))
                       const total = rows.reduce((s, r) => s + Number(r.qty_remaining), 0)
                       const desc = rows[0].description || ''
                       return (
