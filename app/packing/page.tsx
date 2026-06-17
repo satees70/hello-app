@@ -31,7 +31,7 @@ export default function PackingPage() {
   const { profile, loading, error: profileError } = useProfile()
   const [batches, setBatches] = useState<Batch[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
-  const today = new Date().toISOString().slice(0, 10)
+  const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })() // local date (not UTC)
   const [date, setDate] = useState(today)
   const [factoryFilter, setFactoryFilter] = useState('')
   const [hideDone, setHideDone] = useState(false)

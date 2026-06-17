@@ -60,7 +60,7 @@ export default function StockPage() {
   if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
   if (!profile) return null
 
-  const today = new Date().toISOString().slice(0, 10)
+  const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })() // local date (not UTC)
   const q = search.trim().toLowerCase()
   let shown = lots
   if (q) shown = shown.filter(l => `${l.item_code} ${l.description || ''}`.toLowerCase().includes(q))

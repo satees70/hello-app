@@ -72,7 +72,8 @@ export default function InspectionPage() {
     }
     const { data: cons } = await supabase.from('production_consumption').select('batch_no').eq('production_batch_id', id)
     const rmBatches = [...new Set((cons || []).map(c => c.batch_no).filter(Boolean))].join(', ')
-    setF({ ...EMPTY, date: new Date().toISOString().slice(0, 10), code: batch?.item_code || '', product: batch?.description || '', bn_raw_material: rmBatches, exp_in: batch?.exp_date || '', exp_out: batch?.exp_date || '' })
+    const td = new Date(); const localToday = `${td.getFullYear()}-${String(td.getMonth() + 1).padStart(2, '0')}-${String(td.getDate()).padStart(2, '0')}`
+    setF({ ...EMPTY, date: localToday, code: batch?.item_code || '', product: batch?.description || '', bn_raw_material: rmBatches, exp_in: batch?.exp_date || '', exp_out: batch?.exp_date || '' })
   }
 
   const set = (k: string, v: string | boolean) => setF(prev => ({ ...prev, [k]: v }))
