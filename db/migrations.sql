@@ -314,6 +314,18 @@ alter table production_batches add column if not exists pack_line text;
 alter table production_batches add column if not exists pack_date date;
 
 
+-- ============================================================================
+-- 2026-06 · Per-section user permissions (view / edit / delete)
+-- ============================================================================
+-- Each user gets a permission grid stored as jsonb on their profile, shaped
+--   { "sales": {"view":true,"edit":true,"delete":false}, "production": {...}, ... }
+-- Sections: sales, production, receiving, stock, items, bom, traceability, users.
+-- SAFETY: an EMPTY object ({}) means "not configured yet" → legacy full access,
+-- so existing users keep working until Head Office sets their grid. Admins always
+-- have full access regardless. Enforcement helper (has_perm) + RLS come in step 2.
+alter table profiles add column if not exists permissions jsonb not null default '{}'::jsonb;
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.

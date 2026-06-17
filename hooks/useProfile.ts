@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import type { Permissions } from '@/lib/permissions'
 
 export interface Profile {
   id: string
@@ -9,6 +10,7 @@ export interface Profile {
   full_name: string
   factory_code: string
   role: string
+  permissions?: Permissions | null
 }
 
 async function fetchProfile(userId: string) {
