@@ -307,6 +307,13 @@ create policy ir_write on public.inspection_records for all
   with check (my_factory_code()='HEAD_OFFICE' or factory_code = my_factory_code());
 
 
+-- ============================================================================
+-- 2026-06 · Order Board pack planning (which line packs each order & when)
+-- ============================================================================
+alter table production_batches add column if not exists pack_line text;
+alter table production_batches add column if not exists pack_date date;
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.
