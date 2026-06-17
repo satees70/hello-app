@@ -43,6 +43,18 @@ export default function StockPage() {
   const factoryName = (c: string) => factories.find(f => f.code === c)?.name || c || '—'
   const fmt = (d: string | null) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ''); return m ? `${m[3]}/${m[2]}/${m[1]}` : '—' }
   const num = (n: number) => Number(Number(n).toPrecision(12))
+  // Batch numbers usually encode a date: YYMMDD (e.g. 260606 = 6 Jun 2026) or YYMM (e.g. 2602 = Feb 2026).
+  // Read it (from the first 4–6 digit run) so stock can age by batch date and show it.
+  const batchInfo = (batch: string | null): { date: string | null; label: string } => {
+    const m = (batch || '').match(/\d{4,6}/)
+    if (!m) return { date: null, label: '' }
+    const d = m[0], yy = d.slice(0, 2), mm = d.slice(2, 4)
+    if (+mm < 1 || +mm > 12) return { date: null, label: '' }
+    if (d.length >= 6) { const dd = d.slice(4, 6); if (+dd >= 1 && +dd <= 31) return { date: `20${yy}-${mm}-${dd}`, label: `${dd}/${mm}/20${yy}` } }
+    return { date: `20${yy}-${mm}-01`, label: `${mm}/20${yy}` }
+  }
+  // Order key: expiry if any, else the batch date, else the received date — so it's FEFO or oldest-batch-first
+  const lotOrder = (l: Lot) => l.exp_date || batchInfo(l.batch_no).date || l.received_at.slice(0, 10)
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
   if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
@@ -98,7 +110,7 @@ export default function StockPage() {
                   {isHO && <h2 className="font-semibold text-gray-700 mb-2">🏭 {factoryName(fc)}</h2>}
                   <div className="space-y-4">
                     {codes.map(code => {
-                      const rows = [...items[code]].sort((a, b) => (a.exp_date || '9999').localeCompare(b.exp_date || '9999') || a.received_at.localeCompare(b.received_at))
+                      const rows = [...items[code]].sort((a, b) => lotOrder(a).localeCompare(lotOrder(b)))
                       const total = rows.reduce((s, r) => s + Number(r.qty_remaining), 0)
                       const desc = rows[0].description || ''
                       return (
@@ -119,7 +131,7 @@ export default function StockPage() {
                                   const expired = r.exp_date && r.exp_date < today
                                   return (
                                     <tr key={r.id} className={`border-b last:border-0 ${expired ? 'bg-red-50' : ''}`}>
-                                      <td className="px-3 py-2 font-mono">{r.batch_no || '—'}{r.unplanned && <span className="ml-2 px-1.5 py-0.5 rounded text-[11px] font-medium bg-indigo-100 text-indigo-700">unplanned</span>}</td>
+                                      <td className="px-3 py-2 font-mono">{r.batch_no || '—'}{batchInfo(r.batch_no).label && <span className="ml-2 text-[11px] text-gray-400 font-sans">({batchInfo(r.batch_no).label})</span>}{r.unplanned && <span className="ml-2 px-1.5 py-0.5 rounded text-[11px] font-medium bg-indigo-100 text-indigo-700 font-sans">unplanned</span>}</td>
                                       <td className={`px-3 py-2 ${expired ? 'text-red-600 font-medium' : ''}`}>{fmt(r.exp_date)}{expired ? ' (expired)' : ''}</td>
                                       <td className="px-3 py-2 text-right font-semibold">{num(r.qty_remaining)}</td>
                                       <td className="px-3 py-2 text-right text-gray-500">{num(r.qty_received)}</td>
