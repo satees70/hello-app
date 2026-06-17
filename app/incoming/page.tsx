@@ -31,7 +31,6 @@ export default function IncomingPage() {
   const { profile, loading, error: profileError } = useProfile()
   const [docs, setDocs] = useState<DeliveryOrder[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
-  const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -59,9 +58,14 @@ export default function IncomingPage() {
   }
   const factoryName = (c: string) => factories.find(f => f.code === c)?.name || c || '—'
 
-  async function handleUpload(e: React.FormEvent) {
-    e.preventDefault()
-    if (!file || !profile) return
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (file) await doUpload(file)
+    if (fileRef.current) fileRef.current.value = ''
+  }
+
+  async function doUpload(file: File) {
+    if (!profile) return
     if (file.type !== 'application/pdf') { setError('Please choose a PDF file.'); return }
     setUploading(true); setError(''); setSuccess('')
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
@@ -73,7 +77,6 @@ export default function IncomingPage() {
       .select().single()
     if (insErr || !inserted) { setError(`Saving record failed: ${insErr?.message}`); setUploading(false); return }
     setSuccess(`Uploaded "${file.name}". Reading the document with Claude…`)
-    setFile(null); if (fileRef.current) fileRef.current.value = ''
     setUploading(false); loadDocs()
     try {
       const res = await fetch('/api/extract-delivery-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doId: inserted.id, filePath: path }) })
@@ -191,12 +194,13 @@ export default function IncomingPage() {
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
         {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}
 
-        <form onSubmit={handleUpload} className="bg-white rounded-xl shadow-sm border p-6 mb-8 flex flex-wrap items-center gap-3">
-          <input ref={fileRef} type="file" accept=".pdf,application/pdf" onChange={e => setFile(e.target.files?.[0] || null)} className="text-sm" />
-          <button type="submit" disabled={!file || uploading} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">
-            {uploading ? 'Uploading…' : 'Upload Delivery Order'}
+        <div className="bg-white rounded-xl shadow-sm border p-6 mb-8 flex flex-wrap items-center gap-3">
+          <input ref={fileRef} type="file" accept=".pdf,application/pdf" onChange={onFile} className="hidden" />
+          <button onClick={() => fileRef.current?.click()} disabled={uploading} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">
+            {uploading ? 'Uploading…' : '📄 Upload Delivery Order PDF'}
           </button>
-        </form>
+          <span className="text-sm text-gray-400">Choose the warehouse PDF — it uploads and is read automatically.</span>
+        </div>
 
         <h2 className="font-semibold text-lg mb-2">Uploaded Documents</h2>
         <div className="bg-white rounded-xl shadow-sm border overflow-x-auto mb-8">
