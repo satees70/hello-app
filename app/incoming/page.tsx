@@ -16,6 +16,7 @@ interface Lot {
   received_at: string
   unplanned: boolean
   request_item_id: string | null
+  do_number: string | null
 }
 
 export default function IncomingPage() {
@@ -48,7 +49,7 @@ export default function IncomingPage() {
 
   const q = search.trim().toLowerCase()
   let shown = lots
-  if (q) shown = shown.filter(l => `${l.item_code} ${l.description || ''} ${l.batch_no || ''}`.toLowerCase().includes(q))
+  if (q) shown = shown.filter(l => `${l.item_code} ${l.description || ''} ${l.batch_no || ''} ${l.do_number || ''}`.toLowerCase().includes(q))
   if (isHO && factoryFilter) shown = shown.filter(l => l.factory_code === factoryFilter)
   if (sourceFilter === 'unplanned') shown = shown.filter(l => l.unplanned)
   if (sourceFilter === 'order') shown = shown.filter(l => !l.unplanned)
@@ -88,7 +89,7 @@ export default function IncomingPage() {
           <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">
-                <tr>{['Received', ...(isHO ? ['Factory'] : []), 'Item', 'Description', 'Batch', 'Expiry', 'Qty', 'Source'].map(h => (
+                <tr>{['Received', ...(isHO ? ['Factory'] : []), 'DO No.', 'Item', 'Description', 'Batch', 'Expiry', 'Qty', 'Source'].map(h => (
                   <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
               </thead>
               <tbody>
@@ -96,6 +97,7 @@ export default function IncomingPage() {
                   <tr key={l.id} className="border-b last:border-0 hover:bg-gray-50">
                     <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{new Date(l.received_at).toLocaleString()}</td>
                     {isHO && <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{factoryName(l.factory_code)}</td>}
+                    <td className="px-4 py-3 font-mono text-gray-500 whitespace-nowrap">{l.do_number || '—'}</td>
                     <td className="px-4 py-3 font-mono font-medium whitespace-nowrap">{l.item_code}</td>
                     <td className="px-4 py-3 text-gray-600">{l.description}</td>
                     <td className="px-4 py-3 font-mono">{l.batch_no || '—'}</td>

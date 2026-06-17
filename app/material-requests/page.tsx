@@ -238,7 +238,7 @@ export default function MaterialRequestsPage() {
       if (lines.length > 0) {
         const factor = bagFactor(code, g.desc, g.unit, lines[0].unit)
         if (factor === null) { needFactor++; continue }
-        const { error: e } = await supabase.rpc('receive_combined_lot', { p_item_ids: lines.map(l => l.id), p_qty: g.qty * factor, p_batch_no: g.batch || null, p_exp_date: null })
+        const { error: e } = await supabase.rpc('receive_combined_lot', { p_item_ids: lines.map(l => l.id), p_qty: g.qty * factor, p_batch_no: g.batch || null, p_exp_date: null, p_do_number: doData.do_number || null })
         if (e) { setError(`${code}: ${e.message}`); setDoBusy(false); return }
         applied++
       } else {
@@ -246,7 +246,7 @@ export default function MaterialRequestsPage() {
         if (!item) { unknown.push(code); continue }
         const factor = bagFactor(code, g.desc, g.unit, item.unit)
         if (factor === null) { needFactor++; continue }
-        const { error: e } = await supabase.rpc('receive_stock_direct', { p_item_code: item.code, p_factory: doFactory, p_qty: g.qty * factor, p_batch_no: g.batch || null, p_exp_date: null })
+        const { error: e } = await supabase.rpc('receive_stock_direct', { p_item_code: item.code, p_factory: doFactory, p_qty: g.qty * factor, p_batch_no: g.batch || null, p_exp_date: null, p_do_number: doData.do_number || null })
         if (e) { setError(`${code}: ${e.message}`); setDoBusy(false); return }
         unplanned++
       }
