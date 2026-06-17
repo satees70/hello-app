@@ -247,6 +247,39 @@ alter table delivery_order_lines add column if not exists photo_path text;   -- 
 alter table delivery_order_lines add column if not exists received_at timestamptz; -- set when that line is received (partial receiving)
 
 
+-- ============================================================================
+-- 2026-06 · Production recording + raw-material consumption (FEFO)
+-- ============================================================================
+-- Record actual produced qty on a batch (balance vs planned = backorder), and
+-- consume the BOM's raw materials from this factory's stock earliest-expiry /
+-- oldest-received first, logging exactly which lots were consumed.
+alter table public.production_batches add column if not exists produced_qty numeric not null default 0;
+
+create table if not exists public.production_consumption (
+  id uuid primary key default gen_random_uuid(),
+  production_batch_id uuid not null references public.production_batches(id) on delete cascade,
+  lot_id uuid references public.stock_lots(id) on delete set null,
+  item_id uuid, item_code text, description text, batch_no text, exp_date date,
+  factory_code text, qty_consumed numeric not null, run_qty numeric,
+  consumed_at timestamptz not null default now()
+);
+create index if not exists production_consumption_batch on public.production_consumption(production_batch_id);
+grant select, insert, update, delete on public.production_consumption to authenticated, anon, service_role;
+alter table public.production_consumption enable row level security;
+drop policy if exists pc_read on public.production_consumption;
+create policy pc_read on public.production_consumption for select
+  using (my_factory_code()='HEAD_OFFICE' or factory_code = my_factory_code());
+drop policy if exists pc_write on public.production_consumption;
+create policy pc_write on public.production_consumption for all
+  using (my_factory_code()='HEAD_OFFICE' or factory_code = my_factory_code())
+  with check (my_factory_code()='HEAD_OFFICE' or factory_code = my_factory_code());
+
+-- record_production(batch, qty): explode BOM, consume stock_lots FEFO (exp asc
+-- nulls last, then received_at asc), decrement item_stock, log to
+-- production_consumption, bump produced_qty, set status; returns jsonb
+-- {consumed[], shortfalls[]}. (Full body in the SQL Editor snippet / git commit.)
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.
