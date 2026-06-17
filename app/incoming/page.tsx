@@ -143,20 +143,25 @@ export default function IncomingPage() {
     ;[...requests].reverse().filter(r => ACTIVE.includes(r.status)).forEach(r => (r.material_request_items || []).forEach(it => { if (it.item_code === code || it.item_code === base) out.push(it) }))
     return out
   }
+  // Prefer the BASE code (the recipe's KG raw material, e.g. D242) over the bagged SKU (D242-25KG/BAG, unit BAG)
   const resolveItem = (code: string): { code: string; unit: string } | null => {
+    const b = baseCode(code)
+    if (b !== code && doItems[b] != null) return { code: b, unit: doItems[b] }
     if (doItems[code] != null) return { code, unit: doItems[code] }
-    const b = baseCode(code); if (doItems[b] != null) return { code: b, unit: doItems[b] }
     return null
   }
   const parseKgPerBag = (code: string, desc: string) => {
     const m = new RegExp(`(\\d+(?:\\.\\d+)?)\\s*KG\\s*\\/\\s*(?:${PACK})`, 'i').exec(`${code} ${desc || ''}`)
     return m ? Number(m[1]) : null
   }
-  const bagFactor = (code: string, desc: string, doUnit: string, reqUnit: string | undefined): number | null => {
-    const wantsKg = /kg/i.test(reqUnit || ''); const doInKg = /kg/i.test(doUnit || '')
-    if (!wantsKg || doInKg) return 1
+  // Convert when the delivery is in a pack (BAG/CTN), using the KG-per-pack from the code (e.g. 25KG/BAG → 25).
+  // Deliveries already in KG or counted Units pass through (factor 1). null = pack but size unknown.
+  const bagFactor = (code: string, desc: string, doUnit: string): number | null => {
+    if (!/bag|ctn|carton/i.test(doUnit || '')) return 1
     return kgPerBag[code] ?? kgPerBag[baseCode(code)] ?? parseKgPerBag(code, desc)
   }
+  // The unit the stock lands in: KG when a pack was converted, else the item's own unit (or the DO unit)
+  const intoUnit = (factor: number, fallback: string | undefined) => factor === 1 ? (fallback || '') : 'KG'
   const num = (n: number) => Number(Number(n).toPrecision(12))
 
   async function receiveDoc() {
@@ -170,7 +175,7 @@ export default function IncomingPage() {
       const g = byCode[code]
       const ml = matchLines(code)
       if (ml.length > 0) {
-        const factor = bagFactor(code, g.desc, g.unit, ml[0].unit)
+        const factor = bagFactor(code, g.desc, g.unit)
         if (factor === null) { needFactor++; continue }
         const { error: e } = await supabase.rpc('receive_combined_lot', { p_item_ids: ml.map(l => l.id), p_qty: g.qty * factor, p_batch_no: g.batch || null, p_exp_date: null, p_do_number: linesFor.do_number || null })
         if (e) { setError(`${code}: ${e.message}`); setReceiving(false); return }
@@ -178,7 +183,7 @@ export default function IncomingPage() {
       } else {
         const item = resolveItem(code)
         if (!item) { unknown.push(code); continue }
-        const factor = bagFactor(code, g.desc, g.unit, item.unit)
+        const factor = bagFactor(code, g.desc, g.unit)
         if (factor === null) { needFactor++; continue }
         const { error: e } = await supabase.rpc('receive_stock_direct', { p_item_code: item.code, p_factory: linesFor.factory_code, p_qty: g.qty * factor, p_batch_no: g.batch || null, p_exp_date: null, p_do_number: linesFor.do_number || null })
         if (e) { setError(`${code}: ${e.message}`); setReceiving(false); return }
@@ -266,16 +271,16 @@ export default function IncomingPage() {
                     const matched = ml.length > 0
                     const item = matched ? null : resolveItem(l.item_code)
                     const known = matched || !!item
-                    const reqUnit = matched ? ml[0]?.unit : item?.unit
-                    const factor = known ? bagFactor(l.item_code, l.description, l.unit, reqUnit) : 1
+                    const factor = known ? bagFactor(l.item_code, l.description, l.unit) : 1
                     const into = factor === null ? null : num(Number(l.quantity) * factor)
+                    const unit = factor === null ? '' : intoUnit(factor, matched ? ml[0]?.unit : item?.unit)
                     return (
                       <tr key={l.id} className="border-b last:border-0">
                         <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{l.item_code}{baseCode(l.item_code) !== l.item_code && <span className="block text-gray-400 font-normal text-xs">→ {baseCode(l.item_code)}</span>}</td>
                         <td className="px-3 py-2 text-gray-600">{l.description}</td>
                         <td className="px-3 py-2 text-right font-semibold whitespace-nowrap">{l.quantity} {l.unit}</td>
                         <td className="px-3 py-2 font-mono">{l.batch_no || '—'}</td>
-                        <td className="px-3 py-2 text-right whitespace-nowrap">{!known || factor === null ? '—' : <span className="font-semibold text-blue-700">{into} {reqUnit}{factor !== 1 ? <span className="text-gray-400 font-normal"> ({l.quantity}×{factor})</span> : null}</span>}</td>
+                        <td className="px-3 py-2 text-right whitespace-nowrap">{!known || factor === null ? '—' : <span className="font-semibold text-blue-700">{into} {unit}{factor !== 1 ? <span className="text-gray-400 font-normal"> ({l.quantity}×{factor})</span> : null}</span>}</td>
                         <td className="px-3 py-2 whitespace-nowrap">
                           {!known ? <span className="text-red-600">⚠ unknown item — skip</span>
                             : factor === null ? <span className="text-amber-600">⚠ set KG per bag</span>
