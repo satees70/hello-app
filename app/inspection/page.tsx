@@ -7,6 +7,14 @@ import { supabase } from '@/lib/supabase'
 interface Hourly { time: string; weight: string; ink: string; qc_color: string; qc_odour: string; qc_phy: string; temp: string; speed: string; press: string; drop: string; alu: string; fe: string; nonfe: string; ss: string; remarks: string }
 type Form = Record<string, string | boolean | Hourly[]>
 
+interface Seg { s: string; e: string | null }
+interface Timer { status: 'idle' | 'running' | 'paused' | 'stopped'; segments: Seg[] }
+const EMPTY_TIMER: Timer = { status: 'idle', segments: [] }
+const segMs = (seg: Seg, nowMs: number) => (seg.e ? Date.parse(seg.e) : nowMs) - Date.parse(seg.s)
+const totalMs = (t: Timer, nowMs: number) => t.segments.reduce((sum, seg) => sum + segMs(seg, nowMs), 0)
+const fmtDur = (ms: number) => { const s = Math.max(0, Math.floor(ms / 1000)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}` }
+const fmtTime = (iso: string | null) => iso ? new Date(iso).toLocaleString() : '—'
+
 const blankHour = (): Hourly => ({ time: '', weight: '', ink: '', qc_color: '', qc_odour: '', qc_phy: '', temp: '', speed: '', press: '', drop: '', alu: '', fe: '', nonfe: '', ss: '', remarks: '' })
 const EMPTY: Form = {
   date: '', area_machine: '', no: '', code: '', product: '',
@@ -36,9 +44,12 @@ export default function InspectionPage() {
   const [produced, setProduced] = useState(0)
   const [recordedQty, setRecordedQty] = useState(0)
   const [recording, setRecording] = useState(false)
+  const [timer, setTimer] = useState<Timer>(EMPTY_TIMER)
+  const [now, setNow] = useState(Date.now())
 
   useEffect(() => { setBatchId(new URLSearchParams(window.location.search).get('batch') || '') }, [])
   useEffect(() => { if (profile && batchId) loadForBatch(batchId) }, [profile, batchId])
+  useEffect(() => { if (timer.status !== 'running') return; const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id) }, [timer.status])
 
   async function loadForBatch(id: string) {
     const { data: batch } = await supabase.from('production_batches').select('batch_no, item_code, description, factory_code, exp_date, total_quantity, produced_qty').eq('id', id).single()
@@ -48,6 +59,7 @@ export default function InspectionPage() {
       setRecordId(rec.id)
       const d = rec.data as Record<string, unknown>
       setRecordedQty(Number(d.recorded_qty || 0))
+      setTimer((d.timer as Timer) || EMPTY_TIMER)
       setF({ ...EMPTY, ...(d as Form) })
       return
     }
@@ -60,15 +72,22 @@ export default function InspectionPage() {
   const setHour = (i: number, k: keyof Hourly, v: string) => setF(prev => { const h = [...(prev.hourly as Hourly[])]; h[i] = { ...h[i], [k]: v }; return { ...prev, hourly: h } })
   const addHour = () => setF(prev => ({ ...prev, hourly: [...(prev.hourly as Hourly[]), blankHour()] }))
 
-  async function persist(recQty: number): Promise<string | null> {
+  async function persist(recQty: number, t: Timer = timer, form: Form = f): Promise<string | null> {
     if (!profile) return null
-    const payload = { production_batch_id: batchId || null, factory_code: factoryCode || profile.factory_code, data: { ...f, recorded_qty: recQty }, updated_at: new Date().toISOString() }
+    const payload = { production_batch_id: batchId || null, factory_code: factoryCode || profile.factory_code, data: { ...form, recorded_qty: recQty, timer: t }, updated_at: new Date().toISOString() }
     if (recordId) { const { error: e } = await supabase.from('inspection_records').update(payload).eq('id', recordId); if (e) { setError(e.message); return null } return recordId }
     const { data, error: e } = await supabase.from('inspection_records').insert({ ...payload, created_by: profile.id }).select('id').single()
     if (e || !data) { setError(e?.message || 'Save failed'); return null }
     setRecordId(data.id); return data.id
   }
   async function save() { setBusy(true); setError(''); setSuccess(''); const id = await persist(recordedQty); setBusy(false); if (id) setSuccess('Inspection record saved.') }
+
+  // Production timer — Start / Pause / Resume / Stop. Net run time excludes pauses.
+  async function applyTimer(t: Timer, form: Form = f) { setTimer(t); setF(form); setNow(Date.now()); await persist(recordedQty, t, form) }
+  const startTimer = () => { const iso = new Date().toISOString(); applyTimer({ status: 'running', segments: [{ s: iso, e: null }] }, { ...f, prod_start: iso }) }
+  const pauseTimer = () => { const iso = new Date().toISOString(); const segs = timer.segments.map((sg, i) => i === timer.segments.length - 1 && !sg.e ? { ...sg, e: iso } : sg); applyTimer({ status: 'paused', segments: segs }) }
+  const resumeTimer = () => { const iso = new Date().toISOString(); applyTimer({ status: 'running', segments: [...timer.segments, { s: iso, e: null }] }) }
+  const stopTimer = () => { const iso = new Date().toISOString(); const segs = timer.segments.map((sg, i) => i === timer.segments.length - 1 && !sg.e ? { ...sg, e: iso } : sg); applyTimer({ status: 'stopped', segments: segs }, { ...f, prod_end: iso }) }
 
   async function recordProductionFromForm() {
     if (!batchId) { setError('No production batch linked.'); return }
@@ -147,9 +166,28 @@ export default function InspectionPage() {
           {batchId && (
             <div className="border-t pt-3 bg-blue-50/40 -mx-5 px-5 py-3">
               <div className="font-semibold text-sm mb-2">Production run <span className="font-normal text-gray-500">· batch {batchNo}</span></div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-2">
-                <Field label="Production start"><In k="prod_start" type="datetime-local" /></Field>
-                <Field label="Production end"><In k="prod_end" type="datetime-local" /></Field>
+              <div className="mb-3">
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  {timer.status === 'idle' && <button onClick={startTimer} className="bg-green-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium no-print">▶ Start</button>}
+                  {timer.status === 'running' && <>
+                    <button onClick={pauseTimer} className="bg-amber-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium no-print">⏸ Pause</button>
+                    <button onClick={stopTimer} className="bg-red-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium no-print">⏹ Stop</button>
+                  </>}
+                  {timer.status === 'paused' && <>
+                    <button onClick={resumeTimer} className="bg-green-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium no-print">▶ Resume</button>
+                    <button onClick={stopTimer} className="bg-red-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium no-print">⏹ Stop</button>
+                  </>}
+                  {timer.status === 'stopped' && <button onClick={startTimer} className="border px-4 py-1.5 rounded-lg text-sm no-print">↻ Restart</button>}
+                  <span className="font-mono text-xl font-bold ml-1">{fmtDur(totalMs(timer, now))}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${timer.status === 'running' ? 'bg-green-100 text-green-700' : timer.status === 'paused' ? 'bg-amber-100 text-amber-700' : timer.status === 'stopped' ? 'bg-gray-200 text-gray-700' : 'bg-gray-100 text-gray-500'}`}>{timer.status === 'idle' ? 'not started' : timer.status}</span>
+                </div>
+                <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-500">
+                  <span>Started: {fmtTime(timer.segments[0]?.s || null)}</span>
+                  <span>Ended: {fmtTime(timer.status === 'stopped' ? (timer.segments[timer.segments.length - 1]?.e || null) : null)}</span>
+                  <span>Time taken <span className="text-gray-400">(excl. breaks)</span>: <strong className="text-gray-700">{fmtDur(totalMs(timer, now))}</strong></span>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-2">
                 <Field label="Quantity produced"><In k="qty_produced" type="number" /></Field>
                 <div className="flex items-end">
                   <button onClick={recordProductionFromForm} disabled={recording} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium w-full no-print">{recording ? 'Recording…' : 'Record production'}</button>
