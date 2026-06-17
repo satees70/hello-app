@@ -12,6 +12,13 @@ interface Timer { status: 'idle' | 'running' | 'paused' | 'stopped'; segments: S
 const EMPTY_TIMER: Timer = { status: 'idle', segments: [] }
 const segMs = (seg: Seg, nowMs: number) => (seg.e ? Date.parse(seg.e) : nowMs) - Date.parse(seg.s)
 const totalMs = (t: Timer, nowMs: number) => t.segments.reduce((sum, seg) => sum + segMs(seg, nowMs), 0)
+// Total paused time = gaps between work segments, plus the ongoing pause if currently paused
+const pauseMs = (t: Timer, nowMs: number) => {
+  let total = 0
+  for (let i = 1; i < t.segments.length; i++) { const prevEnd = t.segments[i - 1].e; if (prevEnd) total += Date.parse(t.segments[i].s) - Date.parse(prevEnd) }
+  if (t.status === 'paused' && t.segments.length) { const last = t.segments[t.segments.length - 1]; if (last.e) total += nowMs - Date.parse(last.e) }
+  return total
+}
 const fmtDur = (ms: number) => { const s = Math.max(0, Math.floor(ms / 1000)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}` }
 const fmtTime = (iso: string | null) => iso ? new Date(iso).toLocaleString() : '—'
 
@@ -49,7 +56,7 @@ export default function InspectionPage() {
 
   useEffect(() => { setBatchId(new URLSearchParams(window.location.search).get('batch') || '') }, [])
   useEffect(() => { if (profile && batchId) loadForBatch(batchId) }, [profile, batchId])
-  useEffect(() => { if (timer.status !== 'running') return; const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id) }, [timer.status])
+  useEffect(() => { if (timer.status !== 'running' && timer.status !== 'paused') return; const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id) }, [timer.status])
 
   async function loadForBatch(id: string) {
     const { data: batch } = await supabase.from('production_batches').select('batch_no, item_code, description, factory_code, exp_date, total_quantity, produced_qty').eq('id', id).single()
@@ -184,7 +191,9 @@ export default function InspectionPage() {
                 <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-500">
                   <span>Started: {fmtTime(timer.segments[0]?.s || null)}</span>
                   <span>Ended: {fmtTime(timer.status === 'stopped' ? (timer.segments[timer.segments.length - 1]?.e || null) : null)}</span>
-                  <span>Time taken <span className="text-gray-400">(excl. breaks)</span>: <strong className="text-gray-700">{fmtDur(totalMs(timer, now))}</strong></span>
+                  <span>Run time <span className="text-gray-400">(excl. breaks)</span>: <strong className="text-gray-700">{fmtDur(totalMs(timer, now))}</strong></span>
+                  <span>Pause time: <strong className="text-amber-700">{fmtDur(pauseMs(timer, now))}</strong></span>
+                  <span>Total: <strong className="text-gray-700">{fmtDur(totalMs(timer, now) + pauseMs(timer, now))}</strong></span>
                 </div>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-2">
