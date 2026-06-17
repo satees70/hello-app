@@ -14,7 +14,7 @@ interface DeliveryOrder {
   status: string
   created_at: string
 }
-interface DoLine { id: string; item_code: string; description: string; quantity: number; unit: string; batch_no: string }
+interface DoLine { id: string; item_code: string; description: string; quantity: number; unit: string; batch_no: string; qc_checked: boolean; photo_path: string | null }
 interface MRItem { id: string; item_code: string; unit: string; requested_qty: number; received_qty: number }
 interface MatReq { id: string; factory_code: string; status: string; material_request_items: MRItem[] }
 
@@ -43,6 +43,7 @@ export default function IncomingPage() {
   const [kgPerBag, setKgPerBag] = useState<Record<string, number>>({})
   const [doItems, setDoItems] = useState<Record<string, string>>({})
   const [receiving, setReceiving] = useState(false)
+  const [busyLine, setBusyLine] = useState('')
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
@@ -104,6 +105,59 @@ export default function IncomingPage() {
     const codes = [...new Set(dl.flatMap(l => [l.item_code, baseCode(l.item_code)]))]
     const { data: items } = await supabase.from('items').select('code, unit').in('code', codes)
     const u: Record<string, string> = {}; (items || []).forEach(r => { u[r.code] = r.unit || '' }); setDoItems(u)
+  }
+
+  // Reload just the lines of the open document (after a QC tick or photo)
+  async function reloadLines() {
+    if (!linesFor) return
+    const { data } = await supabase.from('delivery_order_lines').select('*').eq('do_id', linesFor.id).order('item_code')
+    setLines((data as DoLine[]) || [])
+  }
+
+  // QC ticks a line as checked (or unchecks)
+  async function toggleQc(line: DoLine) {
+    await supabase.from('delivery_order_lines').update({ qc_checked: !line.qc_checked }).eq('id', line.id)
+    reloadLines()
+  }
+
+  // Shrink a phone photo in the browser before upload (keeps each ~150–250 KB)
+  function compressImage(file: File): Promise<Blob> {
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      const url = URL.createObjectURL(file)
+      img.onload = () => {
+        URL.revokeObjectURL(url)
+        const max = 1280
+        let { width, height } = img
+        if (width > max || height > max) { const s = max / Math.max(width, height); width = Math.round(width * s); height = Math.round(height * s) }
+        const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height
+        const ctx = canvas.getContext('2d'); if (!ctx) return reject(new Error('Canvas unavailable'))
+        ctx.drawImage(img, 0, 0, width, height)
+        canvas.toBlob(b => b ? resolve(b) : reject(new Error('Compress failed')), 'image/jpeg', 0.6)
+      }
+      img.onerror = () => reject(new Error('Could not read image'))
+      img.src = url
+    })
+  }
+
+  // Attach one photo to a line (compressed), stored under the document's folder
+  async function onLinePhoto(line: DoLine, file: File) {
+    if (!linesFor) return
+    setBusyLine(line.id); setError('')
+    try {
+      const blob = await compressImage(file)
+      const path = `photos/${linesFor.id}/${line.id}.jpg`
+      const { error: upErr } = await supabase.storage.from('delivery-orders').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
+      if (upErr) { setError(`Photo upload failed: ${upErr.message}`); setBusyLine(''); return }
+      await supabase.from('delivery_order_lines').update({ photo_path: path }).eq('id', line.id)
+      await reloadLines()
+    } catch { setError('Could not process the photo.') }
+    setBusyLine('')
+  }
+
+  async function viewLinePhoto(path: string) {
+    const { data } = await supabase.storage.from('delivery-orders').createSignedUrl(path, 120)
+    if (data) window.open(data.signedUrl, '_blank')
   }
 
   // Re-run extraction for a document stuck on Processing or Error
@@ -257,15 +311,15 @@ export default function IncomingPage() {
               <h2 className="font-semibold text-lg">{linesFor.do_number || linesFor.file_name} <span className="text-gray-400 font-normal text-sm">· {isHO ? factoryName(linesFor.factory_code) : linesFor.factory_code} · {linesFor.do_date || '—'}</span></h2>
               <button onClick={() => setLinesFor(null)} className="text-gray-400 hover:text-gray-600 text-sm">Close</button>
             </div>
-            <p className="text-gray-500 text-sm mb-3">Matched items are received against their order; known items with no order go into stock flagged <em>unplanned</em>; unknown codes are skipped. Bag/carton quantities convert to KG.</p>
+            <p className="text-gray-500 text-sm mb-3">QC must <strong>tick</strong> and add a <strong>photo</strong> for every line before it can be received. Matched items go against their order; known items with no order go into stock flagged <em>unplanned</em>; unknown codes are skipped. Bag/carton quantities convert to KG.</p>
             <div className="overflow-x-auto border rounded-lg">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b">
-                  <tr>{['Item', 'Description', 'Delivered', 'Batch', 'Into stock', 'Status'].map(h => (
+                  <tr>{['QC', 'Photo', 'Item', 'Description', 'Delivered', 'Batch', 'Into stock', 'Status'].map(h => (
                     <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
                 </thead>
                 <tbody>
-                  {lines.length === 0 && <tr><td colSpan={6} className="text-center py-6 text-gray-400">No lines read from this document.</td></tr>}
+                  {lines.length === 0 && <tr><td colSpan={8} className="text-center py-6 text-gray-400">No lines read from this document.</td></tr>}
                   {lines.map(l => {
                     const ml = matchLines(l.item_code)
                     const matched = ml.length > 0
@@ -274,8 +328,23 @@ export default function IncomingPage() {
                     const factor = known ? bagFactor(l.item_code, l.description, l.unit) : 1
                     const into = factor === null ? null : num(Number(l.quantity) * factor)
                     const unit = factor === null ? '' : intoUnit(factor, matched ? ml[0]?.unit : item?.unit)
+                    const editable = linesFor.status !== 'Received'
                     return (
                       <tr key={l.id} className="border-b last:border-0">
+                        <td className="px-3 py-2 text-center">
+                          <input type="checkbox" checked={l.qc_checked} disabled={!editable} onChange={() => toggleQc(l)} className="h-4 w-4" />
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          {l.photo_path
+                            ? <button onClick={() => viewLinePhoto(l.photo_path!)} className="text-green-600 hover:underline text-xs">✓ View{editable ? ' / retake' : ''}</button>
+                            : <span className="text-amber-600 text-xs">no photo</span>}
+                          {editable && (
+                            <label className="ml-2 cursor-pointer text-blue-600 hover:underline text-xs">
+                              {busyLine === l.id ? '…' : '📷'}
+                              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) onLinePhoto(l, f); e.target.value = '' }} />
+                            </label>
+                          )}
+                        </td>
                         <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{l.item_code}{baseCode(l.item_code) !== l.item_code && <span className="block text-gray-400 font-normal text-xs">→ {baseCode(l.item_code)}</span>}</td>
                         <td className="px-3 py-2 text-gray-600">{l.description}</td>
                         <td className="px-3 py-2 text-right font-semibold whitespace-nowrap">{l.quantity} {l.unit}</td>
@@ -293,14 +362,18 @@ export default function IncomingPage() {
                 </tbody>
               </table>
             </div>
-            {linesFor.status !== 'Received' ? (
-              <div className="flex items-center justify-end gap-3 mt-4">
-                <button onClick={receiveDoc} disabled={receiving || lines.length === 0}
-                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
-                  {receiving ? 'Receiving…' : 'Receive into stock'}
-                </button>
-              </div>
-            ) : (
+            {linesFor.status !== 'Received' ? (() => {
+              const allReady = lines.length > 0 && lines.every(l => l.qc_checked && l.photo_path)
+              return (
+                <div className="flex items-center justify-end gap-3 mt-4">
+                  {!allReady && <span className="text-amber-600 text-sm mr-auto">⚠ Tick QC and add a photo for every line before receiving.</span>}
+                  <button onClick={receiveDoc} disabled={receiving || !allReady}
+                    className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
+                    {receiving ? 'Receiving…' : 'Receive into stock'}
+                  </button>
+                </div>
+              )
+            })() : (
               <p className="text-green-600 text-sm mt-4">✓ This delivery order has been received.</p>
             )}
           </div>
