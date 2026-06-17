@@ -5,8 +5,8 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { supabase, fetchAll } from '@/lib/supabase'
 
-interface Item { id: string; code: string; description: string; unit: string; type: string; stock_group: string; supplied_by_factory: boolean }
-const EMPTY = { code: '', description: '', unit: '', type: 'Material', stock_group: '', supplied_by_factory: false }
+interface Item { id: string; code: string; description: string; unit: string; type: string; stock_group: string; supplied_by_factory: boolean; kg_per_bag: number | null }
+const EMPTY = { code: '', description: '', unit: '', type: 'Material', stock_group: '', supplied_by_factory: false, kg_per_bag: '' }
 
 export default function ItemsPage() {
   const { profile, loading } = useProfile()
@@ -39,16 +39,17 @@ export default function ItemsPage() {
   }
 
   function openCreate() { setEditing(null); setForm(EMPTY); setError(''); setShowForm(true) }
-  function openEdit(item: Item) { setEditing(item); setForm({ code: item.code, description: item.description, unit: item.unit, type: item.type, stock_group: item.stock_group || '', supplied_by_factory: item.supplied_by_factory || false }); setError(''); setShowForm(true) }
+  function openEdit(item: Item) { setEditing(item); setForm({ code: item.code, description: item.description, unit: item.unit, type: item.type, stock_group: item.stock_group || '', supplied_by_factory: item.supplied_by_factory || false, kg_per_bag: item.kg_per_bag != null ? String(item.kg_per_bag) : '' }); setError(''); setShowForm(true) }
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true); setError('')
+    const payload = { ...form, kg_per_bag: form.kg_per_bag === '' ? null : Number(form.kg_per_bag) }
     if (editing) {
-      const { error } = await supabase.from('items').update(form).eq('id', editing.id)
+      const { error } = await supabase.from('items').update(payload).eq('id', editing.id)
       if (error) { setError(error.message); setSaving(false); return }
     } else {
-      const { error } = await supabase.from('items').insert(form)
+      const { error } = await supabase.from('items').insert(payload)
       if (error) { setError(error.message); setSaving(false); return }
     }
     setShowForm(false); setSaving(false); loadItems()
@@ -204,6 +205,12 @@ export default function ItemsPage() {
                   <span className="text-sm font-medium">Made at the factory</span>
                   <span className="text-sm text-gray-400">— supplied by the factory, not picked from the warehouse (e.g. printed labels)</span>
                 </label>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">KG per bag <span className="text-gray-400 font-normal">(optional)</span></label>
+                <input type="number" step="any" min="0" value={form.kg_per_bag} onChange={e => setForm({ ...form, kg_per_bag: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2" placeholder="e.g. 3 — only if the code doesn't show it" />
+                <p className="text-xs text-gray-400 mt-1">Used to convert a Delivery Order's BAG quantities into KG. Normally read from the code (e.g. 3KG/BAG); set this only for exceptions.</p>
               </div>
             </div>
             {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded">{error}</p>}

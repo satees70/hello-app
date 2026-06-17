@@ -70,11 +70,12 @@ export default function MaterialRequestsPage() {
   const [expEdits, setExpEdits] = useState<Record<string, string>>({}) // request id -> EXP date being typed
   const [doData, setDoData] = useState<DeliveryOrder | null>(null) // extracted delivery order awaiting review
   const [doBusy, setDoBusy] = useState(false)
+  const [kgPerBag, setKgPerBag] = useState<Record<string, number>>({}) // item code -> KG/bag override
   const doFileRef = useRef<HTMLInputElement>(null)
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
-  useEffect(() => { if (profile) { load(); loadFactories(); loadFactoryItems() } }, [profile])
+  useEffect(() => { if (profile) { load(); loadFactories(); loadFactoryItems(); loadKgPerBag() } }, [profile])
 
   async function load() {
     const { data } = await supabase
@@ -87,6 +88,13 @@ export default function MaterialRequestsPage() {
     const { data } = await supabase.from('items').select('code').eq('supplied_by_factory', true)
     setFactoryItems(new Set((data || []).map(r => r.code)))
   }
+  // Per-item KG-per-bag OVERRIDES (for codes that don't show the pack size); code is read automatically otherwise
+  async function loadKgPerBag() {
+    const { data } = await supabase.from('items').select('code, kg_per_bag').not('kg_per_bag', 'is', null)
+    const m: Record<string, number> = {}
+    ;(data || []).forEach(r => { if (r.kg_per_bag) m[r.code] = Number(r.kg_per_bag) })
+    setKgPerBag(m)
+  }
   async function loadFactories() {
     const { data } = await supabase.from('factories').select('code, name').order('code')
     setFactories(data || [])
@@ -97,6 +105,7 @@ export default function MaterialRequestsPage() {
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || '')
     return m ? `${m[3]}/${m[2]}/${m[1]}` : (d || '')
   }
+  const num = (n: number) => Number(Number(n).toPrecision(12))
 
   const validExp = (exp: string) => !exp || (/^\d{4}-\d{2}-\d{2}$/.test(exp) && exp >= '2020-01-01' && exp <= '2100-12-31')
 
@@ -151,12 +160,26 @@ export default function MaterialRequestsPage() {
 
   // The factory a delivery order is for: the branch number in its header (HO), else the user's factory
   const doFactory = doData ? (isHO ? `AVINA${doData.factory_no}` : profile?.factory_code || '') : ''
-  // Open/partial request lines for that factory + item code, OLDEST first (for receive distribution)
-  const matchItems = (code: string) => {
-    const ids: string[] = []
+  // Open/partial request LINES for that factory + item code, OLDEST first (for receive distribution)
+  const matchLines = (code: string): MRItem[] => {
+    const out: MRItem[] = []
     ;[...requests].reverse().filter(r => ACTIVE.includes(r.status) && r.factory_code === doFactory)
-      .forEach(r => (r.material_request_items || []).forEach(it => { if (it.item_code === code) ids.push(it.id) }))
-    return ids
+      .forEach(r => (r.material_request_items || []).forEach(it => { if (it.item_code === code) out.push(it) }))
+    return out
+  }
+  // Read "KG per bag" from the code/description (e.g. D982-3KG/BAG → 3), else null
+  const parseKgPerBag = (code: string, desc: string) => {
+    const hay = `${code} ${desc || ''}`
+    const m = /(\d+(?:\.\d+)?)\s*KG\s*\/?\s*BAG/i.exec(hay) || /(\d+(?:\.\d+)?)\s*KG\b/i.exec(hay)
+    return m ? Number(m[1]) : null
+  }
+  // Conversion factor for a DO line vs the matching request unit. 1 = no conversion;
+  // null = the delivery is in bags & request is in KG but the bag size is unknown.
+  const bagFactor = (code: string, desc: string, doUnit: string, reqUnit: string | undefined): number | null => {
+    const isBag = /bag/i.test(doUnit || '')
+    const wantsKg = /kg/i.test(reqUnit || '')
+    if (!(isBag && wantsKg)) return 1
+    return kgPerBag[code] ?? parseKgPerBag(code, desc)
   }
 
   // Upload a Delivery Order PDF → Claude reads the lines → opens the review modal
@@ -180,22 +203,28 @@ export default function MaterialRequestsPage() {
   async function applyDo() {
     if (!doData) return
     setDoBusy(true); setError(''); setSuccess('')
-    const byCode: Record<string, { qty: number; batch: string }> = {}
+    const byCode: Record<string, { qty: number; unit: string; desc: string; batch: string }> = {}
     doData.lines.forEach(l => {
-      const g = (byCode[l.item_code] = byCode[l.item_code] || { qty: 0, batch: '' })
+      const g = (byCode[l.item_code] = byCode[l.item_code] || { qty: 0, unit: l.unit, desc: l.description, batch: '' })
       g.qty += Number(l.quantity) || 0
       if (!g.batch) g.batch = l.batch_no
     })
-    let applied = 0, skipped = 0
+    let applied = 0, skipped = 0, needFactor = 0
     for (const code of Object.keys(byCode)) {
-      const ids = matchItems(code)
-      if (ids.length === 0) { skipped++; continue }
-      const { error: e } = await supabase.rpc('receive_combined_lot', { p_item_ids: ids, p_qty: byCode[code].qty, p_batch_no: byCode[code].batch || null, p_exp_date: null })
+      const lines = matchLines(code)
+      if (lines.length === 0) { skipped++; continue }
+      const g = byCode[code]
+      const factor = bagFactor(code, g.desc, g.unit, lines[0].unit)
+      if (factor === null) { needFactor++; continue }            // bag→kg but pack size unknown
+      const qtyInReqUnit = g.qty * factor
+      const { error: e } = await supabase.rpc('receive_combined_lot', { p_item_ids: lines.map(l => l.id), p_qty: qtyInReqUnit, p_batch_no: g.batch || null, p_exp_date: null })
       if (e) { setError(`${code}: ${e.message}`); setDoBusy(false); return }
       applied++
     }
     setDoBusy(false); setDoData(null)
-    setSuccess(`Delivery order ${doData.do_number} applied — received ${applied} item(s)${skipped ? `, ${skipped} not in any open request (skipped)` : ''}.`)
+    setSuccess(`Delivery order ${doData.do_number} applied — received ${applied} item(s)`
+      + `${skipped ? `, ${skipped} not in any open request` : ''}`
+      + `${needFactor ? `, ${needFactor} need a "KG per bag" set first` : ''}.`)
     load()
   }
 
@@ -583,22 +612,31 @@ export default function MaterialRequestsPage() {
               <div className="overflow-x-auto border rounded-lg">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b">
-                    <tr>{['Item', 'Description', 'Qty', 'Batch', 'Status'].map(h => (
+                    <tr>{['Item', 'Description', 'Delivered', 'Batch', 'Into stock', 'Status'].map(h => (
                       <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
                   </thead>
                   <tbody>
                     {doData.lines.map((l, i) => {
-                      const matched = matchItems(l.item_code).length > 0
+                      const lines = matchLines(l.item_code)
+                      const matched = lines.length > 0
+                      const reqUnit = lines[0]?.unit
+                      const factor = matched ? bagFactor(l.item_code, l.description, l.unit, reqUnit) : 1
+                      const intoStock = factor === null ? null : num(Number(l.quantity) * factor)
                       return (
                         <tr key={i} className="border-b last:border-0">
                           <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{l.item_code}</td>
                           <td className="px-3 py-2 text-gray-600">{l.description}</td>
-                          <td className="px-3 py-2 text-right font-semibold">{l.quantity}</td>
+                          <td className="px-3 py-2 text-right font-semibold whitespace-nowrap">{l.quantity} {l.unit}</td>
                           <td className="px-3 py-2 font-mono">{l.batch_no || '—'}</td>
+                          <td className="px-3 py-2 text-right whitespace-nowrap">
+                            {!matched ? '—'
+                              : factor === null ? <span className="text-amber-600">?</span>
+                              : <span className="font-semibold text-blue-700">{intoStock} {reqUnit}{factor !== 1 ? <span className="text-gray-400 font-normal"> ({l.quantity}×{factor})</span> : null}</span>}
+                          </td>
                           <td className="px-3 py-2 whitespace-nowrap">
-                            {matched
-                              ? <span className="text-green-600">✓ will receive</span>
-                              : <span className="text-amber-600">⚠ not in an open request</span>}
+                            {!matched ? <span className="text-amber-600">⚠ not in an open request</span>
+                              : factor === null ? <span className="text-amber-600">⚠ set KG per bag for this item</span>
+                              : <span className="text-green-600">✓ will receive</span>}
                           </td>
                         </tr>
                       )
@@ -608,7 +646,7 @@ export default function MaterialRequestsPage() {
               </div>
               <div className="flex items-center justify-end gap-3 mt-4">
                 <button onClick={() => setDoData(null)} disabled={doBusy} className="border px-5 py-2 rounded-lg hover:bg-gray-50 disabled:opacity-50">Cancel</button>
-                <button onClick={applyDo} disabled={doBusy || !doData.lines.some(l => matchItems(l.item_code).length > 0)}
+                <button onClick={applyDo} disabled={doBusy || !doData.lines.some(l => { const ls = matchLines(l.item_code); return ls.length > 0 && bagFactor(l.item_code, l.description, l.unit, ls[0].unit) !== null })}
                   className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
                   {doBusy ? 'Receiving…' : 'Receive matched items'}
                 </button>
