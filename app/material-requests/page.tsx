@@ -40,13 +40,27 @@ const STATUS_STYLE: Record<string, string> = {
   Fulfilled: 'bg-green-100 text-green-700',
 }
 
+// Inline control to record one received delivery: quantity + batch no + expiry date
+function ReceiveControl({ disabled, onReceive }: { disabled: boolean; onReceive: (qty: number, batch: string, exp: string) => Promise<boolean> }) {
+  const [qty, setQty] = useState('')
+  const [batch, setBatch] = useState('')
+  const [exp, setExp] = useState('')
+  return (
+    <div className="flex items-center gap-1">
+      <input type="number" step="any" min="0" placeholder="qty" value={qty} onChange={e => setQty(e.target.value)} className="w-16 border rounded px-2 py-1 text-right text-xs" />
+      <input placeholder="batch #" value={batch} onChange={e => setBatch(e.target.value)} className="w-24 border rounded px-2 py-1 text-xs" />
+      <input type="date" min="2020-01-01" max="2100-12-31" value={exp} onChange={e => setExp(e.target.value)} className="border rounded px-2 py-1 text-xs" title="Expiry date of the received batch" />
+      <button disabled={disabled} onClick={async () => { const ok = await onReceive(Number(qty || 0), batch.trim(), exp); if (ok) { setQty(''); setBatch(''); setExp('') } }}
+        className="bg-blue-600 text-white px-3 py-1 rounded text-xs disabled:opacity-50 whitespace-nowrap">Receive</button>
+    </div>
+  )
+}
+
 export default function MaterialRequestsPage() {
   const { profile, loading, error: profileError } = useProfile()
   const [requests, setRequests] = useState<MaterialRequest[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [filter, setFilter] = useState<Filter>('Open')
-  const [edits, setEdits] = useState<Record<string, number>>({}) // item id -> received qty being typed
-  const [combinedEdits, setCombinedEdits] = useState<Record<string, number>>({}) // factory|item_code -> total received being typed
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -79,33 +93,27 @@ export default function MaterialRequestsPage() {
     return m ? `${m[3]}/${m[2]}/${m[1]}` : (d || '')
   }
 
-  async function receive(item: MRItem) {
-    const val = edits[item.id] ?? item.received_qty
+  const validExp = (exp: string) => !exp || (/^\d{4}-\d{2}-\d{2}$/.test(exp) && exp >= '2020-01-01' && exp <= '2100-12-31')
+
+  // Record one received delivery against a single request line: makes a stock lot,
+  // bumps the factory's stock, and updates the request (Open → Partially Received → Fulfilled).
+  async function doReceiveItem(item: MRItem, qty: number, batch: string, exp: string): Promise<boolean> {
+    if (!(qty > 0)) { setError('Enter a received quantity greater than zero.'); return false }
+    if (!validExp(exp)) { setError('Enter a valid expiry date (year 2020–2100) or leave it blank.'); return false }
     setBusy(item.id); setError(''); setSuccess('')
-    const { error: rpcErr } = await supabase.rpc('receive_material_item', { p_item_id: item.id, p_received: val })
-    if (rpcErr) { setError(rpcErr.message); setBusy(''); return }
-    setSuccess('Received quantity updated.')
-    setBusy('')
-    load()
+    const { error: e } = await supabase.rpc('receive_material_lot', { p_item_id: item.id, p_qty: qty, p_batch_no: batch || null, p_exp_date: exp || null })
+    if (e) { setError(e.message); setBusy(''); return false }
+    setSuccess(`Received ${qty} ${item.item_code} into stock.`); setBusy(''); load(); return true
   }
 
-  // Combined receiving: warehouse enters ONE total received for a material; we split it
-  // back across the underlying request lines (oldest request first) and recompute each.
-  async function receiveCombined(key: string, total: number, items: { id: string; requested_qty: number; received_qty: number }[]) {
+  // Combined warehouse receiving: one physical delivery (one lot) split across the underlying lines.
+  async function doReceiveCombined(key: string, items: { id: string }[], qty: number, batch: string, exp: string): Promise<boolean> {
+    if (!(qty > 0)) { setError('Enter a received quantity greater than zero.'); return false }
+    if (!validExp(exp)) { setError('Enter a valid expiry date (year 2020–2100) or leave it blank.'); return false }
     setBusy(key); setError(''); setSuccess('')
-    let remaining = total
-    for (const it of items) {
-      const alloc = Math.max(0, Math.min(remaining, it.requested_qty))
-      remaining -= alloc
-      if (alloc !== it.received_qty) {
-        const { error: rpcErr } = await supabase.rpc('receive_material_item', { p_item_id: it.id, p_received: alloc })
-        if (rpcErr) { setError(rpcErr.message); setBusy(''); return }
-      }
-    }
-    setSuccess('Combined receipt saved — split across the underlying requests.')
-    setBusy('')
-    setCombinedEdits(prev => { const n = { ...prev }; delete n[key]; return n })
-    load()
+    const { error: e } = await supabase.rpc('receive_combined_lot', { p_item_ids: items.map(i => i.id), p_qty: qty, p_batch_no: batch || null, p_exp_date: exp || null })
+    if (e) { setError(e.message); setBusy(''); return false }
+    setSuccess(`Received ${qty} into stock and applied to the request(s).`); setBusy(''); load(); return true
   }
 
   // Release the waiting (unreleased) requests of a factory to the warehouse as one pick run,
@@ -251,7 +259,7 @@ export default function MaterialRequestsPage() {
   // One material table; editable=true adds the Received/Remaining columns + receiving (released runs only)
   const renderMatTable = (mats: MatMap, prefix: string, editable: boolean) => {
     const list = Object.values(mats).sort((a, b) => a.code.localeCompare(b.code))
-    const heads = ['Material', 'Description', 'Unit', 'To pick', ...(editable ? ['Received', 'Remaining', ''] : [])]
+    const heads = ['Material', 'Description', 'Unit', 'To pick', ...(editable ? ['Received', 'Remaining', 'Add received (qty · batch · expiry)'] : [])]
     return (
       <div className="overflow-x-auto border rounded-lg">
         <table className="w-full text-sm">
@@ -270,16 +278,10 @@ export default function MaterialRequestsPage() {
                   <td className="px-3 py-2 text-gray-500">{g.unit}</td>
                   <td className="px-3 py-2 text-right font-semibold text-blue-700">{g.requested}</td>
                   {editable && <>
-                    <td className="px-3 py-2">
-                      <input type="number" step="any" min="0"
-                        value={combinedEdits[key] ?? g.received}
-                        onChange={e => setCombinedEdits(prev => ({ ...prev, [key]: e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)) }))}
-                        className="w-24 border rounded px-2 py-1 text-right" />
-                    </td>
+                    <td className="px-3 py-2 text-right text-gray-700">{g.received}</td>
                     <td className={`px-3 py-2 text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{remaining}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      <button onClick={() => receiveCombined(key, combinedEdits[key] ?? g.received, g.items)} disabled={busy === key}
-                        className="text-blue-600 hover:underline text-xs disabled:opacity-50">Save</button>
+                    <td className="px-3 py-2">
+                      <ReceiveControl disabled={busy === key} onReceive={(q, b, e) => doReceiveCombined(key, g.items, q, b, e)} />
                     </td>
                   </>}
                 </tr>
@@ -415,26 +417,22 @@ export default function MaterialRequestsPage() {
                                       <div className="overflow-x-auto border rounded-lg">
                                         <table className="w-full text-sm">
                                           <thead className="bg-gray-50 border-b">
-                                            <tr>{['Material', 'Description', 'Unit', 'To make', 'Made', ''].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr>
+                                            <tr>{['Material', 'Description', 'Unit', 'To make', 'Made', 'Remaining', 'Add received (qty · batch · expiry)'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr>
                                           </thead>
                                           <tbody>
                                             {facItems.map(it => {
                                               const done = it.received_qty >= it.requested_qty
+                                              const remaining = Math.max(0, it.requested_qty - it.received_qty)
                                               return (
                                                 <tr key={it.id} className={`border-b last:border-0 ${done ? 'bg-green-50/40' : ''}`}>
                                                   <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{it.item_code}</td>
                                                   <td className="px-3 py-2 text-gray-600">{it.description}</td>
                                                   <td className="px-3 py-2 text-gray-500">{it.unit}</td>
                                                   <td className="px-3 py-2 text-right font-semibold text-purple-700">{it.requested_qty}</td>
+                                                  <td className="px-3 py-2 text-right text-gray-700">{it.received_qty}</td>
+                                                  <td className={`px-3 py-2 text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{remaining}</td>
                                                   <td className="px-3 py-2">
-                                                    <input type="number" step="any" min="0"
-                                                      value={edits[it.id] ?? it.received_qty}
-                                                      onChange={e => setEdits(prev => ({ ...prev, [it.id]: e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)) }))}
-                                                      className="w-24 border rounded px-2 py-1 text-right" />
-                                                  </td>
-                                                  <td className="px-3 py-2 whitespace-nowrap">
-                                                    <button onClick={() => receive(it)} disabled={busy === it.id}
-                                                      className="text-blue-600 hover:underline text-xs disabled:opacity-50">Save</button>
+                                                    <ReceiveControl disabled={busy === it.id} onReceive={(q, b, e) => doReceiveItem(it, q, b, e)} />
                                                   </td>
                                                 </tr>
                                               )
@@ -478,30 +476,23 @@ export default function MaterialRequestsPage() {
                 <div className="overflow-x-auto border rounded-lg">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b">
-                      <tr>{['Material', 'Description', 'Unit', 'Required', 'Stock', 'Shortfall', 'Requested', 'Received', ''].map(h => (
+                      <tr>{['Material', 'Description', 'Unit', 'Requested', 'Received', 'Remaining', 'Add received (qty · batch · expiry)'].map(h => (
                         <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
                     </thead>
                     <tbody>
                       {r.material_request_items?.map(it => {
                         const done = it.received_qty >= it.requested_qty
+                        const remaining = Math.max(0, it.requested_qty - it.received_qty)
                         return (
                           <tr key={it.id} className={`border-b last:border-0 ${done ? 'bg-green-50/40' : ''}`}>
                             <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{it.item_code}</td>
                             <td className="px-3 py-2 text-gray-600">{it.description}</td>
                             <td className="px-3 py-2 text-gray-500">{it.unit}</td>
-                            <td className="px-3 py-2 text-right">{it.required_qty}</td>
-                            <td className="px-3 py-2 text-right text-gray-500">{it.stock_qty}</td>
-                            <td className="px-3 py-2 text-right text-red-600">{it.shortfall_qty}</td>
                             <td className="px-3 py-2 text-right font-semibold text-blue-700">{it.requested_qty}</td>
+                            <td className="px-3 py-2 text-right text-gray-700">{it.received_qty}</td>
+                            <td className={`px-3 py-2 text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{remaining}</td>
                             <td className="px-3 py-2">
-                              <input type="number" step="any"
-                                value={edits[it.id] ?? it.received_qty}
-                                onChange={e => setEdits(prev => ({ ...prev, [it.id]: e.target.value === '' ? 0 : Number(e.target.value) }))}
-                                className="w-24 border rounded px-2 py-1 text-right" />
-                            </td>
-                            <td className="px-3 py-2 whitespace-nowrap">
-                              <button onClick={() => receive(it)} disabled={busy === it.id}
-                                className="text-blue-600 hover:underline text-xs disabled:opacity-50">Save</button>
+                              <ReceiveControl disabled={busy === it.id} onReceive={(q, b, e) => doReceiveItem(it, q, b, e)} />
                             </td>
                           </tr>
                         )

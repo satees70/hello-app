@@ -90,6 +90,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     { href: '/sales-orders/changes', label: 'Pending Changes' },
     { href: '/production', label: 'Production' },
     { href: '/material-requests', label: 'Material Requests' },
+    { href: '/stock', label: 'Stock' },
     ...(isHO ? [
       { href: '/admin/bom', label: 'BOM' },
       { href: '/admin/location-map', label: 'Location Map' },
