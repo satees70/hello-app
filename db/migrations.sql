@@ -555,6 +555,58 @@ alter table public.grinding_records add column if not exists mix_start text;   -
 alter table public.grinding_records add column if not exists mix_end text;     -- HH:MM
 
 
+-- ============================================================================
+-- 2026-06 · Process inspection forms: Drying/Roasting (P07-F05), Moisture
+--           (P07-F08), OPRP (P07-F03). Factory-scoped record logs.
+-- ============================================================================
+-- Helper note: all three are simple factory-scoped logs (same RLS shape as
+-- stock_lots), shown under the Production permission. Rendered by the shared
+-- ProcessLog component from a fields config per page.
+
+create table if not exists public.drying_roasting_records (
+  id uuid primary key default gen_random_uuid(),
+  factory_code text not null, month_year text, record_date date,
+  product text, rm_batch_no text, product_batch_no text, qty_in numeric, qty_out numeric, machine text,
+  oven_temp text, oven_achieve_temp text, oven_time_start text, oven_time_finish text,
+  roast_temp text, roast_achieve_temp text, roast_time_start text, roast_time_finish text,
+  moisture_before text, moisture_after text, done_by text, verified_by text, remark text,
+  created_by uuid, created_at timestamptz not null default now()
+);
+
+create table if not exists public.moisture_records (
+  id uuid primary key default gen_random_uuid(),
+  factory_code text not null, month_year text, record_date date,
+  product text, batch_no text, sample_from text, product_desc text, sample_prep text,
+  weight_g numeric, time_min numeric, moisture_pct text, remarks text, checked_by text, verified_by text,
+  created_by uuid, created_at timestamptz not null default now()
+);
+
+create table if not exists public.oprp_records (
+  id uuid primary key default gen_random_uuid(),
+  factory_code text not null, month_year text, record_date date,
+  product text, batch_no_old text, batch_no_new text, taken_qty numeric, out_qty numeric,
+  time_in text, time_out text, machine text, machine_before text, machine_after text,
+  sieve_size text, sieve_before text, sieve_after text, weight_residue numeric, weight_waste numeric,
+  handpick_result text, visual_result text, needle_condition text, seal_integrity text,
+  done_by text, verified_by text, remark text,
+  created_by uuid, created_at timestamptz not null default now()
+);
+
+-- Same factory-scoped RLS for all three (HO or one of the user's factories).
+do $$
+declare t text;
+begin
+  foreach t in array array['drying_roasting_records', 'moisture_records', 'oprp_records'] loop
+    execute format('grant select, insert, update, delete on public.%I to authenticated, anon, service_role', t);
+    execute format('alter table public.%I enable row level security', t);
+    execute format('drop policy if exists %I on public.%I', t || '_read', t);
+    execute format('create policy %I on public.%I for select using (my_factory_code() = ''HEAD_OFFICE'' or factory_code = any (my_factory_codes()))', t || '_read', t);
+    execute format('drop policy if exists %I on public.%I', t || '_write', t);
+    execute format('create policy %I on public.%I for all using (my_factory_code() = ''HEAD_OFFICE'' or factory_code = any (my_factory_codes())) with check (my_factory_code() = ''HEAD_OFFICE'' or factory_code = any (my_factory_codes()))', t || '_write', t);
+  end loop;
+end $$;
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.
