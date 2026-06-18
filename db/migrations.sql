@@ -464,6 +464,86 @@ create policy gr_write on public.grinding_records for all
   with check ((my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes())) and has_perm('grinding', 'edit'));
 
 
+-- ============================================================================
+-- 2026-06 · Grinding recipes (preset formula) + lot-multiplier production
+-- ============================================================================
+-- Mixer presets a formula per product; operators just pick product + #lots and
+-- the secure produce_grinding() multiplies the per-lot quantities. Operators see
+-- only the product name (recipe HEADER read by 'grinding'); the COMPONENTS
+-- (quantities) are read only with 'grinding_recipe' (the mixer / QC blocked).
+
+create table if not exists public.grinding_recipes (
+  id uuid primary key default gen_random_uuid(),
+  factory_code text not null,
+  product text not null,
+  recipe_type text not null default 'mixing',   -- 'direct' | 'mixing'
+  active boolean not null default true,
+  created_by uuid,
+  created_at timestamptz not null default now()
+);
+grant select, insert, update, delete on public.grinding_recipes to authenticated, anon, service_role;
+alter table public.grinding_recipes enable row level security;
+-- Header (product name) visible to grinding operators so they can pick it.
+drop policy if exists grec_read on public.grinding_recipes;
+create policy grec_read on public.grinding_recipes for select
+  using ((my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes())) and has_perm('grinding', 'view'));
+-- Only the mixer (recipe permission) creates/edits recipes.
+drop policy if exists grec_write on public.grinding_recipes;
+create policy grec_write on public.grinding_recipes for all
+  using ((my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes())) and has_perm('grinding_recipe', 'edit'))
+  with check ((my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes())) and has_perm('grinding_recipe', 'edit'));
+
+-- The secret quantities (per lot). Readable only with the recipe permission.
+create table if not exists public.grinding_recipe_components (
+  id uuid primary key default gen_random_uuid(),
+  recipe_id uuid not null references public.grinding_recipes(id) on delete cascade,
+  factory_code text not null,
+  item text not null,
+  qty_per_lot numeric not null default 0,
+  created_at timestamptz not null default now()
+);
+create index if not exists grec_comp_recipe on public.grinding_recipe_components(recipe_id);
+grant select, insert, update, delete on public.grinding_recipe_components to authenticated, anon, service_role;
+alter table public.grinding_recipe_components enable row level security;
+drop policy if exists grc_read on public.grinding_recipe_components;
+create policy grc_read on public.grinding_recipe_components for select
+  using ((my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes())) and has_perm('grinding_recipe', 'view'));
+drop policy if exists grc_write on public.grinding_recipe_components;
+create policy grc_write on public.grinding_recipe_components for all
+  using ((my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes())) and has_perm('grinding_recipe', 'edit'))
+  with check ((my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes())) and has_perm('grinding_recipe', 'edit'));
+
+-- Link production records to a recipe + lots.
+alter table public.grinding_records add column if not exists recipe_id uuid references public.grinding_recipes(id);
+alter table public.grinding_records add column if not exists lots numeric;
+alter table public.grinding_records add column if not exists recipe_type text;
+
+-- Operator produces N lots of a recipe; computes the (hidden) mixture as definer
+-- so the operator never needs to read the formula.
+create or replace function public.produce_grinding(p_recipe_id uuid, p_lots numeric)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare v_rec public.grinding_recipes; v_id uuid; c record;
+begin
+  if not has_perm('grinding', 'edit') then raise exception 'Not allowed to record grinding'; end if;
+  if p_lots is null or p_lots <= 0 then raise exception 'Number of lots must be greater than zero'; end if;
+  select * into v_rec from public.grinding_recipes where id = p_recipe_id;
+  if not found then raise exception 'Recipe not found'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_rec.factory_code = any (my_factory_codes())) then
+    raise exception 'Not allowed for this factory'; end if;
+  insert into public.grinding_records (factory_code, product, recipe_id, lots, recipe_type, record_date, month_year, created_by)
+  values (v_rec.factory_code, v_rec.product, p_recipe_id, p_lots, v_rec.recipe_type,
+          (now() at time zone 'Asia/Kuala_Lumpur')::date,
+          to_char(now() at time zone 'Asia/Kuala_Lumpur', 'MM/YYYY'), auth.uid())
+  returning id into v_id;
+  for c in select item, qty_per_lot from public.grinding_recipe_components where recipe_id = p_recipe_id loop
+    insert into public.grinding_materials (grinding_record_id, factory_code, item, qty)
+    values (v_id, v_rec.factory_code, c.item, (c.qty_per_lot * p_lots)::text);
+  end loop;
+  return v_id;
+end $$;
+grant execute on function public.produce_grinding(uuid, numeric) to authenticated;
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.
