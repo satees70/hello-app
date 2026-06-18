@@ -5,7 +5,8 @@
 export const PERMISSION_MODULES = [
   { key: 'sales', label: 'Sales', desc: 'Sales orders & change requests' },
   { key: 'production', label: 'Production', desc: 'Order board, packing, inspection' },
-  { key: 'grinding', label: 'Grinding', desc: 'Grinding & mixing record (P07-F10)' },
+  { key: 'grinding', label: 'Grinding', desc: 'Grinding & mixing record / QC (P07-F10)' },
+  { key: 'grinding_recipe', label: 'Grinding recipe', desc: 'Raw-material mixture / formula (secret)' },
   { key: 'receiving', label: 'Receiving', desc: 'Material requests, goods received' },
   { key: 'stock', label: 'Stock', desc: 'Stock on hand' },
   { key: 'items', label: 'Items', desc: 'Items master' },
@@ -17,7 +18,7 @@ export const PERMISSION_MODULES = [
 // Sections that are HIDDEN by default — a user sees them ONLY if explicitly
 // granted (the opposite of the normal "open unless restricted" rule). Used for
 // sensitive processes like Grinding that most staff shouldn't see.
-export const RESTRICTED_MODULES: ModuleKey[] = ['grinding']
+export const RESTRICTED_MODULES: ModuleKey[] = ['grinding', 'grinding_recipe']
 
 export type ModuleKey = typeof PERMISSION_MODULES[number]['key']
 export type Action = 'view' | 'edit' | 'delete'

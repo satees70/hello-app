@@ -405,6 +405,65 @@ create policy gr_write on public.grinding_records for all
   with check (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()));
 
 
+-- ============================================================================
+-- 2026-06 · Grinding recipe locked away from QC (DB-enforced field separation)
+-- ============================================================================
+-- The raw-material mixture (formula) must be hidden from QC, who still do the
+-- inspection. So the mixture moves to its own table, gated by a NEW permission
+-- 'grinding_recipe' enforced in the database via has_perm(). QC gets 'grinding'
+-- (inspection) only; operators get both.
+
+-- Permission check mirroring lib/permissions.ts can(): admins full; restricted
+-- sections need an explicit grant; otherwise unconfigured = full (legacy).
+create or replace function public.has_perm(p_module text, p_action text)
+returns boolean language sql stable security definer set search_path = public as $$
+  with me as (select role, permissions from profiles where id = auth.uid())
+  select case
+    when (select role from me) = 'admin' then true
+    when (select permissions from me) is null or (select permissions from me) = '{}'::jsonb
+      then p_module not in ('grinding', 'grinding_recipe')   -- restricted → need explicit grant
+    else coalesce((((select permissions from me) -> p_module) ->> p_action)::boolean, false)
+  end
+$$;
+grant execute on function public.has_perm(text, text) to authenticated, anon, service_role;
+
+-- The locked recipe/mixture (one row per raw material in a grinding record).
+create table if not exists public.grinding_materials (
+  id uuid primary key default gen_random_uuid(),
+  grinding_record_id uuid not null references public.grinding_records(id) on delete cascade,
+  factory_code text not null,
+  item text,
+  qty text,
+  created_at timestamptz not null default now()
+);
+create index if not exists grinding_materials_record on public.grinding_materials(grinding_record_id);
+grant select, insert, update, delete on public.grinding_materials to authenticated, anon, service_role;
+alter table public.grinding_materials enable row level security;
+-- Read/write the mixture ONLY with the grinding_recipe permission (+ own factory).
+drop policy if exists gm_read on public.grinding_materials;
+create policy gm_read on public.grinding_materials for select
+  using ((my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes())) and has_perm('grinding_recipe', 'view'));
+drop policy if exists gm_write on public.grinding_materials;
+create policy gm_write on public.grinding_materials for all
+  using ((my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes())) and has_perm('grinding_recipe', 'edit'))
+  with check ((my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes())) and has_perm('grinding_recipe', 'edit'));
+
+-- Move any existing inline mixture (jsonb) into the locked table, then it's unused.
+insert into public.grinding_materials (grinding_record_id, factory_code, item, qty)
+select gr.id, gr.factory_code, m->>'item', m->>'qty'
+from public.grinding_records gr, jsonb_array_elements(gr.materials) m
+where jsonb_typeof(gr.materials) = 'array' and gr.materials <> '[]'::jsonb;
+
+-- Tighten the grinding RECORD (inspection) to the 'grinding' permission too.
+drop policy if exists gr_read on public.grinding_records;
+create policy gr_read on public.grinding_records for select
+  using ((my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes())) and has_perm('grinding', 'view'));
+drop policy if exists gr_write on public.grinding_records;
+create policy gr_write on public.grinding_records for all
+  using ((my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes())) and has_perm('grinding', 'edit'))
+  with check ((my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes())) and has_perm('grinding', 'edit'));
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.
