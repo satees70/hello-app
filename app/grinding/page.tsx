@@ -8,9 +8,10 @@ import { can } from '@/lib/permissions'
 
 interface Recipe { id: string; factory_code: string; product: string; recipe_type: string; active: boolean }
 interface Component { item: string; qty_per_lot: string }
-interface Material { item: string; qty: string }
+interface Material { id?: string; item: string; qty: string; batch_no: string; added: boolean }
 interface GrindingRecord {
   id: string; factory_code: string; record_date: string | null; product: string | null; recipe_type: string | null; lots: number | null
+  mix_start: string | null; mix_end: string | null
   crusher_before: string | null; crusher_after: string | null; qty_rework: number | null; qty_rejection: number | null
   correction_action: string | null; prepared_by: string | null; verified_by: string | null; remark: string | null
 }
@@ -62,9 +63,9 @@ export default function GrindingPage() {
     // materials per record (only returned if you have recipe view)
     const ids = ((recs as GrindingRecord[]) || []).map(r => r.id)
     if (ids.length) {
-      const { data: mats } = await supabase.from('grinding_materials').select('grinding_record_id, item, qty').in('grinding_record_id', ids)
+      const { data: mats } = await supabase.from('grinding_materials').select('id, grinding_record_id, item, qty, batch_no, added').in('grinding_record_id', ids)
       const map: Record<string, Material[]> = {}
-      ;(mats || []).forEach(m => { (map[m.grinding_record_id] = map[m.grinding_record_id] || []).push({ item: m.item || '', qty: m.qty || '' }) })
+      ;(mats || []).forEach(m => { (map[m.grinding_record_id] = map[m.grinding_record_id] || []).push({ id: m.id, item: m.item || '', qty: m.qty || '', batch_no: m.batch_no || '', added: !!m.added }) })
       setMatsByRecord(map)
     } else setMatsByRecord({})
     // recipe components (only returned with recipe view)
@@ -93,23 +94,39 @@ export default function GrindingPage() {
 
   // ---- inspection modal ----
   const [insp, setInsp] = useState<Record<string, string>>({})
+  const [mixMats, setMixMats] = useState<Material[]>([])
+  const [mixStart, setMixStart] = useState(''); const [mixEnd, setMixEnd] = useState('')
   function openRecord(r: GrindingRecord) {
     setOpenRec(r); setError('')
     setInsp({ crusher_before: r.crusher_before || '', crusher_after: r.crusher_after || '', qty_rework: r.qty_rework?.toString() ?? '', qty_rejection: r.qty_rejection?.toString() ?? '', correction_action: r.correction_action || '', prepared_by: r.prepared_by || '', verified_by: r.verified_by || '', remark: r.remark || '' })
+    setMixMats((matsByRecord[r.id] || []).map(m => ({ ...m })))
+    setMixStart(r.mix_start || ''); setMixEnd(r.mix_end || '')
   }
-  async function saveInspection() {
+  const setMixMat = (i: number, k: 'batch_no', v: string) => setMixMats(p => { const m = [...p]; m[i] = { ...m[i], [k]: v }; return m })
+  const toggleMixMat = (i: number) => setMixMats(p => { const m = [...p]; m[i] = { ...m[i], added: !m[i].added }; return m })
+  async function saveRecord() {
     if (!openRec) return
     setSaving(true); setError('')
-    const { error } = await supabase.from('grinding_records').update({
-      crusher_before: insp.crusher_before || null, crusher_after: insp.crusher_after || null,
-      qty_rework: insp.qty_rework === '' ? null : Number(insp.qty_rework),
-      qty_rejection: insp.qty_rejection === '' ? null : Number(insp.qty_rejection),
-      correction_action: insp.correction_action || null, prepared_by: insp.prepared_by || null,
-      verified_by: insp.verified_by || null, remark: insp.remark || null,
-    }).eq('id', openRec.id)
-    setSaving(false)
-    if (error) { setError(error.message); return }
-    setOpenRec(null); load()
+    try {
+      const payload: Record<string, unknown> = {}
+      if (canEdit) Object.assign(payload, {
+        crusher_before: insp.crusher_before || null, crusher_after: insp.crusher_after || null,
+        qty_rework: insp.qty_rework === '' ? null : Number(insp.qty_rework),
+        qty_rejection: insp.qty_rejection === '' ? null : Number(insp.qty_rejection),
+        correction_action: insp.correction_action || null, prepared_by: insp.prepared_by || null,
+        verified_by: insp.verified_by || null, remark: insp.remark || null,
+      })
+      if (canRecipeEdit) Object.assign(payload, { mix_start: mixStart || null, mix_end: mixEnd || null })
+      if (Object.keys(payload).length) { const { error } = await supabase.from('grinding_records').update(payload).eq('id', openRec.id); if (error) throw error }
+      if (canRecipeEdit) {
+        for (const m of mixMats) {
+          if (!m.id) continue
+          const { error } = await supabase.from('grinding_materials').update({ batch_no: m.batch_no || null, added: m.added }).eq('id', m.id)
+          if (error) throw error
+        }
+      }
+      setOpenRec(null); load()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not save') } finally { setSaving(false) }
   }
 
   // ---- recipe editor ----
@@ -254,7 +271,29 @@ export default function GrindingPage() {
             <div className="mb-4 border rounded-lg p-3 bg-gray-50">
               <div className="text-sm font-semibold mb-2">Raw material &amp; qty (mixture)</div>
               {!canRecipeView ? <p className="text-sm text-gray-500 italic">🔒 Hidden from your role.</p>
-                : (matsByRecord[openRec.id]?.length ? <ul className="text-sm list-disc pl-5">{matsByRecord[openRec.id].map((m, i) => <li key={i}>{m.item} — {m.qty}</li>)}</ul> : <p className="text-sm text-gray-400">—</p>)}
+                : mixMats.length === 0 ? <p className="text-sm text-gray-400">—</p> : (
+                <div className="space-y-1">
+                  <div className="grid grid-cols-12 gap-2 text-xs text-gray-500 font-medium px-1">
+                    <div className="col-span-5">Item</div><div className="col-span-2 text-right">Qty</div><div className="col-span-4">Batch no</div><div className="col-span-1 text-center">Added</div>
+                  </div>
+                  {mixMats.map((m, i) => (
+                    <div key={m.id || i} className="grid grid-cols-12 gap-2 items-center text-sm">
+                      <div className="col-span-5">{m.item}</div>
+                      <div className="col-span-2 text-right">{m.qty}</div>
+                      <div className="col-span-4">{canRecipeEdit
+                        ? <input value={m.batch_no} onChange={e => setMixMat(i, 'batch_no', e.target.value)} placeholder="Batch no" className="w-full border rounded px-2 py-1 text-sm" />
+                        : (m.batch_no || '—')}</div>
+                      <div className="col-span-1 text-center"><input type="checkbox" checked={m.added} disabled={!canRecipeEdit} onChange={() => toggleMixMat(i)} className="h-4 w-4" /></div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {canRecipeView && (
+                <div className="flex gap-4 mt-3">
+                  <div><label className="block text-xs text-gray-500 mb-1">Mix start</label><input type="time" value={mixStart} onChange={e => setMixStart(e.target.value)} disabled={!canRecipeEdit} className="border rounded-lg px-2 py-1 text-sm disabled:bg-gray-100" /></div>
+                  <div><label className="block text-xs text-gray-500 mb-1">Mix end</label><input type="time" value={mixEnd} onChange={e => setMixEnd(e.target.value)} disabled={!canRecipeEdit} className="border rounded-lg px-2 py-1 text-sm disabled:bg-gray-100" /></div>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
@@ -264,7 +303,7 @@ export default function GrindingPage() {
               ))}
             </div>
             <div className="flex gap-2">
-              {canEdit && <button onClick={saveInspection} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{saving ? 'Saving…' : 'Save'}</button>}
+              {(canEdit || canRecipeEdit) && <button onClick={saveRecord} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{saving ? 'Saving…' : 'Save'}</button>}
               <button onClick={() => setOpenRec(null)} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Close</button>
             </div>
           </div>

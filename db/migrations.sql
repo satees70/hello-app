@@ -544,6 +544,17 @@ end $$;
 grant execute on function public.produce_grinding(uuid, numeric) to authenticated;
 
 
+-- ============================================================================
+-- 2026-06 · Grinding mixing details: per-material batch + added tick, mix times
+-- ============================================================================
+-- When the mixer prepares a produced batch, they record each raw material's
+-- batch number and tick it as added; the record gets mix start/end times.
+alter table public.grinding_materials add column if not exists batch_no text;
+alter table public.grinding_materials add column if not exists added boolean not null default false;
+alter table public.grinding_records add column if not exists mix_start text;   -- HH:MM
+alter table public.grinding_records add column if not exists mix_end text;     -- HH:MM
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.
