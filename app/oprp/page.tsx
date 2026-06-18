@@ -5,7 +5,7 @@ const GOOD_BROKEN = ['Good', 'Broken']
 const fields: Field[] = [
   { key: 'month_year', label: 'Month / Year' },
   { key: 'record_date', label: 'Date', type: 'date', list: true },
-  { key: 'product', label: 'Product / Raw Material', list: true },
+  { key: 'product', label: 'Product / Raw Material', type: 'item', list: true },
   { key: 'batch_no_old', label: 'Batch No. (old)', list: true },
   { key: 'batch_no_new', label: 'Batch No. (new) / Assembly No.' },
   { key: 'taken_qty', label: 'Taken Qty In (kg)', type: 'number' },

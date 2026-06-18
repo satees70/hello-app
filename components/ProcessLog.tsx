@@ -3,13 +3,13 @@ import { useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
-import { supabase } from '@/lib/supabase'
+import { supabase, fetchAll } from '@/lib/supabase'
 import { can, type ModuleKey } from '@/lib/permissions'
 
 export type Field = {
   key: string
   label: string
-  type?: 'text' | 'number' | 'date' | 'time' | 'select'
+  type?: 'text' | 'number' | 'date' | 'time' | 'select' | 'item'
   options?: string[]
   list?: boolean   // show as a column in the list table
   wide?: boolean   // span full width in the form
@@ -30,6 +30,8 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields }
   const [form, setForm] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [items, setItems] = useState<{ code: string; description: string | null }[]>([])
+  const hasItemField = fields.some(f => f.type === 'item')
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
   const canEdit = can(profile, moduleKey, 'edit')
@@ -38,6 +40,7 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields }
   const listFields = fields.filter(f => f.list)
 
   useEffect(() => { if (profile) { loadFactories(); load() } }, [profile])
+  useEffect(() => { if (profile && hasItemField && items.length === 0) fetchAll<{ code: string; description: string | null }>('items', 'code, description', 'code').then(setItems) }, [profile])
   async function loadFactories() { const { data } = await supabase.from('factories').select('code, name').order('code'); setFactories(data || []) }
   async function load() { const { data } = await supabase.from(table).select('*').order('created_at', { ascending: false }); setRows((data as Record<string, unknown>[]) || []) }
   const factoryName = (c: string) => factories.find(f => f.code === c)?.name || c
@@ -113,6 +116,7 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields }
       {editing && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={close}>
           <div className="bg-white rounded-xl shadow-xl border w-full max-w-3xl my-8 p-6" onClick={e => e.stopPropagation()}>
+            {hasItemField && <datalist id="process-items">{items.map(it => <option key={it.code} value={`${it.code}${it.description ? ' — ' + it.description : ''}`} />)}</datalist>}
             <h2 className="font-semibold text-lg mb-4">{editing === 'new' ? `New — ${title}` : title}</h2>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {editing === 'new' && myFactoryOptions.length > 1 && (
@@ -126,6 +130,9 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields }
                     <select value={form[fl.key] || ''} onChange={e => setForm({ ...form, [fl.key]: e.target.value })} disabled={!canEdit} className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100">
                       <option value="">—</option>{(fl.options || []).map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
+                  ) : fl.type === 'item' ? (
+                    <input list="process-items" value={form[fl.key] || ''} onChange={e => setForm({ ...form, [fl.key]: e.target.value })} disabled={!canEdit}
+                      placeholder="Search code or name…" className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100" />
                   ) : (
                     <input type={fl.type === 'number' ? 'number' : fl.type === 'date' ? 'date' : fl.type === 'time' ? 'time' : 'text'}
                       value={form[fl.key] || ''} onChange={e => setForm({ ...form, [fl.key]: e.target.value })} disabled={!canEdit}

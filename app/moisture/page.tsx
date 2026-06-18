@@ -4,7 +4,7 @@ import ProcessLog, { type Field } from '@/components/ProcessLog'
 const fields: Field[] = [
   { key: 'month_year', label: 'Month / Year' },
   { key: 'record_date', label: 'Date', type: 'date', list: true },
-  { key: 'product', label: 'Product / Raw Material', list: true },
+  { key: 'product', label: 'Product / Raw Material', type: 'item', list: true },
   { key: 'batch_no', label: 'Batch number', list: true },
   { key: 'sample_from', label: 'Sample collect from' },
   { key: 'product_desc', label: 'Describe of product' },
