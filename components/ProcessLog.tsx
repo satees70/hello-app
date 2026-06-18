@@ -9,14 +9,18 @@ import { can, type ModuleKey } from '@/lib/permissions'
 export type Field = {
   key: string
   label: string
-  type?: 'text' | 'number' | 'date' | 'time' | 'select' | 'item'
+  type?: 'text' | 'number' | 'date' | 'time' | 'select' | 'item' | 'timer'
   options?: string[]
-  list?: boolean   // show as a column in the list table
-  wide?: boolean   // span full width in the form
+  list?: boolean        // show as a column in the list table
+  wide?: boolean        // span full width in the form
+  startKey?: string     // for type 'timer': the start-time column
+  finishKey?: string    // for type 'timer': the finish-time column
 }
 
 const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 const fmtDate = (d: string) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ''); return m ? `${m[3]}/${m[2]}/${m[1]}` : (d || '—') }
+const fmtClock = (iso: string) => iso ? new Date(iso).toLocaleTimeString() : '—'
+const fmtDur = (ms: number) => { const s = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}` }
 
 export default function ProcessLog({ table, title, subtitle, moduleKey, fields }: {
   table: string; title: string; subtitle?: string; moduleKey: ModuleKey; fields: Field[]
@@ -31,7 +35,10 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields }
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [items, setItems] = useState<{ code: string; description: string | null }[]>([])
+  const [now, setNow] = useState(Date.now())
   const hasItemField = fields.some(f => f.type === 'item')
+  const anyRunning = fields.some(f => f.type === 'timer' && form[f.startKey!] && !form[f.finishKey!])
+  useEffect(() => { if (!editing || !anyRunning) return; const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id) }, [editing, anyRunning])
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
   const canEdit = can(profile, moduleKey, 'edit')
@@ -47,19 +54,33 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields }
 
   function openNew() {
     setEditing('new'); setError(''); setFactory(myFactoryOptions[0] || '')
-    const f: Record<string, string> = {}; fields.forEach(fl => f[fl.key] = fl.type === 'date' ? todayLocal() : ''); setForm(f)
+    const f: Record<string, string> = {}
+    fields.forEach(fl => { if (fl.type === 'timer') { f[fl.startKey!] = ''; f[fl.finishKey!] = '' } else f[fl.key] = fl.type === 'date' ? todayLocal() : '' })
+    setForm(f)
   }
   function openEdit(r: Record<string, unknown>) {
     setEditing(r); setError(''); setFactory((r.factory_code as string) || '')
-    const f: Record<string, string> = {}; fields.forEach(fl => f[fl.key] = r[fl.key] == null ? '' : String(r[fl.key])); setForm(f)
+    const f: Record<string, string> = {}
+    fields.forEach(fl => { if (fl.type === 'timer') { f[fl.startKey!] = r[fl.startKey!] == null ? '' : String(r[fl.startKey!]); f[fl.finishKey!] = r[fl.finishKey!] == null ? '' : String(r[fl.finishKey!]) } else f[fl.key] = r[fl.key] == null ? '' : String(r[fl.key]) })
+    setForm(f)
   }
   function close() { setEditing(null) }
+
+  // Set a field; if editing an existing record, persist it immediately (so a
+  // timer's Start survives closing the form and coming back to press Finish).
+  async function setField(key: string, value: string) {
+    setForm(prev => ({ ...prev, [key]: value }))
+    if (editing && editing !== 'new') await supabase.from(table).update({ [key]: value || null }).eq('id', (editing as Record<string, unknown>).id as string)
+  }
 
   async function save() {
     setSaving(true); setError('')
     if (!factory) { setError('Pick a factory.'); setSaving(false); return }
     const payload: Record<string, unknown> = { factory_code: factory }
-    fields.forEach(fl => { const v = form[fl.key]; payload[fl.key] = fl.type === 'number' ? (v === '' ? null : Number(v)) : (v === '' ? null : v) })
+    fields.forEach(fl => {
+      if (fl.type === 'timer') { payload[fl.startKey!] = form[fl.startKey!] || null; payload[fl.finishKey!] = form[fl.finishKey!] || null; return }
+      const v = form[fl.key]; payload[fl.key] = fl.type === 'number' ? (v === '' ? null : Number(v)) : (v === '' ? null : v)
+    })
     let err
     if (editing === 'new') {
       const { data: sess } = await supabase.auth.getSession()
@@ -126,7 +147,19 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields }
               {fields.map(fl => (
                 <div key={fl.key} className={fl.wide ? 'sm:col-span-3' : ''}>
                   <label className="block text-sm font-medium mb-1">{fl.label}</label>
-                  {fl.type === 'select' ? (
+                  {fl.type === 'timer' ? (() => {
+                    const sv = form[fl.startKey!] || '', fv = form[fl.finishKey!] || ''
+                    const dur = sv ? (Date.parse(fv || new Date(now).toISOString()) - Date.parse(sv)) : 0
+                    return (
+                      <div className="flex flex-wrap items-center gap-2 border rounded-lg px-3 py-2">
+                        {canEdit && !sv && <button type="button" onClick={() => setField(fl.startKey!, new Date().toISOString())} className="bg-green-600 text-white px-3 py-1 rounded-lg text-sm font-medium">▶ Start</button>}
+                        {canEdit && sv && !fv && <button type="button" onClick={() => setField(fl.finishKey!, new Date().toISOString())} className="bg-red-600 text-white px-3 py-1 rounded-lg text-sm font-medium">⏹ Finish</button>}
+                        {canEdit && sv && fv && <button type="button" onClick={() => { setField(fl.startKey!, ''); setField(fl.finishKey!, '') }} className="border px-3 py-1 rounded-lg text-sm">↻ Reset</button>}
+                        <span className="font-mono text-sm font-semibold">{sv ? fmtDur(dur) : '—'}</span>
+                        <span className="text-xs text-gray-500">{sv && `Start ${fmtClock(sv)}`}{fv ? ` · End ${fmtClock(fv)}` : sv ? ' · running' : ''}</span>
+                      </div>
+                    )
+                  })() : fl.type === 'select' ? (
                     <select value={form[fl.key] || ''} onChange={e => setForm({ ...form, [fl.key]: e.target.value })} disabled={!canEdit} className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100">
                       <option value="">—</option>{(fl.options || []).map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
