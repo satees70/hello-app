@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
+import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
 
 interface ChangeRequest {
@@ -46,6 +47,7 @@ type Filter = typeof FILTERS[number]
 
 export default function PendingChangesPage() {
   const { profile, loading, error: profileError } = useProfile()
+  useRequireView(profile, 'sales')
   const [requests, setRequests] = useState<ChangeRequest[]>([])
   const [filter, setFilter] = useState<Filter>('Pending')
   const [busyId, setBusyId] = useState('')

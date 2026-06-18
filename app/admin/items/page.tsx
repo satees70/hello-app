@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import Papa from 'papaparse'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
+import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 
 interface Item { id: string; code: string; description: string; unit: string; type: string; stock_group: string; supplied_by_factory: boolean; kg_per_bag: number | null }
@@ -10,6 +11,7 @@ const EMPTY = { code: '', description: '', unit: '', type: 'Material', stock_gro
 
 export default function ItemsPage() {
   const { profile, loading } = useProfile()
+  useRequireView(profile, 'items')
   const [items, setItems] = useState<Item[]>([])
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Item | null>(null)

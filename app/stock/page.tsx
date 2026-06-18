@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
+import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
 
 interface Lot {
@@ -20,6 +21,7 @@ interface Lot {
 
 export default function StockPage() {
   const { profile, loading, error: profileError } = useProfile()
+  useRequireView(profile, 'stock')
   const [lots, setLots] = useState<Lot[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [search, setSearch] = useState('')

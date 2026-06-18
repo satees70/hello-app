@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
+import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
 
 // A produced finished batch (what the recall report is run against).
@@ -50,6 +51,7 @@ interface Affected {
 
 export default function TraceabilityPage() {
   const { profile, loading, error: profileError } = useProfile()
+  useRequireView(profile, 'traceability')
   const [batches, setBatches] = useState<Batch[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [search, setSearch] = useState('')

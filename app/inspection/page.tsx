@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
+import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
 
 interface Hourly { time: string; weight: string; ink: string; qc_color: string; qc_odour: string; qc_phy: string; temp: string; speed: string; press: string; drop: string; alu: string; fe: string; nonfe: string; ss: string; remarks: string }
@@ -39,6 +40,7 @@ const EMPTY: Form = {
 
 export default function InspectionPage() {
   const { profile, loading, error: profileError } = useProfile()
+  useRequireView(profile, 'production')
   const [batchId, setBatchId] = useState('')
   const [recordId, setRecordId] = useState('')
   const [f, setF] = useState<Form>(EMPTY)

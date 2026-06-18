@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
+import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
 
 interface SalesImport {
@@ -56,6 +57,7 @@ const FIELDS: { value: keyof SalesLine; label: string }[] = [
 
 export default function SalesOrdersPage() {
   const { profile, loading, error: profileError } = useProfile()
+  useRequireView(profile, 'sales')
   const [imports, setImports] = useState<SalesImport[]>([])
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)

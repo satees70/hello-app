@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { can, type ModuleKey, type Permissions } from '@/lib/permissions'
 
 interface NavbarProps {
   factoryCode: string
@@ -20,6 +21,18 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const [pendingCount, setPendingCount] = useState(0)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [openMenu, setOpenMenu] = useState<string | null>(null)
+  const [perms, setPerms] = useState<Permissions | null>(null)
+  // This user's permissions (for menu view-gating). Until loaded, can() treats an
+  // unset grid as full access, so nothing is hidden by mistake.
+  const profileLike = { role, permissions: perms }
+
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (!data.session) return
+      const { data: p } = await supabase.from('profiles').select('permissions').eq('id', data.session.user.id).single()
+      setPerms((p?.permissions as Permissions) ?? {})
+    })
+  }, [])
 
   function addToast(title: string, message: string) {
     const id = Date.now() + Math.random()
@@ -108,29 +121,31 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   }
 
   // Menu grouped by area so it's easy to scan (group with no header = top-level).
-  // Empty groups (e.g. Setup for non-HO users) are dropped below.
-  const menuGroups: { header?: string; items: { href: string; label: string }[] }[] = [
+  // `module` ties a link to a permission section; links without a module (e.g.
+  // Dashboard, HO-only Setup pages) are always shown to whoever reaches them.
+  type Item = { href: string; label: string; module?: ModuleKey }
+  const allGroups: { header?: string; items: Item[] }[] = [
     { items: [
       { href: '/dashboard', label: 'Dashboard' },
-      { href: '/sales-orders/changes', label: 'Pending Changes' },
+      { href: '/sales-orders/changes', label: 'Pending Changes', module: 'sales' },
     ] },
     { header: 'Sales', items: [
-      { href: '/sales-orders', label: 'Sales Orders' },
+      { href: '/sales-orders', label: 'Sales Orders', module: 'sales' },
     ] },
     { header: 'Receiving', items: [
-      { href: '/material-requests', label: 'Material Requests' },
-      { href: '/incoming', label: 'Goods Received' },
+      { href: '/material-requests', label: 'Material Requests', module: 'receiving' },
+      { href: '/incoming', label: 'Goods Received', module: 'receiving' },
     ] },
     { header: 'Production', items: [
-      { href: '/production', label: 'Order Board' },
-      { href: '/packing', label: 'Packing Schedule' },
+      { href: '/production', label: 'Order Board', module: 'production' },
+      { href: '/packing', label: 'Packing Schedule', module: 'production' },
     ] },
     { header: 'Reports', items: [
-      { href: '/stock', label: 'Stock' },
-      { href: '/traceability', label: 'Traceability' },
-      { href: '/admin/items', label: 'Items' },
+      { href: '/stock', label: 'Stock', module: 'stock' },
+      { href: '/traceability', label: 'Traceability', module: 'traceability' },
+      { href: '/admin/items', label: 'Items', module: 'items' },
       ...(isHO ? [
-        { href: '/admin/bom', label: 'BOM' },
+        { href: '/admin/bom', label: 'BOM', module: 'bom' as ModuleKey },
         { href: '/admin/location-map', label: 'Location Map' },
       ] : []),
     ] },
@@ -138,7 +153,11 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       ...(isHO && isAdmin ? [{ href: '/admin/users', label: 'Users' }] : []),
       ...(isHO ? [{ href: '/admin/allowed-networks', label: 'Allowed Networks' }] : []),
     ] },
-  ].filter(g => g.items.length > 0)
+  ]
+  // Hide links the user has no View permission for (admins/HO/unconfigured see all).
+  const menuGroups = allGroups
+    .map(g => ({ ...g, items: g.items.filter(it => !it.module || can(profileLike, it.module, 'view')) }))
+    .filter(g => g.items.length > 0)
   return (
     <>
       <nav className="bg-blue-700 text-white px-4 sm:px-6 flex items-center justify-between gap-3 relative z-50">

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
+import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
 
 interface DeliveryOrder {
@@ -30,6 +31,7 @@ const PACK = 'BAG|CTN|CARTON'
 
 export default function IncomingPage() {
   const { profile, loading, error: profileError } = useProfile()
+  useRequireView(profile, 'receiving')
   const [docs, setDocs] = useState<DeliveryOrder[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [uploading, setUploading] = useState(false)

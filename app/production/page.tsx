@@ -2,6 +2,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
+import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 
 interface BatchItem { id: string; customer_name: string; so_number: string; quantity: number }
@@ -40,6 +41,7 @@ const STATUS_STYLE: Record<string, string> = {
 
 export default function ProductionPage() {
   const { profile, loading, error: profileError } = useProfile()
+  useRequireView(profile, 'production')
   const [batches, setBatches] = useState<Batch[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [items, setItems] = useState<Item[]>([])

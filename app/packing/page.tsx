@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
+import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
 
 interface PBItem { customer_name: string; quantity: number }
@@ -29,6 +30,7 @@ const STATUS_STYLE: Record<string, string> = {
 
 export default function PackingPage() {
   const { profile, loading, error: profileError } = useProfile()
+  useRequireView(profile, 'production')
   const [batches, setBatches] = useState<Batch[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })() // local date (not UTC)
