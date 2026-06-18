@@ -326,6 +326,46 @@ alter table production_batches add column if not exists pack_date date;
 alter table profiles add column if not exists permissions jsonb not null default '{}'::jsonb;
 
 
+-- ============================================================================
+-- 2026-06 · Office-only access (IP allow-list per factory)
+-- ============================================================================
+-- Factory staff can only use the app from an office network (an allowed IP);
+-- Head Office + Admins are exempt (checked in the client, not here). Allowed IPs
+-- are managed by Head Office on /admin/allowed-networks. A master switch lets the
+-- whole thing be turned on/off safely (default OFF so nobody is locked out until
+-- it's configured and switched on).
+
+create table if not exists public.allowed_networks (
+  id uuid primary key default gen_random_uuid(),
+  label text,                                   -- e.g. "AVINA102 office"
+  ip text not null,                             -- public IP as shown by whatismyipaddress
+  enabled boolean not null default true,
+  created_at timestamptz not null default now()
+);
+grant select, insert, update, delete on public.allowed_networks to authenticated, anon, service_role;
+alter table public.allowed_networks enable row level security;
+drop policy if exists an_read on public.allowed_networks;
+create policy an_read on public.allowed_networks for select using (true);
+drop policy if exists an_write on public.allowed_networks;
+create policy an_write on public.allowed_networks for all
+  using (my_factory_code() = 'HEAD_OFFICE') with check (my_factory_code() = 'HEAD_OFFICE');
+
+-- Single-row app settings (id is always 1). Master switch for the IP guard.
+create table if not exists public.app_config (
+  id int primary key default 1,
+  network_guard_enabled boolean not null default false,
+  constraint app_config_single check (id = 1)
+);
+insert into public.app_config (id) values (1) on conflict do nothing;
+grant select, insert, update, delete on public.app_config to authenticated, anon, service_role;
+alter table public.app_config enable row level security;
+drop policy if exists ac_read on public.app_config;
+create policy ac_read on public.app_config for select using (true);
+drop policy if exists ac_write on public.app_config;
+create policy ac_write on public.app_config for all
+  using (my_factory_code() = 'HEAD_OFFICE') with check (my_factory_code() = 'HEAD_OFFICE');
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.

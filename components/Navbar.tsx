@@ -79,7 +79,30 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     return () => { if (channel) supabase.removeChannel(channel) }
   }, [isHO])
 
+  // Office-only access guard. Factory staff may only use the app from an allowed
+  // office IP; Head Office + Admins are exempt. Master switch (app_config) lets it
+  // be turned off. Result cached for the session to avoid re-checking every page.
+  useEffect(() => {
+    if (isHO || isAdmin) return
+    if (typeof window !== 'undefined' && sessionStorage.getItem('netguard_ok') === '1') return
+    let cancelled = false
+    ;(async () => {
+      const { data: cfg } = await supabase.from('app_config').select('network_guard_enabled').eq('id', 1).maybeSingle()
+      if (!cfg?.network_guard_enabled) return                       // guard off (or table missing) → allow
+      const { data: nets } = await supabase.from('allowed_networks').select('ip').eq('enabled', true)
+      const allowed = (nets || []).map(n => String(n.ip).trim())
+      let myIp = ''
+      try { myIp = (await (await fetch('/api/whoami')).json()).ip || '' } catch { return } // can't tell → don't lock out
+      if (cancelled) return
+      if (allowed.includes(myIp.trim())) { sessionStorage.setItem('netguard_ok', '1'); return }
+      await supabase.auth.signOut()
+      router.replace('/blocked')
+    })()
+    return () => { cancelled = true }
+  }, [isHO, isAdmin])
+
   async function handleLogout() {
+    sessionStorage.removeItem('netguard_ok')
     await supabase.auth.signOut()
     router.replace('/login')
   }
@@ -113,6 +136,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     ] },
     { header: 'Setup', items: [
       ...(isHO && isAdmin ? [{ href: '/admin/users', label: 'Users' }] : []),
+      ...(isHO ? [{ href: '/admin/allowed-networks', label: 'Allowed Networks' }] : []),
     ] },
   ].filter(g => g.items.length > 0)
   return (
