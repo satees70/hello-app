@@ -29,7 +29,7 @@ export default function GrindingPage() {
   const [error, setError] = useState('')
 
   // Produce panel
-  const [prodRecipe, setProdRecipe] = useState(''); const [prodLots, setProdLots] = useState(''); const [producing, setProducing] = useState(false)
+  const [prodSearch, setProdSearch] = useState(''); const [prodLots, setProdLots] = useState(''); const [producing, setProducing] = useState(false)
   // Record (inspection) modal
   const [openRec, setOpenRec] = useState<GrindingRecord | null>(null)
   // Recipe editor modal
@@ -81,11 +81,14 @@ export default function GrindingPage() {
   const fmt = (d: string | null) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ''); return m ? `${m[3]}/${m[2]}/${m[1]}` : '—' }
 
   async function produce() {
-    setProducing(true); setError('')
-    const { error } = await supabase.rpc('produce_grinding', { p_recipe_id: prodRecipe, p_lots: Number(prodLots) })
+    setError('')
+    const r = recipes.filter(x => x.active).find(x => x.product === prodSearch.trim())
+    if (!r) { setError('Pick a product from the list (it must have a saved recipe).'); return }
+    setProducing(true)
+    const { error } = await supabase.rpc('produce_grinding', { p_recipe_id: r.id, p_lots: Number(prodLots) })
     setProducing(false)
     if (error) { setError(error.message); return }
-    setProdRecipe(''); setProdLots(''); load()
+    setProdSearch(''); setProdLots(''); load()
   }
 
   // ---- inspection modal ----
@@ -169,16 +172,16 @@ export default function GrindingPage() {
               <div className="bg-white rounded-xl shadow-sm border p-4 mb-5 flex flex-wrap gap-3 items-end">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Product to produce</label>
-                  <select value={prodRecipe} onChange={e => setProdRecipe(e.target.value)} className="border rounded-lg px-3 py-2 text-sm w-64">
-                    <option value="">— Select product —</option>
-                    {activeRecipes.map(r => <option key={r.id} value={r.id}>{r.product} ({r.recipe_type}){isHO ? ` · ${r.factory_code}` : ''}</option>)}
-                  </select>
+                  <input list="produce-products" value={prodSearch} onChange={e => setProdSearch(e.target.value)} placeholder="Type to search product…" className="border rounded-lg px-3 py-2 text-sm w-64" />
+                  <datalist id="produce-products">
+                    {activeRecipes.map(r => <option key={r.id} value={r.product}>{r.recipe_type}{isHO ? ` · ${r.factory_code}` : ''}</option>)}
+                  </datalist>
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Number of lots</label>
                   <input value={prodLots} onChange={e => setProdLots(e.target.value)} placeholder="e.g. 5" className="border rounded-lg px-3 py-2 text-sm w-28" />
                 </div>
-                <button onClick={produce} disabled={producing || !prodRecipe || !prodLots} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{producing ? 'Producing…' : 'Produce'}</button>
+                <button onClick={produce} disabled={producing || !prodSearch || !prodLots} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{producing ? 'Producing…' : 'Produce'}</button>
                 {activeRecipes.length === 0 && <span className="text-xs text-amber-600">No recipes yet — ask the mixer to add one in the Recipes tab.</span>}
               </div>
             )}
