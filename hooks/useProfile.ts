@@ -9,6 +9,7 @@ export interface Profile {
   email: string
   full_name: string
   factory_code: string
+  factory_codes?: string[] | null
   role: string
   permissions?: Permissions | null
 }

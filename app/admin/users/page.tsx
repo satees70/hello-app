@@ -6,9 +6,9 @@ import { useProfile } from '@/hooks/useProfile'
 import { supabase } from '@/lib/supabase'
 import { PERMISSION_MODULES, defaultGrid, isConfigured, type Permissions, type Action } from '@/lib/permissions'
 
-interface UserRow { id: string; email: string; full_name: string; factory_code: string; role: string; permissions: Permissions | null }
-type FormState = { email: string; password: string; full_name: string; factory_code: string; role: string; permissions: Permissions }
-const blankForm = (): FormState => ({ email: '', password: '', full_name: '', factory_code: '', role: 'user', permissions: defaultGrid() })
+interface UserRow { id: string; email: string; full_name: string; factory_code: string; factory_codes: string[] | null; role: string; permissions: Permissions | null }
+type FormState = { email: string; password: string; full_name: string; factory_code: string; factory_codes: string[]; role: string; permissions: Permissions }
+const blankForm = (): FormState => ({ email: '', password: '', full_name: '', factory_code: '', factory_codes: [], role: 'user', permissions: defaultGrid() })
 
 export default function UsersPage() {
   const { profile, loading } = useProfile()
@@ -46,12 +46,30 @@ export default function UsersPage() {
   function openEdit(u: UserRow) {
     setEditingId(u.id); setError(''); setSuccess('')
     setForm({
-      email: u.email, password: '', full_name: u.full_name || '', factory_code: u.factory_code, role: u.role,
+      email: u.email, password: '', full_name: u.full_name || '', factory_code: u.factory_code,
+      factory_codes: u.factory_codes?.length ? u.factory_codes : (u.factory_code ? [u.factory_code] : []),
+      role: u.role,
       permissions: isConfigured(u.permissions) ? (u.permissions as Permissions) : defaultGrid(),
     })
     setMode('edit')
   }
   function closeForm() { setMode('closed'); setEditingId(null) }
+
+  // Factory access (multi-select). Head Office is exclusive (sees everything).
+  const hoSelected = form.factory_codes.includes('HEAD_OFFICE') || form.factory_code === 'HEAD_OFFICE'
+  function toggleHO(checked: boolean) {
+    setForm(prev => checked
+      ? { ...prev, factory_codes: ['HEAD_OFFICE'], factory_code: 'HEAD_OFFICE' }
+      : { ...prev, factory_codes: [], factory_code: '' })
+  }
+  function toggleFactory(code: string, checked: boolean) {
+    setForm(prev => {
+      const list = checked
+        ? [...prev.factory_codes.filter(c => c !== 'HEAD_OFFICE'), code]
+        : prev.factory_codes.filter(c => c !== code)
+      return { ...prev, factory_codes: list, factory_code: list[0] || '' }
+    })
+  }
 
   const setPerm = (moduleKey: string, action: Action, checked: boolean) =>
     setForm(prev => ({ ...prev, permissions: { ...prev.permissions, [moduleKey]: { ...prev.permissions[moduleKey], [action]: checked } } }))
@@ -64,11 +82,12 @@ export default function UsersPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true); setError(''); setSuccess('')
+    if (form.factory_codes.length === 0) { setError('Select Head Office or at least one factory.'); setSaving(false); return }
     const isEdit = mode === 'edit'
     const url = isEdit ? '/api/update-user' : '/api/create-user'
     const body = isEdit
-      ? { id: editingId, full_name: form.full_name, factory_code: form.factory_code, role: form.role, permissions: form.permissions, password: form.password || undefined }
-      : { email: form.email, password: form.password, full_name: form.full_name, factory_code: form.factory_code, role: form.role, permissions: form.permissions }
+      ? { id: editingId, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, role: form.role, permissions: form.permissions, password: form.password || undefined }
+      : { email: form.email, password: form.password, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, role: form.role, permissions: form.permissions }
     const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     const data = await res.json()
     if (data.error) { setError(data.error); setSaving(false); return }
@@ -123,15 +142,6 @@ export default function UsersPage() {
                   placeholder={mode === 'edit' ? '••••••• (unchanged)' : ''} />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Assign To</label>
-                <select value={form.factory_code} onChange={e => setForm({ ...form, factory_code: e.target.value })}
-                  className="w-full border rounded-lg px-3 py-2" required>
-                  <option value="">-- Select --</option>
-                  <option value="HEAD_OFFICE">Head Office</option>
-                  {factories.map(f => <option key={f.code} value={f.code}>{f.name}</option>)}
-                </select>
-              </div>
-              <div>
                 <label className="block text-sm font-medium mb-1">Role</label>
                 <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}
                   className="w-full border rounded-lg px-3 py-2">
@@ -139,6 +149,31 @@ export default function UsersPage() {
                   <option value="admin">Admin</option>
                 </select>
               </div>
+            </div>
+
+            {/* Factory access (multi-select) */}
+            <div>
+              <label className="block text-sm font-medium mb-1">Factory access</label>
+              <label className="inline-flex items-center gap-2 text-sm mb-2">
+                <input type="checkbox" className="h-4 w-4" checked={hoSelected} onChange={e => toggleHO(e.target.checked)} />
+                Head Office (sees all factories)
+              </label>
+              {!hoSelected && (
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 border rounded-lg p-3">
+                    {factories.map(f => (
+                      <label key={f.code} className="inline-flex items-center gap-2 text-sm">
+                        <input type="checkbox" className="h-4 w-4"
+                          checked={form.factory_codes.includes(f.code)}
+                          onChange={e => toggleFactory(f.code, e.target.checked)} />
+                        {f.name}
+                      </label>
+                    ))}
+                  </div>
+                  {form.factory_codes.length === 0 && <p className="text-xs text-amber-600 mt-1">Select at least one factory (or tick Head Office).</p>}
+                  {form.factory_codes.length > 1 && <p className="text-xs text-blue-600 mt-1">This user will see all {form.factory_codes.length} selected factories together (merged view).</p>}
+                </>
+              )}
             </div>
 
             {/* Permission grid */}
@@ -222,9 +257,11 @@ export default function UsersPage() {
                     <td className="px-4 py-3 font-medium">{u.full_name || '—'}</td>
                     <td className="px-4 py-3 text-gray-600">{u.email}</td>
                     <td className="px-4 py-3">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${u.factory_code === 'HEAD_OFFICE' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
-                        {u.factory_code === 'HEAD_OFFICE' ? 'Head Office' : u.factory_code}
-                      </span>
+                      {(u.factory_codes?.length ? u.factory_codes : [u.factory_code]).filter(Boolean).map(fc => (
+                        <span key={fc} className={`mr-1 mb-1 inline-block px-2 py-0.5 rounded-full text-xs font-medium ${fc === 'HEAD_OFFICE' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                          {fc === 'HEAD_OFFICE' ? 'Head Office' : fc}
+                        </span>
+                      ))}
                     </td>
                     <td className="px-4 py-3 capitalize">{u.role}</td>
                     <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${al.cls}`}>{al.text}</span></td>

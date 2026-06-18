@@ -22,6 +22,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const [toasts, setToasts] = useState<Toast[]>([])
   const [openMenu, setOpenMenu] = useState<string | null>(null)
   const [perms, setPerms] = useState<Permissions | null>(null)
+  const [myFactories, setMyFactories] = useState<string[]>([])
   // This user's permissions (for menu view-gating). Until loaded, can() treats an
   // unset grid as full access, so nothing is hidden by mistake.
   const profileLike = { role, permissions: perms }
@@ -29,10 +30,16 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data }) => {
       if (!data.session) return
-      const { data: p } = await supabase.from('profiles').select('permissions').eq('id', data.session.user.id).single()
+      const { data: p } = await supabase.from('profiles').select('permissions, factory_codes').eq('id', data.session.user.id).single()
       setPerms((p?.permissions as Permissions) ?? {})
+      setMyFactories((p?.factory_codes as string[]) ?? [])
     })
   }, [])
+
+  // Top-bar label: Head Office, "Multi-site (N)", or the single factory code.
+  const factoryLabel = isHO ? 'Head Office'
+    : myFactories.filter(c => c !== 'HEAD_OFFICE').length > 1 ? `Multi-site (${myFactories.filter(c => c !== 'HEAD_OFFICE').length})`
+    : factoryCode
 
   function addToast(title: string, message: string) {
     const id = Date.now() + Math.random()
@@ -201,7 +208,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
         </div>
         <div className="flex items-center gap-2 sm:gap-4 text-sm shrink-0">
           <span className="bg-blue-800 px-2 sm:px-3 py-1 rounded-full text-xs whitespace-nowrap">
-            {isHO ? 'Head Office' : factoryCode}
+            {factoryLabel}
           </span>
           <span className="hidden md:inline">{fullName || 'User'}</span>
           <button onClick={handleLogout} className="bg-white text-blue-700 px-3 py-1 rounded hover:bg-blue-50 text-xs font-medium">
