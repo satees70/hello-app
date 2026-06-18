@@ -24,8 +24,9 @@ const fmtDate = (d: string) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || 
 const fmtClock = (iso: string) => iso ? new Date(iso).toLocaleTimeString() : '—'
 const fmtDur = (ms: number) => { const s = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}` }
 
-export default function ProcessLog({ table, title, subtitle, moduleKey, fields }: {
+export default function ProcessLog({ table, title, subtitle, moduleKey, fields, applyAction }: {
   table: string; title: string; subtitle?: string; moduleKey: ModuleKey; fields: Field[]
+  applyAction?: { rpc: string; flagField: string; label: string; doneLabel: string }
 }) {
   const { profile, loading, error: profileError } = useProfile()
   useRequireView(profile, moduleKey)
@@ -73,6 +74,15 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields }
   async function setField(key: string, value: string) {
     setForm(prev => ({ ...prev, [key]: value }))
     if (editing && editing !== 'new') await supabase.from(table).update({ [key]: value || null }).eq('id', (editing as Record<string, unknown>).id as string)
+  }
+
+  async function runApply() {
+    if (!applyAction || !editing || editing === 'new') return
+    setSaving(true); setError('')
+    const { error } = await supabase.rpc(applyAction.rpc, { p_id: (editing as Record<string, unknown>).id })
+    setSaving(false)
+    if (error) { setError(error.message); return }
+    alert('Done — stock updated.'); close(); load()
   }
 
   async function requestCancel(fl: Field) {
@@ -186,10 +196,16 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields }
               ))}
             </div>
             {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mt-3">{error}</p>}
-            <div className="flex gap-2 mt-4">
+            <div className="flex flex-wrap gap-2 mt-4 items-center">
               {canEdit && <button onClick={save} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{saving ? 'Saving…' : 'Save'}</button>}
-              <button onClick={close} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Close</button>
+              {applyAction && canEdit && editing !== 'new' && (
+                (editing as Record<string, unknown>)[applyAction.flagField]
+                  ? <span className="text-green-700 text-sm font-medium">✓ {applyAction.doneLabel}</span>
+                  : <button onClick={runApply} disabled={saving} className="bg-emerald-600 text-white px-5 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium">{applyAction.label}</button>
+              )}
+              <button onClick={close} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium ml-auto">Close</button>
             </div>
+            {applyAction && editing === 'new' && <p className="text-xs text-gray-400 mt-2">Save first, then re-open this record to move the stock.</p>}
           </div>
         </div>
       )}

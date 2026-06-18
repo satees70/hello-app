@@ -666,6 +666,54 @@ end $$;
 grant execute on function public.reject_correction(uuid) to authenticated;
 
 
+-- ============================================================================
+-- 2026-06 · Drying/Roasting moves stock: same item, new batch (e.g. 260606AH)
+-- ============================================================================
+-- Roasting is an extra process: consume qty_in of the old batch and create a new
+-- batch (same item) with qty_out (the weight loss is the difference). One-shot
+-- per record (stock_applied guard). Product field holds "CODE — DESCRIPTION".
+alter table public.drying_roasting_records add column if not exists stock_applied boolean not null default false;
+
+create or replace function public.process_drying_stock(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare r public.drying_roasting_records; v_code text; v_item public.items; v_need numeric; v_take numeric; v_avail numeric; c record;
+begin
+  if not has_perm('production', 'edit') then raise exception 'Not allowed to record production'; end if;
+  select * into r from public.drying_roasting_records where id = p_id;
+  if not found then raise exception 'Record not found'; end if;
+  if r.stock_applied then raise exception 'Stock has already been moved for this record'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (r.factory_code = any (my_factory_codes())) then raise exception 'Not allowed for this factory'; end if;
+  if r.qty_in is null or r.qty_in <= 0 then raise exception 'Enter Qty in (kg)'; end if;
+  if r.qty_out is null or r.qty_out <= 0 then raise exception 'Enter Qty out (kg)'; end if;
+  if coalesce(r.rm_batch_no, '') = '' then raise exception 'Enter the batch before oven'; end if;
+  if coalesce(r.product_batch_no, '') = '' then raise exception 'Enter the new batch after oven'; end if;
+  v_code := trim(split_part(coalesce(r.product, ''), '—', 1));
+  select * into v_item from public.items where code = v_code limit 1;
+  if not found then raise exception 'Item % not found in Items master', v_code; end if;
+  select coalesce(sum(qty_remaining), 0) into v_avail from public.stock_lots
+    where item_id = v_item.id and factory_code = r.factory_code and batch_no = r.rm_batch_no;
+  if v_avail < r.qty_in then raise exception 'Not enough stock of batch % (have %, need %)', r.rm_batch_no, v_avail, r.qty_in; end if;
+  v_need := r.qty_in;
+  for c in select id, qty_remaining from public.stock_lots
+           where item_id = v_item.id and factory_code = r.factory_code and batch_no = r.rm_batch_no and qty_remaining > 0
+           order by exp_date asc nulls last, received_at asc loop
+    exit when v_need <= 0;
+    v_take := least(v_need, c.qty_remaining);
+    update public.stock_lots set qty_remaining = qty_remaining - v_take where id = c.id;
+    v_need := v_need - v_take;
+  end loop;
+  insert into public.stock_lots (item_id, item_code, description, factory_code, batch_no, exp_date, qty_received, qty_remaining)
+  values (v_item.id, v_item.code, v_item.description, r.factory_code, r.product_batch_no, null, r.qty_out, r.qty_out);
+  update public.item_stock set quantity = quantity - r.qty_in + r.qty_out, updated_at = now()
+    where item_id = v_item.id and factory_code = r.factory_code;
+  if not found then
+    insert into public.item_stock (item_id, factory_code, quantity, updated_at) values (v_item.id, r.factory_code, r.qty_out - r.qty_in, now());
+  end if;
+  update public.drying_roasting_records set stock_applied = true where id = p_id;
+end $$;
+grant execute on function public.process_drying_stock(uuid) to authenticated;
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.
