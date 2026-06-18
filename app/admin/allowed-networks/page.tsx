@@ -17,6 +17,8 @@ export default function AllowedNetworksPage() {
   const [ip, setIp] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [editId, setEditId] = useState<string | null>(null)
+  const [editLabel, setEditLabel] = useState('')
 
   useEffect(() => {
     if (!profile) return
@@ -57,6 +59,15 @@ export default function AllowedNetworksPage() {
     setError('')
     const { error } = await supabase.from('allowed_networks').update({ enabled: !n.enabled }).eq('id', n.id)
     if (error) { setError(error.message); return }
+    load()
+  }
+
+  function startEdit(n: Network) { setEditId(n.id); setEditLabel(n.label || ''); setError('') }
+  async function saveEdit(n: Network) {
+    setError('')
+    const { error } = await supabase.from('allowed_networks').update({ label: editLabel.trim() || null }).eq('id', n.id)
+    if (error) { setError(error.message); return }
+    setEditId(null); setEditLabel('')
     load()
   }
 
@@ -150,15 +161,33 @@ export default function AllowedNetworksPage() {
               {nets.length === 0 && <tr><td colSpan={4} className="text-center py-8 text-gray-400">No allowed IPs yet</td></tr>}
               {nets.map(n => (
                 <tr key={n.id} className="border-b last:border-0 hover:bg-gray-50">
-                  <td className="px-4 py-3">{n.label || '—'}{n.ip.trim() === myIp.trim() && <span className="ml-2 text-xs text-blue-600">(this device)</span>}</td>
+                  <td className="px-4 py-3">
+                    {editId === n.id ? (
+                      <input value={editLabel} onChange={e => setEditLabel(e.target.value)} autoFocus
+                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(n); if (e.key === 'Escape') setEditId(null) }}
+                        placeholder="Office name" className="border rounded-lg px-2 py-1 text-sm w-48" />
+                    ) : (
+                      <>{n.label || '—'}{n.ip.trim() === myIp.trim() && <span className="ml-2 text-xs text-blue-600">(this device)</span>}</>
+                    )}
+                  </td>
                   <td className="px-4 py-3 font-mono">{n.ip}</td>
                   <td className="px-4 py-3">
                     <button onClick={() => toggleRow(n)} className={`px-2 py-0.5 rounded-full text-xs font-medium ${n.enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                       {n.enabled ? 'Enabled' : 'Disabled'}
                     </button>
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    <button onClick={() => removeRow(n)} className="text-red-600 hover:underline text-sm">Remove</button>
+                  <td className="px-4 py-3 text-right whitespace-nowrap">
+                    {editId === n.id ? (
+                      <>
+                        <button onClick={() => saveEdit(n)} className="text-blue-600 hover:underline text-sm font-medium">Save</button>
+                        <button onClick={() => setEditId(null)} className="text-gray-500 hover:underline text-sm ml-3">Cancel</button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={() => startEdit(n)} className="text-blue-600 hover:underline text-sm">Edit</button>
+                        <button onClick={() => removeRow(n)} className="text-red-600 hover:underline text-sm ml-3">Remove</button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}
