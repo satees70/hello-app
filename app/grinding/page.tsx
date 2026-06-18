@@ -5,6 +5,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can } from '@/lib/permissions'
+import { requestTimerCancel } from '@/lib/corrections'
 
 interface Recipe { id: string; factory_code: string; product: string; recipe_type: string; active: boolean }
 interface Component { item: string; qty_per_lot: string }
@@ -128,6 +129,12 @@ export default function GrindingPage() {
   const pauseMix = () => { const iso = new Date().toISOString(); persistTimer({ status: 'paused', segments: mixTimer.segments.map((sg, i) => i === mixTimer.segments.length - 1 && !sg.e ? { ...sg, e: iso } : sg) }) }
   const resumeMix = () => { const iso = new Date().toISOString(); persistTimer({ status: 'running', segments: [...mixTimer.segments, { s: iso, e: null }] }) }
   const stopMix = () => { const iso = new Date().toISOString(); persistTimer({ status: 'stopped', segments: mixTimer.segments.map((sg, i) => i === mixTimer.segments.length - 1 && !sg.e ? { ...sg, e: iso } : sg) }) }
+  async function cancelMixTimer() {
+    if (!openRec) return
+    const res = await requestTimerCancel({ table: 'grinding_records', record_id: openRec.id, timer_key: 'grinding_mix', label: `Grinding ${openRec.product || ''} — mixing timer`, factory_code: openRec.factory_code, requested_by_name: profile?.full_name })
+    if (res === null) return
+    if (res) setError(res); else alert('Cancellation request sent to Head Office for approval.')
+  }
   const setMixMat = (i: number, k: 'batch_no', v: string) => setMixMats(p => { const m = [...p]; m[i] = { ...m[i], [k]: v }; return m })
   const toggleMixMat = (i: number) => setMixMats(p => { const m = [...p]; m[i] = { ...m[i], added: !m[i].added }; return m })
   async function saveRecord() {
@@ -331,6 +338,7 @@ export default function GrindingPage() {
                     </>}
                     <span className="font-mono text-xl font-bold ml-1">{fmtDur(totalMs(mixTimer, now))}</span>
                     <span className={`text-xs px-2 py-0.5 rounded-full ${mixTimer.status === 'running' ? 'bg-green-100 text-green-700' : mixTimer.status === 'paused' ? 'bg-amber-100 text-amber-700' : mixTimer.status === 'stopped' ? 'bg-gray-200 text-gray-700' : 'bg-gray-100 text-gray-500'}`}>{mixTimer.status === 'idle' ? 'not started' : mixTimer.status}</span>
+                    {canRecipeEdit && mixTimer.status !== 'idle' && <button onClick={cancelMixTimer} className="text-orange-600 hover:underline text-xs ml-1">Request to cancel</button>}
                   </div>
                   <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-500">
                     <span>Started: {fmtClock(mixTimer.segments[0]?.s || null)}</span>

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
+import { requestTimerCancel } from '@/lib/corrections'
 import { supabase } from '@/lib/supabase'
 
 interface Hourly { time: string; weight: string; ink: string; qc_color: string; qc_odour: string; qc_phy: string; temp: string; speed: string; press: string; drop: string; alu: string; fe: string; nonfe: string; ss: string; remarks: string }
@@ -190,6 +191,10 @@ export default function InspectionPage() {
                   {timer.status === 'stopped' && <button onClick={startTimer} className="border px-4 py-1.5 rounded-lg text-sm no-print">↻ Restart</button>}
                   <span className="font-mono text-xl font-bold ml-1">{fmtDur(totalMs(timer, now))}</span>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${timer.status === 'running' ? 'bg-green-100 text-green-700' : timer.status === 'paused' ? 'bg-amber-100 text-amber-700' : timer.status === 'stopped' ? 'bg-gray-200 text-gray-700' : 'bg-gray-100 text-gray-500'}`}>{timer.status === 'idle' ? 'not started' : timer.status}</span>
+                  {timer.status !== 'idle' && recordId && (
+                    <button onClick={async () => { const res = await requestTimerCancel({ table: 'inspection_records', record_id: recordId, timer_key: 'inspection_production', label: `Inspection — production timer (batch ${batchNo})`, factory_code: factoryCode, requested_by_name: profile?.full_name }); if (res === null) return; if (res) setError(res); else alert('Cancellation request sent to Head Office for approval.') }}
+                      className="text-orange-600 hover:underline text-xs no-print">Request to cancel</button>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-500">
                   <span>Started: {fmtTime(timer.segments[0]?.s || null)}</span>

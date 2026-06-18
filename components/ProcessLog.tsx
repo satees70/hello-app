@@ -5,6 +5,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can, type ModuleKey } from '@/lib/permissions'
+import { requestTimerCancel } from '@/lib/corrections'
 
 export type Field = {
   key: string
@@ -15,6 +16,7 @@ export type Field = {
   wide?: boolean        // span full width in the form
   startKey?: string     // for type 'timer': the start-time column
   finishKey?: string    // for type 'timer': the finish-time column
+  cancelKey?: string    // for type 'timer': semantic key for a cancellation request
 }
 
 const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
@@ -71,6 +73,14 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields }
   async function setField(key: string, value: string) {
     setForm(prev => ({ ...prev, [key]: value }))
     if (editing && editing !== 'new') await supabase.from(table).update({ [key]: value || null }).eq('id', (editing as Record<string, unknown>).id as string)
+  }
+
+  async function requestCancel(fl: Field) {
+    if (!editing || editing === 'new' || !fl.cancelKey) return
+    const r = editing as Record<string, unknown>
+    const res = await requestTimerCancel({ table, record_id: r.id as string, timer_key: fl.cancelKey, label: `${title} — ${fl.label}`, factory_code: (r.factory_code as string) || factory, requested_by_name: profile?.full_name })
+    if (res === null) return
+    if (res) setError(res); else alert('Cancellation request sent to Head Office for approval.')
   }
 
   async function save() {
@@ -154,9 +164,10 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields }
                       <div className="flex flex-wrap items-center gap-2 border rounded-lg px-3 py-2">
                         {canEdit && !sv && <button type="button" onClick={() => setField(fl.startKey!, new Date().toISOString())} className="bg-green-600 text-white px-3 py-1 rounded-lg text-sm font-medium">▶ Start</button>}
                         {canEdit && sv && !fv && <button type="button" onClick={() => setField(fl.finishKey!, new Date().toISOString())} className="bg-red-600 text-white px-3 py-1 rounded-lg text-sm font-medium">⏹ Finish</button>}
-                        {canEdit && sv && fv && <button type="button" onClick={() => { setField(fl.startKey!, ''); setField(fl.finishKey!, '') }} className="border px-3 py-1 rounded-lg text-sm">↻ Reset</button>}
+                        {canEdit && sv && editing === 'new' && <button type="button" onClick={() => { setField(fl.startKey!, ''); setField(fl.finishKey!, '') }} className="border px-3 py-1 rounded-lg text-sm">↻ Reset</button>}
                         <span className="font-mono text-sm font-semibold">{sv ? fmtDur(dur) : '—'}</span>
                         <span className="text-xs text-gray-500">{sv && `Start ${fmtClock(sv)}`}{fv ? ` · End ${fmtClock(fv)}` : sv ? ' · running' : ''}</span>
+                        {canEdit && sv && editing !== 'new' && fl.cancelKey && <button type="button" onClick={() => requestCancel(fl)} className="text-orange-600 hover:underline text-xs ml-1">Request to cancel</button>}
                       </div>
                     )
                   })() : fl.type === 'select' ? (

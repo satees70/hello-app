@@ -607,6 +607,65 @@ begin
 end $$;
 
 
+-- ============================================================================
+-- 2026-06 · Timer cancellation requests (accidental Start/Stop → HO approval)
+-- ============================================================================
+-- A user can request to cancel a timer they pressed by mistake; it appears in
+-- Pending Changes; Head Office approves → the specific timer fields are cleared.
+create table if not exists public.correction_requests (
+  id uuid primary key default gen_random_uuid(),
+  factory_code text,
+  table_name text not null,
+  record_id uuid not null,
+  timer_key text not null,           -- which timer: grinding_mix / drying_oven / drying_roast / oprp_process / inspection_production
+  label text,
+  reason text,
+  status text not null default 'Pending',
+  requested_by uuid, requested_by_name text,
+  reviewed_by uuid, reviewed_by_name text, reviewed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+grant select, insert on public.correction_requests to authenticated, anon, service_role;
+grant update, delete on public.correction_requests to service_role;
+alter table public.correction_requests enable row level security;
+drop policy if exists cr_read on public.correction_requests;
+create policy cr_read on public.correction_requests for select
+  using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()) or requested_by = auth.uid());
+drop policy if exists cr_insert on public.correction_requests;
+create policy cr_insert on public.correction_requests for insert with check (requested_by = auth.uid());
+
+-- Approve: HO only; clears the specific timer fields for the known timer_key.
+create or replace function public.approve_correction(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare r public.correction_requests; v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can approve'; end if;
+  select * into r from public.correction_requests where id = p_id;
+  if not found or r.status <> 'Pending' then raise exception 'Not a pending request'; end if;
+  case r.timer_key
+    when 'grinding_mix' then update public.grinding_records set mix_timer = null, mix_start = null, mix_end = null where id = r.record_id;
+    when 'drying_oven' then update public.drying_roasting_records set oven_time_start = null, oven_time_finish = null where id = r.record_id;
+    when 'drying_roast' then update public.drying_roasting_records set roast_time_start = null, roast_time_finish = null where id = r.record_id;
+    when 'oprp_process' then update public.oprp_records set time_in = null, time_out = null where id = r.record_id;
+    when 'inspection_production' then update public.inspection_records set data = (data - 'timer' - 'prod_start' - 'prod_end') where id = r.record_id;
+    else raise exception 'Unknown timer key %', r.timer_key;
+  end case;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.correction_requests set status = 'Approved', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id;
+end $$;
+grant execute on function public.approve_correction(uuid) to authenticated;
+
+create or replace function public.reject_correction(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can reject'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.correction_requests set status = 'Rejected', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id and status = 'Pending';
+end $$;
+grant execute on function public.reject_correction(uuid) to authenticated;
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.

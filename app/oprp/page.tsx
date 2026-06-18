@@ -10,7 +10,7 @@ const fields: Field[] = [
   { key: 'batch_no_new', label: 'Batch No. (new) / Assembly No.' },
   { key: 'taken_qty', label: 'Taken Qty In (kg)', type: 'number' },
   { key: 'out_qty', label: 'Out Qty (kg)', type: 'number' },
-  { key: 'process_timer', label: 'Process time — in/out (click Start/Finish)', type: 'timer', startKey: 'time_in', finishKey: 'time_out', wide: true },
+  { key: 'process_timer', label: 'Process time — in/out (click Start/Finish)', type: 'timer', startKey: 'time_in', finishKey: 'time_out', cancelKey: 'oprp_process', wide: true },
   { key: 'machine', label: 'Machine name' },
   { key: 'machine_before', label: 'Machine cond. — before' },
   { key: 'machine_after', label: 'Machine cond. — after' },
