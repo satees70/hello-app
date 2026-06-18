@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
-import { supabase } from '@/lib/supabase'
+import { supabase, fetchAll } from '@/lib/supabase'
 import { can } from '@/lib/permissions'
 
 interface Recipe { id: string; factory_code: string; product: string; recipe_type: string; active: boolean }
@@ -35,6 +35,7 @@ export default function GrindingPage() {
   // Recipe editor modal
   const [editRecipe, setEditRecipe] = useState<Recipe | 'new' | null>(null)
   const [recipeForm, setRecipeForm] = useState<{ factory_code: string; product: string; recipe_type: string; active: boolean; components: Component[] } | null>(null)
+  const [items, setItems] = useState<{ code: string; description: string | null }[]>([])
   const [saving, setSaving] = useState(false)
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -45,6 +46,8 @@ export default function GrindingPage() {
     : (profile?.factory_codes?.length ? profile.factory_codes : (profile?.factory_code ? [profile.factory_code] : []))
 
   useEffect(() => { if (profile) { loadFactories(); load() } }, [profile])
+  // Items master for the recipe pick-lists (only the mixer needs it)
+  useEffect(() => { if (profile && canRecipeEdit && items.length === 0) fetchAll<{ code: string; description: string | null }>('items', 'code, description', 'code').then(setItems) }, [profile, canRecipeEdit])
 
   async function loadFactories() {
     const { data } = await supabase.from('factories').select('code, name').order('code'); setFactories(data || [])
@@ -269,13 +272,16 @@ export default function GrindingPage() {
       {editRecipe && recipeForm && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => { setEditRecipe(null); setRecipeForm(null) }}>
           <div className="bg-white rounded-xl shadow-xl border w-full max-w-2xl my-8 p-6" onClick={e => e.stopPropagation()}>
+            <datalist id="grind-items">
+              {items.map(it => <option key={it.code} value={`${it.code}${it.description ? ' — ' + it.description : ''}`} />)}
+            </datalist>
             <h2 className="font-semibold text-lg mb-4">{editRecipe === 'new' ? 'New recipe' : 'Edit recipe'}</h2>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
               {editRecipe === 'new' && myFactoryOptions.length > 1 && (
                 <div><label className="block text-sm font-medium mb-1">Factory</label>
                   <select value={recipeForm.factory_code} onChange={e => setRecipeForm({ ...recipeForm, factory_code: e.target.value })} className="w-full border rounded-lg px-3 py-2">{myFactoryOptions.map(c => <option key={c} value={c}>{factoryName(c)}</option>)}</select></div>
               )}
-              <div><label className="block text-sm font-medium mb-1">Product</label><input value={recipeForm.product} onChange={e => setRecipeForm({ ...recipeForm, product: e.target.value })} className="w-full border rounded-lg px-3 py-2" /></div>
+              <div><label className="block text-sm font-medium mb-1">Product</label><input list="grind-items" value={recipeForm.product} onChange={e => setRecipeForm({ ...recipeForm, product: e.target.value })} placeholder="Search code or name…" className="w-full border rounded-lg px-3 py-2" /></div>
               <div><label className="block text-sm font-medium mb-1">Type</label>
                 <select value={recipeForm.recipe_type} onChange={e => setRecipeForm({ ...recipeForm, recipe_type: e.target.value })} className="w-full border rounded-lg px-3 py-2"><option value="direct">Direct</option><option value="mixing">Mixing</option></select></div>
               <label className="inline-flex items-center gap-2 text-sm self-end"><input type="checkbox" checked={recipeForm.active} onChange={e => setRecipeForm({ ...recipeForm, active: e.target.checked })} className="h-4 w-4" /> Active</label>
@@ -289,7 +295,7 @@ export default function GrindingPage() {
               <div className="space-y-2">
                 {recipeForm.components.map((c, i) => (
                   <div key={i} className="flex gap-2 items-center">
-                    <input value={c.item} onChange={e => setComp(i, 'item', e.target.value)} placeholder="Ingredient / item" className="flex-1 border rounded-lg px-3 py-2 text-sm" />
+                    <input list="grind-items" value={c.item} onChange={e => setComp(i, 'item', e.target.value)} placeholder="Search code or name…" className="flex-1 border rounded-lg px-3 py-2 text-sm" />
                     <input value={c.qty_per_lot} onChange={e => setComp(i, 'qty_per_lot', e.target.value)} placeholder="Qty / lot" className="w-32 border rounded-lg px-3 py-2 text-sm" />
                     {recipeForm.components.length > 1 && <button type="button" onClick={() => setRecipeForm({ ...recipeForm, components: recipeForm.components.filter((_, j) => j !== i) })} className="text-red-500 text-sm px-2">✕</button>}
                   </div>
