@@ -5,6 +5,7 @@
 export const PERMISSION_MODULES = [
   { key: 'sales', label: 'Sales', desc: 'Sales orders & change requests' },
   { key: 'production', label: 'Production', desc: 'Order board, packing, inspection' },
+  { key: 'grinding', label: 'Grinding', desc: 'Grinding & mixing record (P07-F10)' },
   { key: 'receiving', label: 'Receiving', desc: 'Material requests, goods received' },
   { key: 'stock', label: 'Stock', desc: 'Stock on hand' },
   { key: 'items', label: 'Items', desc: 'Items master' },
@@ -12,6 +13,11 @@ export const PERMISSION_MODULES = [
   { key: 'traceability', label: 'Traceability', desc: 'Recall report' },
   { key: 'users', label: 'Users', desc: 'User management' },
 ] as const
+
+// Sections that are HIDDEN by default — a user sees them ONLY if explicitly
+// granted (the opposite of the normal "open unless restricted" rule). Used for
+// sensitive processes like Grinding that most staff shouldn't see.
+export const RESTRICTED_MODULES: ModuleKey[] = ['grinding']
 
 export type ModuleKey = typeof PERMISSION_MODULES[number]['key']
 export type Action = 'view' | 'edit' | 'delete'
@@ -23,7 +29,11 @@ export type Permissions = Record<string, ModulePerm>
 // then tightens or loosens from here.
 export function defaultGrid(): Permissions {
   const g: Permissions = {}
-  for (const m of PERMISSION_MODULES) g[m.key] = { view: true, edit: true, delete: false }
+  for (const m of PERMISSION_MODULES) {
+    g[m.key] = RESTRICTED_MODULES.includes(m.key)
+      ? { view: false, edit: false, delete: false }   // restricted sections start OFF
+      : { view: true, edit: true, delete: false }
+  }
   return g
 }
 
@@ -43,6 +53,7 @@ export function can(
 ): boolean {
   if (!profile) return false
   if (profile.role === 'admin') return true
-  if (!isConfigured(profile.permissions)) return true
+  // Restricted sections need an explicit grant (no legacy-full default).
+  if (!isConfigured(profile.permissions)) return !RESTRICTED_MODULES.includes(module)
   return !!profile.permissions?.[module]?.[action]
 }

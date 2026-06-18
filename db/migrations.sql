@@ -366,6 +366,45 @@ create policy ac_write on public.app_config for all
   using (my_factory_code() = 'HEAD_OFFICE') with check (my_factory_code() = 'HEAD_OFFICE');
 
 
+-- ============================================================================
+-- 2026-06 · Grinding & Mixing Record (P07-F10) — restricted process screen
+-- ============================================================================
+-- A grinding/mixing log (controlled form P07-F10 Ver.02). Each record can list
+-- several raw materials (a mixture) in `materials` jsonb [{item, qty}]. Visible
+-- only to users explicitly granted the 'grinding' permission section (restricted
+-- by default). Factory-scoped (multi-factory aware via my_factory_codes()).
+create table if not exists public.grinding_records (
+  id uuid primary key default gen_random_uuid(),
+  factory_code text not null,
+  month_year text,
+  record_date date,
+  product text,
+  product_batch_no text,
+  materials jsonb not null default '[]'::jsonb,   -- [{ item, qty }]
+  machine text,
+  crusher_before text,                            -- crusher condition before production
+  crusher_after text,                             -- crusher condition after production
+  qty_rework numeric,
+  qty_rejection numeric,
+  correction_action text,
+  prepared_by text,
+  verified_by text,
+  remark text,
+  created_by uuid,
+  created_at timestamptz not null default now()
+);
+create index if not exists grinding_records_factory on public.grinding_records(factory_code, record_date);
+grant select, insert, update, delete on public.grinding_records to authenticated, anon, service_role;
+alter table public.grinding_records enable row level security;
+drop policy if exists gr_read on public.grinding_records;
+create policy gr_read on public.grinding_records for select
+  using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()));
+drop policy if exists gr_write on public.grinding_records;
+create policy gr_write on public.grinding_records for all
+  using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()))
+  with check (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()));
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.
