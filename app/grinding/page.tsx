@@ -9,9 +9,22 @@ import { can } from '@/lib/permissions'
 interface Recipe { id: string; factory_code: string; product: string; recipe_type: string; active: boolean }
 interface Component { item: string; qty_per_lot: string }
 interface Material { id?: string; item: string; qty: string; batch_no: string; added: boolean }
+interface Seg { s: string; e: string | null }
+interface Timer { status: 'idle' | 'running' | 'paused' | 'stopped'; segments: Seg[] }
+const EMPTY_TIMER: Timer = { status: 'idle', segments: [] }
+const segMs = (seg: Seg, nowMs: number) => (seg.e ? Date.parse(seg.e) : nowMs) - Date.parse(seg.s)
+const totalMs = (t: Timer, nowMs: number) => t.segments.reduce((sum, seg) => sum + segMs(seg, nowMs), 0)
+const pauseMs = (t: Timer, nowMs: number) => {
+  let total = 0
+  for (let i = 1; i < t.segments.length; i++) { const p = t.segments[i - 1].e; if (p) total += Date.parse(t.segments[i].s) - Date.parse(p) }
+  if (t.status === 'paused' && t.segments.length) { const l = t.segments[t.segments.length - 1]; if (l.e) total += nowMs - Date.parse(l.e) }
+  return total
+}
+const fmtDur = (ms: number) => { const s = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}` }
+const fmtClock = (iso: string | null) => iso ? new Date(iso).toLocaleString() : '—'
 interface GrindingRecord {
   id: string; factory_code: string; record_date: string | null; product: string | null; recipe_type: string | null; lots: number | null
-  mix_start: string | null; mix_end: string | null
+  mix_start: string | null; mix_end: string | null; mix_timer: Timer | null
   crusher_before: string | null; crusher_after: string | null; qty_rework: number | null; qty_rejection: number | null
   correction_action: string | null; prepared_by: string | null; verified_by: string | null; remark: string | null
 }
@@ -95,13 +108,26 @@ export default function GrindingPage() {
   // ---- inspection modal ----
   const [insp, setInsp] = useState<Record<string, string>>({})
   const [mixMats, setMixMats] = useState<Material[]>([])
-  const [mixStart, setMixStart] = useState(''); const [mixEnd, setMixEnd] = useState('')
+  const [mixTimer, setMixTimer] = useState<Timer>(EMPTY_TIMER); const [now, setNow] = useState(Date.now())
+  useEffect(() => { if (mixTimer.status !== 'running' && mixTimer.status !== 'paused') return; const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id) }, [mixTimer.status])
   function openRecord(r: GrindingRecord) {
     setOpenRec(r); setError('')
     setInsp({ crusher_before: r.crusher_before || '', crusher_after: r.crusher_after || '', qty_rework: r.qty_rework?.toString() ?? '', qty_rejection: r.qty_rejection?.toString() ?? '', correction_action: r.correction_action || '', prepared_by: r.prepared_by || '', verified_by: r.verified_by || '', remark: r.remark || '' })
     setMixMats((matsByRecord[r.id] || []).map(m => ({ ...m })))
-    setMixStart(r.mix_start || ''); setMixEnd(r.mix_end || '')
+    setMixTimer((r.mix_timer as Timer) || EMPTY_TIMER)
   }
+  // Mix timer (recipe-edit). Persists immediately so it survives closing the modal.
+  async function persistTimer(t: Timer) {
+    setMixTimer(t)
+    if (!openRec) return
+    const start = t.segments[0]?.s || null
+    const end = t.status === 'stopped' ? (t.segments[t.segments.length - 1]?.e || null) : null
+    await supabase.from('grinding_records').update({ mix_timer: t, mix_start: start, mix_end: end }).eq('id', openRec.id)
+  }
+  const startMix = () => { const iso = new Date().toISOString(); persistTimer({ status: 'running', segments: [{ s: iso, e: null }] }) }
+  const pauseMix = () => { const iso = new Date().toISOString(); persistTimer({ status: 'paused', segments: mixTimer.segments.map((sg, i) => i === mixTimer.segments.length - 1 && !sg.e ? { ...sg, e: iso } : sg) }) }
+  const resumeMix = () => { const iso = new Date().toISOString(); persistTimer({ status: 'running', segments: [...mixTimer.segments, { s: iso, e: null }] }) }
+  const stopMix = () => { const iso = new Date().toISOString(); persistTimer({ status: 'stopped', segments: mixTimer.segments.map((sg, i) => i === mixTimer.segments.length - 1 && !sg.e ? { ...sg, e: iso } : sg) }) }
   const setMixMat = (i: number, k: 'batch_no', v: string) => setMixMats(p => { const m = [...p]; m[i] = { ...m[i], [k]: v }; return m })
   const toggleMixMat = (i: number) => setMixMats(p => { const m = [...p]; m[i] = { ...m[i], added: !m[i].added }; return m })
   async function saveRecord() {
@@ -116,7 +142,6 @@ export default function GrindingPage() {
         correction_action: insp.correction_action || null, prepared_by: insp.prepared_by || null,
         verified_by: insp.verified_by || null, remark: insp.remark || null,
       })
-      if (canRecipeEdit) Object.assign(payload, { mix_start: mixStart || null, mix_end: mixEnd || null })
       if (Object.keys(payload).length) { const { error } = await supabase.from('grinding_records').update(payload).eq('id', openRec.id); if (error) throw error }
       if (canRecipeEdit) {
         for (const m of mixMats) {
@@ -289,9 +314,30 @@ export default function GrindingPage() {
                 </div>
               )}
               {canRecipeView && (
-                <div className="flex gap-4 mt-3">
-                  <div><label className="block text-xs text-gray-500 mb-1">Mix start</label><input type="time" value={mixStart} onChange={e => setMixStart(e.target.value)} disabled={!canRecipeEdit} className="border rounded-lg px-2 py-1 text-sm disabled:bg-gray-100" /></div>
-                  <div><label className="block text-xs text-gray-500 mb-1">Mix end</label><input type="time" value={mixEnd} onChange={e => setMixEnd(e.target.value)} disabled={!canRecipeEdit} className="border rounded-lg px-2 py-1 text-sm disabled:bg-gray-100" /></div>
+                <div className="mt-3 border-t pt-3">
+                  <div className="text-sm font-semibold mb-2">Mixing time</div>
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                    {canRecipeEdit && <>
+                      {mixTimer.status === 'idle' && <button onClick={startMix} className="bg-green-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium">▶ Start</button>}
+                      {mixTimer.status === 'running' && <>
+                        <button onClick={pauseMix} className="bg-amber-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium">⏸ Pause</button>
+                        <button onClick={stopMix} className="bg-red-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium">⏹ Stop</button>
+                      </>}
+                      {mixTimer.status === 'paused' && <>
+                        <button onClick={resumeMix} className="bg-green-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium">▶ Resume</button>
+                        <button onClick={stopMix} className="bg-red-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium">⏹ Stop</button>
+                      </>}
+                      {mixTimer.status === 'stopped' && <button onClick={startMix} className="border px-4 py-1.5 rounded-lg text-sm">↻ Restart</button>}
+                    </>}
+                    <span className="font-mono text-xl font-bold ml-1">{fmtDur(totalMs(mixTimer, now))}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${mixTimer.status === 'running' ? 'bg-green-100 text-green-700' : mixTimer.status === 'paused' ? 'bg-amber-100 text-amber-700' : mixTimer.status === 'stopped' ? 'bg-gray-200 text-gray-700' : 'bg-gray-100 text-gray-500'}`}>{mixTimer.status === 'idle' ? 'not started' : mixTimer.status}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-500">
+                    <span>Started: {fmtClock(mixTimer.segments[0]?.s || null)}</span>
+                    <span>Ended: {fmtClock(mixTimer.status === 'stopped' ? (mixTimer.segments[mixTimer.segments.length - 1]?.e || null) : null)}</span>
+                    <span>Run time <span className="text-gray-400">(excl. breaks)</span>: <strong className="text-gray-700">{fmtDur(totalMs(mixTimer, now))}</strong></span>
+                    <span>Pause time: <strong className="text-amber-700">{fmtDur(pauseMs(mixTimer, now))}</strong></span>
+                  </div>
                 </div>
               )}
             </div>
