@@ -287,6 +287,25 @@ export default function SalesOrdersPage() {
     setBulkSubmitting(false); setBulkOpen(false); setSelectedIds(new Set())
     loadChangeReqs(linesFor.id); loadSummary()
   }
+  async function submitBulkDelete() {
+    if (!profile || !linesFor || selectedIds.size === 0) return
+    const reason = window.prompt(`Request to DELETE ${selectedIds.size} selected line(s).\nReason (sent to Head Office):`)
+    if (reason === null) return
+    if (!reason.trim()) { setError('Please give a reason.'); return }
+    setBulkSubmitting(true); setError(''); setSuccess('')
+    const sel = lines.filter(l => selectedIds.has(l.id))
+    const rows = sel.map(l => ({
+      line_id: l.id, import_id: linesFor.id, reason: reason.trim(), status: 'Pending',
+      requested_by: profile.id, requested_by_email: profile.email, requested_by_name: profile.full_name || profile.email,
+      factory_code: l.factory_code || profile.factory_code,
+      request_type: 'delete', field: '__line__', old_value: `${l.item_code} — ${l.description}`, new_value: '(delete line)',
+    }))
+    const { error: insErr } = await supabase.from('change_requests').insert(rows)
+    if (insErr) { setError(`Could not submit: ${insErr.message}`); setBulkSubmitting(false); return }
+    setSuccess(`Delete requested for ${rows.length} line(s) — awaiting Head Office approval.`)
+    setBulkSubmitting(false); setBulkOpen(false); setSelectedIds(new Set())
+    loadChangeReqs(linesFor.id); loadSummary()
+  }
 
   function onReqFieldChange(field: keyof SalesLine) {
     setReqField(field)
@@ -498,6 +517,7 @@ export default function SalesOrdersPage() {
               <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
                 <span className="font-medium text-blue-800">{selectedIds.size} line(s) selected</span>
                 <button onClick={openBulk} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 text-sm font-medium">Request bulk change</button>
+                <button onClick={submitBulkDelete} disabled={bulkSubmitting} className="bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50 text-sm font-medium">Request delete</button>
                 <button onClick={() => setSelectedIds(new Set())} className="text-gray-500 hover:underline">Clear</button>
               </div>
             )}
