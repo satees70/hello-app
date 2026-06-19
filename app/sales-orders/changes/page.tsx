@@ -182,7 +182,7 @@ export default function PendingChangesPage() {
   // Filterable columns on the change-requests table (dropdowns list the values present)
   const CR_COLS: { key: string; label: string; get: (r: ChangeRequest) => string }[] = [
     { key: 'doc', label: 'Document', get: r => r.sales_imports?.file_name || '—' },
-    { key: 'line', label: 'Line', get: r => r.sales_order_lines?.item_code || (r.request_type === 'delete' ? (r.old_value || '') : '') || '—' },
+    { key: 'line', label: 'Line', get: r => { const c = r.sales_order_lines?.item_code || (r.request_type === 'delete' ? (r.old_value || '') : ''); const d = r.sales_order_lines?.description || ''; return (c ? `${c}${d ? ' — ' + d : ''}` : '') || '—' } },
     { key: 'field', label: 'Field', get: r => r.request_type === 'delete' ? 'Whole line' : (FIELD_LABEL[r.field] || r.field) },
     { key: 'by', label: 'Requested by', get: r => r.requested_by_name || r.requested_by_email || '—' },
   ]

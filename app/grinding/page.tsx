@@ -5,6 +5,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can } from '@/lib/permissions'
+import MultiFilter from '@/components/MultiFilter'
 import { requestTimerCancel } from '@/lib/corrections'
 
 interface Recipe { id: string; factory_code: string; product: string; recipe_type: string; active: boolean }
@@ -40,6 +41,7 @@ export default function GrindingPage() {
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [compByRecipe, setCompByRecipe] = useState<Record<string, Component[]>>({})
   const [records, setRecords] = useState<GrindingRecord[]>([])
+  const [grF, setGrF] = useState<Record<string, Set<string>>>({})
   const [matsByRecord, setMatsByRecord] = useState<Record<string, Material[]>>({})
   const [error, setError] = useState('')
 
@@ -197,6 +199,11 @@ export default function GrindingPage() {
   if (!profile) return null
 
   const activeRecipes = recipes.filter(r => r.active)
+  // Records table column filters (Excel-style multi-select)
+  const grPass = (sel: Set<string> | undefined, v: string) => !sel || !sel.size || sel.has(v)
+  const grDist = (get: (r: GrindingRecord) => string) => [...new Set(records.map(get))].filter(Boolean).sort()
+  const grVal = { factory: (r: GrindingRecord) => factoryName(r.factory_code), product: (r: GrindingRecord) => r.product || '—', type: (r: GrindingRecord) => r.recipe_type || '—', verified: (r: GrindingRecord) => r.verified_by || '—' }
+  const visibleRecords = records.filter(r => grPass(grF.factory, grVal.factory(r)) && grPass(grF.product, grVal.product(r)) && grPass(grF.type, grVal.type(r)) && grPass(grF.verified, grVal.verified(r)))
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -240,10 +247,20 @@ export default function GrindingPage() {
                 <thead className="bg-gray-50 border-b">
                   <tr>{['Date', ...(isHO ? ['Factory'] : []), 'Product', 'Type', 'Lots', 'Crusher B/A', 'Rework', 'Reject', 'Verified', ''].map(h => (
                     <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+                  <tr className="border-b">
+                    <th className="px-2 py-1"></th>
+                    {isHO && <th className="px-2 py-1 min-w-[110px]"><MultiFilter values={grDist(grVal.factory)} selected={grF.factory || new Set()} onChange={s => setGrF(p => ({ ...p, factory: s }))} /></th>}
+                    <th className="px-2 py-1 min-w-[110px]"><MultiFilter values={grDist(grVal.product)} selected={grF.product || new Set()} onChange={s => setGrF(p => ({ ...p, product: s }))} /></th>
+                    <th className="px-2 py-1 min-w-[90px]"><MultiFilter values={grDist(grVal.type)} selected={grF.type || new Set()} onChange={s => setGrF(p => ({ ...p, type: s }))} /></th>
+                    <th className="px-2 py-1"></th><th className="px-2 py-1"></th><th className="px-2 py-1"></th><th className="px-2 py-1"></th>
+                    <th className="px-2 py-1 min-w-[100px]"><MultiFilter values={grDist(grVal.verified)} selected={grF.verified || new Set()} onChange={s => setGrF(p => ({ ...p, verified: s }))} /></th>
+                    <th className="px-2 py-1"></th>
+                  </tr>
                 </thead>
                 <tbody>
                   {records.length === 0 && <tr><td colSpan={11} className="text-center py-8 text-gray-400">No grinding records yet.</td></tr>}
-                  {records.map(r => (
+                  {records.length > 0 && visibleRecords.length === 0 && <tr><td colSpan={11} className="text-center py-8 text-gray-400">No records match the filter.</td></tr>}
+                  {visibleRecords.map(r => (
                     <tr key={r.id} className="border-b last:border-0 hover:bg-gray-50">
                       <td className="px-3 py-2 whitespace-nowrap">{fmt(r.record_date)}</td>
                       {isHO && <td className="px-3 py-2 whitespace-nowrap">{factoryName(r.factory_code)}</td>}

@@ -5,6 +5,7 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { supabase } from '@/lib/supabase'
 import { PERMISSION_MODULES, defaultGrid, isConfigured, type Permissions, type Action } from '@/lib/permissions'
+import MultiFilter from '@/components/MultiFilter'
 
 interface UserRow { id: string; email: string; full_name: string; factory_code: string; factory_codes: string[] | null; role: string; permissions: Permissions | null }
 type FormState = { email: string; password: string; full_name: string; factory_code: string; factory_codes: string[]; role: string; permissions: Permissions }
@@ -14,6 +15,7 @@ export default function UsersPage() {
   const { profile, loading } = useProfile()
   const router = useRouter()
   const [users, setUsers] = useState<UserRow[]>([])
+  const [uFilters, setUFilters] = useState<Record<string, Set<string>>>({})
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [mode, setMode] = useState<'closed' | 'create' | 'edit'>('closed')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -105,6 +107,14 @@ export default function UsersPage() {
     const views = PERMISSION_MODULES.filter(m => p[m.key]?.view).length
     return { text: `Custom · ${views}/${PERMISSION_MODULES.length} sections`, cls: 'bg-amber-100 text-amber-700' }
   }
+
+  const uFacs = (u: UserRow) => (u.factory_codes?.length ? u.factory_codes : [u.factory_code]).filter(Boolean) as string[]
+  const uPass = (sel: Set<string> | undefined, v: string) => !sel || !sel.size || sel.has(v)
+  const uDist = (get: (u: UserRow) => string) => [...new Set(users.map(get))].filter(Boolean).sort()
+  const allFacCodes = [...new Set(users.flatMap(uFacs))].sort()
+  const visibleUsers = users.filter(u =>
+    uPass(uFilters.name, u.full_name || '—') && uPass(uFilters.email, u.email) && uPass(uFilters.role, u.role) &&
+    (!uFilters.factory || !uFilters.factory.size || uFacs(u).some(f => uFilters.factory!.has(f))))
 
   if (loading) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
   if (!profile) return null
@@ -245,12 +255,22 @@ export default function UsersPage() {
                   <th key={i} className="text-left px-4 py-3 font-medium text-gray-600">{h}</th>
                 ))}
               </tr>
+              <tr className="border-b">
+                <th className="px-3 py-1.5 min-w-[120px]"><MultiFilter values={uDist(u => u.full_name || '—')} selected={uFilters.name || new Set()} onChange={s => setUFilters(p => ({ ...p, name: s }))} /></th>
+                <th className="px-3 py-1.5 min-w-[120px]"><MultiFilter values={uDist(u => u.email)} selected={uFilters.email || new Set()} onChange={s => setUFilters(p => ({ ...p, email: s }))} /></th>
+                <th className="px-3 py-1.5 min-w-[120px]"><MultiFilter values={allFacCodes} selected={uFilters.factory || new Set()} onChange={s => setUFilters(p => ({ ...p, factory: s }))} /></th>
+                <th className="px-3 py-1.5 min-w-[90px]"><MultiFilter values={uDist(u => u.role)} selected={uFilters.role || new Set()} onChange={s => setUFilters(p => ({ ...p, role: s }))} /></th>
+                <th className="px-3 py-1.5"></th><th className="px-3 py-1.5"></th>
+              </tr>
             </thead>
             <tbody>
               {users.length === 0 && (
                 <tr><td colSpan={6} className="text-center py-8 text-gray-400">No users yet</td></tr>
               )}
-              {users.map(u => {
+              {users.length > 0 && visibleUsers.length === 0 && (
+                <tr><td colSpan={6} className="text-center py-8 text-gray-400">No users match the filter</td></tr>
+              )}
+              {visibleUsers.map(u => {
                 const al = accessLabel(u)
                 return (
                   <tr key={u.id} className="border-b last:border-0 hover:bg-gray-50">
