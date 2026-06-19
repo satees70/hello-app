@@ -25,7 +25,6 @@ interface Batch {
 }
 interface ConsRow { id: string; item_code: string; description: string | null; batch_no: string | null; exp_date: string | null; qty_consumed: number; consumed_at: string }
 interface Item { id: string; code: string; description: string; unit: string; type: string }
-interface PackLine { factory_code: string; name: string; active: boolean }
 interface BomComp { parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean; use_mode: string }
 
 // A materials target: a single batch or a combined group of batches (same item + factory)
@@ -48,7 +47,6 @@ export default function ProductionPage() {
   const [batches, setBatches] = useState<Batch[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [items, setItems] = useState<Item[]>([])
-  const [packLines, setPackLines] = useState<PackLine[]>([])
   const [boms, setBoms] = useState<BomComp[]>([])
   const [stock, setStock] = useState<Record<string, number>>({})
   const [filter, setFilter] = useState<Filter>('All')
@@ -66,27 +64,23 @@ export default function ProductionPage() {
   const [combineOn, setCombineOn] = useState(true)
   const [sortBy, setSortBy] = useState<'due_asc' | 'due_desc' | 'batch'>('due_asc')
   const [consumption, setConsumption] = useState<Record<string, ConsRow[]>>({}) // batch id -> consumed lots
-  const [packEdit, setPackEdit] = useState<Record<string, { line: string; date: string; mode?: string }>>({}) // batch id -> pack plan being edited
-  const [savingPlan, setSavingPlan] = useState('')
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
   useEffect(() => { if (profile) loadAll() }, [profile])
 
   async function loadAll() {
-    const [{ data: b }, { data: f }, it, bc, { data: st }, { data: pl }] = await Promise.all([
+    const [{ data: b }, { data: f }, it, bc, { data: st }] = await Promise.all([
       supabase.from('production_batches').select('*, production_batch_items(id, customer_name, so_number, quantity)').order('created_at', { ascending: false }),
       supabase.from('factories').select('code, name').order('code'),
       fetchAll<Item>('items', 'id, code, description, unit, type'),
       fetchAll<BomComp>('bom_components', 'parent_item_id, component_item_id, quantity, apply_allowance, use_mode'),
       supabase.from('item_stock').select('item_id, factory_code, quantity'),
-      supabase.from('packing_lines').select('factory_code, name, active').order('name'),
     ])
     setBatches((b as Batch[]) || [])
     setFactories(f || [])
     setItems(it)
     setBoms(bc)
-    setPackLines((pl as PackLine[]) || [])
     const sm: Record<string, number> = {}
     ;(st || []).forEach(r => { sm[`${r.item_id}|${r.factory_code}`] = Number(r.quantity) })
     setStock(sm)
@@ -206,57 +200,6 @@ export default function ProductionPage() {
     if (e) { setError(e.message); return }
     setBatches(prev => prev.map(x => (x.id === b.id ? { ...x, no_combine: false } : x)))
     setSuccess(`${b.batch_no} re-combined.`)
-  }
-
-  // Save the pack plan (line + date) for a batch
-  async function savePackPlan(b: Batch) {
-    const e = packEdit[b.id] ?? { line: b.pack_line || '', date: b.pack_date || '', mode: b.run_mode || 'auto' }
-    const mode = e.mode || b.run_mode || 'auto'
-    setSavingPlan(b.id); setError(''); setSuccess('')
-    const { error: upErr } = await supabase.from('production_batches').update({ pack_line: e.line || null, pack_date: e.date || null, run_mode: mode }).eq('id', b.id)
-    if (upErr) { setError(upErr.message); setSavingPlan(''); return }
-    setBatches(prev => prev.map(x => (x.id === b.id ? { ...x, pack_line: e.line || null, pack_date: e.date || null, run_mode: mode } : x)))
-    setSavingPlan(''); setSuccess(`Pack plan saved for ${b.batch_no}.`)
-  }
-
-  // Save one pack plan (line / date / run mode) across every batch in a combined group
-  async function savePackPlanMany(members: Batch[], key: string) {
-    const e = packEdit[key] ?? { line: members[0].pack_line || '', date: members[0].pack_date || '', mode: members[0].run_mode || 'auto' }
-    const mode = e.mode || 'auto'
-    setSavingPlan(key); setError(''); setSuccess('')
-    const ids = members.map(m => m.id)
-    const { error: upErr } = await supabase.from('production_batches').update({ pack_line: e.line || null, pack_date: e.date || null, run_mode: mode }).in('id', ids)
-    if (upErr) { setError(upErr.message); setSavingPlan(''); return }
-    setBatches(prev => prev.map(x => (ids.includes(x.id) ? { ...x, pack_line: e.line || null, pack_date: e.date || null, run_mode: mode } : x)))
-    setSavingPlan(''); setSuccess(`Pack plan saved for ${ids.length} batch(es).`)
-  }
-
-  // Reusable pack-plan form (used by single batches and combined groups). `key`
-  // identifies the row in packEdit; defaults seed the fields.
-  function renderPackPlan(key: string, factoryCode: string, defLine: string | null, defDate: string | null, defMode: string | null, onSave: () => void) {
-    const cur = packEdit[key]?.line ?? defLine ?? ''
-    const opts = packLines.filter(p => p.factory_code === factoryCode && (p.active || p.name === cur)).map(p => p.name)
-    const setField = (patch: Partial<{ line: string; date: string; mode: string }>) =>
-      setPackEdit(p => ({ ...p, [key]: { line: p[key]?.line ?? defLine ?? '', date: p[key]?.date ?? defDate ?? '', mode: p[key]?.mode ?? defMode ?? 'auto', ...patch } }))
-    return (
-      <div className="flex flex-wrap items-end gap-3 mb-3 bg-teal-50/50 border border-teal-100 rounded-lg p-3">
-        <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Pack line</span>
-          <select value={cur} onChange={e => setField({ line: e.target.value })} className="border rounded px-2 py-1 text-sm bg-white min-w-[120px]">
-            <option value="">— Select line —</option>
-            {opts.map(n => <option key={n} value={n}>{n}</option>)}
-            {opts.length === 0 && <option value="" disabled>No lines — add in Setup → Packing Lines</option>}
-          </select></div>
-        <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Pack date</span>
-          <input type="date" value={packEdit[key]?.date ?? defDate ?? ''} onChange={e => setField({ date: e.target.value })} className="border rounded px-2 py-1 text-sm" /></div>
-        <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Run mode</span>
-          <select value={packEdit[key]?.mode ?? defMode ?? 'auto'} onChange={e => setField({ mode: e.target.value })} className="border rounded px-2 py-1 text-sm bg-white">
-            <option value="auto">Auto machine</option>
-            <option value="manual">Manual</option>
-          </select></div>
-        <button onClick={onSave} disabled={savingPlan === key} className="bg-teal-600 text-white px-4 py-1.5 rounded-lg hover:bg-teal-700 disabled:opacity-50 text-sm font-medium">{savingPlan === key ? 'Saving…' : 'Save pack plan'}</button>
-        <span className="text-gray-400 text-xs">line, date &amp; run mode (auto/manual)</span>
-      </div>
-    )
   }
 
   async function requestSplit(b: Batch, it: BatchItem) {
@@ -444,10 +387,6 @@ export default function ProductionPage() {
                                         </div>
                                       ))}
                                     </div>
-                                    <div className="mt-3 max-w-2xl">
-                                      <div className="text-gray-500 text-xs mb-1">One pack plan for all {members.length} batches in this group:</div>
-                                      {renderPackPlan(key, fc, members[0].pack_line, members[0].pack_date, members[0].run_mode, () => savePackPlanMany(members, key))}
-                                    </div>
                                   </td>
                                 </tr>
                               )}
@@ -492,10 +431,9 @@ export default function ProductionPage() {
                                       </li>
                                     ))}
                                   </ul>
-                                  {renderPackPlan(b.id, b.factory_code, b.pack_line, b.pack_date, b.run_mode, () => savePackPlan(b))}
-
                                   <button onClick={() => { setSelected(singleTarget(b)); setError(''); setSuccess('') }}
                                     className="border border-blue-600 text-blue-600 px-4 py-1.5 rounded-lg hover:bg-blue-50 text-sm font-medium">Materials</button>
+                                  <span className="ml-2 text-gray-400 text-xs">Pack line &amp; date are set on the Packing Schedule once materials are received.</span>
 
                                   <div className="mt-4 border-t pt-3">
                                     <div className="flex flex-wrap items-center gap-4 text-sm mb-2">
