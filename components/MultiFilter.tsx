@@ -20,15 +20,15 @@ export default function MultiFilter({ values, selected, onChange }: {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute z-50 mt-1 w-56 max-h-72 overflow-auto bg-white border rounded-lg shadow-xl p-2 text-xs">
+          <div className="absolute z-50 mt-1 w-[22rem] max-w-[80vw] max-h-72 overflow-auto bg-white border rounded-lg shadow-xl p-2 text-xs">
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search…" className="w-full border rounded px-2 py-1 mb-1" />
             <label className="flex items-center gap-2 px-1 py-1 hover:bg-gray-50 cursor-pointer font-medium border-b mb-1">
               <input type="checkbox" checked={selected.size === 0} onChange={() => onChange(new Set())} className="h-4 w-4" /> (All)
             </label>
             {shown.map(v => (
-              <label key={v} className="flex items-center gap-2 px-1 py-1 hover:bg-gray-50 cursor-pointer">
-                <input type="checkbox" checked={selected.has(v)} onChange={() => toggle(v)} className="h-4 w-4" />
-                <span className="truncate">{v}</span>
+              <label key={v} className="flex items-start gap-2 px-1 py-1 hover:bg-gray-50 cursor-pointer">
+                <input type="checkbox" checked={selected.has(v)} onChange={() => toggle(v)} className="h-4 w-4 mt-0.5 shrink-0" />
+                <span className="break-words leading-tight">{v}</span>
               </label>
             ))}
             {shown.length === 0 && <div className="text-gray-400 px-1 py-2">No matches</div>}
