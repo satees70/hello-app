@@ -31,7 +31,7 @@ const PACK = 'BAG|CTN|CARTON'
 
 export default function IncomingPage() {
   const { profile, loading, error: profileError } = useProfile()
-  useRequireView(profile, 'receiving')
+  useRequireView(profile, 'goods_received')
   const [docs, setDocs] = useState<DeliveryOrder[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [uploading, setUploading] = useState(false)

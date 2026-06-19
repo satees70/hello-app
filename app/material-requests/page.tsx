@@ -43,7 +43,7 @@ const STATUS_STYLE: Record<string, string> = {
 
 export default function MaterialRequestsPage() {
   const { profile, loading, error: profileError } = useProfile()
-  useRequireView(profile, 'receiving')
+  useRequireView(profile, 'material_requests')
   const [requests, setRequests] = useState<MaterialRequest[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [filter, setFilter] = useState<Filter>('Open')

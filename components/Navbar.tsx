@@ -140,8 +140,8 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/sales-orders', label: 'Sales Orders', module: 'sales' },
     ] },
     { header: 'Receiving', items: [
-      { href: '/material-requests', label: 'Material Requests', module: 'receiving' },
-      { href: '/incoming', label: 'Goods Received', module: 'receiving' },
+      { href: '/material-requests', label: 'Material Requests', module: 'material_requests' },
+      { href: '/incoming', label: 'Goods Received', module: 'goods_received' },
     ] },
     { header: 'Production', items: [
       { href: '/production', label: 'Order Board', module: 'production' },
