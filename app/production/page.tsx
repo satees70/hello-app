@@ -19,14 +19,15 @@ interface Batch {
   material_request_id: string | null
   pack_line: string | null
   pack_date: string | null
+  run_mode: string | null
   production_batch_items: BatchItem[]
 }
 interface ConsRow { id: string; item_code: string; description: string | null; batch_no: string | null; exp_date: string | null; qty_consumed: number; consumed_at: string }
 interface Item { id: string; code: string; description: string; unit: string; type: string }
-interface BomComp { parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean }
+interface BomComp { parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean; use_mode: string }
 
 // A materials target: a single batch or a combined group of batches (same item + factory)
-interface MatTarget { label: string; item_code: string; factory_code: string; total: number; batchIds: string[] }
+interface MatTarget { label: string; item_code: string; factory_code: string; total: number; batchIds: string[]; mode: string }
 
 const STATUSES = ['Planned', 'Requested', 'In Progress', 'Completed'] as const
 const FILTERS = ['All', ...STATUSES] as const
@@ -63,7 +64,7 @@ export default function ProductionPage() {
   const [separated, setSeparated] = useState<Set<string>>(new Set())
   const [sortBy, setSortBy] = useState<'due_asc' | 'due_desc' | 'batch'>('due_asc')
   const [consumption, setConsumption] = useState<Record<string, ConsRow[]>>({}) // batch id -> consumed lots
-  const [packEdit, setPackEdit] = useState<Record<string, { line: string; date: string }>>({}) // batch id -> pack plan being edited
+  const [packEdit, setPackEdit] = useState<Record<string, { line: string; date: string; mode?: string }>>({}) // batch id -> pack plan being edited
   const [savingPlan, setSavingPlan] = useState('')
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -75,7 +76,7 @@ export default function ProductionPage() {
       supabase.from('production_batches').select('*, production_batch_items(id, customer_name, so_number, quantity)').order('created_at', { ascending: false }),
       supabase.from('factories').select('code, name').order('code'),
       fetchAll<Item>('items', 'id, code, description, unit, type'),
-      fetchAll<BomComp>('bom_components', 'parent_item_id, component_item_id, quantity, apply_allowance'),
+      fetchAll<BomComp>('bom_components', 'parent_item_id, component_item_id, quantity, apply_allowance, use_mode'),
       supabase.from('item_stock').select('item_id, factory_code, quantity'),
     ])
     setBatches((b as Batch[]) || [])
@@ -128,10 +129,10 @@ export default function ProductionPage() {
   }
 
   // Explode a BOM for a given item/factory/quantity
-  function explode(itemCode: string, factoryCode: string, total: number) {
+  function explode(itemCode: string, factoryCode: string, total: number, mode = 'auto') {
     const parent = items.find(i => i.code === itemCode)
     if (!parent) return { note: `Item ${itemCode} is not in Items Master.`, rows: [] }
-    const comps = boms.filter(b => b.parent_item_id === parent.id)
+    const comps = boms.filter(b => b.parent_item_id === parent.id && ((b.use_mode || 'any') === 'any' || (b.use_mode || 'any') === mode))
     if (comps.length === 0) return { note: 'No BOM defined for this item. Add a recipe in BOM first.', rows: [] }
     const rows = comps.map(c => {
       const ci = items.find(i => i.id === c.component_item_id)
@@ -184,11 +185,12 @@ export default function ProductionPage() {
 
   // Save the pack plan (line + date) for a batch
   async function savePackPlan(b: Batch) {
-    const e = packEdit[b.id] ?? { line: b.pack_line || '', date: b.pack_date || '' }
+    const e = packEdit[b.id] ?? { line: b.pack_line || '', date: b.pack_date || '', mode: b.run_mode || 'auto' }
+    const mode = e.mode || b.run_mode || 'auto'
     setSavingPlan(b.id); setError(''); setSuccess('')
-    const { error: upErr } = await supabase.from('production_batches').update({ pack_line: e.line || null, pack_date: e.date || null }).eq('id', b.id)
+    const { error: upErr } = await supabase.from('production_batches').update({ pack_line: e.line || null, pack_date: e.date || null, run_mode: mode }).eq('id', b.id)
     if (upErr) { setError(upErr.message); setSavingPlan(''); return }
-    setBatches(prev => prev.map(x => (x.id === b.id ? { ...x, pack_line: e.line || null, pack_date: e.date || null } : x)))
+    setBatches(prev => prev.map(x => (x.id === b.id ? { ...x, pack_line: e.line || null, pack_date: e.date || null, run_mode: mode } : x)))
     setSavingPlan(''); setSuccess(`Pack plan saved for ${b.batch_no}.`)
   }
 
@@ -217,7 +219,7 @@ export default function ProductionPage() {
   const counts: Record<string, number> = { Planned: 0, Requested: 0, 'In Progress': 0, Completed: 0 }
   batches.forEach(b => { const st = derivedStatus(b); counts[st] = (counts[st] || 0) + 1 })
 
-  const exploded = selected ? explode(selected.item_code, selected.factory_code, selected.total) : null
+  const exploded = selected ? explode(selected.item_code, selected.factory_code, selected.total, selected.mode) : null
   const totalShortfall = exploded ? exploded.rows.reduce((s, r) => s + r.shortfall, 0) : 0
   const hasRequest = selected ? selected.batchIds.some(id => batches.find(b => b.id === id)?.material_request_id) : false
 
@@ -230,7 +232,7 @@ export default function ProductionPage() {
 
   // Factories present in the current view (for the combined, factory-grouped layout)
   const factoriesInView = [...new Set(shown.map(b => b.factory_code))].sort()
-  const singleTarget = (b: Batch): MatTarget => ({ label: b.batch_no, item_code: b.item_code, factory_code: b.factory_code, total: b.total_quantity, batchIds: [b.id] })
+  const singleTarget = (b: Batch): MatTarget => ({ label: b.batch_no, item_code: b.item_code, factory_code: b.factory_code, total: b.total_quantity, batchIds: [b.id], mode: b.run_mode || 'auto' })
 
   // Build display units for a factory's batches when Combine is on
   function buildUnits(fb: Batch[]) {
@@ -322,7 +324,7 @@ export default function ProductionPage() {
                           const total = members.reduce((s, m) => s + m.total_quantity, 0)
                           const dates = [...new Set(members.map(m => m.delivery_date))]
                           const dateLabel = dates.length === 1 ? dates[0] : 'Multiple'
-                          const target: MatTarget = { label: `${item} (combined ${members.length})`, item_code: item, factory_code: fc, total, batchIds: members.map(m => m.id) }
+                          const target: MatTarget = { label: `${item} (combined ${members.length})`, item_code: item, factory_code: fc, total, batchIds: members.map(m => m.id), mode: members[0].run_mode || 'auto' }
                           return (
                             <Fragment key={key}>
                               <tr className={`border-b last:border-0 hover:bg-amber-50/40 cursor-pointer ${expanded.has(key) ? 'bg-amber-50/60' : 'bg-amber-50/20'}`} onClick={() => toggleRow(key)}>
@@ -404,11 +406,16 @@ export default function ProductionPage() {
                                   </ul>
                                   <div className="flex flex-wrap items-end gap-3 mb-3 bg-teal-50/50 border border-teal-100 rounded-lg p-3">
                                     <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Pack line</span>
-                                      <input value={packEdit[b.id]?.line ?? b.pack_line ?? ''} onChange={e => setPackEdit(p => ({ ...p, [b.id]: { line: e.target.value, date: p[b.id]?.date ?? b.pack_date ?? '' } }))} placeholder="e.g. Line 1" className="border rounded px-2 py-1 text-sm" /></div>
+                                      <input value={packEdit[b.id]?.line ?? b.pack_line ?? ''} onChange={e => setPackEdit(p => ({ ...p, [b.id]: { line: e.target.value, date: p[b.id]?.date ?? b.pack_date ?? '', mode: p[b.id]?.mode ?? b.run_mode ?? 'auto' } }))} placeholder="e.g. Line 1" className="border rounded px-2 py-1 text-sm" /></div>
                                     <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Pack date</span>
-                                      <input type="date" value={packEdit[b.id]?.date ?? b.pack_date ?? ''} onChange={e => setPackEdit(p => ({ ...p, [b.id]: { line: p[b.id]?.line ?? b.pack_line ?? '', date: e.target.value } }))} className="border rounded px-2 py-1 text-sm" /></div>
+                                      <input type="date" value={packEdit[b.id]?.date ?? b.pack_date ?? ''} onChange={e => setPackEdit(p => ({ ...p, [b.id]: { line: p[b.id]?.line ?? b.pack_line ?? '', date: e.target.value, mode: p[b.id]?.mode ?? b.run_mode ?? 'auto' } }))} className="border rounded px-2 py-1 text-sm" /></div>
+                                    <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Run mode</span>
+                                      <select value={packEdit[b.id]?.mode ?? b.run_mode ?? 'auto'} onChange={e => setPackEdit(p => ({ ...p, [b.id]: { line: p[b.id]?.line ?? b.pack_line ?? '', date: p[b.id]?.date ?? b.pack_date ?? '', mode: e.target.value } }))} className="border rounded px-2 py-1 text-sm bg-white">
+                                        <option value="auto">Auto machine</option>
+                                        <option value="manual">Manual</option>
+                                      </select></div>
                                     <button onClick={() => savePackPlan(b)} disabled={savingPlan === b.id} className="bg-teal-600 text-white px-4 py-1.5 rounded-lg hover:bg-teal-700 disabled:opacity-50 text-sm font-medium">{savingPlan === b.id ? 'Saving…' : 'Save pack plan'}</button>
-                                    <span className="text-gray-400 text-xs">which line packs this & when</span>
+                                    <span className="text-gray-400 text-xs">line, date &amp; run mode (auto/manual)</span>
                                   </div>
 
                                   <button onClick={() => { setSelected(singleTarget(b)); setError(''); setSuccess('') }}

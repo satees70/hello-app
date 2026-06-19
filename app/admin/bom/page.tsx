@@ -7,7 +7,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { supabase, fetchAll } from '@/lib/supabase'
 
 interface Item { id: string; code: string; description: string; unit: string; type: string }
-interface BomComponent { id: string; parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean }
+interface BomComponent { id: string; parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean; use_mode: string }
 
 // Type-to-search item picker (replaces a huge native dropdown)
 function ItemCombo({ items, value, onChange, placeholder }: {
@@ -50,6 +50,7 @@ export default function BomPage() {
   const [parentId, setParentId] = useState('')
   const [components, setComponents] = useState<BomComponent[]>([])
   const [addComponentId, setAddComponentId] = useState('')
+  const [addUseMode, setAddUseMode] = useState('any')
   const [addQty, setAddQty] = useState('1')
   const [copyFromId, setCopyFromId] = useState('')
   const [copying, setCopying] = useState(false)
@@ -175,11 +176,11 @@ export default function BomPage() {
     const qty = Number(addQty)
     if (!qty || qty <= 0) { setError('Enter a quantity greater than 0.'); return }
     const { data: inserted, error: insErr } = await supabase.from('bom_components').insert({
-      parent_item_id: parentId, component_item_id: addComponentId, quantity: qty,
+      parent_item_id: parentId, component_item_id: addComponentId, quantity: qty, use_mode: addUseMode,
     }).select().single()
     if (insErr || !inserted) { setError(insErr?.message || 'Could not add component.'); return }
     setComponents(prev => [...prev, inserted])
-    setAddComponentId(''); setAddQty('1')
+    setAddComponentId(''); setAddQty('1'); setAddUseMode('any')
     setSuccess('Component added.')
   }
 
@@ -190,6 +191,11 @@ export default function BomPage() {
 
   function setRowAllowance(id: string) {
     setComponents(prev => prev.map(c => (c.id === id ? { ...c, apply_allowance: !c.apply_allowance } : c)))
+    setDirty(true)
+  }
+
+  function setRowMode(id: string, mode: string) {
+    setComponents(prev => prev.map(c => (c.id === id ? { ...c, use_mode: mode } : c)))
     setDirty(true)
   }
 
@@ -205,7 +211,7 @@ export default function BomPage() {
   async function saveAll() {
     setError(''); setSuccess(''); setSaving(true)
     const results = await Promise.all(components.map(c =>
-      supabase.from('bom_components').update({ component_item_id: c.component_item_id, quantity: Number(c.quantity) || 0, apply_allowance: c.apply_allowance }).eq('id', c.id)
+      supabase.from('bom_components').update({ component_item_id: c.component_item_id, quantity: Number(c.quantity) || 0, apply_allowance: c.apply_allowance, use_mode: c.use_mode || 'any' }).eq('id', c.id)
     ))
     const failed = results.find(r => r.error)
     if (failed?.error) { setError(failed.error.message); setSaving(false); return }
@@ -218,9 +224,9 @@ export default function BomPage() {
     if (!parentId || !copyFromId) { setError('Pick an item to copy the recipe from.'); return }
     if (copyFromId === parentId) { setError('Choose a different item to copy from.'); return }
     setCopying(true); setError(''); setSuccess('')
-    const { data: src } = await supabase.from('bom_components').select('component_item_id, quantity, apply_allowance').eq('parent_item_id', copyFromId)
+    const { data: src } = await supabase.from('bom_components').select('component_item_id, quantity, apply_allowance, use_mode').eq('parent_item_id', copyFromId)
     if (!src || src.length === 0) { setError('That item has no recipe to copy.'); setCopying(false); return }
-    const rows = src.map(s => ({ parent_item_id: parentId, component_item_id: s.component_item_id, quantity: s.quantity, apply_allowance: s.apply_allowance }))
+    const rows = src.map(s => ({ parent_item_id: parentId, component_item_id: s.component_item_id, quantity: s.quantity, apply_allowance: s.apply_allowance, use_mode: s.use_mode || 'any' }))
     const { error: upErr } = await supabase.from('bom_components').upsert(rows, { onConflict: 'parent_item_id,component_item_id' })
     if (upErr) { setError(upErr.message); setCopying(false); return }
     setCopyFromId(''); setCopying(false)
@@ -310,6 +316,14 @@ export default function BomPage() {
                   <input type="number" step="any" value={addQty} onChange={e => setAddQty(e.target.value)}
                     className="w-full border rounded-lg px-3 py-2 text-sm bg-white text-right" />
                 </div>
+                <div className="w-36">
+                  <label className="block text-xs font-medium mb-1">Used when</label>
+                  <select value={addUseMode} onChange={e => setAddUseMode(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-white">
+                    <option value="any">Any run</option>
+                    <option value="auto">Auto only</option>
+                    <option value="manual">Manual only</option>
+                  </select>
+                </div>
                 <button onClick={addComponent}
                   className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">
                   Add
@@ -321,14 +335,14 @@ export default function BomPage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b">
                   <tr>
-                    {['Component Code', 'Description', 'Type', 'Unit', 'Qty per unit', 'Allowance', 'Actions'].map(h => (
+                    {['Component Code', 'Description', 'Type', 'Unit', 'Qty per unit', 'Allowance', 'Used when', 'Actions'].map(h => (
                       <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {components.length === 0 && (
-                    <tr><td colSpan={7} className="text-center py-8 text-gray-400">No components yet. Add the first one above.</td></tr>
+                    <tr><td colSpan={8} className="text-center py-8 text-gray-400">No components yet. Add the first one above.</td></tr>
                   )}
                   {components.map(c => {
                     const ci = itemById(c.component_item_id)
@@ -372,6 +386,13 @@ export default function BomPage() {
                             <input type="checkbox" checked={c.apply_allowance} onChange={() => setRowAllowance(c.id)} className="h-4 w-4" />
                             <span className="text-xs text-gray-500">{c.apply_allowance ? '+10%' : 'none'}</span>
                           </label>
+                        </td>
+                        <td className="px-4 py-3">
+                          <select value={c.use_mode || 'any'} onChange={e => setRowMode(c.id, e.target.value)} className="border rounded px-2 py-1 text-xs bg-white">
+                            <option value="any">Any</option>
+                            <option value="auto">Auto</option>
+                            <option value="manual">Manual</option>
+                          </select>
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <button onClick={() => removeRow(c.id)} className="text-red-500 hover:underline text-xs">Remove</button>

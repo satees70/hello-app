@@ -806,6 +806,129 @@ end $$;
 grant execute on function public.reject_do_change(uuid) to authenticated;
 
 
+-- ============================================================================
+-- 2026-06 · BOM alternate component by run mode (auto = roll, manual = pc)
+-- ============================================================================
+-- A recipe component can be "any" (always), "auto" (only auto-machine runs) or
+-- "manual" (only manual runs). Each production batch has a run_mode; the material
+-- calculation includes the 'any' components + the one matching the batch mode.
+alter table public.bom_components add column if not exists use_mode text not null default 'any';   -- any | auto | manual
+alter table public.production_batches add column if not exists run_mode text not null default 'auto'; -- auto | manual
+
+-- Re-create the three material-calc functions with the mode filter added.
+create or replace function public.raise_material_request(p_batch_id uuid)
+ returns uuid language plpgsql security definer set search_path to 'public' as $function$
+declare v_batch public.production_batches; v_parent uuid; v_req uuid; v_no text; v_count int := 0; c record; v_short numeric; v_reqd numeric;
+begin
+  select * into v_batch from public.production_batches where id = p_batch_id;
+  if not found then raise exception 'Batch not found'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and v_batch.factory_code <> all(my_factory_codes()) then
+    raise exception 'Not allowed for this factory'; end if;
+  if v_batch.material_request_id is not null then raise exception 'A material request already exists for this batch'; end if;
+  select id into v_parent from public.items where code = v_batch.item_code limit 1;
+  if v_parent is null then raise exception 'Item % not found in Items Master', v_batch.item_code; end if;
+  if not exists (select 1 from public.bom_components where parent_item_id = v_parent) then
+    raise exception 'No BOM defined for %', v_batch.item_code; end if;
+  v_no := 'MR-' || lpad(nextval('public.material_request_seq')::text, 5, '0');
+  insert into public.material_requests (request_no, batch_id, factory_code, status)
+  values (v_no, p_batch_id, v_batch.factory_code, 'Open') returning id into v_req;
+  for c in
+    select bc.component_item_id as item_id, it.code, it.description, it.unit, bc.apply_allowance,
+           bc.quantity * v_batch.total_quantity as required_qty, coalesce(s.quantity, 0) as stock_qty
+    from public.bom_components bc join public.items it on it.id = bc.component_item_id
+    left join public.item_stock s on s.item_id = bc.component_item_id and s.factory_code = v_batch.factory_code
+    where bc.parent_item_id = v_parent
+      and (bc.use_mode = 'any' or bc.use_mode = coalesce(v_batch.run_mode, 'auto'))
+  loop
+    v_short := c.required_qty - c.stock_qty;
+    if v_short > 0 then
+      v_reqd := case when c.apply_allowance then ceil(v_short * 1.1) else v_short end;
+      insert into public.material_request_items
+        (request_id, item_id, item_code, description, unit, required_qty, stock_qty, shortfall_qty, requested_qty, received_qty, factory_code)
+      values (v_req, c.item_id, c.code, c.description, c.unit, c.required_qty, c.stock_qty, v_short, v_reqd, 0, v_batch.factory_code);
+      v_count := v_count + 1;
+    end if;
+  end loop;
+  if v_count = 0 then delete from public.material_requests where id = v_req; raise exception 'No shortfall — enough stock on hand for all materials'; end if;
+  update public.production_batches set status = case when status = 'Planned' then 'Requested' else status end, material_request_id = v_req where id = p_batch_id;
+  return v_req;
+end; $function$;
+
+create or replace function public.refresh_one_open_request(p_request_id uuid)
+ returns void language plpgsql security definer set search_path to 'public' as $function$
+declare v_req public.material_requests; v_batch public.production_batches; v_parent uuid; v_count int := 0; c record; v_short numeric; v_reqd numeric;
+begin
+  select * into v_req from public.material_requests where id = p_request_id;
+  if not found or v_req.status <> 'Open' then return; end if;
+  select * into v_batch from public.production_batches where id = v_req.batch_id;
+  if not found then return; end if;
+  select id into v_parent from public.items where code = v_batch.item_code limit 1;
+  delete from public.material_request_items where request_id = p_request_id;
+  if v_parent is not null then
+    for c in
+      select bc.component_item_id as item_id, it.code, it.description, it.unit, bc.apply_allowance,
+             bc.quantity * v_batch.total_quantity as required_qty, coalesce(s.quantity,0) as stock_qty
+      from public.bom_components bc join public.items it on it.id = bc.component_item_id
+      left join public.item_stock s on s.item_id = bc.component_item_id and s.factory_code = v_batch.factory_code
+      where bc.parent_item_id = v_parent
+        and (bc.use_mode = 'any' or bc.use_mode = coalesce(v_batch.run_mode, 'auto'))
+    loop
+      v_short := c.required_qty - c.stock_qty;
+      if v_short > 0 then
+        v_reqd := case when c.apply_allowance then ceil(v_short * 1.1) else v_short end;
+        insert into public.material_request_items
+          (request_id, item_id, item_code, description, unit, required_qty, stock_qty, shortfall_qty, requested_qty, received_qty, factory_code)
+        values (p_request_id, c.item_id, c.code, c.description, c.unit, c.required_qty, c.stock_qty, v_short, v_reqd, 0, v_batch.factory_code);
+        v_count := v_count + 1;
+      end if;
+    end loop;
+  end if;
+  if v_count = 0 then delete from public.material_requests where id = p_request_id; end if;
+end; $function$;
+
+create or replace function public.raise_combined_material_request(p_batch_ids uuid[])
+ returns uuid language plpgsql security definer set search_path to 'public' as $function$
+declare v_item text; v_factory text; v_mode text; v_total numeric; v_parent uuid; v_req uuid; v_no text; v_count int := 0; c record; v_short numeric; v_reqd numeric;
+begin
+  select item_code, factory_code, run_mode into v_item, v_factory, v_mode from public.production_batches where id = p_batch_ids[1];
+  if v_item is null then raise exception 'Batch not found'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and v_factory <> all(my_factory_codes()) then raise exception 'Not allowed for this factory'; end if;
+  if exists (select 1 from public.production_batches where id = any(p_batch_ids)
+             and (item_code <> v_item or factory_code <> v_factory or status <> 'Planned' or material_request_id is not null
+                  or coalesce(run_mode,'auto') <> coalesce(v_mode,'auto'))) then
+    raise exception 'All batches must be the same item, factory, run mode, Planned, and not yet requested';
+  end if;
+  select coalesce(sum(total_quantity), 0) into v_total from public.production_batches where id = any(p_batch_ids);
+  select id into v_parent from public.items where code = v_item limit 1;
+  if v_parent is null then raise exception 'Item % not found in Items Master', v_item; end if;
+  if not exists (select 1 from public.bom_components where parent_item_id = v_parent) then
+    raise exception 'No BOM defined for %', v_item; end if;
+  v_no := 'MR-' || lpad(nextval('public.material_request_seq')::text, 5, '0');
+  insert into public.material_requests (request_no, batch_id, factory_code, status)
+  values (v_no, p_batch_ids[1], v_factory, 'Open') returning id into v_req;
+  for c in
+    select bc.component_item_id as item_id, it.code, it.description, it.unit, bc.apply_allowance,
+           bc.quantity * v_total as required_qty, coalesce(s.quantity, 0) as stock_qty
+    from public.bom_components bc join public.items it on it.id = bc.component_item_id
+    left join public.item_stock s on s.item_id = bc.component_item_id and s.factory_code = v_factory
+    where bc.parent_item_id = v_parent
+      and (bc.use_mode = 'any' or bc.use_mode = coalesce(v_mode, 'auto'))
+  loop
+    v_short := c.required_qty - c.stock_qty;
+    if v_short > 0 then
+      v_reqd := case when c.apply_allowance then ceil(v_short * 1.1) else v_short end;
+      insert into public.material_request_items
+        (request_id, item_id, item_code, description, unit, required_qty, stock_qty, shortfall_qty, requested_qty, received_qty, factory_code)
+      values (v_req, c.item_id, c.code, c.description, c.unit, c.required_qty, c.stock_qty, v_short, v_reqd, 0, v_factory);
+      v_count := v_count + 1;
+    end if;
+  end loop;
+  if v_count = 0 then delete from public.material_requests where id = v_req; raise exception 'No shortfall — enough stock on hand for all materials'; end if;
+  update public.production_batches set status = 'Requested', material_request_id = v_req where id = any(p_batch_ids);
+  return v_req;
+end; $function$;
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.
