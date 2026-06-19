@@ -1,6 +1,7 @@
 'use client'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
+import { can, type ModuleKey } from '@/lib/permissions'
 import Link from 'next/link'
 
 export default function DashboardPage() {
@@ -13,36 +14,40 @@ export default function DashboardPage() {
   const isHO = profile.factory_code === 'HEAD_OFFICE'
   const isAdmin = profile.role === 'admin'
 
-  // Same grouping as the top menu (group with no header = shown first, no heading)
-  type Card = { href: string; label: string; desc: string }
-  const groups: { header?: string; items: Card[] }[] = [
+  // Same grouping as the top menu. Each card maps to a permission section;
+  // cards without a module (e.g. Location Map) are HO-only by their branch.
+  type Card = { href: string; label: string; desc: string; module?: ModuleKey }
+  const rawGroups: { header?: string; items: Card[] }[] = [
     { items: [
-      { href: '/sales-orders/changes', label: isHO ? 'Pending Changes' : 'My Change Requests', desc: isHO ? 'Approve or reject line change requests' : 'Track change requests you raised' },
+      { href: '/sales-orders/changes', label: isHO ? 'Pending Changes' : 'My Change Requests', desc: isHO ? 'Approve or reject line change requests' : 'Track change requests you raised', module: 'changes' },
     ] },
     { header: 'Sales', items: [
-      { href: '/sales-orders', label: 'Sales Orders', desc: 'Upload and track sales order PDFs' },
+      { href: '/sales-orders', label: 'Sales Orders', desc: 'Upload and track sales order PDFs', module: 'sales' },
     ] },
     { header: 'Receiving', items: [
-      { href: '/material-requests', label: 'Material Requests', desc: 'Material shortfalls requested from the warehouse' },
-      { href: '/incoming', label: 'Goods Received', desc: 'Receive deliveries (DO) into stock' },
+      { href: '/material-requests', label: 'Material Requests', desc: 'Material shortfalls requested from the warehouse', module: 'material_requests' },
+      { href: '/incoming', label: 'Goods Received', desc: 'Receive deliveries (DO) into stock', module: 'goods_received' },
     ] },
     { header: 'Production', items: [
-      { href: '/production', label: 'Order Board', desc: 'Production batches from confirmed orders' },
-      { href: '/packing', label: 'Packing Schedule', desc: 'What to pack today, by line' },
+      { href: '/production', label: 'Order Board', desc: 'Production batches from confirmed orders', module: 'order_board' },
+      { href: '/packing', label: 'Packing Schedule', desc: 'What to pack today, by line', module: 'packing' },
     ] },
     { header: 'Reports', items: [
-      { href: '/stock', label: 'Stock', desc: 'Stock on hand by batch and expiry' },
-      { href: '/traceability', label: 'Traceability', desc: 'Recall report — trace batches & materials' },
-      { href: '/admin/items', label: 'Items Master', desc: 'View and manage all items' },
+      { href: '/stock', label: 'Stock', desc: 'Stock on hand by batch and expiry', module: 'stock' },
+      { href: '/traceability', label: 'Traceability', desc: 'Recall report — trace batches & materials', module: 'traceability' },
+      { href: '/admin/items', label: 'Items Master', desc: 'View and manage all items', module: 'items' },
       ...(isHO ? [
-        { href: '/admin/bom', label: 'Bill of Materials', desc: 'Define recipes for manufactured items' },
+        { href: '/admin/bom', label: 'Bill of Materials', desc: 'Define recipes for manufactured items', module: 'bom' as ModuleKey },
         { href: '/admin/location-map', label: 'Location Map', desc: 'Map location codes to factories' },
       ] : []),
     ] },
     { header: 'Setup', items: [
       ...(isHO && isAdmin ? [{ href: '/admin/users', label: 'User Management', desc: 'Create and manage user accounts' }] : []),
     ] },
-  ].filter(g => g.items.length > 0)
+  ]
+  const groups = rawGroups
+    .map(g => ({ ...g, items: g.items.filter(c => !c.module || can(profile, c.module, 'view')) }))
+    .filter(g => g.items.length > 0)
 
   return (
     <div className="min-h-screen bg-gray-50">
