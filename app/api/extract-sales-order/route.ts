@@ -9,6 +9,10 @@ const supabaseAdmin = createClient(
 )
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
+// Reading a PDF with the model can take longer than the default ~10s function
+// limit, which would leave the document stuck on "Processing". Allow up to 60s.
+export const maxDuration = 60
+
 // Most capable model for messy multi-column document extraction.
 // Switch to 'claude-sonnet-4-6' if you want lower cost per document.
 const MODEL = 'claude-opus-4-8'
