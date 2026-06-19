@@ -25,6 +25,7 @@ interface Batch {
 }
 interface ConsRow { id: string; item_code: string; description: string | null; batch_no: string | null; exp_date: string | null; qty_consumed: number; consumed_at: string }
 interface Item { id: string; code: string; description: string; unit: string; type: string }
+interface PackLine { factory_code: string; name: string; active: boolean }
 interface BomComp { parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean; use_mode: string }
 
 // A materials target: a single batch or a combined group of batches (same item + factory)
@@ -47,6 +48,7 @@ export default function ProductionPage() {
   const [batches, setBatches] = useState<Batch[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [items, setItems] = useState<Item[]>([])
+  const [packLines, setPackLines] = useState<PackLine[]>([])
   const [boms, setBoms] = useState<BomComp[]>([])
   const [stock, setStock] = useState<Record<string, number>>({})
   const [filter, setFilter] = useState<Filter>('All')
@@ -72,17 +74,19 @@ export default function ProductionPage() {
   useEffect(() => { if (profile) loadAll() }, [profile])
 
   async function loadAll() {
-    const [{ data: b }, { data: f }, it, bc, { data: st }] = await Promise.all([
+    const [{ data: b }, { data: f }, it, bc, { data: st }, { data: pl }] = await Promise.all([
       supabase.from('production_batches').select('*, production_batch_items(id, customer_name, so_number, quantity)').order('created_at', { ascending: false }),
       supabase.from('factories').select('code, name').order('code'),
       fetchAll<Item>('items', 'id, code, description, unit, type'),
       fetchAll<BomComp>('bom_components', 'parent_item_id, component_item_id, quantity, apply_allowance, use_mode'),
       supabase.from('item_stock').select('item_id, factory_code, quantity'),
+      supabase.from('packing_lines').select('factory_code, name, active').order('name'),
     ])
     setBatches((b as Batch[]) || [])
     setFactories(f || [])
     setItems(it)
     setBoms(bc)
+    setPackLines((pl as PackLine[]) || [])
     const sm: Record<string, number> = {}
     ;(st || []).forEach(r => { sm[`${r.item_id}|${r.factory_code}`] = Number(r.quantity) })
     setStock(sm)
@@ -446,7 +450,17 @@ export default function ProductionPage() {
                                   </ul>
                                   <div className="flex flex-wrap items-end gap-3 mb-3 bg-teal-50/50 border border-teal-100 rounded-lg p-3">
                                     <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Pack line</span>
-                                      <input value={packEdit[b.id]?.line ?? b.pack_line ?? ''} onChange={e => setPackEdit(p => ({ ...p, [b.id]: { line: e.target.value, date: p[b.id]?.date ?? b.pack_date ?? '', mode: p[b.id]?.mode ?? b.run_mode ?? 'auto' } }))} placeholder="e.g. Line 1" className="border rounded px-2 py-1 text-sm" /></div>
+                                      {(() => {
+                                        const cur = packEdit[b.id]?.line ?? b.pack_line ?? ''
+                                        const opts = packLines.filter(p => p.factory_code === b.factory_code && (p.active || p.name === cur)).map(p => p.name)
+                                        return (
+                                          <select value={cur} onChange={e => setPackEdit(p => ({ ...p, [b.id]: { line: e.target.value, date: p[b.id]?.date ?? b.pack_date ?? '', mode: p[b.id]?.mode ?? b.run_mode ?? 'auto' } }))} className="border rounded px-2 py-1 text-sm bg-white min-w-[120px]">
+                                            <option value="">— Select line —</option>
+                                            {opts.map(n => <option key={n} value={n}>{n}</option>)}
+                                            {opts.length === 0 && <option value="" disabled>No lines — add in Setup → Packing Lines</option>}
+                                          </select>
+                                        )
+                                      })()}</div>
                                     <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Pack date</span>
                                       <input type="date" value={packEdit[b.id]?.date ?? b.pack_date ?? ''} onChange={e => setPackEdit(p => ({ ...p, [b.id]: { line: p[b.id]?.line ?? b.pack_line ?? '', date: e.target.value, mode: p[b.id]?.mode ?? b.run_mode ?? 'auto' } }))} className="border rounded px-2 py-1 text-sm" /></div>
                                     <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Run mode</span>

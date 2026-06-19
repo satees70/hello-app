@@ -1010,6 +1010,25 @@ end $$;
 grant execute on function public.reject_split(uuid) to authenticated;
 
 
+-- ============================================================================
+-- 2026-06 · Packing lines master (per factory) — dropdown on the Order Board
+-- ============================================================================
+create table if not exists public.packing_lines (
+  id uuid primary key default gen_random_uuid(),
+  factory_code text not null,
+  name text not null,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  unique (factory_code, name)
+);
+grant select, insert, update, delete on public.packing_lines to authenticated, service_role;
+alter table public.packing_lines enable row level security;
+drop policy if exists pl_all on public.packing_lines;
+create policy pl_all on public.packing_lines for all
+  using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()))
+  with check (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()));
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.

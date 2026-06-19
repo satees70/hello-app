@@ -7,6 +7,7 @@ export const PERMISSION_MODULES = [
   { key: 'changes', label: 'Pending changes', desc: 'Change-request approvals & status' },
   { key: 'order_board', label: 'Order board', desc: 'Production batches & planning' },
   { key: 'packing', label: 'Packing schedule', desc: 'What to pack, by line & date' },
+  { key: 'packing_lines', label: 'Packing lines', desc: 'Maintain the list of packing lines' },
   { key: 'inspection', label: 'Inspection', desc: 'Finished-good QC (P07-F01)' },
   { key: 'drying', label: 'Drying & roasting', desc: 'Oven drying & roasting (P07-F05)' },
   { key: 'moisture', label: 'Moisture', desc: 'Moisture content reading (P07-F08)' },
