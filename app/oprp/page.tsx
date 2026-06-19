@@ -29,6 +29,6 @@ const fields: Field[] = [
 ]
 
 export default function Page() {
-  return <ProcessLog table="oprp_records" moduleKey="production"
+  return <ProcessLog table="oprp_records" moduleKey="oprp"
     title="OPRP Record" subtitle="Controlled form P07-F03 · Handpicking (OPRP1), Sieving/Visual (OPRP2), Needle/Seal (OPRP3)." fields={fields} />
 }

@@ -18,6 +18,6 @@ const fields: Field[] = [
 ]
 
 export default function Page() {
-  return <ProcessLog table="moisture_records" moduleKey="production"
+  return <ProcessLog table="moisture_records" moduleKey="moisture"
     title="Moisture Content Reading" subtitle="Controlled form P07-F08 · Machine temp 130°C · Sample weight 3 ± 0.1 g." fields={fields} />
 }

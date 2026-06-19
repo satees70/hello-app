@@ -24,7 +24,7 @@ const fields: Field[] = [
 ]
 
 export default function Page() {
-  return <ProcessLog table="drying_roasting_records" moduleKey="production"
+  return <ProcessLog table="drying_roasting_records" moduleKey="drying"
     title="Oven Drying & Roasting Inspection" subtitle="Controlled form P07-F05 (CCP1 Oven Drying · CCP4 Roasting). Same item; after the oven it gets a new batch and the weight change moves stock."
     fields={fields}
     applyAction={{ rpc: 'process_drying_stock', flagField: 'stock_applied', label: 'Move to stock (apply weight change)', doneLabel: 'Stock moved' }} />

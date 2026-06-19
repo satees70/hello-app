@@ -5,6 +5,9 @@
 export const PERMISSION_MODULES = [
   { key: 'sales', label: 'Sales', desc: 'Sales orders & change requests' },
   { key: 'production', label: 'Production', desc: 'Order board, packing, inspection' },
+  { key: 'drying', label: 'Drying & roasting', desc: 'Oven drying & roasting (P07-F05)' },
+  { key: 'moisture', label: 'Moisture', desc: 'Moisture content reading (P07-F08)' },
+  { key: 'oprp', label: 'OPRP', desc: 'OPRP record (P07-F03)' },
   { key: 'grinding', label: 'Grinding', desc: 'Grinding & mixing record / QC (P07-F10)' },
   { key: 'grinding_recipe', label: 'Grinding recipe', desc: 'Raw-material mixture / formula (secret)' },
   { key: 'receiving', label: 'Receiving', desc: 'Material requests, goods received' },
