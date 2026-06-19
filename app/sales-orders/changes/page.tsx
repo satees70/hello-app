@@ -38,6 +38,11 @@ interface DoChangeRequest {
   requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
 }
 
+interface SplitRequest {
+  id: string; label: string | null; reason: string | null; status: string
+  requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null; factory_code: string | null
+}
+
 const FIELD_LABEL: Record<string, string> = {
   customer_name: 'Customer',
   item_code: 'Item Code',
@@ -72,6 +77,9 @@ export default function PendingChangesPage() {
   const [corrFilters, setCorrFilters] = useState<Record<string, Set<string>>>({})
   const [selDo, setSelDo] = useState<Set<string>>(new Set())
   const [doFilters, setDoFilters] = useState<Record<string, Set<string>>>({})
+  const [splits, setSplits] = useState<SplitRequest[]>([])
+  const [selSplit, setSelSplit] = useState<Set<string>>(new Set())
+  const [splitFilters, setSplitFilters] = useState<Record<string, Set<string>>>({})
 
   // Distinct values present in a list, for a filter dropdown
   const distinctOf = <T,>(arr: T[], get: (x: T) => string) => [...new Set(arr.map(get))].filter(Boolean).sort()
@@ -84,7 +92,7 @@ export default function PendingChangesPage() {
 
   useEffect(() => {
     if (!profile) return
-    loadRequests(); loadCorrections(); loadDoChanges()
+    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits()
     // Live refresh on any change-request activity, with a poll fallback
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) supabase.realtime.setAuth(data.session.access_token)
@@ -94,8 +102,9 @@ export default function PendingChangesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'change_requests' }, () => loadRequests())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'correction_requests' }, () => loadCorrections())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'do_change_requests' }, () => loadDoChanges())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'split_requests' }, () => loadSplits())
       .subscribe()
-    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges() }, 20000)
+    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits() }, 20000)
     return () => { supabase.removeChannel(channel); clearInterval(timer) }
   }, [profile])
 
@@ -139,6 +148,24 @@ export default function PendingChangesPage() {
     const { error: e } = await supabase.rpc('reject_do_change', { p_id: id })
     if (e) { setError(e.message); setBusyId(''); return }
     setSuccess('Goods Received change rejected.'); setBusyId(''); loadDoChanges()
+  }
+
+  async function loadSplits() {
+    const { data } = await supabase.from('split_requests').select('*').order('created_at', { ascending: false })
+    setSplits((data as SplitRequest[]) || [])
+  }
+  async function approveSplit(id: string) {
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('approve_split', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Split approved — the order now has its own batch.'); setBusyId(''); loadSplits()
+  }
+  async function rejectSplit(id: string) {
+    if (!confirm('Reject this split request? The batch stays as it is.')) return
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('reject_split', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Split request rejected.'); setBusyId(''); loadSplits()
   }
 
   async function approve(id: string) {
@@ -202,6 +229,11 @@ export default function PendingChangesPage() {
   const doPending = shownDo.filter(c => c.status === 'Pending')
   const doAllSel = doPending.length > 0 && doPending.every(c => selDo.has(c.id))
   const selDoIds = doPending.filter(c => selDo.has(c.id)).map(c => c.id)
+  const shownSplitAll = filter === 'All' ? splits : splits.filter(c => c.status === filter)
+  const shownSplit = shownSplitAll.filter(c => passes(splitFilters.label, c.label || '—') && passes(splitFilters.by, c.requested_by_name || '—'))
+  const splitPending = shownSplit.filter(c => c.status === 'Pending')
+  const splitAllSel = splitPending.length > 0 && splitPending.every(c => selSplit.has(c.id))
+  const selSplitIds = splitPending.filter(c => selSplit.has(c.id)).map(c => c.id)
   const counts: Record<string, number> = { Pending: 0, Approved: 0, Rejected: 0 }
   requests.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1 })
 
@@ -401,6 +433,59 @@ export default function PendingChangesPage() {
                         <div className="flex gap-2">
                           <button onClick={() => approveDo(c.id)} disabled={busyId === c.id} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">Approve</button>
                           <button onClick={() => rejectDo(c.id)} disabled={busyId === c.id} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>
+                        </div>
+                      ) : <span className="text-gray-400">done</span>}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Batch split requests */}
+        <h2 className="text-lg font-semibold mt-8 mb-2">Batch splits</h2>
+        <p className="text-gray-500 text-sm mb-3">{isHO ? 'Approve to pull an order out of a merged batch into its own batch. Nothing is deleted.' : 'Track your requests to split an order into its own batch.'}</p>
+        {isHO && selSplitIds.length > 0 && (
+          <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
+            <span className="font-medium text-blue-800">{selSplitIds.length} pending selected</span>
+            <button onClick={() => bulkAct('approve_split', selSplitIds, 'approve')} disabled={bulkBusy} className="bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">Approve selected</button>
+            <button onClick={() => bulkAct('reject_split', selSplitIds, 'reject')} disabled={bulkBusy} className="bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50 font-medium">Reject selected</button>
+            <button onClick={() => setSelSplit(new Set())} className="text-gray-500 hover:underline">Clear</button>
+          </div>
+        )}
+        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                {isHO && <th className="px-3 py-2"><input type="checkbox" checked={splitAllSel} onChange={() => setSelSplit(splitAllSel ? new Set() : new Set(splitPending.map(c => c.id)))} className="h-4 w-4" /></th>}
+                {['Order to split out', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
+                  <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}
+              </tr>
+              <tr className="border-b">
+                {isHO && <th className="px-2 py-1"></th>}
+                <th className="px-2 py-1"><MultiFilter values={distinctOf(shownSplitAll, c => c.label || '—')} selected={splitFilters.label || new Set()} onChange={s => setSplitFilters(p => ({ ...p, label: s }))} /></th>
+                <th className="px-2 py-1"></th>
+                <th className="px-2 py-1"><MultiFilter values={distinctOf(shownSplitAll, c => c.requested_by_name || '—')} selected={splitFilters.by || new Set()} onChange={s => setSplitFilters(p => ({ ...p, by: s }))} /></th>
+                <th className="px-2 py-1"></th><th className="px-2 py-1"></th>{isHO && <th className="px-2 py-1"></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {shownSplit.length === 0 && (<tr><td colSpan={7} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} batch splits.</td></tr>)}
+              {shownSplit.map(c => (
+                <tr key={c.id} className={`border-b last:border-0 align-top ${selSplit.has(c.id) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                  {isHO && <td className="px-3 py-2">{c.status === 'Pending' ? <input type="checkbox" checked={selSplit.has(c.id)} onChange={() => setSelSplit(p => { const n = new Set(p); n.has(c.id) ? n.delete(c.id) : n.add(c.id); return n })} className="h-4 w-4" /> : null}</td>}
+                  <td className="px-3 py-2 min-w-[220px]">{c.label || '—'}</td>
+                  <td className="px-3 py-2 text-gray-600 min-w-[120px]">{c.reason || '—'}</td>
+                  <td className="px-3 py-2 whitespace-nowrap"><span className="block">{c.requested_by_name || '—'}</span><span className="block text-gray-400">{fmt(c.created_at)}</span></td>
+                  <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full font-medium ${STATUS_STYLES[c.status] || 'bg-gray-100 text-gray-700'}`}>{c.status}</span></td>
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-600">{c.status === 'Pending' ? '—' : (<><span className="block">{c.reviewed_by_name}</span><span className="block text-gray-400">{fmt(c.reviewed_at)}</span></>)}</td>
+                  {isHO && (
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {c.status === 'Pending' ? (
+                        <div className="flex gap-2">
+                          <button onClick={() => approveSplit(c.id)} disabled={busyId === c.id} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">Approve</button>
+                          <button onClick={() => rejectSplit(c.id)} disabled={busyId === c.id} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>
                         </div>
                       ) : <span className="text-gray-400">done</span>}
                     </td>

@@ -194,6 +194,19 @@ export default function ProductionPage() {
     setSavingPlan(''); setSuccess(`Pack plan saved for ${b.batch_no}.`)
   }
 
+  async function requestSplit(b: Batch, it: BatchItem) {
+    const reason = window.prompt(`Split "${it.customer_name}" (${it.so_number || ''} · qty ${it.quantity}) out of ${b.batch_no} into its own batch?\n\nThis goes to Pending Changes for Head Office approval.\n\nReason (optional):`, '')
+    if (reason === null) return
+    setError(''); setSuccess('')
+    const { error: insErr } = await supabase.from('split_requests').insert({
+      batch_item_id: it.id, batch_id: b.id, factory_code: b.factory_code,
+      label: `${b.batch_no} · ${b.item_code} — ${it.customer_name}${it.so_number ? ' · ' + it.so_number : ''} · qty ${it.quantity}`,
+      reason: reason || null, requested_by: profile?.id, requested_by_name: profile?.full_name || null,
+    })
+    if (insErr) { setError(insErr.message); return }
+    setSuccess(`Split requested for ${it.customer_name} — waiting for Head Office approval.`)
+  }
+
   async function loadConsumption(batchId: string) {
     const { data } = await supabase.from('production_consumption')
       .select('id, item_code, description, batch_no, exp_date, qty_consumed, consumed_at')
@@ -400,6 +413,10 @@ export default function ProductionPage() {
                                         <span className="flex-shrink-0 flex items-baseline gap-2">
                                           {it.so_number && <span className="text-gray-400 font-mono text-xs">{it.so_number}</span>}
                                           <span className="font-medium">{it.quantity}</span>
+                                          {b.status === 'Planned' && !b.material_request_id && (b.production_batch_items?.length || 0) > 1 && (
+                                            <button onClick={() => requestSplit(b, it)} title="Split this order into its own batch (needs Head Office approval)"
+                                              className="text-red-600 hover:underline text-xs">✕ Split</button>
+                                          )}
                                         </span>
                                       </li>
                                     ))}
