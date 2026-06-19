@@ -219,6 +219,46 @@ export default function ProductionPage() {
     setSavingPlan(''); setSuccess(`Pack plan saved for ${b.batch_no}.`)
   }
 
+  // Save one pack plan (line / date / run mode) across every batch in a combined group
+  async function savePackPlanMany(members: Batch[], key: string) {
+    const e = packEdit[key] ?? { line: members[0].pack_line || '', date: members[0].pack_date || '', mode: members[0].run_mode || 'auto' }
+    const mode = e.mode || 'auto'
+    setSavingPlan(key); setError(''); setSuccess('')
+    const ids = members.map(m => m.id)
+    const { error: upErr } = await supabase.from('production_batches').update({ pack_line: e.line || null, pack_date: e.date || null, run_mode: mode }).in('id', ids)
+    if (upErr) { setError(upErr.message); setSavingPlan(''); return }
+    setBatches(prev => prev.map(x => (ids.includes(x.id) ? { ...x, pack_line: e.line || null, pack_date: e.date || null, run_mode: mode } : x)))
+    setSavingPlan(''); setSuccess(`Pack plan saved for ${ids.length} batch(es).`)
+  }
+
+  // Reusable pack-plan form (used by single batches and combined groups). `key`
+  // identifies the row in packEdit; defaults seed the fields.
+  function renderPackPlan(key: string, factoryCode: string, defLine: string | null, defDate: string | null, defMode: string | null, onSave: () => void) {
+    const cur = packEdit[key]?.line ?? defLine ?? ''
+    const opts = packLines.filter(p => p.factory_code === factoryCode && (p.active || p.name === cur)).map(p => p.name)
+    const setField = (patch: Partial<{ line: string; date: string; mode: string }>) =>
+      setPackEdit(p => ({ ...p, [key]: { line: p[key]?.line ?? defLine ?? '', date: p[key]?.date ?? defDate ?? '', mode: p[key]?.mode ?? defMode ?? 'auto', ...patch } }))
+    return (
+      <div className="flex flex-wrap items-end gap-3 mb-3 bg-teal-50/50 border border-teal-100 rounded-lg p-3">
+        <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Pack line</span>
+          <select value={cur} onChange={e => setField({ line: e.target.value })} className="border rounded px-2 py-1 text-sm bg-white min-w-[120px]">
+            <option value="">— Select line —</option>
+            {opts.map(n => <option key={n} value={n}>{n}</option>)}
+            {opts.length === 0 && <option value="" disabled>No lines — add in Setup → Packing Lines</option>}
+          </select></div>
+        <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Pack date</span>
+          <input type="date" value={packEdit[key]?.date ?? defDate ?? ''} onChange={e => setField({ date: e.target.value })} className="border rounded px-2 py-1 text-sm" /></div>
+        <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Run mode</span>
+          <select value={packEdit[key]?.mode ?? defMode ?? 'auto'} onChange={e => setField({ mode: e.target.value })} className="border rounded px-2 py-1 text-sm bg-white">
+            <option value="auto">Auto machine</option>
+            <option value="manual">Manual</option>
+          </select></div>
+        <button onClick={onSave} disabled={savingPlan === key} className="bg-teal-600 text-white px-4 py-1.5 rounded-lg hover:bg-teal-700 disabled:opacity-50 text-sm font-medium">{savingPlan === key ? 'Saving…' : 'Save pack plan'}</button>
+        <span className="text-gray-400 text-xs">line, date &amp; run mode (auto/manual)</span>
+      </div>
+    )
+  }
+
   async function requestSplit(b: Batch, it: BatchItem) {
     const reason = window.prompt(`Split "${it.customer_name}" (${it.so_number || ''} · qty ${it.quantity}) out of ${b.batch_no} into its own batch?\n\nThis goes to Pending Changes for Head Office approval.\n\nReason (optional):`, '')
     if (reason === null) return
@@ -404,6 +444,10 @@ export default function ProductionPage() {
                                         </div>
                                       ))}
                                     </div>
+                                    <div className="mt-3 max-w-2xl">
+                                      <div className="text-gray-500 text-xs mb-1">One pack plan for all {members.length} batches in this group:</div>
+                                      {renderPackPlan(key, fc, members[0].pack_line, members[0].pack_date, members[0].run_mode, () => savePackPlanMany(members, key))}
+                                    </div>
                                   </td>
                                 </tr>
                               )}
@@ -448,34 +492,10 @@ export default function ProductionPage() {
                                       </li>
                                     ))}
                                   </ul>
-                                  <div className="flex flex-wrap items-end gap-3 mb-3 bg-teal-50/50 border border-teal-100 rounded-lg p-3">
-                                    <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Pack line</span>
-                                      {(() => {
-                                        const cur = packEdit[b.id]?.line ?? b.pack_line ?? ''
-                                        const opts = packLines.filter(p => p.factory_code === b.factory_code && (p.active || p.name === cur)).map(p => p.name)
-                                        return (
-                                          <select value={cur} onChange={e => setPackEdit(p => ({ ...p, [b.id]: { line: e.target.value, date: p[b.id]?.date ?? b.pack_date ?? '', mode: p[b.id]?.mode ?? b.run_mode ?? 'auto' } }))} className="border rounded px-2 py-1 text-sm bg-white min-w-[120px]">
-                                            <option value="">— Select line —</option>
-                                            {opts.map(n => <option key={n} value={n}>{n}</option>)}
-                                            {opts.length === 0 && <option value="" disabled>No lines — add in Setup → Packing Lines</option>}
-                                          </select>
-                                        )
-                                      })()}</div>
-                                    <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Pack date</span>
-                                      <input type="date" value={packEdit[b.id]?.date ?? b.pack_date ?? ''} onChange={e => setPackEdit(p => ({ ...p, [b.id]: { line: p[b.id]?.line ?? b.pack_line ?? '', date: e.target.value, mode: p[b.id]?.mode ?? b.run_mode ?? 'auto' } }))} className="border rounded px-2 py-1 text-sm" /></div>
-                                    <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Run mode</span>
-                                      <select value={packEdit[b.id]?.mode ?? b.run_mode ?? 'auto'} onChange={e => setPackEdit(p => ({ ...p, [b.id]: { line: p[b.id]?.line ?? b.pack_line ?? '', date: p[b.id]?.date ?? b.pack_date ?? '', mode: e.target.value } }))} className="border rounded px-2 py-1 text-sm bg-white">
-                                        <option value="auto">Auto machine</option>
-                                        <option value="manual">Manual</option>
-                                      </select></div>
-                                    <button onClick={() => savePackPlan(b)} disabled={savingPlan === b.id} className="bg-teal-600 text-white px-4 py-1.5 rounded-lg hover:bg-teal-700 disabled:opacity-50 text-sm font-medium">{savingPlan === b.id ? 'Saving…' : 'Save pack plan'}</button>
-                                    <span className="text-gray-400 text-xs">line, date &amp; run mode (auto/manual)</span>
-                                  </div>
+                                  {renderPackPlan(b.id, b.factory_code, b.pack_line, b.pack_date, b.run_mode, () => savePackPlan(b))}
 
                                   <button onClick={() => { setSelected(singleTarget(b)); setError(''); setSuccess('') }}
                                     className="border border-blue-600 text-blue-600 px-4 py-1.5 rounded-lg hover:bg-blue-50 text-sm font-medium">Materials</button>
-                                  <a href={`/inspection?batch=${b.id}`}
-                                    className="ml-2 border border-green-600 text-green-700 px-4 py-1.5 rounded-lg hover:bg-green-50 text-sm font-medium inline-block">📋 Inspection Record</a>
 
                                   <div className="mt-4 border-t pt-3">
                                     <div className="flex flex-wrap items-center gap-4 text-sm mb-2">

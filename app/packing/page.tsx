@@ -85,7 +85,7 @@ export default function PackingPage() {
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
         <h1 className="text-2xl font-bold mb-1">Packing Schedule</h1>
-        <p className="text-gray-500 text-sm mb-5">What each line packs on the selected day. Open the Inspection Record to start &amp; record production.</p>
+        <p className="text-gray-500 text-sm mb-5">What each line packs on the selected day. Open the Packing &amp; Finished Goods Inspection Record to start &amp; record production.</p>
 
         <div className="flex flex-wrap gap-2 items-center mb-5 text-sm">
           <span className="text-gray-500">Pack date:</span>
@@ -132,7 +132,7 @@ export default function PackingPage() {
                                   <td className={`px-3 py-2 text-right font-semibold ${backorder > 0 ? 'text-red-600' : 'text-green-600'}`}>{backorder}</td>
                                   <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[status(b)] || 'bg-gray-100 text-gray-700'}`}>{status(b)}</span></td>
                                   <td className="px-3 py-2 whitespace-nowrap text-right">
-                                    <a href={`/inspection?batch=${b.id}`} className="border border-green-600 text-green-700 px-3 py-1 rounded-lg hover:bg-green-50 text-xs font-medium">📋 Inspection Record</a>
+                                    <a href={`/inspection?batch=${b.id}`} className="border border-green-600 text-green-700 px-3 py-1 rounded-lg hover:bg-green-50 text-xs font-medium">📋 Packing &amp; Finished Goods Inspection Record</a>
                                   </td>
                                 </tr>
                               )

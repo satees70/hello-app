@@ -140,7 +140,7 @@ export default function InspectionPage() {
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4 no-print">
-          <h1 className="text-2xl font-bold">Packing &amp; Finished Good Inspection Record <span className="text-gray-400 font-normal text-sm">P07-F01 Ver.06</span></h1>
+          <h1 className="text-2xl font-bold">Packing &amp; Finished Goods Inspection Record <span className="text-gray-400 font-normal text-sm">P07-F01 Ver.06</span></h1>
           <div className="flex gap-2">
             <button onClick={() => window.print()} className="border px-4 py-2 rounded-lg hover:bg-gray-50 text-sm font-medium">🖨 Print / PDF</button>
             <button onClick={save} disabled={busy} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{busy ? 'Saving…' : 'Save'}</button>
@@ -152,7 +152,7 @@ export default function InspectionPage() {
         <div className="printable bg-white rounded-xl shadow-sm border p-5 space-y-5">
           <div className="flex items-center justify-between border-b pb-2">
             <div className="font-bold text-lg text-green-700">EASWARI</div>
-            <div className="font-semibold text-center">Packing &amp; Finished Good Inspection Record</div>
+            <div className="font-semibold text-center">Packing &amp; Finished Goods Inspection Record</div>
             <div className="text-xs text-gray-500 text-right">Ver. 06 · P07-F01<br />Eff. 26.01.2026 · Page 1 of 2</div>
           </div>
 
