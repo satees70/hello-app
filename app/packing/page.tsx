@@ -43,6 +43,8 @@ export default function PackingPage() {
   const [factoryFilter, setFactoryFilter] = useState('')
   const [hideDone, setHideDone] = useState(false)
   const [packEdit, setPackEdit] = useState<Record<string, { line: string; date: string; mode: string }>>({})
+  const [collapsedFacs, setCollapsedFacs] = useState<Set<string>>(new Set())
+  const toggleFac = (fc: string) => setCollapsedFacs(p => { const n = new Set(p); n.has(fc) ? n.delete(fc) : n.add(fc); return n })
   const [savingId, setSavingId] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -222,8 +224,8 @@ export default function PackingPage() {
           <div className="space-y-6">
             {facs.map(fc => (
               <div key={fc}>
-                {isHO && <h3 className="font-semibold text-gray-700 mb-2">🏭 {factoryName(fc)}</h3>}
-                <div className="space-y-4">
+                {isHO && <button onClick={() => toggleFac(fc)} className="flex items-center gap-1 font-semibold text-gray-700 mb-2 hover:text-gray-900"><span className="text-gray-400 w-3 inline-block">{collapsedFacs.has(fc) ? '▸' : '▾'}</span> 🏭 {factoryName(fc)}</button>}
+                {!collapsedFacs.has(fc) && <div className="space-y-4">
                   {Object.keys(byFactory[fc]).sort().map(line => (
                     <div key={line} className="bg-white rounded-xl shadow-sm border p-4">
                       <div className="font-semibold mb-2">📅 {fmtDate(date)} · <span className="text-teal-700">{line}</span> <span className="text-gray-400 font-normal text-sm">· {byFactory[fc][line].length} item(s)</span></div>
@@ -255,7 +257,7 @@ export default function PackingPage() {
                       </div>
                     </div>
                   ))}
-                </div>
+                </div>}
               </div>
             ))}
           </div>

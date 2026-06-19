@@ -55,6 +55,8 @@ export default function ProductionPage() {
 
   const [selected, setSelected] = useState<MatTarget | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [collapsedFacs, setCollapsedFacs] = useState<Set<string>>(new Set())
+  const toggleFac = (fc: string) => setCollapsedFacs(p => { const n = new Set(p); n.has(fc) ? n.delete(fc) : n.add(fc); return n })
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [factoryFilter, setFactoryFilter] = useState('')
@@ -325,9 +327,12 @@ export default function ProductionPage() {
             {factoriesInView.map(fc => {
               const fb = [...shown.filter(b => b.factory_code === fc)].sort(cmp)
               const { combos, singles } = buildUnits(fb)
+              const collapsed = collapsedFacs.has(fc)
               return (
                 <div key={fc}>
-                  {isHO && <h3 className="font-semibold text-sm text-gray-700 mb-2">🏭 {factoryName(fc)} <span className="text-gray-400 font-normal">· {fb.length} batch(es)</span></h3>}
+                  {isHO && <button onClick={() => toggleFac(fc)} className="flex items-center gap-1 font-semibold text-sm text-gray-700 mb-2 hover:text-gray-900">
+                    <span className="text-gray-400 w-3 inline-block">{collapsed ? '▸' : '▾'}</span> 🏭 {factoryName(fc)} <span className="text-gray-400 font-normal">· {fb.length} batch(es)</span></button>}
+                  {!collapsed && (
                   <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead className="bg-gray-50 border-b">
@@ -471,6 +476,7 @@ export default function ProductionPage() {
                       </tbody>
                     </table>
                   </div>
+                  )}
                 </div>
               )
             })}

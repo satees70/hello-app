@@ -27,6 +27,8 @@ export default function StockPage() {
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [search, setSearch] = useState('')
   const [factoryFilter, setFactoryFilter] = useState('')
+  const [collapsedFacs, setCollapsedFacs] = useState<Set<string>>(new Set())
+  const toggleFac = (fc: string) => setCollapsedFacs(p => { const n = new Set(p); n.has(fc) ? n.delete(fc) : n.add(fc); return n })
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
@@ -114,8 +116,8 @@ export default function StockPage() {
               const codes = Object.keys(items).sort()
               return (
                 <div key={fc}>
-                  {isHO && <h2 className="font-semibold text-gray-700 mb-2">🏭 {factoryName(fc)}</h2>}
-                  <div className="space-y-4">
+                  {isHO && <button onClick={() => toggleFac(fc)} className="flex items-center gap-1 font-semibold text-gray-700 mb-2 hover:text-gray-900"><span className="text-gray-400 w-3 inline-block">{collapsedFacs.has(fc) ? '▸' : '▾'}</span> 🏭 {factoryName(fc)} <span className="text-gray-400 font-normal text-sm">· {codes.length} item(s)</span></button>}
+                  {!collapsedFacs.has(fc) && <div className="space-y-4">
                     {codes.map(code => {
                       const rows = [...items[code]].sort((a, b) => lotOrder(a).localeCompare(lotOrder(b)))
                       const total = rows.reduce((s, r) => s + Number(r.qty_remaining), 0)
@@ -152,7 +154,7 @@ export default function StockPage() {
                         </div>
                       )
                     })}
-                  </div>
+                  </div>}
                 </div>
               )
             })}
