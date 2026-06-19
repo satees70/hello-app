@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
@@ -29,6 +29,8 @@ export default function StockAdjustmentPage() {
   const [onHand, setOnHand] = useState<Record<string, number>>({}) // item_id|factory -> qty
   const [adjs, setAdjs] = useState<Adj[]>([])
   const [filter, setFilter] = useState<Filter>('Pending')
+  const [collapsedFacs, setCollapsedFacs] = useState<Set<string>>(new Set())
+  const toggleFac = (fc: string) => setCollapsedFacs(p => { const n = new Set(p); n.has(fc) ? n.delete(fc) : n.add(fc); return n })
   const [busyId, setBusyId] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -188,7 +190,24 @@ export default function StockAdjustmentPage() {
             </thead>
             <tbody>
               {shown.length === 0 && <tr><td colSpan={isHO ? 10 : 8} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} adjustments.</td></tr>}
-              {shown.map(a => (
+              {isHO && [...new Set(shown.map(a => a.factory_code))].map(fc => (
+                <Fragment key={fc}>
+                  <tr className="bg-gray-50 border-b cursor-pointer hover:bg-gray-100" onClick={() => toggleFac(fc)}>
+                    <td colSpan={10} className="px-3 py-1.5 font-semibold text-gray-700"><span className="text-gray-400 mr-1">{collapsedFacs.has(fc) ? '▸' : '▾'}</span>🏭 {factoryName(fc)} <span className="text-gray-400 font-normal">· {shown.filter(a => a.factory_code === fc).length}</span></td>
+                  </tr>
+                  {!collapsedFacs.has(fc) && shown.filter(a => a.factory_code === fc).map(a => renderRow(a))}
+                </Fragment>
+              ))}
+              {!isHO && shown.map(a => renderRow(a))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+
+  function renderRow(a: Adj) {
+    return (
                 <tr key={a.id} className="border-b last:border-0 align-top hover:bg-gray-50">
                   {isHO && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(a.factory_code)}</td>}
                   <td className="px-3 py-2"><span className="font-mono font-medium">{a.item_code}</span><span className="block text-gray-400">{a.description}</span></td>
@@ -210,11 +229,6 @@ export default function StockAdjustmentPage() {
                     </td>
                   )}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  )
+    )
+  }
 }

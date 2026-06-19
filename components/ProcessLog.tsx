@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
@@ -32,6 +32,8 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields, 
   useRequireView(profile, moduleKey)
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
   const [colF, setColF] = useState<Record<string, string>>({})
+  const [collapsedFacs, setCollapsedFacs] = useState<Set<string>>(new Set())
+  const toggleFac = (fc: string) => setCollapsedFacs(p => { const n = new Set(p); n.has(fc) ? n.delete(fc) : n.add(fc); return n })
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [factory, setFactory] = useState('')
   const [editing, setEditing] = useState<Record<string, unknown> | 'new' | null>(null)
@@ -153,13 +155,30 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields, 
             <tbody>
               {rows.length === 0 && <tr><td colSpan={listFields.length + 2} className="text-center py-8 text-gray-400">No records yet.</td></tr>}
               {rows.length > 0 && visibleRows.length === 0 && <tr><td colSpan={listFields.length + 2} className="text-center py-8 text-gray-400">No records match the filter.</td></tr>}
-              {visibleRows.map(r => (
+              {!isHO && visibleRows.map(r => (
                 <tr key={r.id as string} className="border-b last:border-0 hover:bg-gray-50">
-                  {isHO && <td className="px-3 py-2 whitespace-nowrap">{factoryName(r.factory_code as string)}</td>}
                   {listFields.map(fl => <td key={fl.key} className="px-3 py-2 whitespace-nowrap">{cell(r, fl)}</td>)}
                   <td className="px-3 py-2 text-right"><button onClick={() => openEdit(r)} className="text-blue-600 hover:underline">{canEdit ? 'Open' : 'View'}</button></td>
                 </tr>
               ))}
+              {isHO && [...new Set(visibleRows.map(r => r.factory_code as string))].map(fc => {
+                const grp = visibleRows.filter(r => (r.factory_code as string) === fc)
+                const collapsed = collapsedFacs.has(fc)
+                return (
+                  <Fragment key={fc}>
+                    <tr className="bg-gray-50 border-b cursor-pointer hover:bg-gray-100" onClick={() => toggleFac(fc)}>
+                      <td colSpan={listFields.length + 2} className="px-3 py-1.5 font-semibold text-gray-700"><span className="text-gray-400 mr-1">{collapsed ? '▸' : '▾'}</span>🏭 {factoryName(fc)} <span className="text-gray-400 font-normal">· {grp.length}</span></td>
+                    </tr>
+                    {!collapsed && grp.map(r => (
+                      <tr key={r.id as string} className="border-b last:border-0 hover:bg-gray-50">
+                        <td className="px-3 py-2 whitespace-nowrap">{factoryName(r.factory_code as string)}</td>
+                        {listFields.map(fl => <td key={fl.key} className="px-3 py-2 whitespace-nowrap">{cell(r, fl)}</td>)}
+                        <td className="px-3 py-2 text-right"><button onClick={() => openEdit(r)} className="text-blue-600 hover:underline">{canEdit ? 'Open' : 'View'}</button></td>
+                      </tr>
+                    ))}
+                  </Fragment>
+                )
+              })}
             </tbody>
           </table>
         </div>

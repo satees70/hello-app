@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
@@ -42,6 +42,8 @@ export default function GrindingPage() {
   const [compByRecipe, setCompByRecipe] = useState<Record<string, Component[]>>({})
   const [records, setRecords] = useState<GrindingRecord[]>([])
   const [grF, setGrF] = useState<Record<string, Set<string>>>({})
+  const [collapsedFacs, setCollapsedFacs] = useState<Set<string>>(new Set())
+  const toggleFac = (fc: string) => setCollapsedFacs(p => { const n = new Set(p); n.has(fc) ? n.delete(fc) : n.add(fc); return n })
   const [matsByRecord, setMatsByRecord] = useState<Record<string, Material[]>>({})
   const [error, setError] = useState('')
 
@@ -260,10 +262,9 @@ export default function GrindingPage() {
                 <tbody>
                   {records.length === 0 && <tr><td colSpan={11} className="text-center py-8 text-gray-400">No grinding records yet.</td></tr>}
                   {records.length > 0 && visibleRecords.length === 0 && <tr><td colSpan={11} className="text-center py-8 text-gray-400">No records match the filter.</td></tr>}
-                  {visibleRecords.map(r => (
+                  {!isHO && visibleRecords.map(r => (
                     <tr key={r.id} className="border-b last:border-0 hover:bg-gray-50">
                       <td className="px-3 py-2 whitespace-nowrap">{fmt(r.record_date)}</td>
-                      {isHO && <td className="px-3 py-2 whitespace-nowrap">{factoryName(r.factory_code)}</td>}
                       <td className="px-3 py-2">{r.product || '—'}</td>
                       <td className="px-3 py-2 capitalize">{r.recipe_type || '—'}</td>
                       <td className="px-3 py-2 text-right">{r.lots ?? '—'}</td>
@@ -274,6 +275,31 @@ export default function GrindingPage() {
                       <td className="px-3 py-2 text-right"><button onClick={() => openRecord(r)} className="text-blue-600 hover:underline">Open</button></td>
                     </tr>
                   ))}
+                  {isHO && [...new Set(visibleRecords.map(r => r.factory_code))].map(fc => {
+                    const grp = visibleRecords.filter(r => r.factory_code === fc)
+                    const collapsed = collapsedFacs.has(fc)
+                    return (
+                      <Fragment key={fc}>
+                        <tr className="bg-gray-50 border-b cursor-pointer hover:bg-gray-100" onClick={() => toggleFac(fc)}>
+                          <td colSpan={11} className="px-3 py-1.5 font-semibold text-gray-700"><span className="text-gray-400 mr-1">{collapsed ? '▸' : '▾'}</span>🏭 {factoryName(fc)} <span className="text-gray-400 font-normal">· {grp.length}</span></td>
+                        </tr>
+                        {!collapsed && grp.map(r => (
+                          <tr key={r.id} className="border-b last:border-0 hover:bg-gray-50">
+                            <td className="px-3 py-2 whitespace-nowrap">{fmt(r.record_date)}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">{factoryName(r.factory_code)}</td>
+                            <td className="px-3 py-2">{r.product || '—'}</td>
+                            <td className="px-3 py-2 capitalize">{r.recipe_type || '—'}</td>
+                            <td className="px-3 py-2 text-right">{r.lots ?? '—'}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">{(r.crusher_before || '—')} / {(r.crusher_after || '—')}</td>
+                            <td className="px-3 py-2 text-right">{r.qty_rework ?? '—'}</td>
+                            <td className="px-3 py-2 text-right">{r.qty_rejection ?? '—'}</td>
+                            <td className="px-3 py-2">{r.verified_by || '—'}</td>
+                            <td className="px-3 py-2 text-right"><button onClick={() => openRecord(r)} className="text-blue-600 hover:underline">Open</button></td>
+                          </tr>
+                        ))}
+                      </Fragment>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
