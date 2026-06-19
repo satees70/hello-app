@@ -203,8 +203,9 @@ export default function ProductionPage() {
       label: `${b.batch_no} · ${b.item_code} — ${it.customer_name}${it.so_number ? ' · ' + it.so_number : ''} · qty ${it.quantity}`,
       reason: reason || null, requested_by: profile?.id, requested_by_name: profile?.full_name || null,
     })
-    if (insErr) { setError(insErr.message); return }
+    if (insErr) { setError(insErr.message); alert('Could not request split:\n\n' + insErr.message); return }
     setSuccess(`Split requested for ${it.customer_name} — waiting for Head Office approval.`)
+    alert(`Split requested for ${it.customer_name}.\nGo to Pending Changes → Batch splits for Head Office to approve.`)
   }
 
   async function loadConsumption(batchId: string) {
