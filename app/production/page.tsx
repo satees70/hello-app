@@ -362,7 +362,8 @@ export default function ProductionPage() {
                                         <div key={m.id} className="border rounded-lg bg-white p-2">
                                           <div className="flex justify-between items-center mb-1">
                                             <span className="text-xs"><span className="font-mono font-semibold">{m.batch_no}</span> · due {m.delivery_date || '—'} · qty <strong>{m.total_quantity}</strong></span>
-                                            <button onClick={() => toggleSeparate(m.id)} className="text-red-600 hover:underline text-xs">✕ Separate</button>
+                                            <button onClick={() => { if (confirm(`Run ${m.batch_no} on its own, separate from this combined group?\n\nThis only changes how raw materials are picked — it is its own batch already, nothing is deleted and no approval is needed. You can re-combine anytime.`)) toggleSeparate(m.id) }}
+                                              title="Un-group for material picking only. Reversible, no approval needed." className="text-blue-600 hover:underline text-xs">↔ Run on its own</button>
                                           </div>
                                           <ul className="space-y-0.5 pl-1">
                                             {m.production_batch_items?.map(it => (
@@ -415,8 +416,8 @@ export default function ProductionPage() {
                                           {it.so_number && <span className="text-gray-400 font-mono text-xs">{it.so_number}</span>}
                                           <span className="font-medium">{it.quantity}</span>
                                           {b.status === 'Planned' && !b.material_request_id && (b.production_batch_items?.length || 0) > 1 && (
-                                            <button onClick={() => requestSplit(b, it)} title="Split this order into its own batch (needs Head Office approval)"
-                                              className="text-red-600 hover:underline text-xs">✕ Split</button>
+                                            <button onClick={() => requestSplit(b, it)} title="Request to split this order into its own batch — Head Office must approve"
+                                              className="text-red-600 hover:underline text-xs font-medium whitespace-nowrap">✕ Split (needs approval)</button>
                                           )}
                                         </span>
                                       </li>
