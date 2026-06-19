@@ -43,6 +43,12 @@ interface SplitRequest {
   requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null; factory_code: string | null
 }
 
+interface StockAdj {
+  id: string; factory_code: string; item_code: string; description: string | null
+  direction: string; quantity: number; batch_no: string | null; reason: string | null; status: string
+  requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
+}
+
 const FIELD_LABEL: Record<string, string> = {
   customer_name: 'Customer',
   item_code: 'Item Code',
@@ -80,6 +86,9 @@ export default function PendingChangesPage() {
   const [splits, setSplits] = useState<SplitRequest[]>([])
   const [selSplit, setSelSplit] = useState<Set<string>>(new Set())
   const [splitFilters, setSplitFilters] = useState<Record<string, Set<string>>>({})
+  const [stockAdjs, setStockAdjs] = useState<StockAdj[]>([])
+  const [selSA, setSelSA] = useState<Set<string>>(new Set())
+  const [saFilters, setSaFilters] = useState<Record<string, Set<string>>>({})
 
   // Distinct values present in a list, for a filter dropdown
   const distinctOf = <T,>(arr: T[], get: (x: T) => string) => [...new Set(arr.map(get))].filter(Boolean).sort()
@@ -92,7 +101,7 @@ export default function PendingChangesPage() {
 
   useEffect(() => {
     if (!profile) return
-    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits()
+    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs()
     // Live refresh on any change-request activity, with a poll fallback
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) supabase.realtime.setAuth(data.session.access_token)
@@ -103,8 +112,9 @@ export default function PendingChangesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'correction_requests' }, () => loadCorrections())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'do_change_requests' }, () => loadDoChanges())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'split_requests' }, () => loadSplits())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_adjustments' }, () => loadStockAdjs())
       .subscribe()
-    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits() }, 20000)
+    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs() }, 20000)
     return () => { supabase.removeChannel(channel); clearInterval(timer) }
   }, [profile])
 
@@ -166,6 +176,24 @@ export default function PendingChangesPage() {
     const { error: e } = await supabase.rpc('reject_split', { p_id: id })
     if (e) { setError(e.message); setBusyId(''); return }
     setSuccess('Split request rejected.'); setBusyId(''); loadSplits()
+  }
+
+  async function loadStockAdjs() {
+    const { data } = await supabase.from('stock_adjustments').select('*').order('created_at', { ascending: false })
+    setStockAdjs((data as StockAdj[]) || [])
+  }
+  async function approveSA(id: string) {
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('approve_stock_adjustment', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Stock adjustment approved — stock updated.'); setBusyId(''); loadStockAdjs()
+  }
+  async function rejectSA(id: string) {
+    if (!confirm('Reject this stock adjustment? Stock will not change.')) return
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('reject_stock_adjustment', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Stock adjustment rejected.'); setBusyId(''); loadStockAdjs()
   }
 
   async function approve(id: string) {
@@ -234,6 +262,12 @@ export default function PendingChangesPage() {
   const splitPending = shownSplit.filter(c => c.status === 'Pending')
   const splitAllSel = splitPending.length > 0 && splitPending.every(c => selSplit.has(c.id))
   const selSplitIds = splitPending.filter(c => selSplit.has(c.id)).map(c => c.id)
+  const saLabel = (a: StockAdj) => `${a.item_code}${a.description ? ' — ' + a.description : ''} · ${a.direction === 'in' ? 'IN' : 'OUT'} ${a.quantity}`
+  const shownSAAll = filter === 'All' ? stockAdjs : stockAdjs.filter(a => a.status === filter)
+  const shownSA = shownSAAll.filter(a => passes(saFilters.item, saLabel(a)) && passes(saFilters.by, a.requested_by_name || '—'))
+  const saPending = shownSA.filter(a => a.status === 'Pending')
+  const saAllSel = saPending.length > 0 && saPending.every(a => selSA.has(a.id))
+  const selSAIds = saPending.filter(a => selSA.has(a.id)).map(a => a.id)
   const counts: Record<string, number> = { Pending: 0, Approved: 0, Rejected: 0 }
   requests.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1 })
 
@@ -486,6 +520,62 @@ export default function PendingChangesPage() {
                         <div className="flex gap-2">
                           <button onClick={() => approveSplit(c.id)} disabled={busyId === c.id} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">Approve</button>
                           <button onClick={() => rejectSplit(c.id)} disabled={busyId === c.id} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>
+                        </div>
+                      ) : <span className="text-gray-400">done</span>}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Stock adjustment requests */}
+        <h2 className="text-lg font-semibold mt-8 mb-2">Stock adjustments</h2>
+        <p className="text-gray-500 text-sm mb-3">{isHO ? 'Approve to apply a manual stock IN/OUT. IN adds a lot; OUT removes earliest-expiry first.' : 'Track your manual stock in/out requests.'}</p>
+        {isHO && selSAIds.length > 0 && (
+          <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
+            <span className="font-medium text-blue-800">{selSAIds.length} pending selected</span>
+            <button onClick={() => bulkAct('approve_stock_adjustment', selSAIds, 'approve')} disabled={bulkBusy} className="bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">Approve selected</button>
+            <button onClick={() => bulkAct('reject_stock_adjustment', selSAIds, 'reject')} disabled={bulkBusy} className="bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50 font-medium">Reject selected</button>
+            <button onClick={() => setSelSA(new Set())} className="text-gray-500 hover:underline">Clear</button>
+          </div>
+        )}
+        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                {isHO && <th className="px-3 py-2"><input type="checkbox" checked={saAllSel} onChange={() => setSelSA(saAllSel ? new Set() : new Set(saPending.map(a => a.id)))} className="h-4 w-4" /></th>}
+                {['Item', 'In/Out', 'Qty', 'Batch', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
+                  <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}
+              </tr>
+              <tr className="border-b">
+                {isHO && <th className="px-2 py-1"></th>}
+                <th className="px-2 py-1"><MultiFilter values={distinctOf(shownSAAll, saLabel)} selected={saFilters.item || new Set()} onChange={s => setSaFilters(p => ({ ...p, item: s }))} /></th>
+                <th className="px-2 py-1"></th><th className="px-2 py-1"></th><th className="px-2 py-1"></th><th className="px-2 py-1"></th>
+                <th className="px-2 py-1"><MultiFilter values={distinctOf(shownSAAll, a => a.requested_by_name || '—')} selected={saFilters.by || new Set()} onChange={s => setSaFilters(p => ({ ...p, by: s }))} /></th>
+                <th className="px-2 py-1"></th><th className="px-2 py-1"></th>{isHO && <th className="px-2 py-1"></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {shownSA.length === 0 && (<tr><td colSpan={10} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} stock adjustments.</td></tr>)}
+              {shownSA.map(a => (
+                <tr key={a.id} className={`border-b last:border-0 align-top ${selSA.has(a.id) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                  {isHO && <td className="px-3 py-2">{a.status === 'Pending' ? <input type="checkbox" checked={selSA.has(a.id)} onChange={() => setSelSA(p => { const n = new Set(p); n.has(a.id) ? n.delete(a.id) : n.add(a.id); return n })} className="h-4 w-4" /> : null}</td>}
+                  <td className="px-3 py-2 min-w-[160px]"><span className="font-mono font-medium">{a.item_code}</span><span className="block text-gray-400">{a.description}</span></td>
+                  <td className="px-3 py-2 whitespace-nowrap">{a.direction === 'in' ? <span className="text-green-700 font-medium">➕ IN</span> : <span className="text-red-600 font-medium">➖ OUT</span>}</td>
+                  <td className="px-3 py-2 text-right font-semibold">{a.quantity}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">{a.batch_no || '—'}</td>
+                  <td className="px-3 py-2 text-gray-600 min-w-[120px]">{a.reason}</td>
+                  <td className="px-3 py-2 whitespace-nowrap"><span className="block">{a.requested_by_name || '—'}</span><span className="block text-gray-400">{fmt(a.created_at)}</span></td>
+                  <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full font-medium ${STATUS_STYLES[a.status] || 'bg-gray-100 text-gray-700'}`}>{a.status}</span></td>
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-600">{a.status === 'Pending' ? '—' : (<><span className="block">{a.reviewed_by_name}</span><span className="block text-gray-400">{fmt(a.reviewed_at)}</span></>)}</td>
+                  {isHO && (
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {a.status === 'Pending' ? (
+                        <div className="flex gap-2">
+                          <button onClick={() => approveSA(a.id)} disabled={busyId === a.id} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">Approve</button>
+                          <button onClick={() => rejectSA(a.id)} disabled={busyId === a.id} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>
                         </div>
                       ) : <span className="text-gray-400">done</span>}
                     </td>
