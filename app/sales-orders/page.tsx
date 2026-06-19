@@ -295,7 +295,9 @@ export default function SalesOrdersPage() {
     if (!bulkReason.trim()) { setError('Please give a reason.'); return }
     if (!bulkValue.trim()) { setError('Enter the new value.'); return }
     setBulkSubmitting(true); setError(''); setSuccess('')
-    const sel = lines.filter(l => selectedIds.has(l.id))
+    const sel = lines.filter(l => selectedIds.has(l.id) && pendingForLine(l.id) === 0)
+    const skipped = selectedIds.size - sel.length
+    if (sel.length === 0) { setError('All selected lines already have a pending request — wait for those to be approved first.'); setBulkSubmitting(false); return }
     const rows = sel.map(l => ({
       line_id: l.id, import_id: linesFor.id, reason: bulkReason.trim(), status: 'Pending',
       requested_by: profile.id, requested_by_email: profile.email, requested_by_name: profile.full_name || profile.email,
@@ -304,7 +306,7 @@ export default function SalesOrdersPage() {
     }))
     const { error: insErr } = await supabase.from('change_requests').insert(rows)
     if (insErr) { setError(`Could not submit: ${insErr.message}`); setBulkSubmitting(false); return }
-    setSuccess(`Bulk change submitted for ${rows.length} line(s) — awaiting Head Office approval.`)
+    setSuccess(`Bulk change submitted for ${rows.length} line(s)${skipped ? ` (${skipped} skipped — already pending)` : ''} — awaiting Head Office approval.`)
     setBulkSubmitting(false); setBulkOpen(false); setSelectedIds(new Set())
     loadChangeReqs(linesFor.id); loadSummary()
   }
@@ -314,7 +316,9 @@ export default function SalesOrdersPage() {
     if (reason === null) return
     if (!reason.trim()) { setError('Please give a reason.'); return }
     setBulkSubmitting(true); setError(''); setSuccess('')
-    const sel = lines.filter(l => selectedIds.has(l.id))
+    const sel = lines.filter(l => selectedIds.has(l.id) && pendingForLine(l.id) === 0)
+    const skipped = selectedIds.size - sel.length
+    if (sel.length === 0) { setError('All selected lines already have a pending request — wait for those first.'); setBulkSubmitting(false); return }
     const rows = sel.map(l => ({
       line_id: l.id, import_id: linesFor.id, reason: reason.trim(), status: 'Pending',
       requested_by: profile.id, requested_by_email: profile.email, requested_by_name: profile.full_name || profile.email,
@@ -323,7 +327,7 @@ export default function SalesOrdersPage() {
     }))
     const { error: insErr } = await supabase.from('change_requests').insert(rows)
     if (insErr) { setError(`Could not submit: ${insErr.message}`); setBulkSubmitting(false); return }
-    setSuccess(`Delete requested for ${rows.length} line(s) — awaiting Head Office approval.`)
+    setSuccess(`Delete requested for ${rows.length} line(s)${skipped ? ` (${skipped} skipped — already pending)` : ''} — awaiting Head Office approval.`)
     setBulkSubmitting(false); setBulkOpen(false); setSelectedIds(new Set())
     loadChangeReqs(linesFor.id); loadSummary()
   }
@@ -628,9 +632,12 @@ export default function SalesOrdersPage() {
                             : <span className="text-red-600">⚠ Unmapped</span>}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">
-                          {pend > 0 && <span className="mr-2 text-amber-600">⏳ {pend}</span>}
-                          <button onClick={() => openRequest(line)} className="text-blue-600 hover:underline">Request change</button>
-                          <button onClick={() => openDelete(line)} className="text-red-600 hover:underline ml-3">Request delete</button>
+                          {pend > 0
+                            ? <span className="text-amber-600" title="Waiting for Head Office to approve/reject before another change can be raised">⏳ pending — wait for approval</span>
+                            : <>
+                                <button onClick={() => openRequest(line)} className="text-blue-600 hover:underline">Request change</button>
+                                <button onClick={() => openDelete(line)} className="text-red-600 hover:underline ml-3">Request delete</button>
+                              </>}
                         </td>
                       </tr>
                     )
