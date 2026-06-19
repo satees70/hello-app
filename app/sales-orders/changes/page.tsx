@@ -31,6 +31,12 @@ interface CorrectionRequest {
   requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null; factory_code: string | null
 }
 
+interface DoChangeRequest {
+  id: string; request_type: string; field: string | null; old_value: string | null; new_value: string | null
+  line_label: string | null; reason: string | null; status: string
+  requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
+}
+
 const FIELD_LABEL: Record<string, string> = {
   customer_name: 'Customer',
   item_code: 'Item Code',
@@ -55,6 +61,7 @@ export default function PendingChangesPage() {
   useRequireView(profile, 'sales')
   const [requests, setRequests] = useState<ChangeRequest[]>([])
   const [corrections, setCorrections] = useState<CorrectionRequest[]>([])
+  const [doChanges, setDoChanges] = useState<DoChangeRequest[]>([])
   const [filter, setFilter] = useState<Filter>('Pending')
   const [busyId, setBusyId] = useState('')
   const [error, setError] = useState('')
@@ -64,7 +71,7 @@ export default function PendingChangesPage() {
 
   useEffect(() => {
     if (!profile) return
-    loadRequests(); loadCorrections()
+    loadRequests(); loadCorrections(); loadDoChanges()
     // Live refresh on any change-request activity, with a poll fallback
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) supabase.realtime.setAuth(data.session.access_token)
@@ -73,8 +80,9 @@ export default function PendingChangesPage() {
       .channel('changes-page-feed')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'change_requests' }, () => loadRequests())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'correction_requests' }, () => loadCorrections())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'do_change_requests' }, () => loadDoChanges())
       .subscribe()
-    const timer = setInterval(() => { loadRequests(); loadCorrections() }, 20000)
+    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges() }, 20000)
     return () => { supabase.removeChannel(channel); clearInterval(timer) }
   }, [profile])
 
@@ -101,6 +109,23 @@ export default function PendingChangesPage() {
     const { error: e } = await supabase.rpc('reject_correction', { p_id: id })
     if (e) { setError(e.message); setBusyId(''); return }
     setSuccess('Timer cancellation rejected.'); setBusyId(''); loadCorrections()
+  }
+  async function loadDoChanges() {
+    const { data } = await supabase.from('do_change_requests').select('*').order('created_at', { ascending: false })
+    setDoChanges((data as DoChangeRequest[]) || [])
+  }
+  async function approveDo(id: string) {
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('approve_do_change', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Goods Received change approved.'); setBusyId(''); loadDoChanges()
+  }
+  async function rejectDo(id: string) {
+    if (!confirm('Reject this Goods Received change?')) return
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('reject_do_change', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Goods Received change rejected.'); setBusyId(''); loadDoChanges()
   }
 
   async function approve(id: string) {
@@ -130,6 +155,7 @@ export default function PendingChangesPage() {
 
   const shown = filter === 'All' ? requests : requests.filter(r => r.status === filter)
   const shownCorr = filter === 'All' ? corrections : corrections.filter(c => c.status === filter)
+  const shownDo = filter === 'All' ? doChanges : doChanges.filter(c => c.status === filter)
   const counts: Record<string, number> = { Pending: 0, Approved: 0, Rejected: 0 }
   requests.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1 })
 
@@ -226,6 +252,45 @@ export default function PendingChangesPage() {
                         <div className="flex gap-2">
                           <button onClick={() => approveCorr(c.id)} disabled={busyId === c.id} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">Approve</button>
                           <button onClick={() => rejectCorr(c.id)} disabled={busyId === c.id} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>
+                        </div>
+                      ) : <span className="text-gray-400">done</span>}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Goods Received line changes */}
+        <h2 className="text-lg font-semibold mt-8 mb-2">Goods Received changes</h2>
+        <p className="text-gray-500 text-sm mb-3">{isHO ? 'Approve to apply edits, or delete a received line (this reverses its stock).' : 'Track your edit/delete requests on Goods Received lines.'}</p>
+        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 border-b">
+              <tr>{['Line', 'Change', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
+                <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+            </thead>
+            <tbody>
+              {shownDo.length === 0 && (<tr><td colSpan={7} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} Goods Received changes.</td></tr>)}
+              {shownDo.map(c => (
+                <tr key={c.id} className="border-b last:border-0 align-top hover:bg-gray-50">
+                  <td className="px-3 py-2 min-w-[160px]">{c.line_label || '—'}</td>
+                  <td className="px-3 py-2 min-w-[160px]">
+                    {c.request_type === 'delete'
+                      ? <span className="text-red-600 font-medium">🗑 Delete line</span>
+                      : <><span className="text-gray-500">{c.field}: </span><span className="line-through text-gray-400">{c.old_value || '(empty)'}</span><span className="mx-1">→</span><span className="font-medium text-gray-800">{c.new_value}</span></>}
+                  </td>
+                  <td className="px-3 py-2 text-gray-600 min-w-[120px]">{c.reason || '—'}</td>
+                  <td className="px-3 py-2 whitespace-nowrap"><span className="block">{c.requested_by_name || '—'}</span><span className="block text-gray-400">{fmt(c.created_at)}</span></td>
+                  <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full font-medium ${STATUS_STYLES[c.status] || 'bg-gray-100 text-gray-700'}`}>{c.status}</span></td>
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-600">{c.status === 'Pending' ? '—' : (<><span className="block">{c.reviewed_by_name}</span><span className="block text-gray-400">{fmt(c.reviewed_at)}</span></>)}</td>
+                  {isHO && (
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {c.status === 'Pending' ? (
+                        <div className="flex gap-2">
+                          <button onClick={() => approveDo(c.id)} disabled={busyId === c.id} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">Approve</button>
+                          <button onClick={() => rejectDo(c.id)} disabled={busyId === c.id} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>
                         </div>
                       ) : <span className="text-gray-400">done</span>}
                     </td>

@@ -15,7 +15,7 @@ interface DeliveryOrder {
   status: string
   created_at: string
 }
-interface DoLine { id: string; item_code: string; description: string; quantity: number; unit: string; batch_no: string; qc_checked: boolean; photo_path: string | null; received_at: string | null }
+interface DoLine { id: string; item_code: string; description: string; quantity: number; unit: string; batch_no: string; qc_checked: boolean; photo_path: string | null; received_at: string | null; stock_lot_id?: string | null; received_qty?: number | null }
 interface MRItem { id: string; item_code: string; unit: string; requested_qty: number; received_qty: number }
 interface MatReq { id: string; factory_code: string; status: string; material_request_items: MRItem[] }
 
@@ -47,6 +47,55 @@ export default function IncomingPage() {
   const [doItems, setDoItems] = useState<Record<string, string>>({})
   const [receiving, setReceiving] = useState(false)
   const [busyLine, setBusyLine] = useState('')
+  const [editReq, setEditReq] = useState<DoLine | null>(null)
+  const [editForm, setEditForm] = useState<Record<string, string>>({})
+
+  const EDIT_FIELDS: { key: string; label: string }[] = [
+    { key: 'item_code', label: 'Item code' }, { key: 'description', label: 'Description' },
+    { key: 'quantity', label: 'Delivered qty' }, { key: 'unit', label: 'Unit' }, { key: 'batch_no', label: 'Batch no' },
+  ]
+  function openEditReq(l: DoLine) {
+    setEditReq(l); setError(''); setSuccess('')
+    setEditForm({ item_code: l.item_code || '', description: l.description || '', quantity: String(l.quantity ?? ''), unit: l.unit || '', batch_no: l.batch_no || '' })
+  }
+  async function submitEditReq() {
+    if (!editReq || !linesFor) return
+    const orig: Record<string, string> = { item_code: editReq.item_code || '', description: editReq.description || '', quantity: String(editReq.quantity ?? ''), unit: editReq.unit || '', batch_no: editReq.batch_no || '' }
+    const changed = EDIT_FIELDS.filter(f => (editForm[f.key] || '') !== orig[f.key])
+    if (changed.length === 0) { setError('Nothing changed.'); return }
+    const reason = window.prompt('Reason for these changes (sent to Head Office):')
+    if (reason === null) return
+    const { data: sess } = await supabase.auth.getSession()
+    const rows = changed.map(f => ({
+      do_id: linesFor.id, line_id: editReq.id, factory_code: linesFor.factory_code, request_type: 'edit',
+      field: f.key, old_value: orig[f.key], new_value: editForm[f.key], reason: reason || null,
+      line_label: `${editReq.item_code} · ${editReq.description || ''}`,
+      requested_by: sess.session?.user.id || null, requested_by_name: profile?.full_name || null,
+    }))
+    const { error: e } = await supabase.from('do_change_requests').insert(rows)
+    if (e) { setError(e.message); return }
+    setEditReq(null); setSuccess('Change request sent to Head Office.')
+  }
+  async function requestDeleteLine(l: DoLine) {
+    if (!linesFor) return
+    const reason = window.prompt(`Request to DELETE line "${l.item_code}".\nReason (sent to Head Office):`)
+    if (reason === null) return
+    const { data: sess } = await supabase.auth.getSession()
+    const { error: e } = await supabase.from('do_change_requests').insert({
+      do_id: linesFor.id, line_id: l.id, factory_code: linesFor.factory_code, request_type: 'delete',
+      reason: reason || null, line_label: `${l.item_code} · ${l.description || ''}`,
+      requested_by: sess.session?.user.id || null, requested_by_name: profile?.full_name || null,
+    })
+    if (e) { setError(e.message); return }
+    setSuccess('Delete request sent to Head Office.')
+  }
+  const reqCtl = (l: DoLine) => (
+    <span className="whitespace-nowrap text-xs">
+      <button onClick={() => openEditReq(l)} className="text-blue-600 hover:underline">Request edit</button>
+      <span className="text-gray-300 mx-1">·</span>
+      <button onClick={() => requestDeleteLine(l)} className="text-red-600 hover:underline">delete</button>
+    </span>
+  )
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
@@ -295,7 +344,16 @@ export default function IncomingPage() {
       ;({ error: err } = await supabase.rpc('receive_stock_direct', { p_item_code: item.code, p_factory: linesFor.factory_code, p_qty: qty, p_batch_no: l.batch_no || null, p_exp_date: null, p_do_number: linesFor.do_number || null }))
     }
     if (err) { setError(`${l.item_code}: ${err.message}`); setBusyLine(''); return }
-    await supabase.from('delivery_order_lines').update({ received_at: new Date().toISOString() }).eq('id', l.id)
+    // Record which stock lot this line booked (for an exact reversal if it's deleted later)
+    const resolved = resolveItem(l.item_code)
+    let lotId: string | null = null
+    if (resolved) {
+      const { data: lot } = await supabase.from('stock_lots').select('id')
+        .eq('factory_code', linesFor.factory_code).eq('item_code', resolved.code)
+        .order('created_at', { ascending: false }).limit(1).maybeSingle()
+      lotId = lot?.id || null
+    }
+    await supabase.from('delivery_order_lines').update({ received_at: new Date().toISOString(), stock_lot_id: lotId, received_qty: qty }).eq('id', l.id)
     if (!silent) {
       const { data } = await supabase.from('delivery_order_lines').select('*').eq('do_id', linesFor.id).order('item_code')
       const fresh = (data as DoLine[]) || []
@@ -400,6 +458,7 @@ export default function IncomingPage() {
                       {photoCtl(l, editable)}
                       <span className="ml-auto">{receiveBtn(l)}</span>
                     </div>
+                    <div className="mt-2 pt-2 border-t">{reqCtl(l)}</div>
                   </div>
                 )
               })}
@@ -427,7 +486,7 @@ export default function IncomingPage() {
                         <td className="px-3 py-2 font-mono">{l.batch_no || '—'}</td>
                         <td className="px-3 py-2 text-right whitespace-nowrap">{!c.known || c.factor === null ? '—' : <span className="font-semibold text-blue-700">{c.into} {c.unit}{c.factor !== 1 ? <span className="text-gray-400 font-normal"> ({l.quantity}×{c.factor})</span> : null}</span>}</td>
                         <td className="px-3 py-2 whitespace-nowrap">{statusNode(c.known, c.factor, c.matched)}</td>
-                        <td className="px-3 py-2 whitespace-nowrap">{receiveBtn(l)}</td>
+                        <td className="px-3 py-2 whitespace-nowrap"><div className="flex flex-col items-start gap-1">{receiveBtn(l)}{reqCtl(l)}</div></td>
                       </tr>
                     )
                   })}
@@ -450,6 +509,28 @@ export default function IncomingPage() {
           </div>
         )}
       </div>
+
+      {editReq && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setEditReq(null)}>
+          <div className="bg-white rounded-xl shadow-xl border w-full max-w-lg my-8 p-6" onClick={e => e.stopPropagation()}>
+            <h2 className="font-semibold text-lg mb-1">Request changes to a line</h2>
+            <p className="text-gray-500 text-sm mb-4">Goes to Head Office for approval.{editReq.received_at ? ' This line is already received — item/qty/unit/batch changes need it deleted & received again; only description can be edited here.' : ''}</p>
+            <div className="space-y-3">
+              {EDIT_FIELDS.map(f => (
+                <div key={f.key}>
+                  <label className="block text-sm font-medium mb-1">{f.label}</label>
+                  <input value={editForm[f.key] || ''} onChange={e => setEditForm({ ...editForm, [f.key]: e.target.value })}
+                    className="w-full border rounded-lg px-3 py-2" />
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={submitEditReq} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 font-medium">Send for approval</button>
+              <button onClick={() => setEditReq(null)} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
