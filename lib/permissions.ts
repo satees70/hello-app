@@ -17,6 +17,7 @@ export const PERMISSION_MODULES = [
   { key: 'material_requests', label: 'Material requests', desc: 'Request materials from the warehouse' },
   { key: 'goods_received', label: 'Goods received', desc: 'Receive deliveries into stock' },
   { key: 'stock', label: 'Stock', desc: 'Stock on hand' },
+  { key: 'stock_adjustment', label: 'Stock adjustment', desc: 'Manual stock in/out (HOD approval)' },
   { key: 'items', label: 'Items', desc: 'Items master' },
   { key: 'bom', label: 'BOM', desc: 'Bill of materials' },
   { key: 'traceability', label: 'Traceability', desc: 'Recall report' },

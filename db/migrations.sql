@@ -1029,6 +1029,80 @@ create policy pl_all on public.packing_lines for all
   with check (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()));
 
 
+-- ============================================================================
+-- 2026-06 · Manual stock adjustments (no document) — HOD approval
+-- ============================================================================
+-- Staff key an IN/OUT adjustment; it stays Pending until Head Office approves.
+-- Approving an IN creates a stock lot; an OUT deducts FEFO (earliest expiry).
+create table if not exists public.stock_adjustments (
+  id uuid primary key default gen_random_uuid(),
+  factory_code text not null,
+  item_id uuid, item_code text not null, description text,
+  direction text not null check (direction in ('in','out')),
+  quantity numeric not null check (quantity > 0),
+  batch_no text, exp_date date, reason text,
+  status text not null default 'Pending',
+  requested_by uuid, requested_by_name text,
+  reviewed_by uuid, reviewed_by_name text, reviewed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+grant select, insert on public.stock_adjustments to authenticated, anon, service_role;
+grant update, delete on public.stock_adjustments to service_role;
+alter table public.stock_adjustments enable row level security;
+drop policy if exists sa_read on public.stock_adjustments;
+create policy sa_read on public.stock_adjustments for select
+  using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()) or requested_by = auth.uid());
+drop policy if exists sa_insert on public.stock_adjustments;
+create policy sa_insert on public.stock_adjustments for insert with check (requested_by = auth.uid());
+
+create or replace function public.approve_stock_adjustment(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare a public.stock_adjustments; v_name text; v_item_id uuid; v_desc text; v_need numeric; r record;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can approve'; end if;
+  select * into a from public.stock_adjustments where id = p_id;
+  if not found or a.status <> 'Pending' then raise exception 'Not a pending adjustment'; end if;
+  v_item_id := a.item_id; v_desc := a.description;
+  if v_item_id is null then select id, description into v_item_id, v_desc from public.items where code = a.item_code limit 1; end if;
+  if a.direction = 'in' then
+    insert into public.stock_lots (item_id, item_code, description, factory_code, batch_no, exp_date, qty_received, qty_remaining, received_at, unplanned)
+    values (v_item_id, a.item_code, coalesce(a.description, v_desc), a.factory_code, a.batch_no, a.exp_date, a.quantity, a.quantity, now(), true);
+    insert into public.item_stock (item_id, factory_code, quantity, updated_at)
+    values (v_item_id, a.factory_code, a.quantity, now())
+    on conflict (item_id, factory_code) do update set quantity = item_stock.quantity + a.quantity, updated_at = now();
+  else
+    v_need := a.quantity;
+    for r in select id, qty_remaining from public.stock_lots
+             where item_code = a.item_code and factory_code = a.factory_code and qty_remaining > 0
+             order by exp_date asc nulls last, received_at asc loop
+      exit when v_need <= 0;
+      if r.qty_remaining <= v_need then
+        update public.stock_lots set qty_remaining = 0 where id = r.id; v_need := v_need - r.qty_remaining;
+      else
+        update public.stock_lots set qty_remaining = qty_remaining - v_need where id = r.id; v_need := 0;
+      end if;
+    end loop;
+    if v_need > 0 then raise exception 'Not enough stock to remove — short by %', v_need; end if;
+    insert into public.item_stock (item_id, factory_code, quantity, updated_at)
+    values (v_item_id, a.factory_code, -a.quantity, now())
+    on conflict (item_id, factory_code) do update set quantity = item_stock.quantity - a.quantity, updated_at = now();
+  end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.stock_adjustments set status = 'Approved', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id;
+end $$;
+grant execute on function public.approve_stock_adjustment(uuid) to authenticated;
+
+create or replace function public.reject_stock_adjustment(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can reject'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.stock_adjustments set status = 'Rejected', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id and status = 'Pending';
+end $$;
+grant execute on function public.reject_stock_adjustment(uuid) to authenticated;
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.
