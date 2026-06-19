@@ -64,6 +64,9 @@ export default function PendingChangesPage() {
   const [doChanges, setDoChanges] = useState<DoChangeRequest[]>([])
   const [filter, setFilter] = useState<Filter>('Pending')
   const [busyId, setBusyId] = useState('')
+  const [selCr, setSelCr] = useState<Set<string>>(new Set())
+  const [crFilters, setCrFilters] = useState<Record<string, string>>({})
+  const [bulkBusy, setBulkBusy] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
@@ -147,6 +150,18 @@ export default function PendingChangesPage() {
     loadRequests()
   }
 
+  const toggleCr = (id: string) => setSelCr(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
+  async function bulkAct(rpc: string, ids: string[], verb: string) {
+    if (ids.length === 0) return
+    if (verb === 'reject' && !confirm(`Reject ${ids.length} change request(s)?`)) return
+    setBulkBusy(true); setError(''); setSuccess('')
+    let ok = 0, fail = 0
+    for (const id of ids) { const { error } = await supabase.rpc(rpc, { p_id: id }); if (error) fail++; else ok++ }
+    setBulkBusy(false); setSelCr(new Set())
+    setSuccess(`${verb === 'approve' ? 'Approved' : 'Rejected'} ${ok} request(s)${fail ? ` · ${fail} failed (a document may be blocked by a duplicate)` : ''}.`)
+    loadRequests()
+  }
+
   function fmt(iso: string | null) { return iso ? new Date(iso).toLocaleString() : '—' }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
@@ -154,6 +169,19 @@ export default function PendingChangesPage() {
   if (!profile) return null
 
   const shown = filter === 'All' ? requests : requests.filter(r => r.status === filter)
+  // Filterable columns on the change-requests table (dropdowns list the values present)
+  const CR_COLS: { key: string; label: string; get: (r: ChangeRequest) => string }[] = [
+    { key: 'doc', label: 'Document', get: r => r.sales_imports?.file_name || '—' },
+    { key: 'line', label: 'Line', get: r => r.sales_order_lines?.item_code || (r.request_type === 'delete' ? (r.old_value || '') : '') || '—' },
+    { key: 'field', label: 'Field', get: r => r.request_type === 'delete' ? 'Whole line' : (FIELD_LABEL[r.field] || r.field) },
+    { key: 'by', label: 'Requested by', get: r => r.requested_by_name || r.requested_by_email || '—' },
+  ]
+  const crDistinct = (key: string) => { const g = CR_COLS.find(c => c.key === key)!.get; return [...new Set(shown.map(g))].filter(Boolean).sort() }
+  const shownF = shown.filter(r => CR_COLS.every(c => !crFilters[c.key] || c.get(r) === crFilters[c.key]))
+  const crPending = shownF.filter(r => r.status === 'Pending')
+  const crAllSel = crPending.length > 0 && crPending.every(r => selCr.has(r.id))
+  const toggleCrAll = () => setSelCr(crAllSel ? new Set() : new Set(crPending.map(r => r.id)))
+  const selPendingIds = crPending.filter(r => selCr.has(r.id)).map(r => r.id)
   const shownCorr = filter === 'All' ? corrections : corrections.filter(c => c.status === filter)
   const shownDo = filter === 'All' ? doChanges : doChanges.filter(c => c.status === filter)
   const counts: Record<string, number> = { Pending: 0, Approved: 0, Rejected: 0 }
@@ -180,16 +208,51 @@ export default function PendingChangesPage() {
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
         {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}
 
+        {isHO && selPendingIds.length > 0 && (
+          <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
+            <span className="font-medium text-blue-800">{selPendingIds.length} pending selected</span>
+            <button onClick={() => bulkAct('approve_change_request', selPendingIds, 'approve')} disabled={bulkBusy} className="bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">Approve selected</button>
+            <button onClick={() => bulkAct('reject_change_request', selPendingIds, 'reject')} disabled={bulkBusy} className="bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50 font-medium">Reject selected</button>
+            <button onClick={() => setSelCr(new Set())} className="text-gray-500 hover:underline">Clear</button>
+          </div>
+        )}
+
         <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="bg-gray-50 border-b">
-              <tr>{['Document', 'Line', 'Field', 'Change', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
-                <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+              <tr>
+                {isHO && <th className="px-3 py-2"><input type="checkbox" checked={crAllSel} onChange={toggleCrAll} className="h-4 w-4" /></th>}
+                {['Document', 'Line', 'Field', 'Change', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
+                  <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}
+              </tr>
+              <tr className="border-b">
+                {isHO && <th className="px-2 py-1"></th>}
+                {(['doc', 'line', 'field'] as const).map(k => (
+                  <th key={k} className="px-2 py-1">
+                    <select value={crFilters[k] || ''} onChange={e => setCrFilters(p => ({ ...p, [k]: e.target.value }))} className="w-full border rounded px-1 py-1 text-xs font-normal bg-white">
+                      <option value="">All</option>
+                      {crDistinct(k).map(v => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                  </th>
+                ))}
+                <th className="px-2 py-1"></th>
+                <th className="px-2 py-1"></th>
+                <th className="px-2 py-1">
+                  <select value={crFilters['by'] || ''} onChange={e => setCrFilters(p => ({ ...p, by: e.target.value }))} className="w-full border rounded px-1 py-1 text-xs font-normal bg-white">
+                    <option value="">All</option>
+                    {crDistinct('by').map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                </th>
+                <th className="px-2 py-1"></th>
+                <th className="px-2 py-1"></th>
+                {isHO && <th className="px-2 py-1"></th>}
+              </tr>
             </thead>
             <tbody>
-              {shown.length === 0 && (<tr><td colSpan={9} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} change requests.</td></tr>)}
-              {shown.map(r => (
-                <tr key={r.id} className="border-b last:border-0 align-top hover:bg-gray-50">
+              {shownF.length === 0 && (<tr><td colSpan={10} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} change requests{Object.values(crFilters).some(Boolean) ? ' match the filter' : ''}.</td></tr>)}
+              {shownF.map(r => (
+                <tr key={r.id} className={`border-b last:border-0 align-top ${selCr.has(r.id) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                  {isHO && <td className="px-3 py-2">{r.status === 'Pending' ? <input type="checkbox" checked={selCr.has(r.id)} onChange={() => toggleCr(r.id)} className="h-4 w-4" /> : null}</td>}
                   <td className="px-3 py-2 min-w-[140px]">{r.sales_imports?.file_name || '—'}</td>
                   <td className="px-3 py-2 min-w-[160px]">
                     <span className="font-mono font-medium">{r.sales_order_lines?.item_code || (r.request_type === 'delete' ? r.old_value : '—')}</span>
