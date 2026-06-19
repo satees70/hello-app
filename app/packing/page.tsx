@@ -76,14 +76,11 @@ export default function PackingPage() {
     if (b.material_request_id) return 'Requested'
     return 'Planned'
   }
-  // Materials are "available" when this batch's request has been fully received
-  const materialsReady = (b: Batch) => !!b.material_request_id && mrStatus[b.material_request_id] === 'Fulfilled'
-  const waitReason = (b: Batch) => {
-    if (!b.material_request_id) return 'Materials not requested yet'
-    const s = mrStatus[b.material_request_id]
-    if (s === 'Partially Received') return 'Materials partially received'
-    return 'Waiting for materials'
-  }
+  // Materials are "available" to schedule once any have been received
+  // (fully OR partially). A request that's still fully Open stays in waiting.
+  const materialsReady = (b: Batch) => !!b.material_request_id && ['Fulfilled', 'Partially Received'].includes(mrStatus[b.material_request_id])
+  const partial = (b: Batch) => !!b.material_request_id && mrStatus[b.material_request_id] === 'Partially Received'
+  const waitReason = (b: Batch) => b.material_request_id ? 'Waiting for materials' : 'Materials not requested yet'
 
   async function savePack(b: Batch) {
     const e = packEdit[b.id] ?? { line: b.pack_line || '', date: b.pack_date || '', mode: b.run_mode || 'auto' }
@@ -172,11 +169,11 @@ export default function PackingPage() {
               {readyToPack.map(b => (
                 <tr key={b.id} className="border-b last:border-0 hover:bg-gray-50">
                   {isHO && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(b.factory_code)}</td>}
-                  <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}</td>
+                  <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}{partial(b) && <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700 align-middle">partial</span>}</td>
                   <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span></td>
                   <td className="px-3 py-2 text-right font-semibold">{b.total_quantity}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-600">{b.delivery_date ? fmtDate(b.delivery_date) : '—'}</td>
-                  <td className="px-3 py-2">{canEdit ? <PackForm b={b} /> : <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Materials ready</span>}</td>
+                  <td className="px-3 py-2">{canEdit ? <PackForm b={b} /> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${partial(b) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{partial(b) ? 'Partial materials' : 'Materials ready'}</span>}</td>
                 </tr>
               ))}
             </tbody>
