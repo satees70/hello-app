@@ -82,6 +82,12 @@ export default function SalesOrdersPage() {
 
   // Change-request form
   const [reqLine, setReqLine] = useState<SalesLine | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkField, setBulkField] = useState<keyof SalesLine>('location_code')
+  const [bulkValue, setBulkValue] = useState('')
+  const [bulkReason, setBulkReason] = useState('')
+  const [bulkSubmitting, setBulkSubmitting] = useState(false)
   const [reqField, setReqField] = useState<keyof SalesLine>('customer_name')
   const [reqValue, setReqValue] = useState('')
   const [reqReason, setReqReason] = useState('')
@@ -255,6 +261,31 @@ export default function SalesOrdersPage() {
     setReqLine(line)
     setReqReason('')
     setError('')
+  }
+
+  // ---- bulk select + bulk change request ----
+  const toggleSel = (id: string) => setSelectedIds(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const allSelected = lines.length > 0 && lines.every(l => selectedIds.has(l.id))
+  const toggleAll = () => setSelectedIds(allSelected ? new Set() : new Set(lines.map(l => l.id)))
+  function openBulk() { setBulkField('location_code'); setBulkValue(''); setBulkReason(''); setError(''); setBulkOpen(true) }
+  async function submitBulk() {
+    if (!profile || !linesFor) return
+    if (selectedIds.size === 0) { setError('Select at least one line.'); return }
+    if (!bulkReason.trim()) { setError('Please give a reason.'); return }
+    if (!bulkValue.trim()) { setError('Enter the new value.'); return }
+    setBulkSubmitting(true); setError(''); setSuccess('')
+    const sel = lines.filter(l => selectedIds.has(l.id))
+    const rows = sel.map(l => ({
+      line_id: l.id, import_id: linesFor.id, reason: bulkReason.trim(), status: 'Pending',
+      requested_by: profile.id, requested_by_email: profile.email, requested_by_name: profile.full_name || profile.email,
+      factory_code: l.factory_code || profile.factory_code,
+      request_type: 'edit', field: bulkField, old_value: String(l[bulkField] ?? ''), new_value: bulkValue.trim(),
+    }))
+    const { error: insErr } = await supabase.from('change_requests').insert(rows)
+    if (insErr) { setError(`Could not submit: ${insErr.message}`); setBulkSubmitting(false); return }
+    setSuccess(`Bulk change submitted for ${rows.length} line(s) — awaiting Head Office approval.`)
+    setBulkSubmitting(false); setBulkOpen(false); setSelectedIds(new Set())
+    loadChangeReqs(linesFor.id); loadSummary()
   }
 
   function onReqFieldChange(field: keyof SalesLine) {
@@ -463,19 +494,64 @@ export default function SalesOrdersPage() {
               </div>
             )}
 
+            {selectedIds.size > 0 && (
+              <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
+                <span className="font-medium text-blue-800">{selectedIds.size} line(s) selected</span>
+                <button onClick={openBulk} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 text-sm font-medium">Request bulk change</button>
+                <button onClick={() => setSelectedIds(new Set())} className="text-gray-500 hover:underline">Clear</button>
+              </div>
+            )}
+
+            {bulkOpen && (
+              <div className="bg-white rounded-xl shadow-sm border p-5 mb-4">
+                <h3 className="font-semibold mb-1">Request a change for {selectedIds.size} line(s)</h3>
+                <p className="text-gray-500 text-xs mb-4">The same change is proposed for every selected line; Head Office approves it.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="block text-xs font-medium mb-1">Field to change</label>
+                    <select value={bulkField} onChange={e => { setBulkField(e.target.value as keyof SalesLine); setBulkValue('') }} className="w-full border rounded-lg px-3 py-2 text-sm bg-white">
+                      {FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1">New value (applied to all selected)</label>
+                    {bulkField === 'location_code' ? (
+                      <select value={bulkValue} onChange={e => setBulkValue(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-white">
+                        <option value="">Select location…</option>
+                        {locationCodes.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    ) : (
+                      <input value={bulkValue} onChange={e => setBulkValue(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-white" />
+                    )}
+                  </div>
+                </div>
+                <label className="block text-xs font-medium mb-1">Reason</label>
+                <textarea value={bulkReason} onChange={e => setBulkReason(e.target.value)} rows={2} className="w-full border rounded-lg px-3 py-2 text-sm bg-white mb-4" placeholder="Why does this need to change?" />
+                {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
+                <div className="flex gap-3">
+                  <button onClick={submitBulk} disabled={bulkSubmitting} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{bulkSubmitting ? 'Submitting…' : `Submit for ${selectedIds.size} line(s)`}</button>
+                  <button onClick={() => setBulkOpen(false)} className="border px-5 py-2 rounded-lg hover:bg-gray-50 text-sm">Cancel</button>
+                </div>
+              </div>
+            )}
+
             <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="bg-gray-50 border-b">
-                  <tr>{['Customer', 'SO No', 'Item Code', 'Description', 'Qty', 'Outstanding', 'Delivery Date', 'Location', 'Factory', ''].map(h => (
-                    <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+                  <tr>
+                    <th className="px-3 py-2"><input type="checkbox" checked={allSelected} onChange={toggleAll} className="h-4 w-4" /></th>
+                    {['Customer', 'SO No', 'Item Code', 'Description', 'Qty', 'Outstanding', 'Delivery Date', 'Location', 'Factory', ''].map(h => (
+                      <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}
+                  </tr>
                 </thead>
                 <tbody>
-                  {linesLoading && (<tr><td colSpan={10} className="text-center py-8 text-gray-400">Loading…</td></tr>)}
-                  {!linesLoading && lines.length === 0 && (<tr><td colSpan={10} className="text-center py-8 text-gray-400">No lines for this document.</td></tr>)}
+                  {linesLoading && (<tr><td colSpan={11} className="text-center py-8 text-gray-400">Loading…</td></tr>)}
+                  {!linesLoading && lines.length === 0 && (<tr><td colSpan={11} className="text-center py-8 text-gray-400">No lines for this document.</td></tr>)}
                   {lines.map(line => {
                     const pend = pendingForLine(line.id)
                     return (
-                      <tr key={line.id} className={`border-b last:border-0 align-top ${isDuplicate(line) ? 'bg-amber-50' : 'hover:bg-gray-50'}`}>
+                      <tr key={line.id} className={`border-b last:border-0 align-top ${selectedIds.has(line.id) ? 'bg-blue-50' : isDuplicate(line) ? 'bg-amber-50' : 'hover:bg-gray-50'}`}>
+                        <td className="px-3 py-2"><input type="checkbox" checked={selectedIds.has(line.id)} onChange={() => toggleSel(line.id)} className="h-4 w-4" /></td>
                         <td className="px-3 py-2 text-gray-700 min-w-[160px]">{line.customer_name}</td>
                         <td className="px-3 py-2 font-mono whitespace-nowrap">
                           {line.so_number}
