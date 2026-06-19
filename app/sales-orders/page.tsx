@@ -88,8 +88,8 @@ export default function SalesOrdersPage() {
   const [bulkValue, setBulkValue] = useState('')
   const [bulkReason, setBulkReason] = useState('')
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
-  const [lineSearch, setLineSearch] = useState('')
-  const [lineFac, setLineFac] = useState('') // '' = all, a factory code, or 'UNMAPPED'
+  const [colFilters, setColFilters] = useState<Record<string, string>>({})
+  const [onlyUnmapped, setOnlyUnmapped] = useState(false)
   const [reqField, setReqField] = useState<keyof SalesLine>('customer_name')
   const [reqValue, setReqValue] = useState('')
   const [reqReason, setReqReason] = useState('')
@@ -244,11 +244,22 @@ export default function SalesOrdersPage() {
   // Per-factory confirmation helpers
   const factoriesInDoc = [...new Set(lines.map(l => l.factory_code).filter(Boolean))].sort()
   const hasUnmapped = lines.some(l => !l.factory_code)
-  const lineQ = lineSearch.trim().toLowerCase()
+  // One filterable column per data field (drives the header labels + the filter row)
+  const COLS: { key: string; label: string; get: (l: SalesLine) => string }[] = [
+    { key: 'customer_name', label: 'Customer', get: l => l.customer_name || '' },
+    { key: 'so_number', label: 'SO No', get: l => l.so_number || '' },
+    { key: 'item_code', label: 'Item Code', get: l => l.item_code || '' },
+    { key: 'description', label: 'Description', get: l => l.description || '' },
+    { key: 'quantity', label: 'Qty', get: l => String(l.quantity ?? '') },
+    { key: 'outstanding_qty', label: 'Outstanding', get: l => String(l.outstanding_qty ?? '') },
+    { key: 'delivery_date', label: 'Delivery Date', get: l => l.delivery_date || '' },
+    { key: 'location_code', label: 'Location', get: l => l.location_code || '' },
+    { key: 'factory', label: 'Factory', get: l => `${l.factory_code || ''} ${factoryName(l.factory_code) || ''}` },
+  ]
+  const anyFilter = onlyUnmapped || COLS.some(c => (colFilters[c.key] || '').trim())
   const visibleLines = lines.filter(l => {
-    if (lineFac === 'UNMAPPED') { if (l.factory_code) return false }
-    else if (lineFac && l.factory_code !== lineFac) return false
-    if (lineQ && !`${l.customer_name} ${l.so_number} ${l.item_code} ${l.description} ${l.location_code}`.toLowerCase().includes(lineQ)) return false
+    if (onlyUnmapped && l.factory_code) return false
+    for (const c of COLS) { const f = (colFilters[c.key] || '').trim().toLowerCase(); if (f && !c.get(l).toLowerCase().includes(f)) return false }
     return true
   })
   const allSelected = visibleLines.length > 0 && visibleLines.every(l => selectedIds.has(l.id))
@@ -523,16 +534,11 @@ export default function SalesOrdersPage() {
               </div>
             )}
 
-            <div className="flex flex-wrap items-center gap-2 mb-3 text-sm">
-              <input value={lineSearch} onChange={e => setLineSearch(e.target.value)} placeholder="Search customer, SO, item, description…"
-                className="w-full sm:w-80 border rounded-lg px-3 py-2" />
-              <select value={lineFac} onChange={e => setLineFac(e.target.value)} className="border rounded-lg px-3 py-2 bg-white">
-                <option value="">All locations</option>
-                {hasUnmapped && <option value="UNMAPPED">⚠ Unmapped only</option>}
-                {factoriesInDoc.map(f => <option key={f} value={f}>{factoryName(f)}</option>)}
-              </select>
+            <div className="flex flex-wrap items-center gap-3 mb-3 text-sm">
+              <span className="text-gray-500">Filter each column below.</span>
+              {hasUnmapped && <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={onlyUnmapped} onChange={e => setOnlyUnmapped(e.target.checked)} className="h-4 w-4" /> ⚠ Unmapped only</label>}
               <span className="text-gray-400 text-xs">{visibleLines.length} of {lines.length} line(s)</span>
-              {(lineSearch || lineFac) && <button onClick={() => { setLineSearch(''); setLineFac('') }} className="text-blue-600 hover:underline text-xs">Clear filter</button>}
+              {anyFilter && <button onClick={() => { setColFilters({}); setOnlyUnmapped(false) }} className="text-blue-600 hover:underline text-xs">Clear filters</button>}
             </div>
 
             {selectedIds.size > 0 && (
@@ -582,8 +588,18 @@ export default function SalesOrdersPage() {
                 <thead className="bg-gray-50 border-b">
                   <tr>
                     <th className="px-3 py-2"><input type="checkbox" checked={allSelected} onChange={toggleAll} className="h-4 w-4" /></th>
-                    {['Customer', 'SO No', 'Item Code', 'Description', 'Qty', 'Outstanding', 'Delivery Date', 'Location', 'Factory', ''].map(h => (
-                      <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}
+                    {COLS.map(c => (<th key={c.key} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{c.label}</th>))}
+                    <th className="px-3 py-2"></th>
+                  </tr>
+                  <tr className="border-b">
+                    <th className="px-2 py-1"></th>
+                    {COLS.map(c => (
+                      <th key={c.key} className="px-2 py-1">
+                        <input value={colFilters[c.key] || ''} onChange={e => setColFilters(p => ({ ...p, [c.key]: e.target.value }))}
+                          placeholder="filter…" className="w-full min-w-[70px] border rounded px-2 py-1 text-xs font-normal bg-white" />
+                      </th>
+                    ))}
+                    <th className="px-2 py-1"></th>
                   </tr>
                 </thead>
                 <tbody>
