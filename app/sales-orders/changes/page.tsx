@@ -4,6 +4,7 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
+import MultiFilter from '@/components/MultiFilter'
 
 interface ChangeRequest {
   id: string
@@ -65,15 +66,17 @@ export default function PendingChangesPage() {
   const [filter, setFilter] = useState<Filter>('Pending')
   const [busyId, setBusyId] = useState('')
   const [selCr, setSelCr] = useState<Set<string>>(new Set())
-  const [crFilters, setCrFilters] = useState<Record<string, string>>({})
+  const [crFilters, setCrFilters] = useState<Record<string, Set<string>>>({})
   const [bulkBusy, setBulkBusy] = useState(false)
   const [selCorr, setSelCorr] = useState<Set<string>>(new Set())
-  const [corrFilters, setCorrFilters] = useState<Record<string, string>>({})
+  const [corrFilters, setCorrFilters] = useState<Record<string, Set<string>>>({})
   const [selDo, setSelDo] = useState<Set<string>>(new Set())
-  const [doFilters, setDoFilters] = useState<Record<string, string>>({})
+  const [doFilters, setDoFilters] = useState<Record<string, Set<string>>>({})
 
   // Distinct values present in a list, for a filter dropdown
   const distinctOf = <T,>(arr: T[], get: (x: T) => string) => [...new Set(arr.map(get))].filter(Boolean).sort()
+  // A row passes a column filter when nothing is selected, or its value is ticked
+  const passes = (sel: Set<string> | undefined, val: string) => !sel || sel.size === 0 || sel.has(val)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
@@ -184,18 +187,18 @@ export default function PendingChangesPage() {
     { key: 'by', label: 'Requested by', get: r => r.requested_by_name || r.requested_by_email || '—' },
   ]
   const crDistinct = (key: string) => { const g = CR_COLS.find(c => c.key === key)!.get; return [...new Set(shown.map(g))].filter(Boolean).sort() }
-  const shownF = shown.filter(r => CR_COLS.every(c => !crFilters[c.key] || c.get(r) === crFilters[c.key]))
+  const shownF = shown.filter(r => CR_COLS.every(c => passes(crFilters[c.key], c.get(r))))
   const crPending = shownF.filter(r => r.status === 'Pending')
   const crAllSel = crPending.length > 0 && crPending.every(r => selCr.has(r.id))
   const toggleCrAll = () => setSelCr(crAllSel ? new Set() : new Set(crPending.map(r => r.id)))
   const selPendingIds = crPending.filter(r => selCr.has(r.id)).map(r => r.id)
   const shownCorrAll = filter === 'All' ? corrections : corrections.filter(c => c.status === filter)
-  const shownCorr = shownCorrAll.filter(c => (!corrFilters.label || (c.label || c.timer_key) === corrFilters.label) && (!corrFilters.by || (c.requested_by_name || '—') === corrFilters.by))
+  const shownCorr = shownCorrAll.filter(c => passes(corrFilters.label, c.label || c.timer_key) && passes(corrFilters.by, c.requested_by_name || '—'))
   const corrPending = shownCorr.filter(c => c.status === 'Pending')
   const corrAllSel = corrPending.length > 0 && corrPending.every(c => selCorr.has(c.id))
   const selCorrIds = corrPending.filter(c => selCorr.has(c.id)).map(c => c.id)
   const shownDoAll = filter === 'All' ? doChanges : doChanges.filter(c => c.status === filter)
-  const shownDo = shownDoAll.filter(c => (!doFilters.label || (c.line_label || '—') === doFilters.label) && (!doFilters.type || c.request_type === doFilters.type) && (!doFilters.by || (c.requested_by_name || '—') === doFilters.by))
+  const shownDo = shownDoAll.filter(c => passes(doFilters.label, c.line_label || '—') && passes(doFilters.type, c.request_type) && passes(doFilters.by, c.requested_by_name || '—'))
   const doPending = shownDo.filter(c => c.status === 'Pending')
   const doAllSel = doPending.length > 0 && doPending.every(c => selDo.has(c.id))
   const selDoIds = doPending.filter(c => selDo.has(c.id)).map(c => c.id)
@@ -243,28 +246,18 @@ export default function PendingChangesPage() {
               <tr className="border-b">
                 {isHO && <th className="px-2 py-1"></th>}
                 {(['doc', 'line', 'field'] as const).map(k => (
-                  <th key={k} className="px-2 py-1">
-                    <select value={crFilters[k] || ''} onChange={e => setCrFilters(p => ({ ...p, [k]: e.target.value }))} className="w-full border rounded px-1 py-1 text-xs font-normal bg-white">
-                      <option value="">All</option>
-                      {crDistinct(k).map(v => <option key={v} value={v}>{v}</option>)}
-                    </select>
-                  </th>
+                  <th key={k} className="px-2 py-1"><MultiFilter values={crDistinct(k)} selected={crFilters[k] || new Set()} onChange={s => setCrFilters(p => ({ ...p, [k]: s }))} /></th>
                 ))}
                 <th className="px-2 py-1"></th>
                 <th className="px-2 py-1"></th>
-                <th className="px-2 py-1">
-                  <select value={crFilters['by'] || ''} onChange={e => setCrFilters(p => ({ ...p, by: e.target.value }))} className="w-full border rounded px-1 py-1 text-xs font-normal bg-white">
-                    <option value="">All</option>
-                    {crDistinct('by').map(v => <option key={v} value={v}>{v}</option>)}
-                  </select>
-                </th>
+                <th className="px-2 py-1"><MultiFilter values={crDistinct('by')} selected={crFilters['by'] || new Set()} onChange={s => setCrFilters(p => ({ ...p, by: s }))} /></th>
                 <th className="px-2 py-1"></th>
                 <th className="px-2 py-1"></th>
                 {isHO && <th className="px-2 py-1"></th>}
               </tr>
             </thead>
             <tbody>
-              {shownF.length === 0 && (<tr><td colSpan={10} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} change requests{Object.values(crFilters).some(Boolean) ? ' match the filter' : ''}.</td></tr>)}
+              {shownF.length === 0 && (<tr><td colSpan={10} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} change requests{Object.values(crFilters).some(s => s && s.size) ? ' match the filter' : ''}.</td></tr>)}
               {shownF.map(r => (
                 <tr key={r.id} className={`border-b last:border-0 align-top ${selCr.has(r.id) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
                   {isHO && <td className="px-3 py-2">{r.status === 'Pending' ? <input type="checkbox" checked={selCr.has(r.id)} onChange={() => toggleCr(r.id)} className="h-4 w-4" /> : null}</td>}
@@ -327,9 +320,9 @@ export default function PendingChangesPage() {
               </tr>
               <tr className="border-b">
                 {isHO && <th className="px-2 py-1"></th>}
-                <th className="px-2 py-1"><select value={corrFilters.label || ''} onChange={e => setCorrFilters(p => ({ ...p, label: e.target.value }))} className="w-full border rounded px-1 py-1 text-xs font-normal bg-white"><option value="">All</option>{distinctOf(shownCorrAll, c => c.label || c.timer_key).map(v => <option key={v} value={v}>{v}</option>)}</select></th>
+                <th className="px-2 py-1"><MultiFilter values={distinctOf(shownCorrAll, c => c.label || c.timer_key)} selected={corrFilters.label || new Set()} onChange={s => setCorrFilters(p => ({ ...p, label: s }))} /></th>
                 <th className="px-2 py-1"></th>
-                <th className="px-2 py-1"><select value={corrFilters.by || ''} onChange={e => setCorrFilters(p => ({ ...p, by: e.target.value }))} className="w-full border rounded px-1 py-1 text-xs font-normal bg-white"><option value="">All</option>{distinctOf(shownCorrAll, c => c.requested_by_name || '—').map(v => <option key={v} value={v}>{v}</option>)}</select></th>
+                <th className="px-2 py-1"><MultiFilter values={distinctOf(shownCorrAll, c => c.requested_by_name || '—')} selected={corrFilters.by || new Set()} onChange={s => setCorrFilters(p => ({ ...p, by: s }))} /></th>
                 <th className="px-2 py-1"></th><th className="px-2 py-1"></th>{isHO && <th className="px-2 py-1"></th>}
               </tr>
             </thead>
@@ -380,10 +373,10 @@ export default function PendingChangesPage() {
               </tr>
               <tr className="border-b">
                 {isHO && <th className="px-2 py-1"></th>}
-                <th className="px-2 py-1"><select value={doFilters.label || ''} onChange={e => setDoFilters(p => ({ ...p, label: e.target.value }))} className="w-full border rounded px-1 py-1 text-xs font-normal bg-white"><option value="">All</option>{distinctOf(shownDoAll, c => c.line_label || '—').map(v => <option key={v} value={v}>{v}</option>)}</select></th>
-                <th className="px-2 py-1"><select value={doFilters.type || ''} onChange={e => setDoFilters(p => ({ ...p, type: e.target.value }))} className="w-full border rounded px-1 py-1 text-xs font-normal bg-white"><option value="">All</option><option value="edit">Edit</option><option value="delete">Delete</option></select></th>
+                <th className="px-2 py-1"><MultiFilter values={distinctOf(shownDoAll, c => c.line_label || '—')} selected={doFilters.label || new Set()} onChange={s => setDoFilters(p => ({ ...p, label: s }))} /></th>
+                <th className="px-2 py-1"><MultiFilter values={['edit', 'delete']} selected={doFilters.type || new Set()} onChange={s => setDoFilters(p => ({ ...p, type: s }))} /></th>
                 <th className="px-2 py-1"></th>
-                <th className="px-2 py-1"><select value={doFilters.by || ''} onChange={e => setDoFilters(p => ({ ...p, by: e.target.value }))} className="w-full border rounded px-1 py-1 text-xs font-normal bg-white"><option value="">All</option>{distinctOf(shownDoAll, c => c.requested_by_name || '—').map(v => <option key={v} value={v}>{v}</option>)}</select></th>
+                <th className="px-2 py-1"><MultiFilter values={distinctOf(shownDoAll, c => c.requested_by_name || '—')} selected={doFilters.by || new Set()} onChange={s => setDoFilters(p => ({ ...p, by: s }))} /></th>
                 <th className="px-2 py-1"></th><th className="px-2 py-1"></th>{isHO && <th className="px-2 py-1"></th>}
               </tr>
             </thead>
