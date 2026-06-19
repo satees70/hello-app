@@ -88,6 +88,8 @@ export default function SalesOrdersPage() {
   const [bulkValue, setBulkValue] = useState('')
   const [bulkReason, setBulkReason] = useState('')
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
+  const [lineSearch, setLineSearch] = useState('')
+  const [lineFac, setLineFac] = useState('') // '' = all, a factory code, or 'UNMAPPED'
   const [reqField, setReqField] = useState<keyof SalesLine>('customer_name')
   const [reqValue, setReqValue] = useState('')
   const [reqReason, setReqReason] = useState('')
@@ -241,6 +243,16 @@ export default function SalesOrdersPage() {
 
   // Per-factory confirmation helpers
   const factoriesInDoc = [...new Set(lines.map(l => l.factory_code).filter(Boolean))].sort()
+  const hasUnmapped = lines.some(l => !l.factory_code)
+  const lineQ = lineSearch.trim().toLowerCase()
+  const visibleLines = lines.filter(l => {
+    if (lineFac === 'UNMAPPED') { if (l.factory_code) return false }
+    else if (lineFac && l.factory_code !== lineFac) return false
+    if (lineQ && !`${l.customer_name} ${l.so_number} ${l.item_code} ${l.description} ${l.location_code}`.toLowerCase().includes(lineQ)) return false
+    return true
+  })
+  const allSelected = visibleLines.length > 0 && visibleLines.every(l => selectedIds.has(l.id))
+  const toggleAll = () => setSelectedIds(allSelected ? new Set() : new Set(visibleLines.map(l => l.id)))
   const factoryOfLine = (lineId: string) => lines.find(l => l.id === lineId)?.factory_code
   const pendingForFactory = (f: string) => changeReqs.filter(c => c.status === 'Pending' && factoryOfLine(c.line_id) === f).length
   const dupForFactory = (f: string) => lines.filter(l => l.factory_code === f && isDuplicate(l)).length
@@ -265,8 +277,6 @@ export default function SalesOrdersPage() {
 
   // ---- bulk select + bulk change request ----
   const toggleSel = (id: string) => setSelectedIds(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
-  const allSelected = lines.length > 0 && lines.every(l => selectedIds.has(l.id))
-  const toggleAll = () => setSelectedIds(allSelected ? new Set() : new Set(lines.map(l => l.id)))
   function openBulk() { setBulkField('location_code'); setBulkValue(''); setBulkReason(''); setError(''); setBulkOpen(true) }
   async function submitBulk() {
     if (!profile || !linesFor) return
@@ -513,6 +523,18 @@ export default function SalesOrdersPage() {
               </div>
             )}
 
+            <div className="flex flex-wrap items-center gap-2 mb-3 text-sm">
+              <input value={lineSearch} onChange={e => setLineSearch(e.target.value)} placeholder="Search customer, SO, item, description…"
+                className="w-full sm:w-80 border rounded-lg px-3 py-2" />
+              <select value={lineFac} onChange={e => setLineFac(e.target.value)} className="border rounded-lg px-3 py-2 bg-white">
+                <option value="">All locations</option>
+                {hasUnmapped && <option value="UNMAPPED">⚠ Unmapped only</option>}
+                {factoriesInDoc.map(f => <option key={f} value={f}>{factoryName(f)}</option>)}
+              </select>
+              <span className="text-gray-400 text-xs">{visibleLines.length} of {lines.length} line(s)</span>
+              {(lineSearch || lineFac) && <button onClick={() => { setLineSearch(''); setLineFac('') }} className="text-blue-600 hover:underline text-xs">Clear filter</button>}
+            </div>
+
             {selectedIds.size > 0 && (
               <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
                 <span className="font-medium text-blue-800">{selectedIds.size} line(s) selected</span>
@@ -567,7 +589,8 @@ export default function SalesOrdersPage() {
                 <tbody>
                   {linesLoading && (<tr><td colSpan={11} className="text-center py-8 text-gray-400">Loading…</td></tr>)}
                   {!linesLoading && lines.length === 0 && (<tr><td colSpan={11} className="text-center py-8 text-gray-400">No lines for this document.</td></tr>)}
-                  {lines.map(line => {
+                  {!linesLoading && lines.length > 0 && visibleLines.length === 0 && (<tr><td colSpan={11} className="text-center py-8 text-gray-400">No lines match the filter.</td></tr>)}
+                  {visibleLines.map(line => {
                     const pend = pendingForLine(line.id)
                     return (
                       <tr key={line.id} className={`border-b last:border-0 align-top ${selectedIds.has(line.id) ? 'bg-blue-50' : isDuplicate(line) ? 'bg-amber-50' : 'hover:bg-gray-50'}`}>
