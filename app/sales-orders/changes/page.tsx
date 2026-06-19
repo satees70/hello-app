@@ -444,8 +444,8 @@ export default function PendingChangesPage() {
         </div>
 
         {/* Batch split requests */}
-        <h2 className="text-lg font-semibold mt-8 mb-2">Batch splits</h2>
-        <p className="text-gray-500 text-sm mb-3">{isHO ? 'Approve to pull an order out of a merged batch into its own batch. Nothing is deleted.' : 'Track your requests to split an order into its own batch.'}</p>
+        <h2 className="text-lg font-semibold mt-8 mb-2">Batch splits &amp; un-combine</h2>
+        <p className="text-gray-500 text-sm mb-3">{isHO ? 'Approve to pull an order into its own batch, or to run a grouped batch on its own. Nothing is deleted.' : 'Track your requests to split an order out, or to run a batch on its own.'}</p>
         {isHO && selSplitIds.length > 0 && (
           <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
             <span className="font-medium text-blue-800">{selSplitIds.length} pending selected</span>

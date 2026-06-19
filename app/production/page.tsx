@@ -20,6 +20,7 @@ interface Batch {
   pack_line: string | null
   pack_date: string | null
   run_mode: string | null
+  no_combine?: boolean
   production_batch_items: BatchItem[]
 }
 interface ConsRow { id: string; item_code: string; description: string | null; batch_no: string | null; exp_date: string | null; qty_consumed: number; consumed_at: string }
@@ -61,7 +62,6 @@ export default function ProductionPage() {
   const [raising, setRaising] = useState(false)
   const [expDate, setExpDate] = useState('')
   const [combineOn, setCombineOn] = useState(true)
-  const [separated, setSeparated] = useState<Set<string>>(new Set())
   const [sortBy, setSortBy] = useState<'due_asc' | 'due_desc' | 'batch'>('due_asc')
   const [consumption, setConsumption] = useState<Record<string, ConsRow[]>>({}) // batch id -> consumed lots
   const [packEdit, setPackEdit] = useState<Record<string, { line: string; date: string; mode?: string }>>({}) // batch id -> pack plan being edited
@@ -181,7 +181,28 @@ export default function ProductionPage() {
     if (!had && !id.startsWith('combo:') && !consumption[id]) loadConsumption(id) // load consumed batches on expand
     return n
   })
-  const toggleSeparate = (id: string) => setSeparated(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  async function requestUncombine(m: Batch) {
+    const reason = window.prompt(`Run ${m.batch_no} (${m.item_code} · qty ${m.total_quantity}) on its own, separate from the combined group?\n\nThis goes to Pending Changes for Head Office approval.\n\nReason (optional):`, '')
+    if (reason === null) return
+    setError(''); setSuccess('')
+    const { error: insErr } = await supabase.from('split_requests').insert({
+      kind: 'uncombine', batch_id: m.id, factory_code: m.factory_code,
+      label: `Un-combine ${m.batch_no} · ${m.item_code} · qty ${m.total_quantity}`,
+      reason: reason || null, requested_by: profile?.id, requested_by_name: profile?.full_name || null,
+    })
+    if (insErr) { setError(insErr.message); alert('Could not request:\n\n' + insErr.message); return }
+    setSuccess(`Requested to run ${m.batch_no} on its own — waiting for Head Office approval.`)
+    alert(`Requested to run ${m.batch_no} on its own.\nGo to Pending Changes → Batch splits for Head Office to approve.`)
+  }
+
+  async function recombine(b: Batch) {
+    if (!confirm(`Re-combine ${b.batch_no} back into its group for material picking?`)) return
+    setError(''); setSuccess('')
+    const { error: e } = await supabase.from('production_batches').update({ no_combine: false }).eq('id', b.id)
+    if (e) { setError(e.message); return }
+    setBatches(prev => prev.map(x => (x.id === b.id ? { ...x, no_combine: false } : x)))
+    setSuccess(`${b.batch_no} re-combined.`)
+  }
 
   // Save the pack plan (line + date) for a batch
   async function savePackPlan(b: Batch) {
@@ -250,7 +271,7 @@ export default function ProductionPage() {
 
   // Build display units for a factory's batches when Combine is on
   function buildUnits(fb: Batch[]) {
-    const combinable = fb.filter(b => derivedStatus(b) === 'Planned' && !b.material_request_id && !separated.has(b.id))
+    const combinable = fb.filter(b => derivedStatus(b) === 'Planned' && !b.material_request_id && !b.no_combine)
     const byItem: Record<string, Batch[]> = {}
     combinable.forEach(b => { (byItem[b.item_code] = byItem[b.item_code] || []).push(b) })
     const combos = Object.values(byItem).filter(m => m.length >= 2)
@@ -362,8 +383,8 @@ export default function ProductionPage() {
                                         <div key={m.id} className="border rounded-lg bg-white p-2">
                                           <div className="flex justify-between items-center mb-1">
                                             <span className="text-xs"><span className="font-mono font-semibold">{m.batch_no}</span> · due {m.delivery_date || '—'} · qty <strong>{m.total_quantity}</strong></span>
-                                            <button onClick={() => { if (confirm(`Run ${m.batch_no} on its own, separate from this combined group?\n\nThis only changes how raw materials are picked — it is its own batch already, nothing is deleted and no approval is needed. You can re-combine anytime.`)) toggleSeparate(m.id) }}
-                                              title="Un-group for material picking only. Reversible, no approval needed." className="text-blue-600 hover:underline text-xs">↔ Run on its own</button>
+                                            <button onClick={() => requestUncombine(m)}
+                                              title="Request to run this batch on its own — Head Office must approve" className="text-red-600 hover:underline text-xs font-medium whitespace-nowrap">✕ Run on its own (needs approval)</button>
                                           </div>
                                           <ul className="space-y-0.5 pl-1">
                                             {m.production_batch_items?.map(it => (
@@ -399,7 +420,7 @@ export default function ProductionPage() {
                                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[derivedStatus(b)] || 'bg-gray-100 text-gray-700'}`}>{derivedStatus(b)}</span>
                               </td>
                               <td className="px-3 py-2 text-right whitespace-nowrap">
-                                {combineOn && separated.has(b.id) && <button onClick={e => { e.stopPropagation(); toggleSeparate(b.id) }} className="text-blue-600 hover:underline text-xs mr-2">↩ Combine</button>}
+                                {combineOn && b.no_combine && isHO && <button onClick={e => { e.stopPropagation(); recombine(b) }} className="text-blue-600 hover:underline text-xs mr-2">↩ Re-combine</button>}
                                 {b.material_request_id && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">MR</span>}
                               </td>
                             </tr>

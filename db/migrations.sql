@@ -961,6 +961,11 @@ create policy sr_read on public.split_requests for select
 drop policy if exists sr_insert on public.split_requests;
 create policy sr_insert on public.split_requests for insert with check (requested_by = auth.uid());
 
+-- kind = 'split' (pull one order into its own batch) or 'uncombine' (run a
+-- grouped batch on its own for material picking).
+alter table public.split_requests add column if not exists kind text not null default 'split';
+alter table public.production_batches add column if not exists no_combine boolean not null default false;
+
 create or replace function public.approve_split(p_id uuid) returns void
 language plpgsql security definer set search_path = public as $$
 declare r public.split_requests; v_it public.production_batch_items; v_old public.production_batches; v_new uuid; v_name text; v_cnt int;
@@ -968,6 +973,12 @@ begin
   if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can approve'; end if;
   select * into r from public.split_requests where id = p_id;
   if not found or r.status <> 'Pending' then raise exception 'Not a pending request'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  if r.kind = 'uncombine' then
+    update public.production_batches set no_combine = true where id = r.batch_id;
+    update public.split_requests set status = 'Approved', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id;
+    return;
+  end if;
   select * into v_it from public.production_batch_items where id = r.batch_item_id;
   if not found then raise exception 'That order line is no longer in a batch'; end if;
   select * into v_old from public.production_batches where id = v_it.batch_id;
