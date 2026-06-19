@@ -31,6 +31,7 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields, 
   const { profile, loading, error: profileError } = useProfile()
   useRequireView(profile, moduleKey)
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
+  const [colF, setColF] = useState<Record<string, string>>({})
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [factory, setFactory] = useState('')
   const [editing, setEditing] = useState<Record<string, unknown> | 'new' | null>(null)
@@ -47,13 +48,17 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields, 
   const canEdit = can(profile, moduleKey, 'edit')
   const myFactoryOptions = isHO ? factories.map(f => f.code)
     : (profile?.factory_codes?.length ? profile.factory_codes : (profile?.factory_code ? [profile.factory_code] : []))
+  const factoryName = (c: string) => factories.find(f => f.code === c)?.name || c
   const listFields = fields.filter(f => f.list)
+  const visibleRows = rows.filter(r => {
+    if (isHO && colF.__factory && !factoryName(r.factory_code as string).toLowerCase().includes(colF.__factory.toLowerCase())) return false
+    return listFields.every(fl => !colF[fl.key] || String(r[fl.key] ?? '').toLowerCase().includes(colF[fl.key].toLowerCase()))
+  })
 
   useEffect(() => { if (profile) { loadFactories(); load() } }, [profile])
   useEffect(() => { if (profile && hasItemField && items.length === 0) fetchAll<{ code: string; description: string | null }>('items', 'code, description', 'code').then(setItems) }, [profile])
   async function loadFactories() { const { data } = await supabase.from('factories').select('code, name').order('code'); setFactories(data || []) }
   async function load() { const { data } = await supabase.from(table).select('*').order('created_at', { ascending: false }); setRows((data as Record<string, unknown>[]) || []) }
-  const factoryName = (c: string) => factories.find(f => f.code === c)?.name || c
 
   function openNew() {
     setEditing('new'); setError(''); setFactory(myFactoryOptions[0] || '')
@@ -139,10 +144,16 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields, 
             <thead className="bg-gray-50 border-b">
               <tr>{[...(isHO ? ['Factory'] : []), ...listFields.map(f => f.label), ''].map((h, i) => (
                 <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+              <tr className="border-b">
+                {isHO && <th className="px-2 py-1"><input value={colF.__factory || ''} onChange={e => setColF(p => ({ ...p, __factory: e.target.value }))} placeholder="filter…" className="w-full min-w-[70px] border rounded px-2 py-1 text-xs bg-white" /></th>}
+                {listFields.map(fl => <th key={fl.key} className="px-2 py-1"><input value={colF[fl.key] || ''} onChange={e => setColF(p => ({ ...p, [fl.key]: e.target.value }))} placeholder="filter…" className="w-full min-w-[70px] border rounded px-2 py-1 text-xs bg-white" /></th>)}
+                <th className="px-2 py-1"></th>
+              </tr>
             </thead>
             <tbody>
               {rows.length === 0 && <tr><td colSpan={listFields.length + 2} className="text-center py-8 text-gray-400">No records yet.</td></tr>}
-              {rows.map(r => (
+              {rows.length > 0 && visibleRows.length === 0 && <tr><td colSpan={listFields.length + 2} className="text-center py-8 text-gray-400">No records match the filter.</td></tr>}
+              {visibleRows.map(r => (
                 <tr key={r.id as string} className="border-b last:border-0 hover:bg-gray-50">
                   {isHO && <td className="px-3 py-2 whitespace-nowrap">{factoryName(r.factory_code as string)}</td>}
                   {listFields.map(fl => <td key={fl.key} className="px-3 py-2 whitespace-nowrap">{cell(r, fl)}</td>)}

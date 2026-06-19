@@ -67,6 +67,13 @@ export default function PendingChangesPage() {
   const [selCr, setSelCr] = useState<Set<string>>(new Set())
   const [crFilters, setCrFilters] = useState<Record<string, string>>({})
   const [bulkBusy, setBulkBusy] = useState(false)
+  const [selCorr, setSelCorr] = useState<Set<string>>(new Set())
+  const [corrFilters, setCorrFilters] = useState<Record<string, string>>({})
+  const [selDo, setSelDo] = useState<Set<string>>(new Set())
+  const [doFilters, setDoFilters] = useState<Record<string, string>>({})
+
+  // Distinct values present in a list, for a filter dropdown
+  const distinctOf = <T,>(arr: T[], get: (x: T) => string) => [...new Set(arr.map(get))].filter(Boolean).sort()
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
@@ -182,8 +189,16 @@ export default function PendingChangesPage() {
   const crAllSel = crPending.length > 0 && crPending.every(r => selCr.has(r.id))
   const toggleCrAll = () => setSelCr(crAllSel ? new Set() : new Set(crPending.map(r => r.id)))
   const selPendingIds = crPending.filter(r => selCr.has(r.id)).map(r => r.id)
-  const shownCorr = filter === 'All' ? corrections : corrections.filter(c => c.status === filter)
-  const shownDo = filter === 'All' ? doChanges : doChanges.filter(c => c.status === filter)
+  const shownCorrAll = filter === 'All' ? corrections : corrections.filter(c => c.status === filter)
+  const shownCorr = shownCorrAll.filter(c => (!corrFilters.label || (c.label || c.timer_key) === corrFilters.label) && (!corrFilters.by || (c.requested_by_name || '—') === corrFilters.by))
+  const corrPending = shownCorr.filter(c => c.status === 'Pending')
+  const corrAllSel = corrPending.length > 0 && corrPending.every(c => selCorr.has(c.id))
+  const selCorrIds = corrPending.filter(c => selCorr.has(c.id)).map(c => c.id)
+  const shownDoAll = filter === 'All' ? doChanges : doChanges.filter(c => c.status === filter)
+  const shownDo = shownDoAll.filter(c => (!doFilters.label || (c.line_label || '—') === doFilters.label) && (!doFilters.type || c.request_type === doFilters.type) && (!doFilters.by || (c.requested_by_name || '—') === doFilters.by))
+  const doPending = shownDo.filter(c => c.status === 'Pending')
+  const doAllSel = doPending.length > 0 && doPending.every(c => selDo.has(c.id))
+  const selDoIds = doPending.filter(c => selDo.has(c.id)).map(c => c.id)
   const counts: Record<string, number> = { Pending: 0, Approved: 0, Rejected: 0 }
   requests.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1 })
 
@@ -294,16 +309,35 @@ export default function PendingChangesPage() {
         {/* Timer cancellation requests */}
         <h2 className="text-lg font-semibold mt-8 mb-2">Timer cancellations</h2>
         <p className="text-gray-500 text-sm mb-3">{isHO ? 'Approve to clear a timer that was pressed by mistake.' : 'Track your requests to cancel a timer.'}</p>
+        {isHO && selCorrIds.length > 0 && (
+          <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
+            <span className="font-medium text-blue-800">{selCorrIds.length} pending selected</span>
+            <button onClick={() => bulkAct('approve_correction', selCorrIds, 'approve')} disabled={bulkBusy} className="bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">Approve selected</button>
+            <button onClick={() => bulkAct('reject_correction', selCorrIds, 'reject')} disabled={bulkBusy} className="bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50 font-medium">Reject selected</button>
+            <button onClick={() => setSelCorr(new Set())} className="text-gray-500 hover:underline">Clear</button>
+          </div>
+        )}
         <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="bg-gray-50 border-b">
-              <tr>{['Timer', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
-                <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+              <tr>
+                {isHO && <th className="px-3 py-2"><input type="checkbox" checked={corrAllSel} onChange={() => setSelCorr(corrAllSel ? new Set() : new Set(corrPending.map(c => c.id)))} className="h-4 w-4" /></th>}
+                {['Timer', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
+                  <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}
+              </tr>
+              <tr className="border-b">
+                {isHO && <th className="px-2 py-1"></th>}
+                <th className="px-2 py-1"><select value={corrFilters.label || ''} onChange={e => setCorrFilters(p => ({ ...p, label: e.target.value }))} className="w-full border rounded px-1 py-1 text-xs font-normal bg-white"><option value="">All</option>{distinctOf(shownCorrAll, c => c.label || c.timer_key).map(v => <option key={v} value={v}>{v}</option>)}</select></th>
+                <th className="px-2 py-1"></th>
+                <th className="px-2 py-1"><select value={corrFilters.by || ''} onChange={e => setCorrFilters(p => ({ ...p, by: e.target.value }))} className="w-full border rounded px-1 py-1 text-xs font-normal bg-white"><option value="">All</option>{distinctOf(shownCorrAll, c => c.requested_by_name || '—').map(v => <option key={v} value={v}>{v}</option>)}</select></th>
+                <th className="px-2 py-1"></th><th className="px-2 py-1"></th>{isHO && <th className="px-2 py-1"></th>}
+              </tr>
             </thead>
             <tbody>
-              {shownCorr.length === 0 && (<tr><td colSpan={6} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} timer cancellations.</td></tr>)}
+              {shownCorr.length === 0 && (<tr><td colSpan={7} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} timer cancellations.</td></tr>)}
               {shownCorr.map(c => (
-                <tr key={c.id} className="border-b last:border-0 align-top hover:bg-gray-50">
+                <tr key={c.id} className={`border-b last:border-0 align-top ${selCorr.has(c.id) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                  {isHO && <td className="px-3 py-2">{c.status === 'Pending' ? <input type="checkbox" checked={selCorr.has(c.id)} onChange={() => setSelCorr(p => { const n = new Set(p); n.has(c.id) ? n.delete(c.id) : n.add(c.id); return n })} className="h-4 w-4" /> : null}</td>}
                   <td className="px-3 py-2 min-w-[200px]">{c.label || c.timer_key}</td>
                   <td className="px-3 py-2 text-gray-600 min-w-[140px]">{c.reason || '—'}</td>
                   <td className="px-3 py-2 whitespace-nowrap"><span className="block">{c.requested_by_name || '—'}</span><span className="block text-gray-400">{fmt(c.created_at)}</span></td>
@@ -328,16 +362,36 @@ export default function PendingChangesPage() {
         {/* Goods Received line changes */}
         <h2 className="text-lg font-semibold mt-8 mb-2">Goods Received changes</h2>
         <p className="text-gray-500 text-sm mb-3">{isHO ? 'Approve to apply edits, or delete a received line (this reverses its stock).' : 'Track your edit/delete requests on Goods Received lines.'}</p>
+        {isHO && selDoIds.length > 0 && (
+          <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
+            <span className="font-medium text-blue-800">{selDoIds.length} pending selected</span>
+            <button onClick={() => bulkAct('approve_do_change', selDoIds, 'approve')} disabled={bulkBusy} className="bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">Approve selected</button>
+            <button onClick={() => bulkAct('reject_do_change', selDoIds, 'reject')} disabled={bulkBusy} className="bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50 font-medium">Reject selected</button>
+            <button onClick={() => setSelDo(new Set())} className="text-gray-500 hover:underline">Clear</button>
+          </div>
+        )}
         <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="bg-gray-50 border-b">
-              <tr>{['Line', 'Change', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
-                <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+              <tr>
+                {isHO && <th className="px-3 py-2"><input type="checkbox" checked={doAllSel} onChange={() => setSelDo(doAllSel ? new Set() : new Set(doPending.map(c => c.id)))} className="h-4 w-4" /></th>}
+                {['Line', 'Change', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
+                  <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}
+              </tr>
+              <tr className="border-b">
+                {isHO && <th className="px-2 py-1"></th>}
+                <th className="px-2 py-1"><select value={doFilters.label || ''} onChange={e => setDoFilters(p => ({ ...p, label: e.target.value }))} className="w-full border rounded px-1 py-1 text-xs font-normal bg-white"><option value="">All</option>{distinctOf(shownDoAll, c => c.line_label || '—').map(v => <option key={v} value={v}>{v}</option>)}</select></th>
+                <th className="px-2 py-1"><select value={doFilters.type || ''} onChange={e => setDoFilters(p => ({ ...p, type: e.target.value }))} className="w-full border rounded px-1 py-1 text-xs font-normal bg-white"><option value="">All</option><option value="edit">Edit</option><option value="delete">Delete</option></select></th>
+                <th className="px-2 py-1"></th>
+                <th className="px-2 py-1"><select value={doFilters.by || ''} onChange={e => setDoFilters(p => ({ ...p, by: e.target.value }))} className="w-full border rounded px-1 py-1 text-xs font-normal bg-white"><option value="">All</option>{distinctOf(shownDoAll, c => c.requested_by_name || '—').map(v => <option key={v} value={v}>{v}</option>)}</select></th>
+                <th className="px-2 py-1"></th><th className="px-2 py-1"></th>{isHO && <th className="px-2 py-1"></th>}
+              </tr>
             </thead>
             <tbody>
-              {shownDo.length === 0 && (<tr><td colSpan={7} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} Goods Received changes.</td></tr>)}
+              {shownDo.length === 0 && (<tr><td colSpan={8} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} Goods Received changes.</td></tr>)}
               {shownDo.map(c => (
-                <tr key={c.id} className="border-b last:border-0 align-top hover:bg-gray-50">
+                <tr key={c.id} className={`border-b last:border-0 align-top ${selDo.has(c.id) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                  {isHO && <td className="px-3 py-2">{c.status === 'Pending' ? <input type="checkbox" checked={selDo.has(c.id)} onChange={() => setSelDo(p => { const n = new Set(p); n.has(c.id) ? n.delete(c.id) : n.add(c.id); return n })} className="h-4 w-4" /> : null}</td>}
                   <td className="px-3 py-2 min-w-[160px]">{c.line_label || '—'}</td>
                   <td className="px-3 py-2 min-w-[160px]">
                     {c.request_type === 'delete'
