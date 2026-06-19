@@ -4,6 +4,7 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
+import MultiFilter from '@/components/MultiFilter'
 
 interface SalesImport {
   id: string
@@ -88,7 +89,7 @@ export default function SalesOrdersPage() {
   const [bulkValue, setBulkValue] = useState('')
   const [bulkReason, setBulkReason] = useState('')
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
-  const [colFilters, setColFilters] = useState<Record<string, string>>({})
+  const [colFilters, setColFilters] = useState<Record<string, Set<string>>>({})
   const [onlyUnmapped, setOnlyUnmapped] = useState(false)
   const [reqField, setReqField] = useState<keyof SalesLine>('customer_name')
   const [reqValue, setReqValue] = useState('')
@@ -256,10 +257,11 @@ export default function SalesOrdersPage() {
     { key: 'location_code', label: 'Location', get: l => l.location_code || '' },
     { key: 'factory', label: 'Factory', get: l => `${l.factory_code || ''} ${factoryName(l.factory_code) || ''}` },
   ]
-  const anyFilter = onlyUnmapped || COLS.some(c => (colFilters[c.key] || '').trim())
+  const anyFilter = onlyUnmapped || COLS.some(c => (colFilters[c.key]?.size || 0) > 0)
+  const colValues = (key: string) => { const g = COLS.find(c => c.key === key)!.get; return [...new Set(lines.map(g))].filter(Boolean).sort() }
   const visibleLines = lines.filter(l => {
     if (onlyUnmapped && l.factory_code) return false
-    for (const c of COLS) { const f = (colFilters[c.key] || '').trim().toLowerCase(); if (f && !c.get(l).toLowerCase().includes(f)) return false }
+    for (const c of COLS) { const sel = colFilters[c.key]; if (sel && sel.size > 0 && !sel.has(c.get(l))) return false }
     return true
   })
   const allSelected = visibleLines.length > 0 && visibleLines.every(l => selectedIds.has(l.id))
@@ -598,9 +600,8 @@ export default function SalesOrdersPage() {
                   <tr className="border-b">
                     <th className="px-2 py-1"></th>
                     {COLS.map(c => (
-                      <th key={c.key} className="px-2 py-1">
-                        <input value={colFilters[c.key] || ''} onChange={e => setColFilters(p => ({ ...p, [c.key]: e.target.value }))}
-                          placeholder="filter…" className="w-full min-w-[70px] border rounded px-2 py-1 text-xs font-normal bg-white" />
+                      <th key={c.key} className="px-2 py-1 min-w-[110px]">
+                        <MultiFilter values={colValues(c.key)} selected={colFilters[c.key] || new Set()} onChange={s => setColFilters(p => ({ ...p, [c.key]: s }))} />
                       </th>
                     ))}
                     <th className="px-2 py-1"></th>
