@@ -929,6 +929,14 @@ begin
 end; $function$;
 
 
+-- ============================================================================
+-- 2026-06 · Roll items: pieces-per-roll conversion (stock in pc, show/pick rolls)
+-- ============================================================================
+-- An item with pcs_per_roll set is stocked/used in PIECES (recipe in pc), but
+-- received in rolls (roll x pcs_per_roll = pc) and shown / requested in rolls.
+alter table public.items add column if not exists pcs_per_roll numeric;
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.

@@ -44,6 +44,7 @@ export default function IncomingPage() {
   const [lines, setLines] = useState<DoLine[]>([])
   const [requests, setRequests] = useState<MatReq[]>([])
   const [kgPerBag, setKgPerBag] = useState<Record<string, number>>({})
+  const [pcsPerRoll, setPcsPerRoll] = useState<Record<string, number>>({})
   const [doItems, setDoItems] = useState<Record<string, string>>({})
   const [receiving, setReceiving] = useState(false)
   const [busyLine, setBusyLine] = useState('')
@@ -153,6 +154,9 @@ export default function IncomingPage() {
     // kg/bag overrides
     const { data: ov } = await supabase.from('items').select('code, kg_per_bag').not('kg_per_bag', 'is', null)
     const m: Record<string, number> = {}; (ov || []).forEach(r => { if (r.kg_per_bag) m[r.code] = Number(r.kg_per_bag) }); setKgPerBag(m)
+    // pieces-per-roll (roll plastics received in rolls → stocked in pc)
+    const { data: rl } = await supabase.from('items').select('code, pcs_per_roll').not('pcs_per_roll', 'is', null)
+    const pr: Record<string, number> = {}; (rl || []).forEach(r => { if (r.pcs_per_roll) pr[r.code] = Number(r.pcs_per_roll) }); setPcsPerRoll(pr)
     // units of every code + base code (to know what's a real item)
     const codes = [...new Set(dl.flatMap(l => [l.item_code, baseCode(l.item_code)]))]
     const { data: items } = await supabase.from('items').select('code, unit').in('code', codes)
@@ -270,12 +274,19 @@ export default function IncomingPage() {
   const intoUnit = (factor: number, fallback: string | undefined) => factor === 1 ? (fallback || '') : 'KG'
   const num = (n: number) => Number(Number(n).toPrecision(12))
 
+  // Roll plastics: a roll converts to N pieces (× pcs_per_roll). Takes precedence over bag→kg.
+  const rollFactor = (code: string): number | null => pcsPerRoll[code] ?? pcsPerRoll[baseCode(code)] ?? null
+
   // Per-line computed display values (shared by the desktop table and mobile cards)
   const lineCalc = (l: DoLine) => {
     const ml = matchLines(l.item_code)
     const matched = ml.length > 0
     const item = matched ? null : resolveItem(l.item_code)
     const known = matched || !!item
+    const roll = known ? rollFactor(l.item_code) : null
+    if (roll) {
+      return { matched, known, factor: roll, into: num(Number(l.quantity) * roll), unit: 'pc' }
+    }
     const factor = known ? bagFactor(l.item_code, l.description, l.unit) : 1
     const into = factor === null ? null : num(Number(l.quantity) * factor)
     const unit = factor === null ? '' : intoUnit(factor, matched ? ml[0]?.unit : item?.unit)

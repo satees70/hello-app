@@ -6,8 +6,8 @@ import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 
-interface Item { id: string; code: string; description: string; unit: string; type: string; stock_group: string; supplied_by_factory: boolean; kg_per_bag: number | null }
-const EMPTY = { code: '', description: '', unit: '', type: 'Material', stock_group: '', supplied_by_factory: false, kg_per_bag: '' }
+interface Item { id: string; code: string; description: string; unit: string; type: string; stock_group: string; supplied_by_factory: boolean; kg_per_bag: number | null; pcs_per_roll: number | null }
+const EMPTY = { code: '', description: '', unit: '', type: 'Material', stock_group: '', supplied_by_factory: false, kg_per_bag: '', pcs_per_roll: '' }
 
 export default function ItemsPage() {
   const { profile, loading } = useProfile()
@@ -41,12 +41,12 @@ export default function ItemsPage() {
   }
 
   function openCreate() { setEditing(null); setForm(EMPTY); setError(''); setShowForm(true) }
-  function openEdit(item: Item) { setEditing(item); setForm({ code: item.code, description: item.description, unit: item.unit, type: item.type, stock_group: item.stock_group || '', supplied_by_factory: item.supplied_by_factory || false, kg_per_bag: item.kg_per_bag != null ? String(item.kg_per_bag) : '' }); setError(''); setShowForm(true) }
+  function openEdit(item: Item) { setEditing(item); setForm({ code: item.code, description: item.description, unit: item.unit, type: item.type, stock_group: item.stock_group || '', supplied_by_factory: item.supplied_by_factory || false, kg_per_bag: item.kg_per_bag != null ? String(item.kg_per_bag) : '', pcs_per_roll: item.pcs_per_roll != null ? String(item.pcs_per_roll) : '' }); setError(''); setShowForm(true) }
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true); setError('')
-    const payload = { ...form, kg_per_bag: form.kg_per_bag === '' ? null : Number(form.kg_per_bag) }
+    const payload = { ...form, kg_per_bag: form.kg_per_bag === '' ? null : Number(form.kg_per_bag), pcs_per_roll: form.pcs_per_roll === '' ? null : Number(form.pcs_per_roll) }
     if (editing) {
       const { error } = await supabase.from('items').update(payload).eq('id', editing.id)
       if (error) { setError(error.message); setSaving(false); return }
@@ -213,6 +213,12 @@ export default function ItemsPage() {
                 <input type="number" step="any" min="0" value={form.kg_per_bag} onChange={e => setForm({ ...form, kg_per_bag: e.target.value })}
                   className="w-full border rounded-lg px-3 py-2" placeholder="e.g. 3 — only if the code doesn't show it" />
                 <p className="text-xs text-gray-400 mt-1">Used to convert a Delivery Order's BAG/CTN quantities into KG. Normally read from the code (e.g. 3KG/BAG, 8KG/CTN); set this only for exceptions.</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Pieces per roll <span className="text-gray-400 font-normal">(optional)</span></label>
+                <input type="number" step="any" min="0" value={form.pcs_per_roll} onChange={e => setForm({ ...form, pcs_per_roll: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2" placeholder="e.g. 1600 — for roll plastics" />
+                <p className="text-xs text-gray-400 mt-1">For roll plastics: how many pieces are in one roll (e.g. 500m = 1600 pc → enter 1600). Stock is counted in pieces, but received and requested in whole rolls.</p>
               </div>
             </div>
             {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded">{error}</p>}

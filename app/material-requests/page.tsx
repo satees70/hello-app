@@ -51,11 +51,22 @@ export default function MaterialRequestsPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [factoryItems, setFactoryItems] = useState<Set<string>>(new Set()) // item codes supplied by the factory
+  const [pcsPerRoll, setPcsPerRoll] = useState<Record<string, number>>({}) // roll items: code -> pieces per roll
   const [expEdits, setExpEdits] = useState<Record<string, string>>({}) // request id -> EXP date being typed
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
-  useEffect(() => { if (profile) { load(); loadFactories(); loadFactoryItems() } }, [profile])
+  useEffect(() => { if (profile) { load(); loadFactories(); loadFactoryItems(); loadRolls() } }, [profile])
+  async function loadRolls() {
+    const { data } = await supabase.from('items').select('code, pcs_per_roll').not('pcs_per_roll', 'is', null)
+    const m: Record<string, number> = {}; (data || []).forEach(r => { if (r.pcs_per_roll) m[r.code] = Number(r.pcs_per_roll) }); setPcsPerRoll(m)
+  }
+  // Roll items are picked in whole rolls (round up); everything else in its own unit.
+  const pickDisplay = (code: string, pcQty: number, unit: string) => {
+    const per = pcsPerRoll[code]
+    if (per) return { qty: Math.ceil(pcQty / per), unit: 'roll' }
+    return { qty: Number(Number(pcQty).toPrecision(12)), unit }
+  }
 
   async function load() {
     const { data } = await supabase
@@ -126,7 +137,7 @@ export default function MaterialRequestsPage() {
     autoTable(doc, {
       startY: 50,
       head: [['#', 'Material', 'Description', 'Unit', 'Qty to pick', 'Picked', 'Remarks']],
-      body: list.map((g, i) => [String(i + 1), g.code, g.description, g.unit, String(g.requested), '', '']),
+      body: list.map((g, i) => { const d = pickDisplay(g.code, g.requested, g.unit); return [String(i + 1), g.code, g.description, d.unit, String(d.qty), '', ''] }),
       styles: { fontSize: 9, cellPadding: 2 },
       headStyles: { fillColor: [37, 99, 235] },
       columnStyles: { 4: { halign: 'right' } },
@@ -235,15 +246,20 @@ export default function MaterialRequestsPage() {
               const key = `${prefix}|${g.code}`
               const remaining = Math.max(0, g.requested - g.received)
               const done = g.received >= g.requested
+              const per = pcsPerRoll[g.code]
+              const r = (n: number) => Number(Number(n).toPrecision(12))
+              const toPick = per ? Math.ceil(g.requested / per) : r(g.requested)
+              const recv = per ? r(g.received / per) : r(g.received)
+              const rem = per ? r(remaining / per) : r(remaining)
               return (
                 <tr key={key} className={`border-b last:border-0 ${editable && done ? 'bg-green-50/40' : ''}`}>
                   <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{g.code}</td>
                   <td className="px-3 py-2 text-gray-600">{g.description}</td>
-                  <td className="px-3 py-2 text-gray-500">{g.unit}</td>
-                  <td className="px-3 py-2 text-right font-semibold text-blue-700">{g.requested}</td>
+                  <td className="px-3 py-2 text-gray-500">{per ? 'roll' : g.unit}</td>
+                  <td className="px-3 py-2 text-right font-semibold text-blue-700">{toPick}{per ? <span className="text-gray-400 font-normal"> ({r(g.requested)} pc)</span> : null}</td>
                   {editable && <>
-                    <td className="px-3 py-2 text-right text-gray-700">{g.received}</td>
-                    <td className={`px-3 py-2 text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{remaining}</td>
+                    <td className="px-3 py-2 text-right text-gray-700">{recv}</td>
+                    <td className={`px-3 py-2 text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{rem}</td>
                   </>}
                 </tr>
               )

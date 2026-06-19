@@ -23,13 +23,18 @@ export default function StockPage() {
   const { profile, loading, error: profileError } = useProfile()
   useRequireView(profile, 'stock')
   const [lots, setLots] = useState<Lot[]>([])
+  const [pcsPerRoll, setPcsPerRoll] = useState<Record<string, number>>({})
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [search, setSearch] = useState('')
   const [factoryFilter, setFactoryFilter] = useState('')
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
-  useEffect(() => { if (profile) { load(); loadFactories() } }, [profile])
+  useEffect(() => { if (profile) { load(); loadFactories(); loadRolls() } }, [profile])
+  async function loadRolls() {
+    const { data } = await supabase.from('items').select('code, pcs_per_roll').not('pcs_per_roll', 'is', null)
+    const m: Record<string, number> = {}; (data || []).forEach(r => { if (r.pcs_per_roll) m[r.code] = Number(r.pcs_per_roll) }); setPcsPerRoll(m)
+  }
 
   async function load() {
     const { data } = await supabase.from('stock_lots').select('*')
@@ -120,7 +125,7 @@ export default function StockPage() {
                           <div className="flex flex-wrap items-baseline gap-2 mb-2">
                             <span className="font-mono font-semibold">{code}</span>
                             <span className="text-gray-500 text-sm">{desc}</span>
-                            <span className="ml-auto text-sm">On hand: <strong className="text-blue-700">{num(total)}</strong></span>
+                            <span className="ml-auto text-sm">On hand: <strong className="text-blue-700">{num(total)}</strong>{pcsPerRoll[code] ? <span className="text-gray-500"> pc (≈ {num(Math.round((total / pcsPerRoll[code]) * 100) / 100)} rolls)</span> : null}</span>
                           </div>
                           <div className="overflow-x-auto border rounded-lg">
                             <table className="w-full text-sm">
