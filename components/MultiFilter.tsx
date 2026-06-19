@@ -10,12 +10,12 @@ export default function MultiFilter({ values, selected, onChange }: {
   const [q, setQ] = useState('')
   const shown = values.filter(v => v.toLowerCase().includes(q.toLowerCase()))
   const toggle = (v: string) => { const n = new Set(selected); n.has(v) ? n.delete(v) : n.add(v); onChange(n) }
-  const label = selected.size === 0 ? 'All' : selected.size === 1 ? [...selected][0] : `${selected.size} selected`
+  const label = selected.size === 0 ? 'All' : `${selected.size} selected`
   return (
     <div className="relative font-normal">
-      <button type="button" onClick={() => setOpen(o => !o)}
+      <button type="button" onClick={() => setOpen(o => !o)} title={selected.size ? [...selected].join(', ') : 'All'}
         className={`w-full border rounded px-2 py-1 text-xs text-left flex items-center justify-between gap-1 ${selected.size ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white'}`}>
-        <span className="truncate">{label}</span><span className="text-gray-400">▾</span>
+        <span className="truncate">{label}</span><span className="text-gray-400 shrink-0">▾</span>
       </button>
       {open && (
         <>
