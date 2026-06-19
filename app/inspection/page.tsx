@@ -41,7 +41,7 @@ const EMPTY: Form = {
 
 export default function InspectionPage() {
   const { profile, loading, error: profileError } = useProfile()
-  useRequireView(profile, 'production')
+  useRequireView(profile, 'inspection')
   const [batchId, setBatchId] = useState('')
   const [recordId, setRecordId] = useState('')
   const [f, setF] = useState<Form>(EMPTY)

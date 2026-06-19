@@ -41,7 +41,7 @@ const STATUS_STYLE: Record<string, string> = {
 
 export default function ProductionPage() {
   const { profile, loading, error: profileError } = useProfile()
-  useRequireView(profile, 'production')
+  useRequireView(profile, 'order_board')
   const [batches, setBatches] = useState<Batch[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [items, setItems] = useState<Item[]>([])

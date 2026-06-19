@@ -134,7 +134,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const allGroups: { header?: string; items: Item[] }[] = [
     { items: [
       { href: '/dashboard', label: 'Dashboard' },
-      { href: '/sales-orders/changes', label: 'Pending Changes', module: 'sales' },
+      { href: '/sales-orders/changes', label: 'Pending Changes', module: 'changes' },
     ] },
     { header: 'Sales', items: [
       { href: '/sales-orders', label: 'Sales Orders', module: 'sales' },
@@ -144,8 +144,8 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/incoming', label: 'Goods Received', module: 'goods_received' },
     ] },
     { header: 'Production', items: [
-      { href: '/production', label: 'Order Board', module: 'production' },
-      { href: '/packing', label: 'Packing Schedule', module: 'production' },
+      { href: '/production', label: 'Order Board', module: 'order_board' },
+      { href: '/packing', label: 'Packing Schedule', module: 'packing' },
       { href: '/grinding', label: 'Grinding', module: 'grinding' },
       { href: '/drying-roasting', label: 'Drying & Roasting', module: 'drying' },
       { href: '/moisture', label: 'Moisture', module: 'moisture' },

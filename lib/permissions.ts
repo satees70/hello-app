@@ -3,8 +3,11 @@
 //   { "sales": { "view": true, "edit": true, "delete": false }, ... }
 
 export const PERMISSION_MODULES = [
-  { key: 'sales', label: 'Sales', desc: 'Sales orders & change requests' },
-  { key: 'production', label: 'Production', desc: 'Order board, packing, inspection' },
+  { key: 'sales', label: 'Sales orders', desc: 'Upload & view sales orders' },
+  { key: 'changes', label: 'Pending changes', desc: 'Change-request approvals & status' },
+  { key: 'order_board', label: 'Order board', desc: 'Production batches & planning' },
+  { key: 'packing', label: 'Packing schedule', desc: 'What to pack, by line & date' },
+  { key: 'inspection', label: 'Inspection', desc: 'Finished-good QC (P07-F01)' },
   { key: 'drying', label: 'Drying & roasting', desc: 'Oven drying & roasting (P07-F05)' },
   { key: 'moisture', label: 'Moisture', desc: 'Moisture content reading (P07-F08)' },
   { key: 'oprp', label: 'OPRP', desc: 'OPRP record (P07-F03)' },

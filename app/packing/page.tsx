@@ -30,7 +30,7 @@ const STATUS_STYLE: Record<string, string> = {
 
 export default function PackingPage() {
   const { profile, loading, error: profileError } = useProfile()
-  useRequireView(profile, 'production')
+  useRequireView(profile, 'packing')
   const [batches, setBatches] = useState<Batch[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })() // local date (not UTC)

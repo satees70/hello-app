@@ -58,7 +58,7 @@ type Filter = typeof FILTERS[number]
 
 export default function PendingChangesPage() {
   const { profile, loading, error: profileError } = useProfile()
-  useRequireView(profile, 'sales')
+  useRequireView(profile, 'changes')
   const [requests, setRequests] = useState<ChangeRequest[]>([])
   const [corrections, setCorrections] = useState<CorrectionRequest[]>([])
   const [doChanges, setDoChanges] = useState<DoChangeRequest[]>([])
