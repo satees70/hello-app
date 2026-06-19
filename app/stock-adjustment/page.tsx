@@ -113,6 +113,9 @@ export default function StockAdjustmentPage() {
   if (!profile) return null
 
   const factoryName = (c: string) => factories.find(f => f.code === c)?.name || c
+  // Locations this user may adjust: all (HO), else their assigned factory_codes
+  const myCodes = profile.factory_codes && profile.factory_codes.length ? profile.factory_codes : [profile.factory_code]
+  const myFactories = isHO ? factories : factories.filter(f => myCodes.includes(f.code))
   const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleString() : '—'
   const fmtD = (d: string | null) => d ? d.split('-').reverse().join('/') : '—'
   const shown = filter === 'All' ? adjs : adjs.filter(a => a.status === filter)
@@ -132,11 +135,14 @@ export default function StockAdjustmentPage() {
         {canEdit && (
           <form onSubmit={submit} className="bg-white border rounded-xl shadow-sm p-4 mb-8">
             <div className="flex flex-wrap gap-4 items-end">
-              {isHO && (
-                <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Factory</span>
+              {myFactories.length > 1 ? (
+                <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Factory (location)</span>
                   <select value={factory} onChange={e => setFactory(e.target.value)} className="border rounded px-2 py-1.5 text-sm bg-white">
-                    {factories.map(f => <option key={f.code} value={f.code}>{f.name}</option>)}
+                    {myFactories.map(f => <option key={f.code} value={f.code}>{f.name}</option>)}
                   </select></div>
+              ) : (
+                <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Factory (location)</span>
+                  <div className="border rounded px-2 py-1.5 text-sm bg-gray-50 text-gray-700 min-w-[140px]">{factoryName(factory) || '—'}</div></div>
               )}
               <div className="flex flex-col gap-1 min-w-[200px] flex-1"><span className="text-xs font-medium text-gray-600">Item</span>
                 <input list="adj-items" value={code} onChange={e => setCode(e.target.value)} placeholder="Type code…" className="border rounded px-2 py-1.5 text-sm" />
