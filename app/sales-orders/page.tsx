@@ -148,12 +148,22 @@ export default function SalesOrdersPage() {
   // mapping is added in Setup → Location Map), without re-uploading the document.
   async function remapUnmapped() {
     if (!linesFor) return
-    const toFix = lines.filter(l => !l.factory_code && locationMap[l.location_code])
-    if (toFix.length === 0) { setError('No unmapped lines can be matched — add the missing Location → Factory in Setup → Location Map first.'); return }
     setRemapping(true); setError(''); setSuccess('')
+    // Always read the LATEST Location Map (the page's copy may predate a mapping you just added)
+    const { data: lm } = await supabase.from('location_map').select('location_code, factory_code')
+    const fresh: Record<string, string> = {}; (lm || []).forEach(r => { if (r.factory_code) fresh[r.location_code] = r.factory_code })
+    setLocationMap(fresh)
+    const unmapped = lines.filter(l => !l.factory_code)
+    const toFix = unmapped.filter(l => fresh[l.location_code])
+    if (toFix.length === 0) {
+      const missing = [...new Set(unmapped.map(l => l.location_code).filter(Boolean))]
+      setRemapping(false)
+      setError(`Still unmapped. These locations have no factory in the Location Map: ${missing.join(', ') || '(blank location)'}. Add them in Setup → Location Map, then click Re-map again.`)
+      return
+    }
     let ok = 0
     for (const l of toFix) {
-      const { error: e } = await supabase.from('sales_order_lines').update({ factory_code: locationMap[l.location_code] }).eq('id', l.id)
+      const { error: e } = await supabase.from('sales_order_lines').update({ factory_code: fresh[l.location_code] }).eq('id', l.id)
       if (!e) ok++
     }
     setRemapping(false)
@@ -567,6 +577,12 @@ export default function SalesOrdersPage() {
               <span className="text-gray-400 text-xs">{visibleLines.length} of {lines.length} line(s)</span>
               {anyFilter && <button onClick={() => { setColFilters({}); setOnlyUnmapped(false) }} className="text-blue-600 hover:underline text-xs">Clear filters</button>}
             </div>
+
+            {hasUnmapped && (
+              <div className="mb-3 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2 text-sm text-amber-800">
+                ⚠ <strong>{lines.filter(l => !l.factory_code).length} line(s) are unmapped</strong> — locations not linked to a factory: <strong>{[...new Set(lines.filter(l => !l.factory_code).map(l => l.location_code || '(blank)'))].join(', ')}</strong>. They won't be confirmed to production until mapped. Add the location in <strong>Setup → Location Map</strong>, then click <strong>🔄 Re-map unmapped lines</strong>.
+              </div>
+            )}
 
             {selectedIds.size > 0 && (
               <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
