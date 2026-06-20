@@ -494,7 +494,31 @@ export default function MaterialRequestsPage() {
                                         <span className="text-gray-700 font-medium">{r.production_batches?.description}</span>
                                         <span className="text-gray-400 text-xs font-mono ml-auto">{r.request_no}</span>
                                       </div>
-                                      <div className="overflow-x-auto border rounded-lg">
+                                      {/* Mobile: one card per label */}
+                                      <div className="md:hidden space-y-2">
+                                        {facItems.map(it => {
+                                          const avail = labelAvail(r, it)
+                                          const le = labelEdits[it.id] ?? { batch: it.label_batch_no ?? '', exp: it.label_exp_date ?? '', qty: String(it.label_print_qty ?? avail) }
+                                          const setLe = (patch: Partial<{ batch: string; exp: string; qty: string }>) => setLabelEdits(p => ({ ...p, [it.id]: { batch: p[it.id]?.batch ?? it.label_batch_no ?? '', exp: p[it.id]?.exp ?? it.label_exp_date ?? '', qty: p[it.id]?.qty ?? String(it.label_print_qty ?? avail), ...patch } }))
+                                          return (
+                                            <div key={`ml|${it.id}`} className="border rounded-lg p-2.5">
+                                              <div className="flex items-baseline justify-between gap-2"><span className="font-mono font-medium text-sm">{it.item_code}</span><span className="text-xs text-gray-500">make {it.requested_qty} {it.unit}</span></div>
+                                              <div className="text-gray-600 text-xs">{it.description}</div>
+                                              {locked ? <div className="text-amber-700 text-xs mt-1">🔒 locked until GRN uploaded</div> : (
+                                                <div className="mt-2 grid grid-cols-2 gap-2">
+                                                  <label className="text-xs text-gray-500">Available now<div className="font-semibold text-blue-700">{avail}</div></label>
+                                                  <label className="text-xs text-gray-500">Print qty<input type="number" min="0" max={avail} value={le.qty} onChange={e => setLe({ qty: e.target.value })} className="border rounded px-2 py-1 text-sm w-full" /></label>
+                                                  <label className="text-xs text-gray-500">Batch No.<input value={le.batch} onChange={e => setLe({ batch: e.target.value })} placeholder="batch no." className="border rounded px-2 py-1 text-sm w-full" /></label>
+                                                  <label className="text-xs text-gray-500">Expiry<input type="date" value={le.exp} onChange={e => setLe({ exp: e.target.value })} className="border rounded px-2 py-1 text-sm w-full" /></label>
+                                                  <button onClick={() => saveLabel(it, r)} disabled={busy === `label|${it.id}`} className="col-span-2 bg-blue-600 text-white rounded px-3 py-1.5 text-sm font-medium disabled:opacity-50">{busy === `label|${it.id}` ? 'Saving…' : 'Save'}{(it.label_batch_no || it.label_exp_date) ? ' ✓' : ''}</button>
+                                                </div>
+                                              )}
+                                            </div>
+                                          )
+                                        })}
+                                      </div>
+                                      {/* Desktop: table */}
+                                      <div className="hidden md:block overflow-x-auto border rounded-lg">
                                         <table className="w-full text-sm">
                                           <thead className="bg-gray-50 border-b">
                                             <tr>{['Material', 'Description', 'Unit', 'To make', 'Made', 'Remaining', ...(locked ? [] : ['Available now', 'Print qty', 'Batch No.', 'Expiry', ''])].map((h, hi) => <th key={hi} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr>
