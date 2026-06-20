@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -47,25 +47,33 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 7000)
   }
 
-  // Head Office: count of change requests waiting for approval (refresh on nav + every 30s)
+  // Every kind of approval that lands in Pending Changes
+  const APPROVAL_TABLES = ['change_requests', 'correction_requests', 'do_change_requests', 'split_requests', 'stock_adjustments', 'run_mode_requests'] as const
+  const TABLE_LABEL: Record<string, string> = {
+    change_requests: 'change', correction_requests: 'timer cancellation', do_change_requests: 'Goods Received change',
+    split_requests: 'batch split / un-combine', stock_adjustments: 'stock adjustment', run_mode_requests: 'run-mode change',
+  }
+
+  // Head Office: total pending approvals across ALL approval types
+  const refreshPending = useCallback(async () => {
+    if (!isHO) return
+    const results = await Promise.all(APPROVAL_TABLES.map(t =>
+      supabase.from(t).select('id', { count: 'exact', head: true }).eq('status', 'Pending')))
+    setPendingCount(results.reduce((s, r) => s + (r.count || 0), 0))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHO])
+
+  // Refresh on nav + every 30s
   useEffect(() => {
     if (!isHO) return
-    let active = true
-    const fetchCount = async () => {
-      const { count } = await supabase
-        .from('change_requests')
-        .select('id', { count: 'exact', head: true })
-        .eq('status', 'Pending')
-      if (active) setPendingCount(count || 0)
-    }
-    fetchCount()
-    const timer = setInterval(fetchCount, 30000)
-    return () => { active = false; clearInterval(timer) }
-  }, [isHO, pathname])
+    refreshPending()
+    const timer = setInterval(refreshPending, 30000)
+    return () => clearInterval(timer)
+  }, [isHO, pathname, refreshPending])
 
   // Live notifications:
-  //  - Head Office gets a toast when a new request is raised
-  //  - The requester gets a toast when their request is approved/rejected
+  //  - Head Office gets a toast + badge bump when any new request is raised
+  //  - The requester gets a toast when their change request is approved/rejected
   useEffect(() => {
     let channel: ReturnType<typeof supabase.channel> | null = null
     let myId: string | null = null
@@ -73,31 +81,28 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       if (!data.session) return
       myId = data.session.user.id
       supabase.realtime.setAuth(data.session.access_token)
-      channel = supabase
-        .channel('change-requests-feed')
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'change_requests' }, payload => {
-          if (!isHO) return
-          const row = payload.new as { request_type?: string; requested_by_name?: string; requested_by_email?: string }
-          const kind = row.request_type === 'delete' ? 'delete' : 'change'
-          addToast('🔔 New request to approve', `New ${kind} request from ${row.requested_by_name || row.requested_by_email || 'a user'}`)
-          setPendingCount(c => c + 1)
-        })
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'change_requests' }, payload => {
-          const row = payload.new as { requested_by?: string; status?: string; request_type?: string }
-          if (isHO && (row.status === 'Approved' || row.status === 'Rejected')) {
-            setPendingCount(c => Math.max(0, c - 1))
-          }
-          // Notify the person who raised it
-          if (row.requested_by === myId && (row.status === 'Approved' || row.status === 'Rejected')) {
-            const what = row.request_type === 'delete' ? 'delete request' : 'change request'
-            const ok = row.status === 'Approved'
-            addToast(ok ? '✅ Request approved' : '❌ Request rejected', `Your ${what} was ${ok ? 'approved' : 'rejected'} by Head Office.`)
-          }
-        })
-        .subscribe()
+      channel = supabase.channel('approvals-feed')
+      for (const t of APPROVAL_TABLES) {
+        channel = channel
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: t }, () => {
+            if (!isHO) return
+            addToast('🔔 New request to approve', `A new ${TABLE_LABEL[t]} request is waiting in Pending Changes.`)
+            refreshPending()
+          })
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: t }, payload => {
+            if (isHO) refreshPending()
+            const row = payload.new as { requested_by?: string; status?: string }
+            if (row.requested_by === myId && (row.status === 'Approved' || row.status === 'Rejected')) {
+              const ok = row.status === 'Approved'
+              addToast(ok ? '✅ Request approved' : '❌ Request rejected', `Your ${TABLE_LABEL[t]} request was ${ok ? 'approved' : 'rejected'} by Head Office.`)
+            }
+          })
+      }
+      channel.subscribe()
     })
     return () => { if (channel) supabase.removeChannel(channel) }
-  }, [isHO])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHO, refreshPending])
 
   // Office-only access guard. Factory staff may only use the app from an allowed
   // office IP; Head Office + Admins are exempt. Master switch (app_config) lets it
