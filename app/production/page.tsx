@@ -161,7 +161,8 @@ export default function ProductionPage() {
       ? await supabase.rpc('raise_material_request', { p_batch_id: t.batchIds[0] })
       : await supabase.rpc('raise_combined_material_request', { p_batch_ids: t.batchIds })
     if (rpcErr) { setError(rpcErr.message); setRaising(false); return }
-    setSuccess(`Material request raised for ${t.label}.`)
+    const sentBatches = t.batchIds.map(id => batches.find(b => b.id === id)?.batch_no || id).join(' + ')
+    setSuccess(`Material request raised for ${t.label} — sent ${t.batchIds.length} batch(es): ${sentBatches} (total ${t.total}).`)
     setRaising(false)
     setSelected(null)
     setExpDate('')
