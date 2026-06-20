@@ -17,6 +17,7 @@ interface MRItem {
   received_qty: number
   label_batch_no?: string | null
   label_exp_date?: string | null
+  label_print_qty?: number | null
 }
 interface MaterialRequest {
   id: string
@@ -57,7 +58,7 @@ export default function MaterialRequestsPage() {
   const [pcsPerRoll, setPcsPerRoll] = useState<Record<string, number>>({}) // roll items: code -> pieces per roll
   const [expEdits, setExpEdits] = useState<Record<string, string>>({}) // request id -> EXP date being typed
   const [soEdits, setSoEdits] = useState<Record<string, string>>({}) // run no -> SO number being typed
-  const [labelEdits, setLabelEdits] = useState<Record<string, { batch: string; exp: string }>>({}) // item id -> label batch/exp being typed
+  const [labelEdits, setLabelEdits] = useState<Record<string, { batch: string; exp: string; qty: string }>>({}) // item id -> label batch/exp/print-qty being typed
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
@@ -147,18 +148,25 @@ export default function MaterialRequestsPage() {
     setSuccess(`Cancel request sent for ${r.request_no} — waiting for Head Office approval.`)
   }
 
-  // Are all the raw (warehouse) materials for this request received? Labels unlock then.
-  function rawDone(r: MaterialRequest) {
-    const raw = (r.material_request_items || []).filter(it => !factoryItems.has(it.item_code))
-    return raw.length === 0 || raw.every(it => it.received_qty >= it.requested_qty)
+  // Fraction of this request's raw materials that have arrived (0..1) — the
+  // limiting material decides how much of the product can be made. Labels unlock
+  // as soon as this is > 0 (partial), and the printable label qty scales with it.
+  function rawFraction(r: MaterialRequest) {
+    const raw = (r.material_request_items || []).filter(it => !factoryItems.has(it.item_code) && it.requested_qty > 0)
+    if (raw.length === 0) return 1
+    return Math.min(...raw.map(it => Math.min(1, it.received_qty / it.requested_qty)))
   }
-  // Save a label item's batch no. / expiry (at least one required)
-  async function saveLabel(it: MRItem) {
-    const e = labelEdits[it.id] ?? { batch: it.label_batch_no ?? '', exp: it.label_exp_date ?? '' }
+  // Labels printable now for one label item, based on what raw materials are in
+  const labelAvail = (r: MaterialRequest, it: MRItem) => Math.floor(rawFraction(r) * it.requested_qty)
+  // Save a label item's batch no. / expiry / print qty (at least batch or expiry required)
+  async function saveLabel(it: MRItem, r: MaterialRequest) {
+    const e = labelEdits[it.id] ?? { batch: it.label_batch_no ?? '', exp: it.label_exp_date ?? '', qty: String(it.label_print_qty ?? labelAvail(r, it)) }
     const batch = e.batch.trim()
     if (!batch && !e.exp) { setError('Enter a batch number or an expiry date (at least one) for the label.'); return }
+    const qty = e.qty === '' ? labelAvail(r, it) : Number(e.qty)
+    if (qty > labelAvail(r, it)) { setError(`Only ${labelAvail(r, it)} can be printed now (that's all the received materials cover).`); return }
     setBusy(`label|${it.id}`); setError(''); setSuccess('')
-    const { error: er } = await supabase.from('material_request_items').update({ label_batch_no: batch || null, label_exp_date: e.exp || null }).eq('id', it.id)
+    const { error: er } = await supabase.from('material_request_items').update({ label_batch_no: batch || null, label_exp_date: e.exp || null, label_print_qty: qty }).eq('id', it.id)
     if (er) { setError(er.message); setBusy(''); return }
     setSuccess(`Label details saved for ${it.item_code}.`)
     setBusy('')
@@ -230,8 +238,10 @@ export default function MaterialRequestsPage() {
     let n = 1
     reqs.forEach(r => {
       (r.material_request_items || []).filter(it => factoryItems.has(it.item_code)).forEach(it => {
+        const printQty = it.label_print_qty != null ? it.label_print_qty : it.requested_qty
         body.push([String(n++), r.production_batches?.item_code || '', r.production_batches?.description || '',
-          fmtExp(r.production_batches?.exp_date) || '—', it.item_code, it.description, it.unit, String(it.requested_qty), ''])
+          it.label_exp_date ? fmtExp(it.label_exp_date) : (fmtExp(r.production_batches?.exp_date) || '—'), it.label_batch_no || '—',
+          it.item_code, it.description, it.unit, String(printQty), ''])
       })
     })
     doc.setFontSize(14); doc.setFont('helvetica', 'bold')
@@ -245,11 +255,11 @@ export default function MaterialRequestsPage() {
     doc.text(`Printed: ${new Date().toLocaleString()}`, 150, 38)
     autoTable(doc, {
       startY: 44,
-      head: [['#', 'Product', 'Product name', 'EXP date', 'Material', 'Description', 'Unit', 'Qty to make', 'Made']],
+      head: [['#', 'Product', 'Product name', 'EXP date', 'Batch No.', 'Material', 'Description', 'Unit', 'Print qty', 'Made']],
       body,
       styles: { fontSize: 9, cellPadding: 2 },
       headStyles: { fillColor: [126, 58, 242] },
-      columnStyles: { 7: { halign: 'right' } },
+      columnStyles: { 8: { halign: 'right' } },
     })
     const endY = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY) + 16
     doc.text('Prepared by: __________________   Date: __________', 14, endY)
@@ -438,7 +448,7 @@ export default function MaterialRequestsPage() {
                           )}
                           {facReqs.length > 0 && (() => {
                             const missingExp = facReqs.some(r => !r.production_batches?.exp_date)
-                            const facLocked = facReqs.some(r => !rawDone(r))
+                            const facLocked = facReqs.some(r => rawFraction(r) <= 0)
                             const labelsMissing = facReqs.some(r => (r.material_request_items || []).filter(it => factoryItems.has(it.item_code)).some(it => !it.label_batch_no && !it.label_exp_date))
                             return (
                             <div>
@@ -458,10 +468,12 @@ export default function MaterialRequestsPage() {
                                 {facReqs.map(r => {
                                   const facItems = (r.material_request_items || []).filter(it => factoryItems.has(it.item_code))
                                   const hasExp = !!r.production_batches?.exp_date
-                                  const locked = !rawDone(r)
+                                  const frac = rawFraction(r)
+                                  const locked = frac <= 0
                                   return (
                                     <div key={r.id} className={`border rounded-lg p-3 ${hasExp ? '' : 'border-red-300'}`}>
-                                      {locked && <p className="text-amber-700 text-xs bg-amber-50 border border-amber-200 rounded p-2 mb-2">🔒 Labels unlock once all raw materials for this request are received (Goods Received). This avoids wasted labels and keeps the batch/expiry accurate.</p>}
+                                      {locked && <p className="text-amber-700 text-xs bg-amber-50 border border-amber-200 rounded p-2 mb-2">🔒 Labels unlock once the raw materials start arriving (Goods Received). You can then print labels for the quantity the received materials cover.</p>}
+                                      {!locked && frac < 1 && <p className="text-blue-700 text-xs bg-blue-50 border border-blue-200 rounded p-2 mb-2">ℹ Raw materials are {Math.round(frac * 100)}% in — you can print labels for the partial quantity now and the rest later.</p>}
                                       <div className="flex flex-wrap items-center gap-2 mb-2 text-sm">
                                         <span className="font-semibold">{r.production_batches?.item_code}</span>
                                         <span className="text-gray-500">{r.production_batches?.description}</span>
@@ -480,13 +492,15 @@ export default function MaterialRequestsPage() {
                                       <div className="overflow-x-auto border rounded-lg">
                                         <table className="w-full text-sm">
                                           <thead className="bg-gray-50 border-b">
-                                            <tr>{['Material', 'Description', 'Unit', 'To make', 'Made', 'Remaining', ...(locked ? [] : ['Batch No.', 'Expiry', ''])].map((h, hi) => <th key={hi} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr>
+                                            <tr>{['Material', 'Description', 'Unit', 'To make', 'Made', 'Remaining', ...(locked ? [] : ['Available now', 'Print qty', 'Batch No.', 'Expiry', ''])].map((h, hi) => <th key={hi} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr>
                                           </thead>
                                           <tbody>
                                             {facItems.map(it => {
                                               const done = it.received_qty >= it.requested_qty
                                               const remaining = Math.max(0, it.requested_qty - it.received_qty)
-                                              const le = labelEdits[it.id] ?? { batch: it.label_batch_no ?? '', exp: it.label_exp_date ?? '' }
+                                              const avail = labelAvail(r, it)
+                                              const le = labelEdits[it.id] ?? { batch: it.label_batch_no ?? '', exp: it.label_exp_date ?? '', qty: String(it.label_print_qty ?? avail) }
+                                              const setLe = (patch: Partial<{ batch: string; exp: string; qty: string }>) => setLabelEdits(p => ({ ...p, [it.id]: { batch: p[it.id]?.batch ?? it.label_batch_no ?? '', exp: p[it.id]?.exp ?? it.label_exp_date ?? '', qty: p[it.id]?.qty ?? String(it.label_print_qty ?? avail), ...patch } }))
                                               return (
                                                 <tr key={it.id} className={`border-b last:border-0 ${done ? 'bg-green-50/40' : ''}`}>
                                                   <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{it.item_code}</td>
@@ -496,9 +510,11 @@ export default function MaterialRequestsPage() {
                                                   <td className="px-3 py-2 text-right text-gray-700">{it.received_qty}</td>
                                                   <td className={`px-3 py-2 text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{remaining}</td>
                                                   {!locked && <>
-                                                    <td className="px-3 py-2"><input value={le.batch} onChange={e => setLabelEdits(p => ({ ...p, [it.id]: { batch: e.target.value, exp: p[it.id]?.exp ?? it.label_exp_date ?? '' } }))} placeholder="batch no." className="border rounded px-2 py-1 text-xs w-28" /></td>
-                                                    <td className="px-3 py-2"><input type="date" min="2020-01-01" max="2100-12-31" value={le.exp} onChange={e => setLabelEdits(p => ({ ...p, [it.id]: { batch: p[it.id]?.batch ?? it.label_batch_no ?? '', exp: e.target.value } }))} className="border rounded px-2 py-1 text-xs" /></td>
-                                                    <td className="px-3 py-2 whitespace-nowrap"><button onClick={() => saveLabel(it)} disabled={busy === `label|${it.id}`} className="text-blue-600 hover:underline text-xs disabled:opacity-50">{busy === `label|${it.id}` ? 'Saving…' : 'Save'}</button>{(it.label_batch_no || it.label_exp_date) && <span className="text-green-600 text-xs ml-1">✓</span>}</td>
+                                                    <td className="px-3 py-2 text-right font-semibold text-blue-700">{avail}</td>
+                                                    <td className="px-3 py-2"><input type="number" min="0" max={avail} value={le.qty} onChange={e => setLe({ qty: e.target.value })} className="border rounded px-2 py-1 text-xs w-20 text-right" /></td>
+                                                    <td className="px-3 py-2"><input value={le.batch} onChange={e => setLe({ batch: e.target.value })} placeholder="batch no." className="border rounded px-2 py-1 text-xs w-28" /></td>
+                                                    <td className="px-3 py-2"><input type="date" min="2020-01-01" max="2100-12-31" value={le.exp} onChange={e => setLe({ exp: e.target.value })} className="border rounded px-2 py-1 text-xs" /></td>
+                                                    <td className="px-3 py-2 whitespace-nowrap"><button onClick={() => saveLabel(it, r)} disabled={busy === `label|${it.id}`} className="text-blue-600 hover:underline text-xs disabled:opacity-50">{busy === `label|${it.id}` ? 'Saving…' : 'Save'}</button>{(it.label_batch_no || it.label_exp_date) && <span className="text-green-600 text-xs ml-1">✓</span>}</td>
                                                   </>}
                                                 </tr>
                                               )

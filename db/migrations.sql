@@ -1223,6 +1223,10 @@ end $$;
 grant execute on function public.reject_mr_cancel(uuid) to authenticated;
 
 
+-- 2026-06 · Partial label printing — how many labels to print this run
+alter table public.material_request_items add column if not exists label_print_qty numeric;
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.
