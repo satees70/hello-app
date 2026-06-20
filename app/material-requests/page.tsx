@@ -571,7 +571,7 @@ export default function MaterialRequestsPage() {
             <br />Raise one from a batch on the Production board.
           </div>
         ) : (
-          <div className="space-y-5">
+          <div className="space-y-5 max-h-[40rem] overflow-y-auto pr-1">
             {shown.map(r => (
               <div key={r.id} className="bg-white rounded-xl shadow-sm border p-5">
                 <div className="flex flex-wrap items-center gap-3 mb-3">
