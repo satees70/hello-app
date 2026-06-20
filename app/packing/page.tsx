@@ -56,6 +56,7 @@ export default function PackingPage() {
   const [success, setSuccess] = useState('')
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
+  const multiFac = isHO || (profile?.factory_codes?.length || 0) > 1   // sees more than one factory
   const canEdit = can(profile, 'packing', 'edit')
 
   useEffect(() => { if (profile) { load(); loadFactories() } }, [profile])
@@ -223,11 +224,11 @@ export default function PackingPage() {
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
         {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}
 
-        {isHO && (
+        {multiFac && (
           <div className="flex flex-wrap gap-2 items-center mb-5 text-sm">
             <select value={factoryFilter} onChange={e => setFactoryFilter(e.target.value)} className="border rounded-lg px-3 py-2 bg-white">
               <option value="">All factories</option>
-              {factories.map(f => <option key={f.code} value={f.code}>{f.name}</option>)}
+              {(isHO ? factories : factories.filter(f => (profile.factory_codes || [profile.factory_code]).includes(f.code))).map(f => <option key={f.code} value={f.code}>{f.name}</option>)}
             </select>
           </div>
         )}
@@ -254,15 +255,15 @@ export default function PackingPage() {
         <div className="hidden md:block bg-white rounded-xl shadow-sm border overflow-x-auto mb-6">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
-              <tr>{[...(isHO ? ['Factory'] : []), 'Batch', 'Item', 'Qty', 'Delivery', canEdit ? 'Schedule to' : 'Status'].map(h => (
+              <tr>{[...(multiFac ? ['Factory'] : []), 'Batch', 'Item', 'Qty', 'Delivery', canEdit ? 'Schedule to' : 'Status'].map(h => (
                 <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
             </thead>
             <tbody>
-              {readyToPack.length === 0 && <tr><td colSpan={isHO ? 6 : 5} className="text-center py-6 text-gray-400">No batches with materials ready. They appear here once a batch has a BOM and enough stock to make at least one unit.</td></tr>}
+              {readyToPack.length === 0 && <tr><td colSpan={multiFac ? 6 : 5} className="text-center py-6 text-gray-400">No batches with materials ready. They appear here once a batch has a BOM and enough stock to make at least one unit.</td></tr>}
               {readyToPack.map(b => (
                 <Fragment key={b.id}>
                   <tr className="border-b last:border-0 hover:bg-gray-50">
-                    {isHO && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(b.factory_code)}</td>}
+                    {multiFac && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(b.factory_code)}</td>}
                     <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}{partial(b) && <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700 align-middle">make {availability(b).units} now</span>}</td>
                     <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span>
                       <button onClick={() => toggleMat(b.id)} className="text-blue-600 hover:underline text-xs mt-0.5">{openMat.has(b.id) ? '▾ hide materials' : '▸ show materials'}</button></td>
@@ -271,7 +272,7 @@ export default function PackingPage() {
                     <td className="px-3 py-2">{canEdit ? <PackForm b={b} /> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${partial(b) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{partial(b) ? `Enough for ${availability(b).units}` : 'Materials ready'}</span>}</td>
                   </tr>
                   {openMat.has(b.id) && (
-                    <tr className="bg-gray-50/60 border-b"><td colSpan={isHO ? 6 : 5} className="px-3 py-3">
+                    <tr className="bg-gray-50/60 border-b"><td colSpan={multiFac ? 6 : 5} className="px-3 py-3">
                       <div className="text-gray-500 text-xs mb-1">To make <strong>{b.total_quantity}</strong> of {b.item_code} at {factoryName(b.factory_code)} — stock is the live system on-hand.</div>
                       <MaterialTable b={b} />
                     </td></tr>
@@ -287,15 +288,15 @@ export default function PackingPage() {
         <div className="bg-white rounded-xl shadow-sm border overflow-x-auto mb-8">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
-              <tr>{[...(isHO ? ['Factory'] : []), 'Batch', 'Item', 'Qty', 'Delivery', 'Why not yet'].map(h => (
+              <tr>{[...(multiFac ? ['Factory'] : []), 'Batch', 'Item', 'Qty', 'Delivery', 'Why not yet'].map(h => (
                 <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
             </thead>
             <tbody>
-              {waiting.length === 0 && <tr><td colSpan={isHO ? 6 : 5} className="text-center py-6 text-gray-400">Nothing waiting — every planned batch has its materials.</td></tr>}
+              {waiting.length === 0 && <tr><td colSpan={multiFac ? 6 : 5} className="text-center py-6 text-gray-400">Nothing waiting — every planned batch has its materials.</td></tr>}
               {waiting.map(b => (
                 <Fragment key={b.id}>
                   <tr className="border-b last:border-0 hover:bg-gray-50">
-                    {isHO && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(b.factory_code)}</td>}
+                    {multiFac && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(b.factory_code)}</td>}
                     <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}</td>
                     <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span>
                       <button onClick={() => toggleMat(b.id)} className="text-blue-600 hover:underline text-xs mt-0.5">{openMat.has(b.id) ? '▾ hide materials' : '▸ show materials'}</button></td>
@@ -304,7 +305,7 @@ export default function PackingPage() {
                     <td className="px-3 py-2"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{waitReason(b)}</span></td>
                   </tr>
                   {openMat.has(b.id) && (
-                    <tr className="bg-gray-50/60 border-b"><td colSpan={isHO ? 6 : 5} className="px-3 py-3">
+                    <tr className="bg-gray-50/60 border-b"><td colSpan={multiFac ? 6 : 5} className="px-3 py-3">
                       <div className="text-gray-500 text-xs mb-1">To make <strong>{b.total_quantity}</strong> of {b.item_code} at {factoryName(b.factory_code)} — stock is the live system on-hand.</div>
                       <MaterialTable b={b} />
                     </td></tr>
@@ -333,7 +334,7 @@ export default function PackingPage() {
           <div className="space-y-6">
             {facs.map(fc => (
               <div key={fc}>
-                {isHO && <button onClick={() => toggleFac(fc)} className="flex items-center gap-1 font-semibold text-gray-700 mb-2 hover:text-gray-900"><span className="text-gray-400 w-3 inline-block">{collapsedFacs.has(fc) ? '▸' : '▾'}</span> 🏭 {factoryName(fc)}</button>}
+                {(isHO || facs.length > 1) && <button onClick={() => toggleFac(fc)} className="flex items-center gap-1 font-semibold text-gray-700 mb-2 hover:text-gray-900"><span className="text-gray-400 w-3 inline-block">{collapsedFacs.has(fc) ? '▸' : '▾'}</span> 🏭 {factoryName(fc)}</button>}
                 {!collapsedFacs.has(fc) && <div className="space-y-4">
                   {Object.keys(byFactory[fc]).sort().map(line => (
                     <div key={line} className="bg-white rounded-xl shadow-sm border p-4">

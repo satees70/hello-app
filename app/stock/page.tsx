@@ -116,7 +116,7 @@ export default function StockPage() {
               const codes = Object.keys(items).sort()
               return (
                 <div key={fc}>
-                  {isHO && <button onClick={() => toggleFac(fc)} className="flex items-center gap-1 font-semibold text-gray-700 mb-2 hover:text-gray-900"><span className="text-gray-400 w-3 inline-block">{collapsedFacs.has(fc) ? '▸' : '▾'}</span> 🏭 {factoryName(fc)} <span className="text-gray-400 font-normal text-sm">· {codes.length} item(s)</span></button>}
+                  {(isHO || facs.length > 1) && <button onClick={() => toggleFac(fc)} className="flex items-center gap-1 font-semibold text-gray-700 mb-2 hover:text-gray-900"><span className="text-gray-400 w-3 inline-block">{collapsedFacs.has(fc) ? '▸' : '▾'}</span> 🏭 {factoryName(fc)} <span className="text-gray-400 font-normal text-sm">· {codes.length} item(s)</span></button>}
                   {!collapsedFacs.has(fc) && <div className="space-y-4">
                     {codes.map(code => {
                       const rows = [...items[code]].sort((a, b) => lotOrder(a).localeCompare(lotOrder(b)))
