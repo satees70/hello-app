@@ -4,6 +4,7 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
+import { can } from '@/lib/permissions'
 
 interface BatchItem { id: string; customer_name: string; so_number: string; quantity: number }
 interface Batch {
@@ -44,6 +45,7 @@ const STATUS_STYLE: Record<string, string> = {
 export default function ProductionPage() {
   const { profile, loading, error: profileError } = useProfile()
   useRequireView(profile, 'order_board')
+  const canEdit = profile ? can(profile, 'order_board', 'edit') : false
   const [batches, setBatches] = useState<Batch[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [items, setItems] = useState<Item[]>([])
@@ -91,6 +93,7 @@ export default function ProductionPage() {
   const BUFFER = 1.1
 
   async function makeManufactured(it: Item) {
+    if (!canEdit) { setError("You have view-only access here."); return }
     if (!confirm(`Change ${it.code} to a Manufactured item? You can then set its BOM recipe.`)) return
     setError(''); setSuccess('')
     const { error: upErr } = await supabase.from('items').update({ type: 'Manufactured' }).eq('id', it.id)
@@ -149,6 +152,7 @@ export default function ProductionPage() {
   }
 
   async function raiseTarget(t: MatTarget) {
+    if (!canEdit) { setError("You have view-only access here."); return }
     setRaising(true); setError(''); setSuccess('')
     // Save the chosen run mode onto the batch(es) first — the RPC uses run_mode to
     // pick the right BOM (auto = roll, manual = pc). Expiry is set later on the label.
@@ -172,6 +176,7 @@ export default function ProductionPage() {
     return n
   })
   async function requestUncombine(m: Batch) {
+    if (!canEdit) { setError("You have view-only access here."); return }
     const reason = window.prompt(`Run ${m.batch_no} (${m.item_code} · qty ${m.total_quantity}) on its own, separate from the combined group?\n\nThis goes to Pending Changes for Head Office approval.\n\nReason (optional):`, '')
     if (reason === null) return
     setError(''); setSuccess('')
@@ -186,6 +191,7 @@ export default function ProductionPage() {
   }
 
   async function recombine(b: Batch) {
+    if (!canEdit) { setError("You have view-only access here."); return }
     if (!confirm(`Re-combine ${b.batch_no} back into its group for material picking?`)) return
     setError(''); setSuccess('')
     const { error: e } = await supabase.from('production_batches').update({ no_combine: false }).eq('id', b.id)
@@ -195,6 +201,7 @@ export default function ProductionPage() {
   }
 
   async function requestSplit(b: Batch, it: BatchItem) {
+    if (!canEdit) { setError("You have view-only access here."); return }
     const reason = window.prompt(`Split "${it.customer_name}" (${it.so_number || ''} · qty ${it.quantity}) out of ${b.batch_no} into its own batch?\n\nThis goes to Pending Changes for Head Office approval.\n\nReason (optional):`, '')
     if (reason === null) return
     setError(''); setSuccess('')
