@@ -55,6 +55,7 @@ export default function MaterialRequestsPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [factoryItems, setFactoryItems] = useState<Set<string>>(new Set()) // item codes supplied by the factory
+  const [grnSet, setGrnSet] = useState<Set<string>>(new Set()) // `${factory}|${code}` that appear on an uploaded Goods Received doc
   const [pcsPerRoll, setPcsPerRoll] = useState<Record<string, number>>({}) // roll items: code -> pieces per roll
   const [expEdits, setExpEdits] = useState<Record<string, string>>({}) // request id -> EXP date being typed
   const [soEdits, setSoEdits] = useState<Record<string, string>>({}) // run no -> SO number being typed
@@ -62,7 +63,7 @@ export default function MaterialRequestsPage() {
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
-  useEffect(() => { if (profile) { load(); loadFactories(); loadFactoryItems(); loadRolls() } }, [profile])
+  useEffect(() => { if (profile) { load(); loadFactories(); loadFactoryItems(); loadRolls(); loadGrn() } }, [profile])
   async function loadRolls() {
     const { data } = await supabase.from('items').select('code, pcs_per_roll').not('pcs_per_roll', 'is', null)
     const m: Record<string, number> = {}; (data || []).forEach(r => { if (r.pcs_per_roll) m[r.code] = Number(r.pcs_per_roll) }); setPcsPerRoll(m)
@@ -85,6 +86,20 @@ export default function MaterialRequestsPage() {
     const { data } = await supabase.from('items').select('code').eq('supplied_by_factory', true)
     setFactoryItems(new Set((data || []).map(r => r.code)))
   }
+  // Item codes (per factory) that appear on any uploaded Goods Received doc — once a
+  // GRN is uploaded for a material, its labels unlock (no need to QC/Receive first).
+  async function loadGrn() {
+    const [{ data: dos }, { data: dls }] = await Promise.all([
+      supabase.from('delivery_orders').select('id, factory_code'),
+      supabase.from('delivery_order_lines').select('do_id, item_code'),
+    ])
+    const fac: Record<string, string> = {}; (dos || []).forEach(d => { fac[d.id] = d.factory_code })
+    const s = new Set<string>()
+    ;(dls || []).forEach(l => { const f = fac[l.do_id]; if (!f || !l.item_code) return; s.add(`${f}|${l.item_code}`); s.add(`${f}|${grnBase(l.item_code)}`) })
+    setGrnSet(s)
+  }
+  // Strip a trailing pack-size suffix ("D955-15KG/BAG" -> "D955") but keep variant codes ("P93541-3000")
+  const grnBase = (code: string) => code.replace(/-\d+(?:KG|UN|UNIT|PKT|PACK|G|CTN|BAG|ML|L)\b.*$/i, '')
   async function loadFactories() {
     const { data } = await supabase.from('factories').select('code, name').order('code')
     setFactories(data || [])
@@ -148,15 +163,15 @@ export default function MaterialRequestsPage() {
     setSuccess(`Cancel request sent for ${r.request_no} — waiting for Head Office approval.`)
   }
 
-  // Fraction of this request's raw materials that have arrived (0..1) — the
-  // limiting material decides how much of the product can be made. Labels unlock
-  // as soon as this is > 0 (partial), and the printable label qty scales with it.
+  // Has a Goods Received Note been uploaded covering this request's raw materials?
+  // Labels unlock once the GRN is uploaded — no need to QC-tick / Receive first.
   function rawFraction(r: MaterialRequest) {
-    const raw = (r.material_request_items || []).filter(it => !factoryItems.has(it.item_code) && it.requested_qty > 0)
+    const raw = (r.material_request_items || []).filter(it => !factoryItems.has(it.item_code))
     if (raw.length === 0) return 1
-    return Math.min(...raw.map(it => Math.min(1, it.received_qty / it.requested_qty)))
+    const covered = raw.some(it => grnSet.has(`${r.factory_code}|${it.item_code}`) || grnSet.has(`${r.factory_code}|${grnBase(it.item_code)}`))
+    return covered ? 1 : 0
   }
-  // Labels printable now for one label item, based on what raw materials are in
+  // Labels printable once unlocked — full requested quantity (the user can lower the Print qty)
   const labelAvail = (r: MaterialRequest, it: MRItem) => Math.floor(rawFraction(r) * it.requested_qty)
   // Save a label item's batch no. / expiry / print qty (at least batch or expiry required)
   async function saveLabel(it: MRItem, r: MaterialRequest) {
@@ -378,7 +393,7 @@ export default function MaterialRequestsPage() {
         {filter === 'Combined picking' || filter === 'Labels' ? (
           !hasCombined ? (
             <div className="bg-white rounded-xl shadow-sm border p-10 text-center text-gray-400">
-              {filter === 'Labels' ? 'No labels yet — release a material request and receive its raw materials to unlock label printing.' : <>Nothing to pick — no open requests.<br />Raise material requests from batches on the Production board.</>}
+              {filter === 'Labels' ? 'No labels yet — release a material request, then upload its Goods Received Note to unlock label printing.' : <>Nothing to pick — no open requests.<br />Raise material requests from batches on the Production board.</>}
             </div>
           ) : (
             <div className="space-y-8">
@@ -476,8 +491,7 @@ export default function MaterialRequestsPage() {
                                   const locked = frac <= 0
                                   return (
                                     <div key={r.id} className={`border rounded-lg p-3 ${hasExp ? '' : 'border-red-300'}`}>
-                                      {locked && <p className="text-amber-700 text-xs bg-amber-50 border border-amber-200 rounded p-2 mb-2">🔒 Labels unlock once the raw materials start arriving (Goods Received). You can then print labels for the quantity the received materials cover.</p>}
-                                      {!locked && frac < 1 && <p className="text-blue-700 text-xs bg-blue-50 border border-blue-200 rounded p-2 mb-2">ℹ Raw materials are {Math.round(frac * 100)}% in — you can print labels for the partial quantity now and the rest later.</p>}
+                                      {locked && <p className="text-amber-700 text-xs bg-amber-50 border border-amber-200 rounded p-2 mb-2">🔒 Labels unlock once a Goods Received Note for these materials is uploaded (no need to QC-tick or click Receive). Upload the delivery in <strong>Goods Received</strong> to unlock.</p>}
                                       <div className="flex flex-wrap items-center gap-2 mb-2 text-sm">
                                         <span className="text-xs text-gray-400 uppercase tracking-wide">Print labels for</span>
                                         <span className="font-bold text-purple-800 text-base">{r.production_batches?.item_code}</span>
