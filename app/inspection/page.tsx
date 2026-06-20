@@ -310,7 +310,25 @@ export default function InspectionPage() {
               <div className="font-semibold text-sm">Hourly Checking <span className="font-normal text-gray-400">(page 2 · metal detector every 4 hours)</span></div>
               <button onClick={addHour} className="text-blue-600 hover:underline text-xs no-print">+ Add row</button>
             </div>
-            <div className="overflow-x-auto border rounded-lg">
+            {/* Mobile: one card per hourly check */}
+            <div className="md:hidden space-y-3">
+              {(f.hourly as Hourly[]).map((h, i) => {
+                const txt: [keyof Hourly, string][] = [['time', 'Time'], ['weight', 'Weight'], ['ink', 'Ink'], ['temp', 'Temp °C'], ['speed', 'Speed'], ['press', 'Press'], ['drop', 'Drop'], ['alu', 'Al pad']]
+                const gn: [keyof Hourly, string][] = [['qc_color', 'Color'], ['qc_odour', 'Odour'], ['qc_phy', 'Phy'], ['fe', 'Fe'], ['nonfe', 'Non-Fe'], ['ss', 'SS']]
+                return (
+                  <div key={i} className="border rounded-lg p-3">
+                    <div className="text-xs font-semibold text-gray-500 mb-2">Check #{i + 1}</div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {txt.map(([k, lbl]) => <label key={k} className="text-[11px] text-gray-500">{lbl}<input value={h[k]} onChange={e => setHour(i, k, e.target.value)} className="border rounded px-2 py-1 text-sm w-full" /></label>)}
+                      {gn.map(([k, lbl]) => <label key={k} className="text-[11px] text-gray-500">{lbl}<select value={h[k]} onChange={e => setHour(i, k, e.target.value)} className="border rounded px-1 py-1 text-sm w-full bg-white"><option value="">—</option><option value="G">G</option><option value="NG">NG</option></select></label>)}
+                    </div>
+                    <label className="text-[11px] text-gray-500 block mt-2">Remarks / Action<input value={h.remarks} onChange={e => setHour(i, 'remarks', e.target.value)} className="border rounded px-2 py-1 text-sm w-full" /></label>
+                  </div>
+                )
+              })}
+            </div>
+            {/* Desktop: table */}
+            <div className="hidden md:block overflow-x-auto border rounded-lg">
               <table className="w-full text-xs">
                 <thead className="bg-gray-50 border-b">
                   <tr>{['Time', 'Weight', 'Ink', 'Color', 'Odour', 'Phy', 'Temp °C', 'Speed', 'Press', 'Drop (Auto)', 'Al pad', 'Fe', 'Non-Fe', 'SS', 'Remarks / Action'].map(h => (
