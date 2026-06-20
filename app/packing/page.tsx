@@ -276,14 +276,23 @@ export default function PackingPage() {
             <tbody>
               {waiting.length === 0 && <tr><td colSpan={isHO ? 6 : 5} className="text-center py-6 text-gray-400">Nothing waiting — every planned batch has its materials.</td></tr>}
               {waiting.map(b => (
-                <tr key={b.id} className="border-b last:border-0 hover:bg-gray-50">
-                  {isHO && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(b.factory_code)}</td>}
-                  <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}</td>
-                  <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span></td>
-                  <td className="px-3 py-2 text-right font-semibold">{b.total_quantity}</td>
-                  <td className="px-3 py-2 whitespace-nowrap text-gray-600">{b.delivery_date ? fmtDate(b.delivery_date) : '—'}</td>
-                  <td className="px-3 py-2"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{waitReason(b)}</span></td>
-                </tr>
+                <Fragment key={b.id}>
+                  <tr className="border-b last:border-0 hover:bg-gray-50">
+                    {isHO && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(b.factory_code)}</td>}
+                    <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}</td>
+                    <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span>
+                      <button onClick={() => toggleMat(b.id)} className="text-blue-600 hover:underline text-xs mt-0.5">{openMat.has(b.id) ? '▾ hide materials' : '▸ show materials'}</button></td>
+                    <td className="px-3 py-2 text-right font-semibold">{b.total_quantity}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-gray-600">{b.delivery_date ? fmtDate(b.delivery_date) : '—'}</td>
+                    <td className="px-3 py-2"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{waitReason(b)}</span></td>
+                  </tr>
+                  {openMat.has(b.id) && (
+                    <tr className="bg-gray-50/60 border-b"><td colSpan={isHO ? 6 : 5} className="px-3 py-3">
+                      <div className="text-gray-500 text-xs mb-1">To make <strong>{b.total_quantity}</strong> of {b.item_code} at {factoryName(b.factory_code)} — stock is the live system on-hand.</div>
+                      <MaterialTable b={b} />
+                    </td></tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>
