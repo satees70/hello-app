@@ -60,7 +60,6 @@ export default function ProductionPage() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [factoryFilter, setFactoryFilter] = useState('')
-  const [savingStock, setSavingStock] = useState('')
   const [raising, setRaising] = useState(false)
   const [expDate, setExpDate] = useState('')
   const [combineOn, setCombineOn] = useState(true)
@@ -144,16 +143,6 @@ export default function ProductionPage() {
       return { item_id: c.component_item_id, key, code: ci?.code || '—', description: ci?.description || '', unit: ci?.unit || '', required, stock: st, shortfall, requested }
     })
     return { note: '', rows }
-  }
-
-  async function saveStock(itemId: string, factory: string, key: string, value: number) {
-    setSavingStock(key); setError(''); setSuccess('')
-    const { error: upErr } = await supabase.from('item_stock')
-      .upsert({ item_id: itemId, factory_code: factory, quantity: value, updated_at: new Date().toISOString() }, { onConflict: 'item_id,factory_code' })
-    if (upErr) { setError(`Stock save failed: ${upErr.message}`); setSavingStock(''); return }
-    setStock(prev => ({ ...prev, [key]: value }))
-    setSavingStock('')
-    setSuccess('Stock updated.')
   }
 
   async function raiseTarget(t: MatTarget) {
@@ -492,7 +481,7 @@ export default function ProductionPage() {
             </div>
             <p className="text-gray-500 text-sm mb-4">
               To make <strong>{selected.total}</strong> of {selected.item_code} at {isHO ? factoryName(selected.factory_code) : (selected.factory_code || 'this factory')}.
-              {selected.batchIds.length > 1 && ` (combined from ${selected.batchIds.length} batches)`} Enter current stock to see the shortfall.
+              {selected.batchIds.length > 1 && ` (combined from ${selected.batchIds.length} batches)`} Stock shown is the live system on-hand; the shortfall is worked out for you.
             </p>
 
             {exploded.note ? (
@@ -502,7 +491,7 @@ export default function ProductionPage() {
                 <div className="overflow-x-auto border rounded-lg">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b">
-                      <tr>{['Material', 'Description', 'Unit', 'Required', 'Stock', 'Shortfall', 'Requested', ''].map(h => (
+                      <tr>{['Material', 'Description', 'Unit', 'Required', 'Stock (system)', 'Shortfall', 'Requested'].map(h => (
                         <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
                     </thead>
                     <tbody>
@@ -512,18 +501,9 @@ export default function ProductionPage() {
                           <td className="px-3 py-2 text-gray-600">{r.description}</td>
                           <td className="px-3 py-2 text-gray-500">{r.unit}</td>
                           <td className="px-3 py-2 text-right">{clean(r.required)}</td>
-                          <td className="px-3 py-2">
-                            <input type="number" step="any" value={stock[r.key] ?? 0}
-                              onChange={e => setStock(prev => ({ ...prev, [r.key]: e.target.value === '' ? 0 : Number(e.target.value) }))}
-                              className="w-24 border rounded px-2 py-1 text-right" />
-                          </td>
+                          <td className="px-3 py-2 text-right font-medium">{clean(r.stock)}</td>
                           <td className={`px-3 py-2 text-right font-semibold ${r.shortfall > 0 ? 'text-red-600' : 'text-green-600'}`}>{clean(r.shortfall)}</td>
                           <td className="px-3 py-2 text-right font-semibold text-blue-700">{r.shortfall > 0 ? r.requested : 0}</td>
-                          <td className="px-3 py-2 whitespace-nowrap">
-                            <button onClick={() => saveStock(r.item_id, selected.factory_code, r.key, stock[r.key] ?? 0)}
-                              disabled={savingStock === r.key}
-                              className="text-blue-600 hover:underline text-xs disabled:opacity-50">Save stock</button>
-                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -553,7 +533,7 @@ export default function ProductionPage() {
                 {!expDate && !hasRequest && totalShortfall > 0 && (
                   <p className="text-red-600 text-xs mt-2">Enter the product expiry date before raising — it prints on the labels.</p>
                 )}
-                <p className="text-gray-400 text-xs mt-2">Tip: save your stock figures first, then raise the request — it captures the shortfall at that moment and adds a safety margin (rounded up) so the warehouse picks enough.</p>
+                <p className="text-gray-400 text-xs mt-2">Tip: the request captures the current shortfall and adds a safety margin (rounded up) so the warehouse picks enough. Stock comes from the system — adjust it under Stock Adjustment if it’s wrong.</p>
               </>
             )}
           </div>

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
-import { supabase } from '@/lib/supabase'
+import { supabase, fetchAll } from '@/lib/supabase'
 import { can } from '@/lib/permissions'
 
 interface PBItem { customer_name: string; quantity: number }
@@ -23,6 +23,8 @@ interface Batch {
   production_batch_items: PBItem[]
 }
 interface PackLine { factory_code: string; name: string; active: boolean }
+interface Item { id: string; code: string }
+interface BomComp { parent_item_id: string; component_item_id: string; quantity: number; use_mode: string }
 
 const STATUS_STYLE: Record<string, string> = {
   Planned: 'bg-blue-100 text-blue-700',
@@ -37,7 +39,9 @@ export default function PackingPage() {
   const [batches, setBatches] = useState<Batch[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [packLines, setPackLines] = useState<PackLine[]>([])
-  const [mrStatus, setMrStatus] = useState<Record<string, string>>({}) // material_request_id -> status
+  const [items, setItems] = useState<Item[]>([])
+  const [boms, setBoms] = useState<BomComp[]>([])
+  const [stock, setStock] = useState<Record<string, number>>({}) // item_id|factory -> qty
   const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })() // local date (not UTC)
   const [date, setDate] = useState(today)
   const [factoryFilter, setFactoryFilter] = useState('')
@@ -59,12 +63,13 @@ export default function PackingPage() {
       .select('id, batch_no, item_code, description, factory_code, total_quantity, produced_qty, material_request_id, pack_line, pack_date, run_mode, delivery_date, production_batch_items(customer_name, quantity)')
       .order('delivery_date')
     setBatches((data as Batch[]) || [])
-    const { data: mr } = await supabase.from('material_requests').select('id, status')
-    const m: Record<string, string> = {}
-    ;(mr || []).forEach(r => { m[r.id] = r.status })
-    setMrStatus(m)
     const { data: pl } = await supabase.from('packing_lines').select('factory_code, name, active').order('name')
     setPackLines((pl as PackLine[]) || [])
+    setItems(await fetchAll<Item>('items', 'id, code'))
+    setBoms(await fetchAll<BomComp>('bom_components', 'parent_item_id, component_item_id, quantity, use_mode'))
+    const { data: st } = await supabase.from('item_stock').select('item_id, factory_code, quantity')
+    const sm: Record<string, number> = {}; (st || []).forEach(r => { sm[`${r.item_id}|${r.factory_code}`] = Number(r.quantity) })
+    setStock(sm)
   }
   async function loadFactories() {
     const { data } = await supabase.from('factories').select('code, name').order('code')
@@ -78,11 +83,22 @@ export default function PackingPage() {
     if (b.material_request_id) return 'Requested'
     return 'Planned'
   }
-  // Materials are "available" to schedule once any have been received
-  // (fully OR partially). A request that's still fully Open stays in waiting.
-  const materialsReady = (b: Batch) => !!b.material_request_id && ['Fulfilled', 'Partially Received'].includes(mrStatus[b.material_request_id])
-  const partial = (b: Batch) => !!b.material_request_id && mrStatus[b.material_request_id] === 'Partially Received'
-  const waitReason = (b: Batch) => b.material_request_id ? 'Waiting for materials' : 'Materials not requested yet'
+  // How many units we can actually make from current system stock.
+  // No BOM => no material constraint. Otherwise = the limiting material.
+  const availability = (b: Batch): { hasBom: boolean; units: number } => {
+    const parent = items.find(i => i.code === b.item_code)
+    if (!parent) return { hasBom: false, units: Infinity }
+    const mode = b.run_mode || 'auto'
+    const comps = boms.filter(c => c.parent_item_id === parent.id && ((c.use_mode || 'any') === 'any' || (c.use_mode || 'any') === mode))
+    if (comps.length === 0) return { hasBom: false, units: Infinity }
+    let units = Infinity
+    for (const c of comps) { const avail = stock[`${c.component_item_id}|${b.factory_code}`] ?? 0; const per = Number(c.quantity) || 0; units = Math.min(units, per > 0 ? Math.floor(avail / per) : Infinity) }
+    return { hasBom: true, units }
+  }
+  // Ready to schedule once we can make at least one unit (or there's no BOM to block it)
+  const materialsReady = (b: Batch) => { const a = availability(b); return !a.hasBom || a.units >= 1 }
+  const partial = (b: Batch) => { const a = availability(b); return a.hasBom && a.units >= 1 && a.units < b.total_quantity }
+  const waitReason = (b: Batch) => 'Not enough material in stock'
 
   async function savePack(b: Batch) {
     const e = packEdit[b.id] ?? { line: b.pack_line || '', date: b.pack_date || '', mode: b.run_mode || 'auto' }
@@ -171,11 +187,11 @@ export default function PackingPage() {
               {readyToPack.map(b => (
                 <tr key={b.id} className="border-b last:border-0 hover:bg-gray-50">
                   {isHO && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(b.factory_code)}</td>}
-                  <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}{partial(b) && <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700 align-middle">partial</span>}</td>
+                  <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}{partial(b) && <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700 align-middle">make {availability(b).units} now</span>}</td>
                   <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span></td>
                   <td className="px-3 py-2 text-right font-semibold">{b.total_quantity}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-600">{b.delivery_date ? fmtDate(b.delivery_date) : '—'}</td>
-                  <td className="px-3 py-2">{canEdit ? <PackForm b={b} /> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${partial(b) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{partial(b) ? 'Partial materials' : 'Materials ready'}</span>}</td>
+                  <td className="px-3 py-2">{canEdit ? <PackForm b={b} /> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${partial(b) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{partial(b) ? `Enough for ${availability(b).units}` : 'Materials ready'}</span>}</td>
                 </tr>
               ))}
             </tbody>
