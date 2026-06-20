@@ -24,7 +24,7 @@ interface Batch {
   production_batch_items: BatchItem[]
 }
 interface ConsRow { id: string; item_code: string; description: string | null; batch_no: string | null; exp_date: string | null; qty_consumed: number; consumed_at: string }
-interface Item { id: string; code: string; description: string; unit: string; type: string }
+interface Item { id: string; code: string; description: string; unit: string; type: string; supplied_by_factory?: boolean }
 interface BomComp { parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean; use_mode: string }
 
 // A materials target: a single batch or a combined group of batches (same item + factory)
@@ -74,7 +74,7 @@ export default function ProductionPage() {
     const [{ data: b }, { data: f }, it, bc, { data: st }] = await Promise.all([
       supabase.from('production_batches').select('*, production_batch_items(id, customer_name, so_number, quantity)').order('created_at', { ascending: false }),
       supabase.from('factories').select('code, name').order('code'),
-      fetchAll<Item>('items', 'id, code, description, unit, type'),
+      fetchAll<Item>('items', 'id, code, description, unit, type, supplied_by_factory'),
       fetchAll<BomComp>('bom_components', 'parent_item_id, component_item_id, quantity, apply_allowance, use_mode'),
       supabase.from('item_stock').select('item_id, factory_code, quantity'),
     ])
@@ -133,8 +133,10 @@ export default function ProductionPage() {
     if (!parent) return { note: `Item ${itemCode} is not in Items Master.`, rows: [] }
     const all = boms.filter(b => b.parent_item_id === parent.id)
     if (all.length === 0) return { note: 'No BOM defined for this item. Add a recipe in BOM first.', rows: [] }
-    const comps = all.filter(b => (b.use_mode || 'any') === 'any' || (b.use_mode || 'any') === mode)
-    if (comps.length === 0) return { note: `This item's BOM has no materials set for ${mode === 'manual' ? 'Manual' : 'Auto machine'} mode. Switch the Run mode above to the other option (or add ${mode} components in BOM).`, rows: [] }
+    // Labels (made at the factory) are NOT requested from the warehouse — exclude them here
+    const allWh = all.filter(b => !items.find(i => i.id === b.component_item_id)?.supplied_by_factory)
+    const comps = allWh.filter(b => (b.use_mode || 'any') === 'any' || (b.use_mode || 'any') === mode)
+    if (comps.length === 0) return { note: allWh.length === 0 ? 'This item only has made-at-factory labels — nothing to request from the warehouse.' : `This item's BOM has no warehouse materials for ${mode === 'manual' ? 'Manual' : 'Auto machine'} mode. Switch the Run mode above (or add ${mode} components in BOM).`, rows: [] }
     const rows = comps.map(c => {
       const ci = items.find(i => i.id === c.component_item_id)
       const required = c.quantity * total

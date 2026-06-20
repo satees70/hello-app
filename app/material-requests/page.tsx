@@ -555,7 +555,7 @@ export default function MaterialRequestsPage() {
                         <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
                     </thead>
                     <tbody>
-                      {r.material_request_items?.map(it => {
+                      {(r.material_request_items || []).filter(it => !factoryItems.has(it.item_code)).map(it => {
                         const done = it.received_qty >= it.requested_qty
                         const remaining = Math.max(0, it.requested_qty - it.received_qty)
                         return (
@@ -572,6 +572,9 @@ export default function MaterialRequestsPage() {
                     </tbody>
                   </table>
                 </div>
+                {(r.material_request_items || []).some(it => factoryItems.has(it.item_code)) && (
+                  <p className="text-gray-400 text-xs mt-2">🏭 This product also has labels made at the factory — they appear in the factory label section (with batch / expiry) once the raw materials are received, not picked from the warehouse.</p>
+                )}
               </div>
             ))}
           </div>
