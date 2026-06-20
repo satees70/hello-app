@@ -131,8 +131,10 @@ export default function ProductionPage() {
   function explode(itemCode: string, factoryCode: string, total: number, mode = 'auto') {
     const parent = items.find(i => i.code === itemCode)
     if (!parent) return { note: `Item ${itemCode} is not in Items Master.`, rows: [] }
-    const comps = boms.filter(b => b.parent_item_id === parent.id && ((b.use_mode || 'any') === 'any' || (b.use_mode || 'any') === mode))
-    if (comps.length === 0) return { note: 'No BOM defined for this item. Add a recipe in BOM first.', rows: [] }
+    const all = boms.filter(b => b.parent_item_id === parent.id)
+    if (all.length === 0) return { note: 'No BOM defined for this item. Add a recipe in BOM first.', rows: [] }
+    const comps = all.filter(b => (b.use_mode || 'any') === 'any' || (b.use_mode || 'any') === mode)
+    if (comps.length === 0) return { note: `This item's BOM has no materials set for ${mode === 'manual' ? 'Manual' : 'Auto machine'} mode. Switch the Run mode above to the other option (or add ${mode} components in BOM).`, rows: [] }
     const rows = comps.map(c => {
       const ci = items.find(i => i.id === c.component_item_id)
       const required = c.quantity * total
