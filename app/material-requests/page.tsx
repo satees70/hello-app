@@ -296,13 +296,14 @@ export default function MaterialRequestsPage() {
       r.material_request_items?.forEach(it => addItem(run.mats, it))
     } else {
       const target = (waiting[r.factory_code] = waiting[r.factory_code] || {})
-      r.material_request_items?.forEach(it => addItem(target, it))
+      // Labels (made at the factory) are not picked from the warehouse — keep them out of this list
+      r.material_request_items?.forEach(it => { if (!factoryItems.has(it.item_code)) addItem(target, it) })
     }
   })
   // Oldest request first for allocation: requests arrive newest-first, so reverse the pooled lines
   const allMaps = [...Object.values(waiting), ...Object.values(runs).map(run => run.mats)]
   allMaps.forEach(mats => Object.values(mats).forEach(g => g.items.reverse()))
-  const waitingFactories = Object.keys(waiting).sort()
+  const waitingFactories = Object.keys(waiting).filter(f => Object.keys(waiting[f]).length > 0).sort()
   const runList = Object.values(runs).sort((a, b) => b.released_at.localeCompare(a.released_at) || a.factory.localeCompare(b.factory))
   const hasCombined = waitingFactories.length > 0 || runList.length > 0
 
