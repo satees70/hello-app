@@ -317,8 +317,25 @@ export default function MaterialRequestsPage() {
   const renderMatTable = (mats: MatMap, prefix: string, editable: boolean) => {
     const list = Object.values(mats).sort((a, b) => a.code.localeCompare(b.code))
     const heads = ['Material', 'Description', 'Unit', 'To pick', ...(editable ? ['Received', 'Remaining'] : [])]
+    const r = (n: number) => Number(Number(n).toPrecision(12))
     return (
-      <div className="overflow-x-auto border rounded-lg">
+      <>
+      {/* Mobile: cards */}
+      <div className="md:hidden space-y-2">
+        {list.map(g => {
+          const remaining = Math.max(0, g.requested - g.received); const per = pcsPerRoll[g.code]
+          const toPick = per ? Math.ceil(g.requested / per) : r(g.requested)
+          return (
+            <div key={`m|${prefix}|${g.code}`} className={`border rounded-lg p-2.5 ${editable && g.received >= g.requested ? 'bg-green-50/40' : ''}`}>
+              <div className="flex items-baseline justify-between gap-2"><span className="font-mono font-medium text-sm">{g.code}</span><span className="text-blue-700 font-semibold text-sm">{toPick} {per ? 'roll' : g.unit}</span></div>
+              <div className="text-gray-600 text-xs">{g.description}</div>
+              {editable && <div className="text-xs text-gray-500 mt-1">Received <strong className="text-gray-700">{per ? r(g.received / per) : r(g.received)}</strong> · Remaining <strong className={remaining > 0 ? 'text-red-600' : 'text-green-600'}>{per ? r(remaining / per) : r(remaining)}</strong></div>}
+            </div>
+          )
+        })}
+      </div>
+      {/* Desktop: table */}
+      <div className="hidden md:block overflow-x-auto border rounded-lg">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b">
             <tr>{heads.map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr>
@@ -349,6 +366,7 @@ export default function MaterialRequestsPage() {
           </tbody>
         </table>
       </div>
+      </>
     )
   }
 
