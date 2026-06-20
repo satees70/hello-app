@@ -5,6 +5,7 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
+import { can } from '@/lib/permissions'
 
 interface Item { id: string; code: string; description: string; unit: string; type: string; stock_group: string; supplied_by_factory: boolean; kg_per_bag: number | null; pcs_per_roll: number | null }
 const EMPTY = { code: '', description: '', unit: '', type: 'Material', stock_group: '', supplied_by_factory: false, kg_per_bag: '', pcs_per_roll: '' }
@@ -12,6 +13,8 @@ const EMPTY = { code: '', description: '', unit: '', type: 'Material', stock_gro
 export default function ItemsPage() {
   const { profile, loading } = useProfile()
   useRequireView(profile, 'items')
+  const canEdit = can(profile, 'items', 'edit')
+  const canDelete = can(profile, 'items', 'delete')
   const [items, setItems] = useState<Item[]>([])
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Item | null>(null)
@@ -136,7 +139,7 @@ export default function ItemsPage() {
       <div className="max-w-6xl mx-auto px-6 py-8">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold">Items Master</h1>
-          {isHO && (
+          {isHO && canEdit && (
             <button onClick={openCreate}
               className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">
               + Add Item
@@ -144,7 +147,7 @@ export default function ItemsPage() {
           )}
         </div>
 
-        {isHO && (
+        {isHO && canEdit && (
           <div className="bg-white rounded-xl shadow-sm border p-5 mb-6">
             <h2 className="font-semibold mb-1">Bulk upload from CSV</h2>
             <p className="text-gray-500 text-sm mb-3">
@@ -277,8 +280,9 @@ export default function ItemsPage() {
                   </td>
                   {isHO && (
                     <td className="px-4 py-3 flex gap-2">
-                      <button onClick={() => openEdit(item)} className="text-blue-600 hover:underline text-xs">Edit</button>
-                      <button onClick={() => handleDelete(item.id)} className="text-red-500 hover:underline text-xs">Delete</button>
+                      {canEdit && <button onClick={() => openEdit(item)} className="text-blue-600 hover:underline text-xs">Edit</button>}
+                      {canDelete && <button onClick={() => handleDelete(item.id)} className="text-red-500 hover:underline text-xs">Delete</button>}
+                      {!canEdit && !canDelete && <span className="text-gray-300 text-xs">view only</span>}
                     </td>
                   )}
                 </tr>

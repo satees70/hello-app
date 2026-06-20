@@ -5,6 +5,7 @@ import Papa from 'papaparse'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { supabase, fetchAll } from '@/lib/supabase'
+import { can } from '@/lib/permissions'
 
 interface Item { id: string; code: string; description: string; unit: string; type: string }
 interface BomComponent { id: string; parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean; use_mode: string }
@@ -45,6 +46,7 @@ function ItemCombo({ items, value, onChange, placeholder }: {
 
 export default function BomPage() {
   const { profile, loading } = useProfile()
+  const canEdit = can(profile, 'bom', 'edit')
   const router = useRouter()
   const [items, setItems] = useState<Item[]>([])
   const [parentId, setParentId] = useState('')
@@ -304,7 +306,8 @@ export default function BomPage() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm border p-5 mb-6">
+            {!canEdit && <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg p-3 mb-4">👁 You have <strong>view-only</strong> access to BOM — you can review recipes but not change them.</div>}
+            {canEdit && <div className="bg-white rounded-xl shadow-sm border p-5 mb-6">
               <h3 className="font-medium mb-3 text-sm">Add a component</h3>
               <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
                 <div className="flex-1">
@@ -329,7 +332,7 @@ export default function BomPage() {
                   Add
                 </button>
               </div>
-            </div>
+            </div>}
 
             <div className="bg-white rounded-xl shadow-sm border">
               <table className="w-full text-sm">
@@ -395,7 +398,7 @@ export default function BomPage() {
                           </select>
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
-                          <button onClick={() => removeRow(c.id)} className="text-red-500 hover:underline text-xs">Remove</button>
+                          {canEdit && <button onClick={() => removeRow(c.id)} className="text-red-500 hover:underline text-xs">Remove</button>}
                         </td>
                       </tr>
                     )
@@ -404,7 +407,7 @@ export default function BomPage() {
               </table>
             </div>
 
-            {components.length > 0 && (
+            {components.length > 0 && canEdit && (
               <div className="flex items-center gap-3 mt-4">
                 <button onClick={saveAll} disabled={!dirty || saving}
                   className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
