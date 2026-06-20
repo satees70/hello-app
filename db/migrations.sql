@@ -1246,6 +1246,11 @@ end $$;
 grant execute on function public.remap_unmapped_lines(uuid) to authenticated;
 
 
+-- 2026-06 · Per-factory view-only — a user can see records for these factories but
+-- not edit/delete them (enforced in the app via can(module, action, factory_code)).
+alter table public.profiles add column if not exists readonly_factories text[] not null default '{}';
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.

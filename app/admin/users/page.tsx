@@ -7,9 +7,9 @@ import { supabase } from '@/lib/supabase'
 import { PERMISSION_MODULES, defaultGrid, isConfigured, type Permissions, type Action } from '@/lib/permissions'
 import MultiFilter from '@/components/MultiFilter'
 
-interface UserRow { id: string; email: string; full_name: string; factory_code: string; factory_codes: string[] | null; role: string; permissions: Permissions | null }
-type FormState = { email: string; password: string; full_name: string; factory_code: string; factory_codes: string[]; role: string; permissions: Permissions }
-const blankForm = (): FormState => ({ email: '', password: '', full_name: '', factory_code: '', factory_codes: [], role: 'user', permissions: defaultGrid() })
+interface UserRow { id: string; email: string; full_name: string; factory_code: string; factory_codes: string[] | null; readonly_factories: string[] | null; role: string; permissions: Permissions | null }
+type FormState = { email: string; password: string; full_name: string; factory_code: string; factory_codes: string[]; readonly_factories: string[]; role: string; permissions: Permissions }
+const blankForm = (): FormState => ({ email: '', password: '', full_name: '', factory_code: '', factory_codes: [], readonly_factories: [], role: 'user', permissions: defaultGrid() })
 
 export default function UsersPage() {
   const { profile, loading } = useProfile()
@@ -50,6 +50,7 @@ export default function UsersPage() {
     setForm({
       email: u.email, password: '', full_name: u.full_name || '', factory_code: u.factory_code,
       factory_codes: u.factory_codes?.length ? u.factory_codes : (u.factory_code ? [u.factory_code] : []),
+      readonly_factories: u.readonly_factories || [],
       role: u.role,
       permissions: isConfigured(u.permissions) ? (u.permissions as Permissions) : defaultGrid(),
     })
@@ -88,8 +89,8 @@ export default function UsersPage() {
     const isEdit = mode === 'edit'
     const url = isEdit ? '/api/update-user' : '/api/create-user'
     const body = isEdit
-      ? { id: editingId, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, role: form.role, permissions: form.permissions, password: form.password || undefined }
-      : { email: form.email, password: form.password, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, role: form.role, permissions: form.permissions }
+      ? { id: editingId, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, role: form.role, permissions: form.permissions, password: form.password || undefined }
+      : { email: form.email, password: form.password, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, role: form.role, permissions: form.permissions }
     const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     const data = await res.json()
     if (data.error) { setError(data.error); setSaving(false); return }
@@ -184,6 +185,25 @@ export default function UsersPage() {
                   {form.factory_codes.length > 1 && <p className="text-xs text-blue-600 mt-1">This user will see all {form.factory_codes.length} selected factories together (merged view).</p>}
                 </>
               )}
+              {(() => {
+                const choices = (hoSelected ? factories : factories.filter(f => form.factory_codes.includes(f.code))).filter(f => f.code !== 'HEAD_OFFICE')
+                if (choices.length === 0) return null
+                return (
+                  <div className="mt-3 border-t pt-3">
+                    <p className="text-xs font-medium text-gray-600 mb-1">View-only at <span className="font-normal text-gray-400">— can see records there but not edit / delete / request changes</span></p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {choices.map(f => (
+                        <label key={f.code} className="inline-flex items-center gap-2 text-sm">
+                          <input type="checkbox" className="h-4 w-4" checked={form.readonly_factories.includes(f.code)}
+                            onChange={e => setForm(prev => ({ ...prev, readonly_factories: e.target.checked ? [...prev.readonly_factories, f.code] : prev.readonly_factories.filter(c => c !== f.code) }))} />
+                          {f.name}
+                        </label>
+                      ))}
+                    </div>
+                    {form.readonly_factories.length > 0 && <p className="text-xs text-amber-600 mt-1">View-only at {form.readonly_factories.length} factory(ies) — the Edit / Delete / Request buttons are hidden for those records.</p>}
+                  </div>
+                )
+              })()}
             </div>
 
             {/* Permission grid */}

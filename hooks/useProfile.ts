@@ -10,6 +10,7 @@ export interface Profile {
   full_name: string
   factory_code: string
   factory_codes?: string[] | null
+  readonly_factories?: string[] | null
   role: string
   permissions?: Permissions | null
 }

@@ -57,12 +57,15 @@ export function isConfigured(perms: Permissions | null | undefined): boolean {
 //  - not-yet-configured (empty {}): legacy full access (don't break existing users)
 //  - otherwise: the explicit tick (delete implies nothing; each action is independent)
 export function can(
-  profile: { role?: string; permissions?: Permissions | null } | null | undefined,
+  profile: { role?: string; permissions?: Permissions | null; readonly_factories?: string[] | null } | null | undefined,
   module: ModuleKey,
   action: Action,
+  factoryCode?: string,   // pass a record's factory to honour per-factory view-only
 ): boolean {
   if (!profile) return false
   if (profile.role === 'admin') return true
+  // View-only at certain factories: the user may see records there but not edit/delete them.
+  if (action !== 'view' && factoryCode && (profile.readonly_factories || []).includes(factoryCode)) return false
   // Restricted sections need an explicit grant (no legacy-full default).
   if (!isConfigured(profile.permissions)) return !RESTRICTED_MODULES.includes(module)
   return !!profile.permissions?.[module]?.[action]

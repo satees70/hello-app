@@ -7,7 +7,7 @@ const supabaseAdmin = createClient(
 )
 
 export async function POST(request: Request) {
-  const { email, password, full_name, factory_code, factory_codes, role, permissions } = await request.json()
+  const { email, password, full_name, factory_code, factory_codes, readonly_factories, role, permissions } = await request.json()
 
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email,
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
 
   const { error: profileError } = await supabaseAdmin
     .from('profiles')
-    .insert({ id: authData.user.id, email, full_name, factory_code, factory_codes: factory_codes ?? [factory_code], role, permissions: permissions ?? {} })
+    .insert({ id: authData.user.id, email, full_name, factory_code, factory_codes: factory_codes ?? [factory_code], readonly_factories: readonly_factories ?? [], role, permissions: permissions ?? {} })
   if (profileError) return NextResponse.json({ error: profileError.message }, { status: 400 })
 
   return NextResponse.json({ success: true })

@@ -4,6 +4,7 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
+import { can } from '@/lib/permissions'
 import MultiFilter from '@/components/MultiFilter'
 
 interface SalesImport {
@@ -691,7 +692,9 @@ export default function SalesOrdersPage() {
                         <td className="px-3 py-2 whitespace-nowrap">
                           {pend > 0
                             ? <span className="text-amber-600" title="Waiting for Head Office to approve/reject before another change can be raised">⏳ pending — wait for approval</span>
-                            : <>
+                            : !can(profile, 'sales', 'edit', line.factory_code)
+                              ? <span className="text-gray-400" title="You have view-only access for this factory">view only</span>
+                              : <>
                                 <button onClick={() => openRequest(line)} className="text-blue-600 hover:underline">Request change</button>
                                 <button onClick={() => openDelete(line)} className="text-red-600 hover:underline ml-3">Request delete</button>
                               </>}
@@ -725,12 +728,12 @@ export default function SalesOrdersPage() {
                                 ? <span className="ml-2 text-amber-600">⚠ {dup} duplicate line(s) — resolve first</span>
                                 : <span className="ml-2 text-green-600">Ready to confirm</span>}
                         </div>
-                        {!confirmed && (
-                          <button onClick={() => confirmFactory(f)} disabled={!ready || confirmingFactory === f}
-                            className="bg-green-600 text-white px-5 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium whitespace-nowrap">
-                            {confirmingFactory === f ? 'Confirming…' : `Confirm ${f} lines`}
-                          </button>
-                        )}
+                        {!confirmed && (can(profile, 'sales', 'edit', f)
+                          ? <button onClick={() => confirmFactory(f)} disabled={!ready || confirmingFactory === f}
+                              className="bg-green-600 text-white px-5 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium whitespace-nowrap">
+                              {confirmingFactory === f ? 'Confirming…' : `Confirm ${f} lines`}
+                            </button>
+                          : <span className="text-gray-400 text-sm">view only</span>)}
                       </div>
                     )
                   })}
