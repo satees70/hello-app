@@ -1103,6 +1103,57 @@ end $$;
 grant execute on function public.reject_stock_adjustment(uuid) to authenticated;
 
 
+-- ============================================================================
+-- 2026-06 · Run-mode change requests (HOD approval) from the Packing Schedule
+-- ============================================================================
+-- Run mode is decided when raising materials. Changing it later (it changes the
+-- BOM: roll vs piece) needs HO approval; approving recalculates any OPEN request.
+create table if not exists public.run_mode_requests (
+  id uuid primary key default gen_random_uuid(),
+  batch_id uuid, factory_code text, batch_no text, item_code text,
+  from_mode text, to_mode text, reason text,
+  status text not null default 'Pending',
+  requested_by uuid, requested_by_name text,
+  reviewed_by uuid, reviewed_by_name text, reviewed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+grant select, insert on public.run_mode_requests to authenticated, anon, service_role;
+grant update, delete on public.run_mode_requests to service_role;
+alter table public.run_mode_requests enable row level security;
+drop policy if exists rm_read on public.run_mode_requests;
+create policy rm_read on public.run_mode_requests for select
+  using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()) or requested_by = auth.uid());
+drop policy if exists rm_insert on public.run_mode_requests;
+create policy rm_insert on public.run_mode_requests for insert with check (requested_by = auth.uid());
+
+create or replace function public.approve_run_mode(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare r public.run_mode_requests; v_name text; mr record;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can approve'; end if;
+  select * into r from public.run_mode_requests where id = p_id;
+  if not found or r.status <> 'Pending' then raise exception 'Not a pending request'; end if;
+  update public.production_batches set run_mode = r.to_mode where id = r.batch_id;
+  -- recalculate any still-open material request for this batch (uses the new mode)
+  for mr in select id from public.material_requests where batch_id = r.batch_id and status = 'Open' loop
+    perform public.refresh_one_open_request(mr.id);
+  end loop;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.run_mode_requests set status = 'Approved', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id;
+end $$;
+grant execute on function public.approve_run_mode(uuid) to authenticated;
+
+create or replace function public.reject_run_mode(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can reject'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.run_mode_requests set status = 'Rejected', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id and status = 'Pending';
+end $$;
+grant execute on function public.reject_run_mode(uuid) to authenticated;
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.

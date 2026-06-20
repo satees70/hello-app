@@ -150,9 +150,10 @@ export default function ProductionPage() {
       setError('Enter a valid expiry date (year between 2020 and 2100).'); return
     }
     setRaising(true); setError(''); setSuccess('')
-    // Save the product expiry date onto the batch(es) first — it flows to the factory/label list
+    // Save the product expiry date + chosen run mode onto the batch(es) first — the
+    // RPC uses run_mode to pick the right BOM (auto = roll, manual = pc).
     const { error: expErr } = await supabase.from('production_batches')
-      .update({ exp_date: expDate || null }).in('id', t.batchIds)
+      .update({ exp_date: expDate || null, run_mode: t.mode }).in('id', t.batchIds)
     if (expErr) { setError(expErr.message); setRaising(false); return }
     const { error: rpcErr } = t.batchIds.length === 1
       ? await supabase.rpc('raise_material_request', { p_batch_id: t.batchIds[0] })
@@ -483,6 +484,18 @@ export default function ProductionPage() {
               To make <strong>{selected.total}</strong> of {selected.item_code} at {isHO ? factoryName(selected.factory_code) : (selected.factory_code || 'this factory')}.
               {selected.batchIds.length > 1 && ` (combined from ${selected.batchIds.length} batches)`} Stock shown is the live system on-hand; the shortfall is worked out for you.
             </p>
+            <div className="flex flex-wrap items-center gap-2 mb-4 text-sm">
+              <span className="font-medium text-gray-700">Run mode:</span>
+              {hasRequest ? (
+                <span className="px-2 py-1 rounded bg-gray-100 text-gray-700">{selected.mode === 'manual' ? 'Manual' : 'Auto machine'} <span className="text-gray-400">(locked — request already open)</span></span>
+              ) : (
+                <select value={selected.mode} onChange={e => setSelected(s => (s ? { ...s, mode: e.target.value } : s))} className="border rounded px-2 py-1 bg-white">
+                  <option value="auto">Auto machine</option>
+                  <option value="manual">Manual</option>
+                </select>
+              )}
+              <span className="text-gray-400 text-xs">decides which materials are needed (auto = roll, manual = pieces)</span>
+            </div>
 
             {exploded.note ? (
               <p className="text-amber-600 text-sm bg-amber-50 p-3 rounded">{exploded.note}</p>

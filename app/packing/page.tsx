@@ -146,10 +146,26 @@ export default function PackingPage() {
     const e = packEdit[b.id] ?? { line: b.pack_line || '', date: b.pack_date || '', mode: b.run_mode || 'auto' }
     if (!e.line || !e.date) { setError('Pick a pack line and a pack date first.'); return }
     setSavingId(b.id); setError(''); setSuccess('')
-    const { error: upErr } = await supabase.from('production_batches').update({ pack_line: e.line, pack_date: e.date, run_mode: e.mode || 'auto' }).eq('id', b.id)
+    // run mode is decided at the material stage — not changed here
+    const { error: upErr } = await supabase.from('production_batches').update({ pack_line: e.line, pack_date: e.date }).eq('id', b.id)
     if (upErr) { setError(upErr.message); setSavingId(''); return }
-    setBatches(prev => prev.map(x => (x.id === b.id ? { ...x, pack_line: e.line, pack_date: e.date, run_mode: e.mode || 'auto' } : x)))
+    setBatches(prev => prev.map(x => (x.id === b.id ? { ...x, pack_line: e.line, pack_date: e.date } : x)))
     setSavingId(''); setSuccess(`${b.batch_no} scheduled to ${e.line} on ${e.date.split('-').reverse().join('/')}.`)
+  }
+
+  async function requestRunModeChange(b: Batch) {
+    const to = (b.run_mode || 'auto') === 'auto' ? 'manual' : 'auto'
+    const reason = window.prompt(`Change ${b.batch_no} run mode from ${b.run_mode === 'manual' ? 'Manual' : 'Auto'} to ${to === 'manual' ? 'Manual' : 'Auto'}?\n\nThis changes the materials needed (roll vs pieces) and goes to Head Office for approval — on approval the open material request is recalculated.\n\nReason (optional):`, '')
+    if (reason === null) return
+    setError(''); setSuccess('')
+    const { error: insErr } = await supabase.from('run_mode_requests').insert({
+      batch_id: b.id, factory_code: b.factory_code, batch_no: b.batch_no, item_code: b.item_code,
+      from_mode: b.run_mode || 'auto', to_mode: to, reason: reason || null,
+      requested_by: profile?.id, requested_by_name: profile?.full_name || null,
+    })
+    if (insErr) { setError(insErr.message); alert('Could not request:\n\n' + insErr.message); return }
+    setSuccess(`Run-mode change requested for ${b.batch_no} — waiting for Head Office approval.`)
+    alert(`Requested to change ${b.batch_no} to ${to === 'manual' ? 'Manual' : 'Auto'}.\nGo to Pending Changes for Head Office to approve.`)
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
@@ -188,10 +204,10 @@ export default function PackingPage() {
           {opts.length === 0 && <option value="" disabled>Add in Setup → Packing Lines</option>}
         </select>
         <input type="date" value={packEdit[b.id]?.date ?? b.pack_date ?? today} onChange={e => setField({ date: e.target.value })} className="border rounded px-2 py-1 text-xs" />
-        <select value={packEdit[b.id]?.mode ?? b.run_mode ?? 'auto'} onChange={e => setField({ mode: e.target.value })} className="border rounded px-2 py-1 text-xs bg-white">
-          <option value="auto">Auto</option>
-          <option value="manual">Manual</option>
-        </select>
+        <div className="flex flex-col items-start text-xs">
+          <span className="px-2 py-1 rounded bg-gray-100 text-gray-700 whitespace-nowrap">{(b.run_mode || 'auto') === 'manual' ? 'Manual' : 'Auto'}</span>
+          <button type="button" onClick={() => requestRunModeChange(b)} className="text-blue-600 hover:underline mt-0.5 whitespace-nowrap">change (needs approval)</button>
+        </div>
         <button onClick={() => savePack(b)} disabled={savingId === b.id} className="bg-teal-600 text-white px-3 py-1 rounded-lg hover:bg-teal-700 disabled:opacity-50 text-xs font-medium">{savingId === b.id ? 'Saving…' : 'Schedule'}</button>
       </div>
     )
