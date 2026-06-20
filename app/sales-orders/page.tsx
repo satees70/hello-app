@@ -80,6 +80,8 @@ export default function SalesOrdersPage() {
   // Factory display + valid location codes (for the location dropdown)
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [locationCodes, setLocationCodes] = useState<string[]>([])
+  const [locationMap, setLocationMap] = useState<Record<string, string>>({}) // location_code -> factory_code
+  const [remapping, setRemapping] = useState(false)
 
   // Change-request form
   const [reqLine, setReqLine] = useState<SalesLine | null>(null)
@@ -135,10 +137,28 @@ export default function SalesOrdersPage() {
   async function loadRefs() {
     const [{ data: f }, { data: lm }] = await Promise.all([
       supabase.from('factories').select('code, name').order('code'),
-      supabase.from('location_map').select('location_code').order('location_code'),
+      supabase.from('location_map').select('location_code, factory_code').order('location_code'),
     ])
     setFactories(f || [])
     setLocationCodes((lm || []).map(r => r.location_code))
+    const m: Record<string, string> = {}; (lm || []).forEach(r => { if (r.factory_code) m[r.location_code] = r.factory_code }); setLocationMap(m)
+  }
+
+  // Re-apply the current Location Map to lines still showing Unmapped (after a new
+  // mapping is added in Setup → Location Map), without re-uploading the document.
+  async function remapUnmapped() {
+    if (!linesFor) return
+    const toFix = lines.filter(l => !l.factory_code && locationMap[l.location_code])
+    if (toFix.length === 0) { setError('No unmapped lines can be matched — add the missing Location → Factory in Setup → Location Map first.'); return }
+    setRemapping(true); setError(''); setSuccess('')
+    let ok = 0
+    for (const l of toFix) {
+      const { error: e } = await supabase.from('sales_order_lines').update({ factory_code: locationMap[l.location_code] }).eq('id', l.id)
+      if (!e) ok++
+    }
+    setRemapping(false)
+    setSuccess(`Re-mapped ${ok} line(s) to their factory.`)
+    viewLines(linesFor)
   }
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -543,6 +563,7 @@ export default function SalesOrdersPage() {
             <div className="flex flex-wrap items-center gap-3 mb-3 text-sm">
               <span className="text-gray-500">Filter each column below.</span>
               {hasUnmapped && <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={onlyUnmapped} onChange={e => setOnlyUnmapped(e.target.checked)} className="h-4 w-4" /> ⚠ Unmapped only</label>}
+              {hasUnmapped && <button onClick={remapUnmapped} disabled={remapping} className="bg-amber-500 text-white px-3 py-1 rounded-lg hover:bg-amber-600 disabled:opacity-50 text-xs font-medium">{remapping ? 'Re-mapping…' : '🔄 Re-map unmapped lines'}</button>}
               <span className="text-gray-400 text-xs">{visibleLines.length} of {lines.length} line(s)</span>
               {anyFilter && <button onClick={() => { setColFilters({}); setOnlyUnmapped(false) }} className="text-blue-600 hover:underline text-xs">Clear filters</button>}
             </div>
