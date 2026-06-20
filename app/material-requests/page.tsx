@@ -15,6 +15,8 @@ interface MRItem {
   shortfall_qty: number
   requested_qty: number
   received_qty: number
+  label_batch_no?: string | null
+  label_exp_date?: string | null
 }
 interface MaterialRequest {
   id: string
@@ -55,6 +57,7 @@ export default function MaterialRequestsPage() {
   const [pcsPerRoll, setPcsPerRoll] = useState<Record<string, number>>({}) // roll items: code -> pieces per roll
   const [expEdits, setExpEdits] = useState<Record<string, string>>({}) // request id -> EXP date being typed
   const [soEdits, setSoEdits] = useState<Record<string, string>>({}) // run no -> SO number being typed
+  const [labelEdits, setLabelEdits] = useState<Record<string, { batch: string; exp: string }>>({}) // item id -> label batch/exp being typed
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
@@ -142,6 +145,25 @@ export default function MaterialRequestsPage() {
     setBusy('')
     if (e) { setError(e.message); return }
     setSuccess(`Cancel request sent for ${r.request_no} — waiting for Head Office approval.`)
+  }
+
+  // Are all the raw (warehouse) materials for this request received? Labels unlock then.
+  function rawDone(r: MaterialRequest) {
+    const raw = (r.material_request_items || []).filter(it => !factoryItems.has(it.item_code))
+    return raw.length === 0 || raw.every(it => it.received_qty >= it.requested_qty)
+  }
+  // Save a label item's batch no. / expiry (at least one required)
+  async function saveLabel(it: MRItem) {
+    const e = labelEdits[it.id] ?? { batch: it.label_batch_no ?? '', exp: it.label_exp_date ?? '' }
+    const batch = e.batch.trim()
+    if (!batch && !e.exp) { setError('Enter a batch number or an expiry date (at least one) for the label.'); return }
+    setBusy(`label|${it.id}`); setError(''); setSuccess('')
+    const { error: er } = await supabase.from('material_request_items').update({ label_batch_no: batch || null, label_exp_date: e.exp || null }).eq('id', it.id)
+    if (er) { setError(er.message); setBusy(''); return }
+    setSuccess(`Label details saved for ${it.item_code}.`)
+    setBusy('')
+    setLabelEdits(prev => { const n = { ...prev }; delete n[it.id]; return n })
+    load()
   }
 
   async function requestRunCancel(run: { runNo: string; reqs: MaterialRequest[] }) {
@@ -416,13 +438,16 @@ export default function MaterialRequestsPage() {
                           )}
                           {facReqs.length > 0 && (() => {
                             const missingExp = facReqs.some(r => !r.production_batches?.exp_date)
+                            const facLocked = facReqs.some(r => !rawDone(r))
+                            const labelsMissing = facReqs.some(r => (r.material_request_items || []).filter(it => factoryItems.has(it.item_code)).some(it => !it.label_batch_no && !it.label_exp_date))
                             return (
                             <div>
                               <div className="flex flex-wrap items-center gap-2 mb-2">
-                                <span className="text-sm font-semibold text-purple-700">🏭 Made at factory <span className="font-normal text-gray-400">— per product (not combined)</span></span>
+                                <span className="text-sm font-semibold text-purple-700">🏭 Made at factory <span className="font-normal text-gray-400">— labels</span></span>
                                 <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 font-mono">L{run.runNo}</span>
-                                <button onClick={() => downloadFactoryPdf(run.runNo, run.factory, run.released_at, facReqs)}
-                                  className="ml-auto border border-purple-600 text-purple-600 px-3 py-1 rounded-lg hover:bg-purple-50 text-xs font-medium">⬇ Factory PDF</button>
+                                <button onClick={() => downloadFactoryPdf(run.runNo, run.factory, run.released_at, facReqs)} disabled={facLocked || labelsMissing}
+                                  title={facLocked ? 'Locked until all raw materials are received' : labelsMissing ? 'Enter a batch no. or expiry for every label first' : ''}
+                                  className="ml-auto border border-purple-600 text-purple-600 px-3 py-1 rounded-lg hover:bg-purple-50 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed">⬇ Factory PDF</button>
                               </div>
                               {missingExp && (
                                 <p className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg p-2 mb-2">
@@ -433,8 +458,10 @@ export default function MaterialRequestsPage() {
                                 {facReqs.map(r => {
                                   const facItems = (r.material_request_items || []).filter(it => factoryItems.has(it.item_code))
                                   const hasExp = !!r.production_batches?.exp_date
+                                  const locked = !rawDone(r)
                                   return (
                                     <div key={r.id} className={`border rounded-lg p-3 ${hasExp ? '' : 'border-red-300'}`}>
+                                      {locked && <p className="text-amber-700 text-xs bg-amber-50 border border-amber-200 rounded p-2 mb-2">🔒 Labels unlock once all raw materials for this request are received (Goods Received). This avoids wasted labels and keeps the batch/expiry accurate.</p>}
                                       <div className="flex flex-wrap items-center gap-2 mb-2 text-sm">
                                         <span className="font-semibold">{r.production_batches?.item_code}</span>
                                         <span className="text-gray-500">{r.production_batches?.description}</span>
@@ -453,12 +480,13 @@ export default function MaterialRequestsPage() {
                                       <div className="overflow-x-auto border rounded-lg">
                                         <table className="w-full text-sm">
                                           <thead className="bg-gray-50 border-b">
-                                            <tr>{['Material', 'Description', 'Unit', 'To make', 'Made', 'Remaining'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr>
+                                            <tr>{['Material', 'Description', 'Unit', 'To make', 'Made', 'Remaining', ...(locked ? [] : ['Batch No.', 'Expiry', ''])].map((h, hi) => <th key={hi} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr>
                                           </thead>
                                           <tbody>
                                             {facItems.map(it => {
                                               const done = it.received_qty >= it.requested_qty
                                               const remaining = Math.max(0, it.requested_qty - it.received_qty)
+                                              const le = labelEdits[it.id] ?? { batch: it.label_batch_no ?? '', exp: it.label_exp_date ?? '' }
                                               return (
                                                 <tr key={it.id} className={`border-b last:border-0 ${done ? 'bg-green-50/40' : ''}`}>
                                                   <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{it.item_code}</td>
@@ -467,6 +495,11 @@ export default function MaterialRequestsPage() {
                                                   <td className="px-3 py-2 text-right font-semibold text-purple-700">{it.requested_qty}</td>
                                                   <td className="px-3 py-2 text-right text-gray-700">{it.received_qty}</td>
                                                   <td className={`px-3 py-2 text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{remaining}</td>
+                                                  {!locked && <>
+                                                    <td className="px-3 py-2"><input value={le.batch} onChange={e => setLabelEdits(p => ({ ...p, [it.id]: { batch: e.target.value, exp: p[it.id]?.exp ?? it.label_exp_date ?? '' } }))} placeholder="batch no." className="border rounded px-2 py-1 text-xs w-28" /></td>
+                                                    <td className="px-3 py-2"><input type="date" min="2020-01-01" max="2100-12-31" value={le.exp} onChange={e => setLabelEdits(p => ({ ...p, [it.id]: { batch: p[it.id]?.batch ?? it.label_batch_no ?? '', exp: e.target.value } }))} className="border rounded px-2 py-1 text-xs" /></td>
+                                                    <td className="px-3 py-2 whitespace-nowrap"><button onClick={() => saveLabel(it)} disabled={busy === `label|${it.id}`} className="text-blue-600 hover:underline text-xs disabled:opacity-50">{busy === `label|${it.id}` ? 'Saving…' : 'Save'}</button>{(it.label_batch_no || it.label_exp_date) && <span className="text-green-600 text-xs ml-1">✓</span>}</td>
+                                                  </>}
                                                 </tr>
                                               )
                                             })}
