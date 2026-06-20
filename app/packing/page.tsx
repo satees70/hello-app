@@ -83,22 +83,38 @@ export default function PackingPage() {
     if (b.material_request_id) return 'Requested'
     return 'Planned'
   }
-  // How many units we can actually make from current system stock.
-  // No BOM => no material constraint. Otherwise = the limiting material.
-  const availability = (b: Batch): { hasBom: boolean; units: number } => {
+  const n = (x: number) => Number(Number(x).toPrecision(12))
+  const itemCode = (id: string) => items.find(i => i.id === id)?.code || id
+  // How many units we can make from current system stock, plus the per-material breakdown.
+  const availability = (b: Batch): { hasBom: boolean; units: number; comps: { code: string; required: number; avail: number }[] } => {
     const parent = items.find(i => i.code === b.item_code)
-    if (!parent) return { hasBom: false, units: Infinity }
+    if (!parent) return { hasBom: false, units: 0, comps: [] }
     const mode = b.run_mode || 'auto'
-    const comps = boms.filter(c => c.parent_item_id === parent.id && ((c.use_mode || 'any') === 'any' || (c.use_mode || 'any') === mode))
-    if (comps.length === 0) return { hasBom: false, units: Infinity }
+    const comps0 = boms.filter(c => c.parent_item_id === parent.id && ((c.use_mode || 'any') === 'any' || (c.use_mode || 'any') === mode))
+    if (comps0.length === 0) return { hasBom: false, units: 0, comps: [] }
     let units = Infinity
-    for (const c of comps) { const avail = stock[`${c.component_item_id}|${b.factory_code}`] ?? 0; const per = Number(c.quantity) || 0; units = Math.min(units, per > 0 ? Math.floor(avail / per) : Infinity) }
-    return { hasBom: true, units }
+    const comps = comps0.map(c => {
+      const avail = stock[`${c.component_item_id}|${b.factory_code}`] ?? 0
+      const per = Number(c.quantity) || 0
+      if (per > 0) units = Math.min(units, Math.floor(avail / per))
+      return { code: itemCode(c.component_item_id), required: per * b.total_quantity, avail }
+    })
+    return { hasBom: true, units: units === Infinity ? b.total_quantity : units, comps }
   }
-  // Ready to schedule once we can make at least one unit (or there's no BOM to block it)
-  const materialsReady = (b: Batch) => { const a = availability(b); return !a.hasBom || a.units >= 1 }
-  const partial = (b: Batch) => { const a = availability(b); return a.hasBom && a.units >= 1 && a.units < b.total_quantity }
-  const waitReason = (b: Batch) => 'Not enough material in stock'
+  // Ready only when we can make at least one unit from real stock. No BOM = can't confirm = waiting.
+  const materialsReady = (b: Batch) => availability(b).units >= 1
+  const partial = (b: Batch) => { const a = availability(b); return a.units >= 1 && a.units < b.total_quantity }
+  const waitReason = (b: Batch) => {
+    const a = availability(b)
+    if (!a.hasBom) return 'No BOM set — add a recipe first'
+    const short = a.comps.filter(c => c.avail < c.required)
+    return short.length ? 'Short: ' + short.map(c => `${c.code} (${n(c.avail)}/${n(c.required)})`).join(', ') : 'Not enough material in stock'
+  }
+  const MaterialCells = ({ b }: { b: Batch }) => {
+    const a = availability(b)
+    if (!a.hasBom) return <span className="text-xs text-amber-600">⚠ No BOM set</span>
+    return <span className="text-xs">{a.comps.map(c => <span key={c.code} className={`mr-2 whitespace-nowrap ${c.avail < c.required ? 'text-red-600 font-medium' : 'text-gray-500'}`}>{c.code}: {n(c.avail)}/{n(c.required)}</span>)}</span>
+  }
 
   async function savePack(b: Batch) {
     const e = packEdit[b.id] ?? { line: b.pack_line || '', date: b.pack_date || '', mode: b.run_mode || 'auto' }
@@ -188,7 +204,7 @@ export default function PackingPage() {
                 <tr key={b.id} className="border-b last:border-0 hover:bg-gray-50">
                   {isHO && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(b.factory_code)}</td>}
                   <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}{partial(b) && <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700 align-middle">make {availability(b).units} now</span>}</td>
-                  <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span></td>
+                  <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span><span className="block mt-0.5"><MaterialCells b={b} /></span></td>
                   <td className="px-3 py-2 text-right font-semibold">{b.total_quantity}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-600">{b.delivery_date ? fmtDate(b.delivery_date) : '—'}</td>
                   <td className="px-3 py-2">{canEdit ? <PackForm b={b} /> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${partial(b) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{partial(b) ? `Enough for ${availability(b).units}` : 'Materials ready'}</span>}</td>
