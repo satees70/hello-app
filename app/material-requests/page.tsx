@@ -33,7 +33,8 @@ interface MaterialRequest {
   material_request_items: MRItem[]
 }
 
-const FILTERS = ['Open', 'Partially Received', 'Fulfilled', 'All', 'Combined picking', 'Labels'] as const
+const FILTERS = ['Open', 'Partially Received', 'Fulfilled', 'All', 'Combined picking', 'Labels', 'Not requested'] as const
+interface PlannedBatch { id: string; batch_no: string; item_code: string; description: string; factory_code: string; total_quantity: number; produced_qty: number; delivery_date: string | null }
 type Filter = typeof FILTERS[number]
 
 // Statuses that still need picking — pooled into the combined list
@@ -56,13 +57,22 @@ export default function MaterialRequestsPage() {
   const [success, setSuccess] = useState('')
   const [factoryItems, setFactoryItems] = useState<Set<string>>(new Set()) // item codes supplied by the factory
   const [grnSet, setGrnSet] = useState<Set<string>>(new Set()) // `${factory}|${code}` that appear on an uploaded Goods Received doc
+  const [notReq, setNotReq] = useState<PlannedBatch[]>([]) // batches with no material request raised yet
   const [pcsPerRoll, setPcsPerRoll] = useState<Record<string, number>>({}) // roll items: code -> pieces per roll
   const [soEdits, setSoEdits] = useState<Record<string, string>>({}) // run no -> SO number being typed
   const [labelEdits, setLabelEdits] = useState<Record<string, { batch: string; exp: string; qty: string }>>({}) // item id -> label batch/exp/print-qty being typed
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
-  useEffect(() => { if (profile) { load(); loadFactories(); loadFactoryItems(); loadRolls(); loadGrn() } }, [profile])
+  useEffect(() => { if (profile) { load(); loadFactories(); loadFactoryItems(); loadRolls(); loadGrn(); loadNotReq() } }, [profile])
+
+  // Planned batches that have NOT had a material request raised yet
+  async function loadNotReq() {
+    const { data } = await supabase.from('production_batches')
+      .select('id, batch_no, item_code, description, factory_code, total_quantity, produced_qty, delivery_date')
+      .is('material_request_id', null).order('factory_code').order('delivery_date')
+    setNotReq(((data as PlannedBatch[]) || []).filter(b => Number(b.produced_qty || 0) < b.total_quantity))
+  }
   async function loadRolls() {
     const { data } = await supabase.from('items').select('code, pcs_per_roll').not('pcs_per_roll', 'is', null)
     const m: Record<string, number> = {}; (data || []).forEach(r => { if (r.pcs_per_roll) m[r.code] = Number(r.pcs_per_roll) }); setPcsPerRoll(m)
@@ -386,7 +396,7 @@ export default function MaterialRequestsPage() {
           {FILTERS.map(f => (
             <button key={f} onClick={() => setFilter(f)}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${filter === f ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
-              {f}{f !== 'All' && counts[f] ? ` (${counts[f]})` : ''}
+              {f}{f === 'Not requested' ? (notReq.length ? ` (${notReq.length})` : '') : (f !== 'All' && counts[f] ? ` (${counts[f]})` : '')}
             </button>
           ))}
         </div>
@@ -394,7 +404,36 @@ export default function MaterialRequestsPage() {
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
         {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}
 
-        {filter === 'Combined picking' || filter === 'Labels' ? (
+        {filter === 'Not requested' ? (
+          (() => {
+            const list = notReq.filter(b => isHO || (profile.factory_codes?.length ? profile.factory_codes.includes(b.factory_code) : b.factory_code === profile.factory_code))
+            if (list.length === 0) return <div className="bg-white rounded-xl shadow-sm border p-10 text-center text-gray-400">🎉 Every planned batch has had its materials requested.</div>
+            const byFac: Record<string, PlannedBatch[]> = {}; list.forEach(b => { (byFac[b.factory_code] = byFac[b.factory_code] || []).push(b) })
+            return (
+              <div className="space-y-5 max-h-[40rem] overflow-y-auto pr-1">
+                <p className="text-gray-500 text-sm">These planned batches have <strong>no material request yet</strong>. Raise materials for them on the <a href="/production" className="text-blue-600 hover:underline">Order Board</a> (Materials button).</p>
+                {Object.keys(byFac).sort().map(fac => (
+                  <div key={fac} className="bg-white rounded-xl shadow-sm border overflow-hidden">
+                    <div className="px-4 py-2 bg-amber-50 border-b text-sm font-semibold text-amber-800">🏭 {isHO ? factoryName(fac) : fac} <span className="font-normal text-amber-600">· {byFac[fac].length} batch(es) not requested</span></div>
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 border-b"><tr>{['Batch', 'Item', 'Qty', 'Delivery'].map(h => <th key={h} className="text-left px-4 py-2 font-medium text-gray-600">{h}</th>)}</tr></thead>
+                      <tbody>
+                        {byFac[fac].map(b => (
+                          <tr key={b.id} className="border-b last:border-0 hover:bg-gray-50">
+                            <td className="px-4 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}</td>
+                            <td className="px-4 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span></td>
+                            <td className="px-4 py-2 text-right font-semibold">{b.total_quantity}</td>
+                            <td className="px-4 py-2 whitespace-nowrap text-gray-600">{b.delivery_date ? b.delivery_date.split('-').reverse().join('/') : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ))}
+              </div>
+            )
+          })()
+        ) : filter === 'Combined picking' || filter === 'Labels' ? (
           !hasCombined ? (
             <div className="bg-white rounded-xl shadow-sm border p-10 text-center text-gray-400">
               {filter === 'Labels' ? 'No labels yet — release a material request, then upload its Goods Received Note to unlock label printing.' : <>Nothing to pick — no open requests.<br />Raise material requests from batches on the Production board.</>}
