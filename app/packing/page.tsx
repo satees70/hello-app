@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
@@ -23,7 +23,7 @@ interface Batch {
   production_batch_items: PBItem[]
 }
 interface PackLine { factory_code: string; name: string; active: boolean }
-interface Item { id: string; code: string }
+interface Item { id: string; code: string; description: string; unit: string }
 interface BomComp { parent_item_id: string; component_item_id: string; quantity: number; use_mode: string }
 
 const STATUS_STYLE: Record<string, string> = {
@@ -49,6 +49,8 @@ export default function PackingPage() {
   const [packEdit, setPackEdit] = useState<Record<string, { line: string; date: string; mode: string }>>({})
   const [collapsedFacs, setCollapsedFacs] = useState<Set<string>>(new Set())
   const toggleFac = (fc: string) => setCollapsedFacs(p => { const n = new Set(p); n.has(fc) ? n.delete(fc) : n.add(fc); return n })
+  const [openMat, setOpenMat] = useState<Set<string>>(new Set())
+  const toggleMat = (id: string) => setOpenMat(p => { const x = new Set(p); x.has(id) ? x.delete(id) : x.add(id); return x })
   const [savingId, setSavingId] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -65,7 +67,7 @@ export default function PackingPage() {
     setBatches((data as Batch[]) || [])
     const { data: pl } = await supabase.from('packing_lines').select('factory_code, name, active').order('name')
     setPackLines((pl as PackLine[]) || [])
-    setItems(await fetchAll<Item>('items', 'id, code'))
+    setItems(await fetchAll<Item>('items', 'id, code, description, unit'))
     setBoms(await fetchAll<BomComp>('bom_components', 'parent_item_id, component_item_id, quantity, use_mode'))
     const { data: st } = await supabase.from('item_stock').select('item_id, factory_code, quantity')
     const sm: Record<string, number> = {}; (st || []).forEach(r => { sm[`${r.item_id}|${r.factory_code}`] = Number(r.quantity) })
@@ -84,9 +86,9 @@ export default function PackingPage() {
     return 'Planned'
   }
   const n = (x: number) => Number(Number(x).toPrecision(12))
-  const itemCode = (id: string) => items.find(i => i.id === id)?.code || id
+  const itemOf = (id: string) => items.find(i => i.id === id)
   // How many units we can make from current system stock, plus the per-material breakdown.
-  const availability = (b: Batch): { hasBom: boolean; units: number; comps: { code: string; required: number; avail: number }[] } => {
+  const availability = (b: Batch): { hasBom: boolean; units: number; comps: { code: string; description: string; unit: string; required: number; avail: number; shortfall: number }[] } => {
     const parent = items.find(i => i.code === b.item_code)
     if (!parent) return { hasBom: false, units: 0, comps: [] }
     const mode = b.run_mode || 'auto'
@@ -94,10 +96,12 @@ export default function PackingPage() {
     if (comps0.length === 0) return { hasBom: false, units: 0, comps: [] }
     let units = Infinity
     const comps = comps0.map(c => {
+      const ci = itemOf(c.component_item_id)
       const avail = stock[`${c.component_item_id}|${b.factory_code}`] ?? 0
       const per = Number(c.quantity) || 0
       if (per > 0) units = Math.min(units, Math.floor(avail / per))
-      return { code: itemCode(c.component_item_id), required: per * b.total_quantity, avail }
+      const required = per * b.total_quantity
+      return { code: ci?.code || '—', description: ci?.description || '', unit: ci?.unit || '', required, avail, shortfall: Math.max(required - avail, 0) }
     })
     return { hasBom: true, units: units === Infinity ? b.total_quantity : units, comps }
   }
@@ -107,13 +111,35 @@ export default function PackingPage() {
   const waitReason = (b: Batch) => {
     const a = availability(b)
     if (!a.hasBom) return 'No BOM set — add a recipe first'
-    const short = a.comps.filter(c => c.avail < c.required)
+    const short = a.comps.filter(c => c.shortfall > 0)
     return short.length ? 'Short: ' + short.map(c => `${c.code} (${n(c.avail)}/${n(c.required)})`).join(', ') : 'Not enough material in stock'
   }
-  const MaterialCells = ({ b }: { b: Batch }) => {
+  // The material table for a batch — same columns as the Order Board popup
+  const MaterialTable = ({ b }: { b: Batch }) => {
     const a = availability(b)
-    if (!a.hasBom) return <span className="text-xs text-amber-600">⚠ No BOM set</span>
-    return <span className="text-xs">{a.comps.map(c => <span key={c.code} className={`mr-2 whitespace-nowrap ${c.avail < c.required ? 'text-red-600 font-medium' : 'text-gray-500'}`}>{c.code}: {n(c.avail)}/{n(c.required)}</span>)}</span>
+    if (!a.hasBom) return <p className="text-amber-600 text-xs">No BOM defined for this item — add a recipe in BOM first.</p>
+    return (
+      <div className="overflow-x-auto border rounded-lg max-w-3xl">
+        <table className="w-full text-xs">
+          <thead className="bg-gray-50 border-b">
+            <tr>{['Material', 'Description', 'Unit', 'Required', 'Stock (system)', 'Shortfall'].map(h => (
+              <th key={h} className="text-left px-3 py-1.5 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+          </thead>
+          <tbody>
+            {a.comps.map(c => (
+              <tr key={c.code} className={`border-b last:border-0 ${c.shortfall > 0 ? '' : 'bg-green-50/40'}`}>
+                <td className="px-3 py-1.5 font-mono font-medium whitespace-nowrap">{c.code}</td>
+                <td className="px-3 py-1.5 text-gray-600">{c.description}</td>
+                <td className="px-3 py-1.5 text-gray-500">{c.unit}</td>
+                <td className="px-3 py-1.5 text-right">{n(c.required)}</td>
+                <td className="px-3 py-1.5 text-right font-medium">{n(c.avail)}</td>
+                <td className={`px-3 py-1.5 text-right font-semibold ${c.shortfall > 0 ? 'text-red-600' : 'text-green-600'}`}>{n(c.shortfall)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
   }
 
   async function savePack(b: Batch) {
@@ -199,16 +225,25 @@ export default function PackingPage() {
                 <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
             </thead>
             <tbody>
-              {readyToPack.length === 0 && <tr><td colSpan={isHO ? 6 : 5} className="text-center py-6 text-gray-400">No batches with materials ready. They appear here once their Material Request is fully received.</td></tr>}
+              {readyToPack.length === 0 && <tr><td colSpan={isHO ? 6 : 5} className="text-center py-6 text-gray-400">No batches with materials ready. They appear here once a batch has a BOM and enough stock to make at least one unit.</td></tr>}
               {readyToPack.map(b => (
-                <tr key={b.id} className="border-b last:border-0 hover:bg-gray-50">
-                  {isHO && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(b.factory_code)}</td>}
-                  <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}{partial(b) && <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700 align-middle">make {availability(b).units} now</span>}</td>
-                  <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span><span className="block mt-0.5"><MaterialCells b={b} /></span></td>
-                  <td className="px-3 py-2 text-right font-semibold">{b.total_quantity}</td>
-                  <td className="px-3 py-2 whitespace-nowrap text-gray-600">{b.delivery_date ? fmtDate(b.delivery_date) : '—'}</td>
-                  <td className="px-3 py-2">{canEdit ? <PackForm b={b} /> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${partial(b) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{partial(b) ? `Enough for ${availability(b).units}` : 'Materials ready'}</span>}</td>
-                </tr>
+                <Fragment key={b.id}>
+                  <tr className="border-b last:border-0 hover:bg-gray-50">
+                    {isHO && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(b.factory_code)}</td>}
+                    <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}{partial(b) && <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700 align-middle">make {availability(b).units} now</span>}</td>
+                    <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span>
+                      <button onClick={() => toggleMat(b.id)} className="text-blue-600 hover:underline text-xs mt-0.5">{openMat.has(b.id) ? '▾ hide materials' : '▸ show materials'}</button></td>
+                    <td className="px-3 py-2 text-right font-semibold">{b.total_quantity}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-gray-600">{b.delivery_date ? fmtDate(b.delivery_date) : '—'}</td>
+                    <td className="px-3 py-2">{canEdit ? <PackForm b={b} /> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${partial(b) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{partial(b) ? `Enough for ${availability(b).units}` : 'Materials ready'}</span>}</td>
+                  </tr>
+                  {openMat.has(b.id) && (
+                    <tr className="bg-gray-50/60 border-b"><td colSpan={isHO ? 6 : 5} className="px-3 py-3">
+                      <div className="text-gray-500 text-xs mb-1">To make <strong>{b.total_quantity}</strong> of {b.item_code} at {factoryName(b.factory_code)} — stock is the live system on-hand.</div>
+                      <MaterialTable b={b} />
+                    </td></tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>
