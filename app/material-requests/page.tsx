@@ -130,6 +130,31 @@ export default function MaterialRequestsPage() {
     load()
   }
 
+  // Released to the warehouse already → cancelling needs Head Office approval
+  async function requestMrCancel(r: MaterialRequest) {
+    const reason = window.prompt(`Request to cancel ${r.request_no}?\n\nIt has already been sent to the warehouse, so Head Office must approve. On approval its batch(es) are freed.\n\nReason (optional):`, '')
+    if (reason === null) return
+    setBusy(`reqcancel|${r.id}`); setError(''); setSuccess('')
+    const { error: e } = await supabase.from('mr_cancel_requests').insert({
+      material_request_id: r.id, request_no: r.request_no, factory_code: r.factory_code,
+      reason: reason || null, requested_by: profile?.id, requested_by_name: profile?.full_name || null,
+    })
+    setBusy('')
+    if (e) { setError(e.message); return }
+    setSuccess(`Cancel request sent for ${r.request_no} — waiting for Head Office approval.`)
+  }
+
+  async function requestRunCancel(run: { runNo: string; reqs: MaterialRequest[] }) {
+    if (!confirm(`Request to cancel released pick run ${run.runNo} (${run.reqs.length} request(s))?\n\nIt has been sent to the warehouse, so Head Office must approve. On approval the batches are freed.`)) return
+    const reason = window.prompt('Reason (optional):', '') ?? ''
+    setBusy(`runcancel|${run.runNo}`); setError(''); setSuccess('')
+    const rows = run.reqs.map(r => ({ material_request_id: r.id, request_no: r.request_no, factory_code: r.factory_code, reason: reason || null, requested_by: profile?.id, requested_by_name: profile?.full_name || null }))
+    const { error: e } = await supabase.from('mr_cancel_requests').insert(rows)
+    setBusy('')
+    if (e) { setError(e.message); return }
+    setSuccess(`Cancel request sent for ${run.runNo} — waiting for Head Office approval.`)
+  }
+
   // Warehouse records the SO number against a released pick run (saved on all its requests)
   async function saveSo(run: { runNo: string; reqs: MaterialRequest[] }) {
     const val = (soEdits[run.runNo] ?? run.reqs[0]?.warehouse_so_no ?? '').trim()
@@ -375,6 +400,9 @@ export default function MaterialRequestsPage() {
                                 placeholder="enter SO number" className="border rounded px-2 py-1 text-xs w-40" />
                               <button onClick={() => saveSo(run)} disabled={busy === `so|${run.runNo}`} className="text-blue-600 hover:underline text-xs disabled:opacity-50">{busy === `so|${run.runNo}` ? 'Saving…' : 'Save'}</button>
                             </span>
+                            <button onClick={() => requestRunCancel(run)} disabled={busy === `runcancel|${run.runNo}`}
+                              className="border border-red-300 text-red-600 px-3 py-1 rounded-lg hover:bg-red-50 text-xs font-medium disabled:opacity-50">
+                              {busy === `runcancel|${run.runNo}` ? 'Sending…' : '✕ Request cancel (HQ approval)'}</button>
                           </div>
                           {Object.keys(warehouse).length > 0 && (
                             <div className="mb-5">
@@ -476,11 +504,15 @@ export default function MaterialRequestsPage() {
                   </span>
                   <span className="text-sm text-gray-500">· {isHO ? factoryName(r.factory_code) : r.factory_code}</span>
                   <span className="text-sm text-gray-400 ml-auto">{new Date(r.created_at).toLocaleString()}</span>
-                  {r.status === 'Open' && (
+                  {r.status === 'Open' && (r.released_at ? (
+                    <button onClick={() => requestMrCancel(r)} disabled={busy === `reqcancel|${r.id}`}
+                      className="border border-red-300 text-red-600 px-3 py-1 rounded-lg hover:bg-red-50 text-xs font-medium disabled:opacity-50">
+                      {busy === `reqcancel|${r.id}` ? 'Sending…' : '✕ Request cancel (HQ approval)'}</button>
+                  ) : (
                     <button onClick={() => cancelRequest(r)} disabled={busy === `cancel|${r.id}`}
                       className="border border-red-300 text-red-600 px-3 py-1 rounded-lg hover:bg-red-50 text-xs font-medium disabled:opacity-50">
                       {busy === `cancel|${r.id}` ? 'Cancelling…' : '✕ Cancel request'}</button>
-                  )}
+                  ))}
                 </div>
 
                 <div className="overflow-x-auto border rounded-lg">

@@ -54,6 +54,11 @@ interface RunModeReq {
   reason: string | null; status: string; requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
 }
 
+interface MrCancelReq {
+  id: string; request_no: string | null; factory_code: string | null; reason: string | null; status: string
+  requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
+}
+
 const FIELD_LABEL: Record<string, string> = {
   customer_name: 'Customer',
   item_code: 'Item Code',
@@ -97,6 +102,9 @@ export default function PendingChangesPage() {
   const [runModes, setRunModes] = useState<RunModeReq[]>([])
   const [selRM, setSelRM] = useState<Set<string>>(new Set())
   const [rmFilters, setRmFilters] = useState<Record<string, Set<string>>>({})
+  const [mrCancels, setMrCancels] = useState<MrCancelReq[]>([])
+  const [selMC, setSelMC] = useState<Set<string>>(new Set())
+  const [mcFilters, setMcFilters] = useState<Record<string, Set<string>>>({})
 
   // Distinct values present in a list, for a filter dropdown
   const distinctOf = <T,>(arr: T[], get: (x: T) => string) => [...new Set(arr.map(get))].filter(Boolean).sort()
@@ -109,7 +117,7 @@ export default function PendingChangesPage() {
 
   useEffect(() => {
     if (!profile) return
-    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes()
+    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels()
     // Live refresh on any change-request activity, with a poll fallback
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) supabase.realtime.setAuth(data.session.access_token)
@@ -122,8 +130,9 @@ export default function PendingChangesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'split_requests' }, () => loadSplits())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_adjustments' }, () => loadStockAdjs())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'run_mode_requests' }, () => loadRunModes())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mr_cancel_requests' }, () => loadMrCancels())
       .subscribe()
-    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes() }, 20000)
+    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels() }, 20000)
     return () => { supabase.removeChannel(channel); clearInterval(timer) }
   }, [profile])
 
@@ -194,6 +203,23 @@ export default function PendingChangesPage() {
   async function loadRunModes() {
     const { data } = await supabase.from('run_mode_requests').select('*').order('created_at', { ascending: false })
     setRunModes((data as RunModeReq[]) || [])
+  }
+  async function loadMrCancels() {
+    const { data } = await supabase.from('mr_cancel_requests').select('*').order('created_at', { ascending: false })
+    setMrCancels((data as MrCancelReq[]) || [])
+  }
+  async function approveMC(id: string) {
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('approve_mr_cancel', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Material request cancelled — its batches are freed.'); setBusyId(''); loadMrCancels()
+  }
+  async function rejectMC(id: string) {
+    if (!confirm('Reject this cancellation? The material request stays as it is.')) return
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('reject_mr_cancel', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Cancellation rejected.'); setBusyId(''); loadMrCancels()
   }
   async function approveRM(id: string) {
     setBusyId(id); setError(''); setSuccess('')
@@ -301,6 +327,11 @@ export default function PendingChangesPage() {
   const rmPending = shownRM.filter(a => a.status === 'Pending')
   const rmAllSel = rmPending.length > 0 && rmPending.every(a => selRM.has(a.id))
   const selRMIds = rmPending.filter(a => selRM.has(a.id)).map(a => a.id)
+  const shownMCAll = filter === 'All' ? mrCancels : mrCancels.filter(a => a.status === filter)
+  const shownMC = shownMCAll.filter(a => passes(mcFilters.req, a.request_no || '—') && passes(mcFilters.by, a.requested_by_name || '—'))
+  const mcPending = shownMC.filter(a => a.status === 'Pending')
+  const mcAllSel = mcPending.length > 0 && mcPending.every(a => selMC.has(a.id))
+  const selMCIds = mcPending.filter(a => selMC.has(a.id)).map(a => a.id)
   const counts: Record<string, number> = { Pending: 0, Approved: 0, Rejected: 0 }
   requests.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1 })
 
@@ -663,6 +694,59 @@ export default function PendingChangesPage() {
                         <div className="flex gap-2">
                           <button onClick={() => approveRM(a.id)} disabled={busyId === a.id} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">Approve</button>
                           <button onClick={() => rejectRM(a.id)} disabled={busyId === a.id} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>
+                        </div>
+                      ) : <span className="text-gray-400">done</span>}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Material request cancellations (released to warehouse) */}
+        <h2 className="text-lg font-semibold mt-8 mb-2">Material request cancellations</h2>
+        <p className="text-gray-500 text-sm mb-3">{isHO ? 'Approve to cancel a material request that was already sent to the warehouse. Its batches are freed (only if nothing was received).' : 'Track your requests to cancel a released material request.'}</p>
+        {isHO && selMCIds.length > 0 && (
+          <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
+            <span className="font-medium text-blue-800">{selMCIds.length} pending selected</span>
+            <button onClick={() => bulkAct('approve_mr_cancel', selMCIds, 'approve')} disabled={bulkBusy} className="bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">Approve selected</button>
+            <button onClick={() => bulkAct('reject_mr_cancel', selMCIds, 'reject')} disabled={bulkBusy} className="bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50 font-medium">Reject selected</button>
+            <button onClick={() => setSelMC(new Set())} className="text-gray-500 hover:underline">Clear</button>
+          </div>
+        )}
+        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                {isHO && <th className="px-3 py-2"><input type="checkbox" checked={mcAllSel} onChange={() => setSelMC(mcAllSel ? new Set() : new Set(mcPending.map(a => a.id)))} className="h-4 w-4" /></th>}
+                {['Request', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
+                  <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}
+              </tr>
+              <tr className="border-b">
+                {isHO && <th className="px-2 py-1"></th>}
+                <th className="px-2 py-1"><MultiFilter values={distinctOf(shownMCAll, a => a.request_no || '—')} selected={mcFilters.req || new Set()} onChange={s => setMcFilters(p => ({ ...p, req: s }))} /></th>
+                <th className="px-2 py-1"></th>
+                <th className="px-2 py-1"><MultiFilter values={distinctOf(shownMCAll, a => a.requested_by_name || '—')} selected={mcFilters.by || new Set()} onChange={s => setMcFilters(p => ({ ...p, by: s }))} /></th>
+                <th className="px-2 py-1"></th><th className="px-2 py-1"></th>{isHO && <th className="px-2 py-1"></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {shownMC.length === 0 && (<tr><td colSpan={7} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} material request cancellations.</td></tr>)}
+              {shownMC.map(a => (
+                <tr key={a.id} className={`border-b last:border-0 align-top ${selMC.has(a.id) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                  {isHO && <td className="px-3 py-2">{a.status === 'Pending' ? <input type="checkbox" checked={selMC.has(a.id)} onChange={() => setSelMC(p => { const n = new Set(p); n.has(a.id) ? n.delete(a.id) : n.add(a.id); return n })} className="h-4 w-4" /> : null}</td>}
+                  <td className="px-3 py-2 whitespace-nowrap font-mono font-medium">{a.request_no}</td>
+                  <td className="px-3 py-2 text-gray-600 min-w-[120px]">{a.reason}</td>
+                  <td className="px-3 py-2 whitespace-nowrap"><span className="block">{a.requested_by_name || '—'}</span><span className="block text-gray-400">{fmt(a.created_at)}</span></td>
+                  <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full font-medium ${STATUS_STYLES[a.status] || 'bg-gray-100 text-gray-700'}`}>{a.status}</span></td>
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-600">{a.status === 'Pending' ? '—' : (<><span className="block">{a.reviewed_by_name}</span><span className="block text-gray-400">{fmt(a.reviewed_at)}</span></>)}</td>
+                  {isHO && (
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {a.status === 'Pending' ? (
+                        <div className="flex gap-2">
+                          <button onClick={() => approveMC(a.id)} disabled={busyId === a.id} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">Approve</button>
+                          <button onClick={() => rejectMC(a.id)} disabled={busyId === a.id} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>
                         </div>
                       ) : <span className="text-gray-400">done</span>}
                     </td>
