@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
@@ -65,6 +65,7 @@ export default function MaterialRequestsPage() {
   const [labelEdits, setLabelEdits] = useState<Record<string, { batch: string; exp: string; qty: string }>>({}) // item id -> label batch/exp/print-qty being typed
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
+  const multiFac = isHO || (profile?.factory_codes?.length || 0) > 1   // sees more than one factory
 
   useEffect(() => { if (profile) { load(); loadFactories(); loadFactoryItems(); loadRolls(); loadGrn(); loadNotReq() } }, [profile])
 
@@ -396,7 +397,7 @@ export default function MaterialRequestsPage() {
         <h1 className="text-2xl font-bold mb-1">Material Requests</h1>
         <p className="text-gray-500 text-sm mb-5">
           Shortfall materials requested from the warehouse.
-          {isHO ? ' Showing all factories.' : ` Showing factory ${profile.factory_code}.`}
+          {isHO ? ' Showing all factories.' : multiFac ? ` Showing ${(profile.factory_codes || []).length} factories.` : ` Showing factory ${profile.factory_code}.`}
         </p>
         <p className="text-gray-400 text-xs mb-5 -mt-3">Open requests refresh automatically when the BOM or stock changes. Once you start recording received quantities, the request is frozen. To receive a whole Delivery Order at once, use the <strong>Goods Received</strong> tab.</p>
 
@@ -620,8 +621,12 @@ export default function MaterialRequestsPage() {
           </div>
         ) : (
           <div className="space-y-5 max-h-[40rem] overflow-y-auto pr-1">
-            {shown.map(r => (
-              <div key={r.id} className="bg-white rounded-xl shadow-sm border p-5">
+            {(multiFac ? [...shown].sort((a, b) => (a.factory_code || '').localeCompare(b.factory_code || '')) : shown).map((r, i, arr) => (
+              <Fragment key={r.id}>
+              {multiFac && (i === 0 || arr[i - 1].factory_code !== r.factory_code) && (
+                <div className="text-sm font-semibold text-gray-700 pt-1">🏭 {isHO ? factoryName(r.factory_code) : r.factory_code} <span className="text-gray-400 font-normal">· {arr.filter(x => x.factory_code === r.factory_code).length} request(s)</span></div>
+              )}
+              <div className="bg-white rounded-xl shadow-sm border p-5">
                 <div className="flex flex-wrap items-center gap-3 mb-3">
                   <span className="font-mono font-semibold">{r.request_no}</span>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[r.status] || 'bg-gray-100 text-gray-700'}`}>{r.status}</span>
@@ -669,6 +674,7 @@ export default function MaterialRequestsPage() {
                   <p className="text-gray-400 text-xs mt-2">🏭 This product also has labels made at the factory — they appear in the factory label section (with batch / expiry) once the raw materials are received, not picked from the warehouse.</p>
                 )}
               </div>
+              </Fragment>
             ))}
           </div>
         )}
