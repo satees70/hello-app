@@ -487,10 +487,17 @@ export default function ProductionPage() {
               <h2 className="font-semibold text-lg">Material requirements — <span className="font-mono">{selected.label}</span></h2>
               <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600 text-sm">Close</button>
             </div>
-            <p className="text-gray-500 text-sm mb-4">
+            <p className="text-gray-500 text-sm mb-2">
               To make <strong>{selected.total}</strong> of {selected.item_code} at {isHO ? factoryName(selected.factory_code) : (selected.factory_code || 'this factory')}.
               {selected.batchIds.length > 1 && ` (combined from ${selected.batchIds.length} batches)`} Stock shown is the live system on-hand; the shortfall is worked out for you.
             </p>
+            {selected.batchIds.length > 1 && (
+              <div className="mb-4 text-xs bg-amber-50 border border-amber-200 rounded-lg p-2">
+                <span className="font-medium text-amber-800">Requesting for {selected.batchIds.length} combined batches:</span>{' '}
+                {selected.batchIds.map(id => { const b = batches.find(x => x.id === id); return b ? `${b.batch_no} (${b.total_quantity})` : id }).join('  +  ')}
+                {' '}= <strong>{selected.total}</strong> total
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-2 mb-4 text-sm">
               <span className="font-medium text-gray-700">Run mode:</span>
               {hasRequest ? (
