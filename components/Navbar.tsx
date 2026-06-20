@@ -21,6 +21,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const [pendingCount, setPendingCount] = useState(0)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [openMenu, setOpenMenu] = useState<string | null>(null)
+  const [mobileOpen, setMobileOpen] = useState(false)
   const [perms, setPerms] = useState<Permissions | null>(null)
   const [myFactories, setMyFactories] = useState<string[]>([])
   // This user's permissions (for menu view-gating). Until loaded, can() treats an
@@ -181,8 +182,9 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   return (
     <>
       <nav className="bg-blue-700 text-white px-4 sm:px-6 flex items-center justify-between gap-3 relative z-50">
-        <div className="flex items-stretch flex-wrap gap-0.5 min-w-0">
+        <div className="flex items-stretch gap-0.5 min-w-0">
           <span className="font-bold text-lg shrink-0 self-center mr-3">EASWARI</span>
+          <div className="hidden md:flex items-stretch flex-wrap gap-0.5 min-w-0">
           {menuGroups.map((g, gi) => {
             // Top-level group with no header → render its items as direct bar links
             if (!g.header) return g.items.map(l => (
@@ -218,17 +220,44 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
               </div>
             )
           })}
+          </div>
         </div>
         <div className="flex items-center gap-2 sm:gap-4 text-sm shrink-0">
           <span className="bg-blue-800 px-2 sm:px-3 py-1 rounded-full text-xs whitespace-nowrap">
             {factoryLabel}
           </span>
           <span className="hidden md:inline">{fullName || 'User'}</span>
-          <button onClick={handleLogout} className="bg-white text-blue-700 px-3 py-1 rounded hover:bg-blue-50 text-xs font-medium">
+          <button onClick={handleLogout} className="hidden sm:inline-block bg-white text-blue-700 px-3 py-1 rounded hover:bg-blue-50 text-xs font-medium">
             Logout
+          </button>
+          {/* Mobile hamburger */}
+          <button onClick={() => setMobileOpen(o => !o)} className="md:hidden inline-flex items-center justify-center w-9 h-9 rounded hover:bg-blue-800 relative" aria-label="Menu">
+            <span className="text-xl leading-none">{mobileOpen ? '✕' : '☰'}</span>
+            {isHO && pendingCount > 0 && !mobileOpen && <span className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[10px] font-semibold rounded-full min-w-[1rem] text-center px-1 leading-tight">{pendingCount}</span>}
           </button>
         </div>
       </nav>
+
+      {/* Mobile slide-down menu */}
+      {mobileOpen && (
+        <div className="md:hidden bg-blue-700 text-white border-t border-blue-600 max-h-[80vh] overflow-y-auto relative z-50">
+          {menuGroups.map((g, gi) => (
+            <div key={gi} className="border-b border-blue-600/60 py-1">
+              {g.header && <div className="px-4 pt-2 pb-1 text-[11px] uppercase tracking-wide text-blue-200">{g.header}</div>}
+              {g.items.map(l => (
+                <Link key={l.href} href={l.href} onClick={() => setMobileOpen(false)}
+                  className={`flex items-center justify-between px-5 py-2.5 text-sm ${pathname === l.href ? 'bg-blue-800 font-semibold' : 'hover:bg-blue-800'}`}>
+                  <span>{l.label}</span>
+                  {l.href === '/sales-orders/changes' && isHO && pendingCount > 0 && (
+                    <span className="bg-red-500 text-white text-xs font-semibold rounded-full min-w-[1.25rem] text-center px-1.5 py-0.5 leading-none">{pendingCount}</span>
+                  )}
+                </Link>
+              ))}
+            </div>
+          ))}
+          <button onClick={handleLogout} className="w-full text-left px-5 py-3 text-sm font-medium hover:bg-blue-800">Logout</button>
+        </div>
+      )}
       {/* click-away backdrop (below the nav so other top menus stay clickable) */}
       {openMenu && <div className="fixed inset-0 z-40" onClick={() => setOpenMenu(null)} />}
 
