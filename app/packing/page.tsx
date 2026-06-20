@@ -234,7 +234,24 @@ export default function PackingPage() {
 
         {/* Ready to pack — materials received, not yet scheduled */}
         <h2 className="font-semibold text-gray-800 mb-2">✅ Ready to pack <span className="text-gray-400 font-normal text-sm">· {readyToPack.length} waiting to schedule</span></h2>
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto mb-6">
+        {/* Mobile: cards */}
+        <div className="md:hidden space-y-3 mb-6">
+          {readyToPack.length === 0 && <p className="text-center py-6 text-gray-400 border rounded-lg bg-white text-sm">No batches with materials ready.</p>}
+          {readyToPack.map(b => (
+            <div key={`mr|${b.id}`} className="bg-white rounded-xl shadow-sm border p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono font-semibold">{b.batch_no}{partial(b) && <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700">make {availability(b).units} now</span>}</span>
+                {isHO && <span className="text-xs text-gray-500">{factoryName(b.factory_code)}</span>}
+              </div>
+              <div className="mt-1"><span className="font-medium">{b.item_code}</span> <span className="text-gray-500 text-sm">×{b.total_quantity}</span><span className="block text-gray-500 text-xs">{b.description}</span></div>
+              <button onClick={() => toggleMat(b.id)} className="text-blue-600 hover:underline text-xs mt-1">{openMat.has(b.id) ? '▾ hide materials' : '▸ show materials'}</button>
+              {openMat.has(b.id) && <div className="mt-2"><MaterialTable b={b} /></div>}
+              <div className="mt-3 pt-2 border-t">{canEdit ? <PackForm b={b} /> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${partial(b) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{partial(b) ? `Enough for ${availability(b).units}` : 'Materials ready'}</span>}</div>
+            </div>
+          ))}
+        </div>
+        {/* Desktop: table */}
+        <div className="hidden md:block bg-white rounded-xl shadow-sm border overflow-x-auto mb-6">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>{[...(isHO ? ['Factory'] : []), 'Batch', 'Item', 'Qty', 'Delivery', canEdit ? 'Schedule to' : 'Status'].map(h => (
