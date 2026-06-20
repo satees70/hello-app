@@ -60,6 +60,7 @@ export default function SalesOrdersPage() {
   const { profile, loading, error: profileError } = useProfile()
   useRequireView(profile, 'sales')
   const [imports, setImports] = useState<SalesImport[]>([])
+  const [docFilters, setDocFilters] = useState<Record<string, Set<string>>>({})
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
@@ -438,6 +439,23 @@ export default function SalesOrdersPage() {
 
   const currentDoc = linesFor ? (imports.find(i => i.id === linesFor.id) || linesFor) : null
 
+  // Column filters for the Uploaded Documents list
+  const docIssueTags = (d: SalesImport) => { const t: string[] = []; if (docSummary[d.id]?.dup) t.push('Duplicates'); if (docSummary[d.id]?.pending) t.push('Pending changes'); if (!t.length) t.push('None'); return t }
+  const docDistinct = (key: string) => {
+    if (key === 'file') return [...new Set(imports.map(d => d.file_name))].sort()
+    if (key === 'status') return [...new Set(imports.map(d => d.status))].sort()
+    if (key === 'locations') return [...new Set(imports.flatMap(d => docSummary[d.id]?.locations || []))].sort()
+    if (key === 'issues') return [...new Set(imports.flatMap(docIssueTags))].sort()
+    return []
+  }
+  const docPass = (sel: Set<string> | undefined, vals: string[]) => !sel || sel.size === 0 || vals.some(v => sel.has(v))
+  const shownImports = imports.filter(d =>
+    docPass(docFilters.file, [d.file_name]) &&
+    docPass(docFilters.status, [d.status]) &&
+    docPass(docFilters.locations, docSummary[d.id]?.locations || []) &&
+    docPass(docFilters.issues, docIssueTags(d)))
+  const anyDocFilter = ['file', 'status', 'locations', 'issues'].some(k => docFilters[k]?.size)
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
@@ -463,11 +481,20 @@ export default function SalesOrdersPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>{['File', 'Locations', 'Status', 'Issues', 'Uploaded', 'Actions'].map(h => (
-                <th key={h} className="text-left px-4 py-3 font-medium text-gray-600">{h}</th>))}</tr>
+                <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 bg-gray-50">{h}</th>))}</tr>
+              <tr className="border-b">
+                <th className="px-2 py-1 bg-gray-50"><MultiFilter values={docDistinct('file')} selected={docFilters.file || new Set()} onChange={s => setDocFilters(p => ({ ...p, file: s }))} /></th>
+                <th className="px-2 py-1 bg-gray-50"><MultiFilter values={docDistinct('locations')} selected={docFilters.locations || new Set()} onChange={s => setDocFilters(p => ({ ...p, locations: s }))} /></th>
+                <th className="px-2 py-1 bg-gray-50"><MultiFilter values={docDistinct('status')} selected={docFilters.status || new Set()} onChange={s => setDocFilters(p => ({ ...p, status: s }))} /></th>
+                <th className="px-2 py-1 bg-gray-50"><MultiFilter values={docDistinct('issues')} selected={docFilters.issues || new Set()} onChange={s => setDocFilters(p => ({ ...p, issues: s }))} /></th>
+                <th className="px-2 py-1 bg-gray-50"></th>
+                <th className="px-2 py-1 bg-gray-50">{anyDocFilter && <button onClick={() => setDocFilters({})} className="text-blue-600 hover:underline text-xs">Clear</button>}</th>
+              </tr>
             </thead>
             <tbody>
               {imports.length === 0 && (<tr><td colSpan={6} className="text-center py-8 text-gray-400">No documents uploaded yet</td></tr>)}
-              {imports.map(doc => (
+              {imports.length > 0 && shownImports.length === 0 && (<tr><td colSpan={6} className="text-center py-8 text-gray-400">No documents match the filter.</td></tr>)}
+              {shownImports.map(doc => (
                 <tr key={doc.id} className={`border-b last:border-0 hover:bg-gray-50 ${linesFor?.id === doc.id ? 'bg-blue-50' : ''}`}>
                   <td className="px-4 py-3 font-medium">{doc.file_name}</td>
                   <td className="px-4 py-3 text-xs text-gray-600 max-w-[200px]">
