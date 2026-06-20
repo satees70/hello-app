@@ -61,7 +61,6 @@ export default function ProductionPage() {
   const [dateTo, setDateTo] = useState('')
   const [factoryFilter, setFactoryFilter] = useState('')
   const [raising, setRaising] = useState(false)
-  const [expDate, setExpDate] = useState('')
   const [combineOn, setCombineOn] = useState(true)
   const [sortBy, setSortBy] = useState<'due_asc' | 'due_desc' | 'batch'>('due_asc')
   const [consumption, setConsumption] = useState<Record<string, ConsRow[]>>({}) // batch id -> consumed lots
@@ -150,14 +149,11 @@ export default function ProductionPage() {
   }
 
   async function raiseTarget(t: MatTarget) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(expDate) || expDate < '2020-01-01' || expDate > '2100-12-31') {
-      setError('Enter a valid expiry date (year between 2020 and 2100).'); return
-    }
     setRaising(true); setError(''); setSuccess('')
-    // Save the product expiry date + chosen run mode onto the batch(es) first — the
-    // RPC uses run_mode to pick the right BOM (auto = roll, manual = pc).
+    // Save the chosen run mode onto the batch(es) first — the RPC uses run_mode to
+    // pick the right BOM (auto = roll, manual = pc). Expiry is set later on the label.
     const { error: expErr } = await supabase.from('production_batches')
-      .update({ exp_date: expDate || null, run_mode: t.mode }).in('id', t.batchIds)
+      .update({ run_mode: t.mode }).in('id', t.batchIds)
     if (expErr) { setError(expErr.message); setRaising(false); return }
     const { error: rpcErr } = t.batchIds.length === 1
       ? await supabase.rpc('raise_material_request', { p_batch_id: t.batchIds[0] })
@@ -167,7 +163,6 @@ export default function ProductionPage() {
     setSuccess(`Material request raised for ${t.label} — sent ${t.batchIds.length} batch(es): ${sentBatches} (total ${t.total}).`)
     setRaising(false)
     setSelected(null)
-    setExpDate('')
     await loadAll()
   }
 
@@ -549,21 +544,13 @@ export default function ProductionPage() {
                         : <span className="text-green-600">Enough stock on hand — no shortfall.</span>}
                   </div>
                   <div className="flex items-end gap-3">
-                    <label className="text-sm">
-                      <span className="block text-gray-600 mb-1">Product expiry date <span className="text-red-500">*required</span></span>
-                      <input type="date" value={expDate} min="2020-01-01" max="2100-12-31" onChange={e => setExpDate(e.target.value)}
-                        className={`border rounded-lg px-2 py-1.5 ${!expDate && !hasRequest ? 'border-red-400 bg-red-50' : ''}`} />
-                    </label>
-                    <button onClick={() => raiseTarget(selected)} disabled={raising || hasRequest || totalShortfall <= 0 || !expDate}
+                    <button onClick={() => raiseTarget(selected)} disabled={raising || hasRequest || totalShortfall <= 0}
                       className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
                       {raising ? 'Raising…' : 'Raise Material Request'}
                     </button>
                   </div>
                 </div>
-                {!expDate && !hasRequest && totalShortfall > 0 && (
-                  <p className="text-red-600 text-xs mt-2">Enter the product expiry date before raising — it prints on the labels.</p>
-                )}
-                <p className="text-gray-400 text-xs mt-2">Tip: the request captures the current shortfall and adds a safety margin (rounded up) so the warehouse picks enough. Stock comes from the system — adjust it under Stock Adjustment if it’s wrong.</p>
+                <p className="text-gray-400 text-xs mt-2">Tip: the request captures the current shortfall and adds a safety margin (rounded up). The product expiry &amp; batch number are entered later on the label, after the materials are received. Stock comes from the system — adjust it under Stock Adjustment if it’s wrong.</p>
               </>
             )}
           </div>
