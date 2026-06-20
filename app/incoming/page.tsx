@@ -410,7 +410,27 @@ export default function IncomingPage() {
         </div>
 
         <h2 className="font-semibold text-lg mb-2">Uploaded Documents</h2>
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto mb-8">
+        {/* Mobile: one card per document */}
+        <div className="md:hidden space-y-3 mb-8">
+          {docs.length === 0 && <p className="text-center py-6 text-gray-400 border rounded-lg bg-white">No delivery orders uploaded yet</p>}
+          {docs.map(doc => (
+            <div key={doc.id} className="bg-white rounded-xl shadow-sm border p-3">
+              <div className="flex items-start justify-between gap-2">
+                <span className="font-medium text-sm break-all">{doc.file_name}</span>
+                <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[doc.status] || 'bg-gray-100 text-gray-700'}`}>{doc.status}</span>
+              </div>
+              <div className="text-xs text-gray-500 mt-1">{doc.do_number ? <span className="font-mono">{doc.do_number}</span> : '—'} · {isHO ? factoryName(doc.factory_code) : doc.factory_code} · {new Date(doc.created_at).toLocaleDateString()}</div>
+              <div className="flex flex-wrap gap-3 mt-2 pt-2 border-t text-xs">
+                <button onClick={() => viewLines(doc)} className="text-blue-600 hover:underline font-medium">View Lines</button>
+                {(doc.status === 'Processing' || doc.status === 'Error') && <button onClick={() => reExtract(doc)} className="text-blue-600 hover:underline">Re-read</button>}
+                <button onClick={() => handleViewPdf(doc.file_path)} className="text-blue-600 hover:underline">View PDF</button>
+                <button onClick={() => handleDelete(doc)} className="text-red-500 hover:underline ml-auto">Delete</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        {/* Desktop: table */}
+        <div className="hidden md:block bg-white rounded-xl shadow-sm border overflow-x-auto mb-8">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>{['File', 'DO No.', 'Factory', 'Status', 'Uploaded', 'Actions'].map(h => (
