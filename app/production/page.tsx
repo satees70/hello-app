@@ -264,10 +264,27 @@ export default function ProductionPage() {
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
       <div className="max-w-7xl mx-auto px-6 py-8">
         <h1 className="text-2xl font-bold mb-1">Order Board</h1>
-        <p className="text-gray-500 text-sm mb-5">
+        <p className="text-gray-500 text-sm mb-3">
           Orders from confirmed sales orders. Once materials are received, plan which line packs each item and when.
           {isHO ? ' Showing all factories.' : ` Showing factory ${profile.factory_code}.`}
         </p>
+
+        {/* Summary — click to filter */}
+        <div className="flex flex-wrap gap-2 mb-4 text-sm">
+          <button onClick={() => setFilter('Planned')} className={`px-3 py-1.5 rounded-lg border font-medium ${filter === 'Planned' ? 'bg-blue-600 text-white border-blue-600' : 'bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100'}`}>
+            ⚠ {counts['Planned'] || 0} not requested yet
+          </button>
+          <button onClick={() => setFilter('Requested')} className={`px-3 py-1.5 rounded-lg border font-medium ${filter === 'Requested' ? 'bg-blue-600 text-white border-blue-600' : 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'}`}>
+            ✓ {counts['Requested'] || 0} requested
+          </button>
+          <button onClick={() => setFilter('In Progress')} className={`px-3 py-1.5 rounded-lg border font-medium ${filter === 'In Progress' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+            {counts['In Progress'] || 0} in progress
+          </button>
+          <button onClick={() => setFilter('Completed')} className={`px-3 py-1.5 rounded-lg border font-medium ${filter === 'Completed' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+            {counts['Completed'] || 0} done
+          </button>
+          {filter !== 'All' && <button onClick={() => setFilter('All')} className="px-3 py-1.5 text-blue-600 hover:underline">Show all</button>}
+        </div>
 
         <div className="flex flex-wrap gap-2 items-center mb-4 text-sm">
           <span className="text-gray-500">Status:</span>
