@@ -33,7 +33,7 @@ interface MaterialRequest {
   material_request_items: MRItem[]
 }
 
-const FILTERS = ['Open', 'Partially Received', 'Fulfilled', 'All', 'Combined picking'] as const
+const FILTERS = ['Open', 'Partially Received', 'Fulfilled', 'All', 'Combined picking', 'Labels'] as const
 type Filter = typeof FILTERS[number]
 
 // Statuses that still need picking — pooled into the combined list
@@ -375,15 +375,14 @@ export default function MaterialRequestsPage() {
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
         {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}
 
-        {filter === 'Combined picking' ? (
+        {filter === 'Combined picking' || filter === 'Labels' ? (
           !hasCombined ? (
             <div className="bg-white rounded-xl shadow-sm border p-10 text-center text-gray-400">
-              Nothing to pick — no open requests.
-              <br />Raise material requests from batches on the Production board.
+              {filter === 'Labels' ? 'No labels yet — release a material request and receive its raw materials to unlock label printing.' : <>Nothing to pick — no open requests.<br />Raise material requests from batches on the Production board.</>}
             </div>
           ) : (
             <div className="space-y-8">
-              {waitingFactories.length > 0 && (
+              {filter !== 'Labels' && waitingFactories.length > 0 && (
                 <div>
                   <h2 className="font-semibold text-gray-800 mb-1">⏳ Waiting to release</h2>
                   <p className="text-gray-500 text-sm mb-3">
@@ -410,22 +409,25 @@ export default function MaterialRequestsPage() {
 
               {runList.length > 0 && (
                 <div>
-                  <h2 className="font-semibold text-gray-800 mb-1">📦 Released pick runs</h2>
+                  <h2 className="font-semibold text-gray-800 mb-1">{filter === 'Labels' ? '🏷️ Labels to print' : '📦 Released pick runs'}</h2>
                   <p className="text-gray-500 text-sm mb-3">
-                    Pick each run's totals in one trip. Type the <strong>total received</strong> for a material —
-                    it is split back across the original requests automatically.
+                    {filter === 'Labels'
+                      ? <>Each card is a <strong>product</strong> — print its labels once its raw materials arrive. Enter batch / expiry and the quantity to print.</>
+                      : <>Pick each run's totals in one trip. Type the <strong>total received</strong> for a material — it is split back across the original requests automatically.</>}
                   </p>
                   <div className="space-y-4">
                     {runList.map(run => {
                       const rkey = run.runNo
                       const { warehouse } = splitBySource(run.mats)
                       const facReqs = run.reqs.filter(r => (r.material_request_items || []).some(it => factoryItems.has(it.item_code)))
+                      if (filter === 'Labels' && facReqs.length === 0) return null
                       return (
                         <div key={rkey} className="bg-white rounded-xl shadow-sm border p-5">
                           <div className="flex flex-wrap items-center gap-3 mb-4">
                             <span className="font-semibold">{isHO ? factoryName(run.factory) : run.factory}</span>
                             <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 font-mono">{run.runNo}</span>
                             <span className="text-sm text-gray-400">released {new Date(run.released_at).toLocaleString()}</span>
+                            {filter !== 'Labels' && <>
                             <span className="flex items-center gap-1 ml-auto">
                               <span className="text-xs font-medium text-gray-600">SO No.</span>
                               <input value={soEdits[run.runNo] ?? run.reqs[0]?.warehouse_so_no ?? ''} onChange={e => setSoEdits(prev => ({ ...prev, [run.runNo]: e.target.value }))}
@@ -435,8 +437,9 @@ export default function MaterialRequestsPage() {
                             <button onClick={() => requestRunCancel(run)} disabled={busy === `runcancel|${run.runNo}`}
                               className="border border-red-300 text-red-600 px-3 py-1 rounded-lg hover:bg-red-50 text-xs font-medium disabled:opacity-50">
                               {busy === `runcancel|${run.runNo}` ? 'Sending…' : '✕ Request cancel (HQ approval)'}</button>
+                            </>}
                           </div>
-                          {Object.keys(warehouse).length > 0 && (
+                          {filter !== 'Labels' && Object.keys(warehouse).length > 0 && (
                             <div className="mb-5">
                               <div className="flex items-center gap-2 mb-2">
                                 <span className="text-sm font-semibold text-gray-700">📦 From warehouse</span>
@@ -475,8 +478,9 @@ export default function MaterialRequestsPage() {
                                       {locked && <p className="text-amber-700 text-xs bg-amber-50 border border-amber-200 rounded p-2 mb-2">🔒 Labels unlock once the raw materials start arriving (Goods Received). You can then print labels for the quantity the received materials cover.</p>}
                                       {!locked && frac < 1 && <p className="text-blue-700 text-xs bg-blue-50 border border-blue-200 rounded p-2 mb-2">ℹ Raw materials are {Math.round(frac * 100)}% in — you can print labels for the partial quantity now and the rest later.</p>}
                                       <div className="flex flex-wrap items-center gap-2 mb-2 text-sm">
-                                        <span className="font-semibold">{r.production_batches?.item_code}</span>
-                                        <span className="text-gray-500">{r.production_batches?.description}</span>
+                                        <span className="text-xs text-gray-400 uppercase tracking-wide">Print labels for</span>
+                                        <span className="font-bold text-purple-800 text-base">{r.production_batches?.item_code}</span>
+                                        <span className="text-gray-700 font-medium">{r.production_batches?.description}</span>
                                         <span className="flex items-center gap-1 ml-1">
                                           <span className={`text-xs font-medium ${hasExp ? 'text-gray-500' : 'text-red-600'}`}>EXP</span>
                                           <input type="date" min="2020-01-01" max="2100-12-31"
