@@ -253,6 +253,8 @@ export default function ProductionPage() {
 
   // Factories present in the current view (for the combined, factory-grouped layout)
   const factoriesInView = [...new Set(shown.map(b => b.factory_code))].sort()
+  // Show the 🏭 location grouping whenever the user is looking at more than one factory
+  const showFacHeaders = isHO || factoriesInView.length > 1
   const singleTarget = (b: Batch): MatTarget => ({ label: b.batch_no, item_code: b.item_code, factory_code: b.factory_code, total: b.total_quantity, batchIds: [b.id], mode: b.run_mode || 'auto' })
 
   // Build display units for a factory's batches when Combine is on
@@ -302,12 +304,12 @@ export default function ProductionPage() {
           <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="border rounded-lg px-2 py-1 bg-white" />
           <span className="text-gray-400">to</span>
           <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="border rounded-lg px-2 py-1 bg-white" />
-          {isHO && (
+          {showFacHeaders && (
             <>
               <span className="text-gray-500 ml-3">Factory:</span>
               <select value={factoryFilter} onChange={e => setFactoryFilter(e.target.value)} className="border rounded-lg px-2 py-1 bg-white">
                 <option value="">All factories</option>
-                {factories.map(f => <option key={f.code} value={f.code}>{f.name}</option>)}
+                {(isHO ? factories : factories.filter(f => factoriesInView.includes(f.code))).map(f => <option key={f.code} value={f.code}>{f.name}</option>)}
               </select>
             </>
           )}
@@ -344,7 +346,7 @@ export default function ProductionPage() {
               const collapsed = collapsedFacs.has(fc)
               return (
                 <div key={fc}>
-                  {isHO && <button onClick={() => toggleFac(fc)} className="flex items-center gap-1 font-semibold text-sm text-gray-700 mb-2 hover:text-gray-900">
+                  {showFacHeaders && <button onClick={() => toggleFac(fc)} className="flex items-center gap-1 font-semibold text-sm text-gray-700 mb-2 hover:text-gray-900">
                     <span className="text-gray-400 w-3 inline-block">{collapsed ? '▸' : '▾'}</span> 🏭 {factoryName(fc)} <span className="text-gray-400 font-normal">· {fb.length} batch(es)</span></button>}
                   {!collapsed && (
                   <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
