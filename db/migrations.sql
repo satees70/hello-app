@@ -1154,6 +1154,28 @@ end $$;
 grant execute on function public.reject_run_mode(uuid) to authenticated;
 
 
+-- ============================================================================
+-- 2026-06 · Cancel an OPEN material request (frees the batches to re-raise)
+-- ============================================================================
+create or replace function public.cancel_material_request(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_req public.material_requests;
+begin
+  select * into v_req from public.material_requests where id = p_id;
+  if not found then raise exception 'Request not found'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and v_req.factory_code <> all(my_factory_codes()) then
+    raise exception 'Not allowed for this factory'; end if;
+  if v_req.status <> 'Open' then
+    raise exception 'Only an Open request can be cancelled (some material has already been received)'; end if;
+  -- free every batch this request was raised for (only if production has not started)
+  update public.production_batches set material_request_id = null, status = 'Planned'
+    where material_request_id = p_id and coalesce(produced_qty, 0) = 0;
+  delete from public.material_request_items where request_id = p_id;
+  delete from public.material_requests where id = p_id;
+end $$;
+grant execute on function public.cancel_material_request(uuid) to authenticated;
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.

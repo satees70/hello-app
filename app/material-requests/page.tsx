@@ -120,6 +120,16 @@ export default function MaterialRequestsPage() {
     load()
   }
 
+  async function cancelRequest(r: MaterialRequest) {
+    if (!confirm(`Cancel ${r.request_no}? This frees its batch(es) so you can re-raise (e.g. combined). Nothing has been received yet.`)) return
+    setBusy(`cancel|${r.id}`); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('cancel_material_request', { p_id: r.id })
+    if (e) { setError(e.message); setBusy(''); return }
+    setSuccess(`${r.request_no} cancelled — its batch(es) are back on the Order Board.`)
+    setBusy('')
+    load()
+  }
+
   // Warehouse records the SO number against a released pick run (saved on all its requests)
   async function saveSo(run: { runNo: string; reqs: MaterialRequest[] }) {
     const val = (soEdits[run.runNo] ?? run.reqs[0]?.warehouse_so_no ?? '').trim()
@@ -466,6 +476,11 @@ export default function MaterialRequestsPage() {
                   </span>
                   <span className="text-sm text-gray-500">· {isHO ? factoryName(r.factory_code) : r.factory_code}</span>
                   <span className="text-sm text-gray-400 ml-auto">{new Date(r.created_at).toLocaleString()}</span>
+                  {r.status === 'Open' && (
+                    <button onClick={() => cancelRequest(r)} disabled={busy === `cancel|${r.id}`}
+                      className="border border-red-300 text-red-600 px-3 py-1 rounded-lg hover:bg-red-50 text-xs font-medium disabled:opacity-50">
+                      {busy === `cancel|${r.id}` ? 'Cancelling…' : '✕ Cancel request'}</button>
+                  )}
                 </div>
 
                 <div className="overflow-x-auto border rounded-lg">
