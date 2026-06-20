@@ -61,6 +61,7 @@ export default function SalesOrdersPage() {
   useRequireView(profile, 'sales')
   const [imports, setImports] = useState<SalesImport[]>([])
   const [docFilters, setDocFilters] = useState<Record<string, Set<string>>>({})
+  const [docSearch, setDocSearch] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
@@ -450,11 +451,11 @@ export default function SalesOrdersPage() {
   }
   const docPass = (sel: Set<string> | undefined, vals: string[]) => !sel || sel.size === 0 || vals.some(v => sel.has(v))
   const shownImports = imports.filter(d =>
-    docPass(docFilters.file, [d.file_name]) &&
+    (!docSearch || d.file_name.toLowerCase().includes(docSearch.toLowerCase())) &&
     docPass(docFilters.status, [d.status]) &&
     docPass(docFilters.locations, docSummary[d.id]?.locations || []) &&
     docPass(docFilters.issues, docIssueTags(d)))
-  const anyDocFilter = ['file', 'status', 'locations', 'issues'].some(k => docFilters[k]?.size)
+  const anyDocFilter = ['status', 'locations', 'issues'].some(k => docFilters[k]?.size)
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -477,19 +478,19 @@ export default function SalesOrdersPage() {
         </form>
 
         <h2 className="font-semibold text-lg mb-3">Uploaded Documents</h2>
+        <div className="flex flex-wrap items-center gap-2 mb-2 text-sm relative z-20">
+          <input value={docSearch} onChange={e => setDocSearch(e.target.value)} placeholder="🔍 Search file…" className="border rounded-lg px-3 py-1.5 text-sm w-44" />
+          <div className="w-44"><span className="text-xs text-gray-500">Location</span><MultiFilter values={docDistinct('locations')} selected={docFilters.locations || new Set()} onChange={s => setDocFilters(p => ({ ...p, locations: s }))} /></div>
+          <div className="w-40"><span className="text-xs text-gray-500">Status</span><MultiFilter values={docDistinct('status')} selected={docFilters.status || new Set()} onChange={s => setDocFilters(p => ({ ...p, status: s }))} /></div>
+          <div className="w-44"><span className="text-xs text-gray-500">Issues</span><MultiFilter values={docDistinct('issues')} selected={docFilters.issues || new Set()} onChange={s => setDocFilters(p => ({ ...p, issues: s }))} /></div>
+          <span className="text-gray-400 text-xs self-end">{shownImports.length} of {imports.length}</span>
+          {(anyDocFilter || docSearch) && <button onClick={() => { setDocFilters({}); setDocSearch('') }} className="text-blue-600 hover:underline text-xs self-end">Clear</button>}
+        </div>
         <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[24rem] mb-8">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>{['File', 'Locations', 'Status', 'Issues', 'Uploaded', 'Actions'].map(h => (
                 <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 bg-gray-50">{h}</th>))}</tr>
-              <tr className="border-b">
-                <th className="px-2 py-1 bg-gray-50"><MultiFilter values={docDistinct('file')} selected={docFilters.file || new Set()} onChange={s => setDocFilters(p => ({ ...p, file: s }))} /></th>
-                <th className="px-2 py-1 bg-gray-50"><MultiFilter values={docDistinct('locations')} selected={docFilters.locations || new Set()} onChange={s => setDocFilters(p => ({ ...p, locations: s }))} /></th>
-                <th className="px-2 py-1 bg-gray-50"><MultiFilter values={docDistinct('status')} selected={docFilters.status || new Set()} onChange={s => setDocFilters(p => ({ ...p, status: s }))} /></th>
-                <th className="px-2 py-1 bg-gray-50"><MultiFilter values={docDistinct('issues')} selected={docFilters.issues || new Set()} onChange={s => setDocFilters(p => ({ ...p, issues: s }))} /></th>
-                <th className="px-2 py-1 bg-gray-50"></th>
-                <th className="px-2 py-1 bg-gray-50">{anyDocFilter && <button onClick={() => setDocFilters({})} className="text-blue-600 hover:underline text-xs">Clear</button>}</th>
-              </tr>
             </thead>
             <tbody>
               {imports.length === 0 && (<tr><td colSpan={6} className="text-center py-8 text-gray-400">No documents uploaded yet</td></tr>)}
