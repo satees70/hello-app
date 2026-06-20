@@ -384,6 +384,11 @@ export default function ProductionPage() {
                                         </div>
                                       ))}
                                     </div>
+                                    <div className="mt-3">
+                                      <button onClick={() => { setSelected(target); setError(''); setSuccess('') }}
+                                        className="border border-blue-600 text-blue-600 px-4 py-1.5 rounded-lg hover:bg-blue-50 text-sm font-medium">Materials</button>
+                                      <span className="ml-2 text-gray-400 text-xs">Request materials for all {members.length} batches together. Pack line &amp; date are set on the Packing Schedule.</span>
+                                    </div>
                                   </td>
                                 </tr>
                               )}
