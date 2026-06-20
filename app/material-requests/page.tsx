@@ -421,6 +421,7 @@ export default function MaterialRequestsPage() {
                       const { warehouse } = splitBySource(run.mats)
                       const facReqs = run.reqs.filter(r => (r.material_request_items || []).some(it => factoryItems.has(it.item_code)))
                       if (filter === 'Labels' && facReqs.length === 0) return null
+                      if (filter !== 'Labels' && Object.keys(warehouse).length === 0) return null
                       return (
                         <div key={rkey} className="bg-white rounded-xl shadow-sm border p-5">
                           <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -449,7 +450,7 @@ export default function MaterialRequestsPage() {
                               {renderMatTable(warehouse, `${rkey}|wh`, true)}
                             </div>
                           )}
-                          {facReqs.length > 0 && (() => {
+                          {filter === 'Labels' && facReqs.length > 0 && (() => {
                             const missingExp = facReqs.some(r => !r.production_batches?.exp_date)
                             const facLocked = facReqs.some(r => rawFraction(r) <= 0)
                             const labelsMissing = facReqs.some(r => (r.material_request_items || []).filter(it => factoryItems.has(it.item_code)).some(it => !it.label_batch_no && !it.label_exp_date))
