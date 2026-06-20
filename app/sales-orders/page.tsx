@@ -149,25 +149,16 @@ export default function SalesOrdersPage() {
   async function remapUnmapped() {
     if (!linesFor) return
     setRemapping(true); setError(''); setSuccess('')
-    // Always read the LATEST Location Map (the page's copy may predate a mapping you just added)
-    const { data: lm } = await supabase.from('location_map').select('location_code, factory_code')
-    const fresh: Record<string, string> = {}; (lm || []).forEach(r => { if (r.factory_code) fresh[r.location_code] = r.factory_code })
-    setLocationMap(fresh)
-    const unmapped = lines.filter(l => !l.factory_code)
-    const toFix = unmapped.filter(l => fresh[l.location_code])
-    if (toFix.length === 0) {
-      const missing = [...new Set(unmapped.map(l => l.location_code).filter(Boolean))]
-      setRemapping(false)
-      setError(`Still unmapped. These locations have no factory in the Location Map: ${missing.join(', ') || '(blank location)'}. Add them in Setup → Location Map, then click Re-map again.`)
+    // Server-side re-map (case/space-insensitive, bypasses line RLS)
+    const { data: count, error: e } = await supabase.rpc('remap_unmapped_lines', { p_import_id: linesFor.id })
+    setRemapping(false)
+    if (e) { setError(e.message); return }
+    if (!count) {
+      const missing = [...new Set(lines.filter(l => !l.factory_code).map(l => l.location_code || '(blank)'))]
+      setError(`Still unmapped. These locations have no matching factory in the Location Map: ${missing.join(', ')}. Check the spelling matches exactly in Setup → Location Map.`)
       return
     }
-    let ok = 0
-    for (const l of toFix) {
-      const { error: e } = await supabase.from('sales_order_lines').update({ factory_code: fresh[l.location_code] }).eq('id', l.id)
-      if (!e) ok++
-    }
-    setRemapping(false)
-    setSuccess(`Re-mapped ${ok} line(s) to their factory.`)
+    setSuccess(`Re-mapped ${count} line(s) to their factory.`)
     viewLines(linesFor)
   }
 

@@ -1227,6 +1227,25 @@ grant execute on function public.reject_mr_cancel(uuid) to authenticated;
 alter table public.material_request_items add column if not exists label_print_qty numeric;
 
 
+-- 2026-06 · Re-map unmapped sales order lines from the current Location Map
+-- (case/space-insensitive; runs server-side so RLS doesn't block the update)
+create or replace function public.remap_unmapped_lines(p_import_id uuid) returns int
+language plpgsql security definer set search_path = public as $$
+declare v_count int;
+begin
+  update public.sales_order_lines sol
+    set factory_code = lm.factory_code
+  from public.location_map lm
+  where sol.import_id = p_import_id
+    and coalesce(sol.factory_code, '') = ''
+    and btrim(upper(lm.location_code)) = btrim(upper(coalesce(sol.location_code, '')))
+    and coalesce(lm.factory_code, '') <> '';
+  get diagnostics v_count = row_count;
+  return v_count;
+end $$;
+grant execute on function public.remap_unmapped_lines(uuid) to authenticated;
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.
