@@ -24,6 +24,7 @@ interface MaterialRequest {
   created_at: string
   released_at: string | null
   pick_run_no: string | null
+  warehouse_so_no: string | null
   batch_id: string
   production_batches: { batch_no: string; item_code: string; description: string; exp_date: string | null } | null
   material_request_items: MRItem[]
@@ -53,6 +54,7 @@ export default function MaterialRequestsPage() {
   const [factoryItems, setFactoryItems] = useState<Set<string>>(new Set()) // item codes supplied by the factory
   const [pcsPerRoll, setPcsPerRoll] = useState<Record<string, number>>({}) // roll items: code -> pieces per roll
   const [expEdits, setExpEdits] = useState<Record<string, string>>({}) // request id -> EXP date being typed
+  const [soEdits, setSoEdits] = useState<Record<string, string>>({}) // run no -> SO number being typed
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
@@ -115,6 +117,19 @@ export default function MaterialRequestsPage() {
     setSuccess(`Expiry date saved for ${r.production_batches?.item_code}.`)
     setBusy('')
     setExpEdits(prev => { const n = { ...prev }; delete n[r.id]; return n })
+    load()
+  }
+
+  // Warehouse records the SO number against a released pick run (saved on all its requests)
+  async function saveSo(run: { runNo: string; reqs: MaterialRequest[] }) {
+    const val = (soEdits[run.runNo] ?? run.reqs[0]?.warehouse_so_no ?? '').trim()
+    setBusy(`so|${run.runNo}`); setError(''); setSuccess('')
+    const ids = run.reqs.map(r => r.id)
+    const { error: upErr } = await supabase.from('material_requests').update({ warehouse_so_no: val || null }).in('id', ids)
+    if (upErr) { setError(upErr.message); setBusy(''); return }
+    setSuccess(`SO number saved for ${run.runNo}.`)
+    setBusy('')
+    setSoEdits(prev => { const n = { ...prev }; delete n[run.runNo]; return n })
     load()
   }
 
@@ -344,6 +359,12 @@ export default function MaterialRequestsPage() {
                             <span className="font-semibold">{isHO ? factoryName(run.factory) : run.factory}</span>
                             <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 font-mono">{run.runNo}</span>
                             <span className="text-sm text-gray-400">released {new Date(run.released_at).toLocaleString()}</span>
+                            <span className="flex items-center gap-1 ml-auto">
+                              <span className="text-xs font-medium text-gray-600">SO No.</span>
+                              <input value={soEdits[run.runNo] ?? run.reqs[0]?.warehouse_so_no ?? ''} onChange={e => setSoEdits(prev => ({ ...prev, [run.runNo]: e.target.value }))}
+                                placeholder="enter SO number" className="border rounded px-2 py-1 text-xs w-40" />
+                              <button onClick={() => saveSo(run)} disabled={busy === `so|${run.runNo}`} className="text-blue-600 hover:underline text-xs disabled:opacity-50">{busy === `so|${run.runNo}` ? 'Saving…' : 'Save'}</button>
+                            </span>
                           </div>
                           {Object.keys(warehouse).length > 0 && (
                             <div className="mb-5">
