@@ -856,18 +856,21 @@ end; $function$;
 
 create or replace function public.refresh_one_open_request(p_request_id uuid)
  returns void language plpgsql security definer set search_path to 'public' as $function$
-declare v_req public.material_requests; v_batch public.production_batches; v_parent uuid; v_count int := 0; c record; v_short numeric; v_reqd numeric;
+declare v_req public.material_requests; v_batch public.production_batches; v_parent uuid; v_count int := 0; c record; v_short numeric; v_reqd numeric; v_total numeric;
 begin
   select * into v_req from public.material_requests where id = p_request_id;
   if not found or v_req.status <> 'Open' then return; end if;
   select * into v_batch from public.production_batches where id = v_req.batch_id;
   if not found then return; end if;
+  -- combined total: sum of EVERY batch that shares this request (not just the linked one)
+  select coalesce(sum(total_quantity), 0) into v_total from public.production_batches where material_request_id = p_request_id;
+  if v_total = 0 then v_total := v_batch.total_quantity; end if;
   select id into v_parent from public.items where code = v_batch.item_code limit 1;
   delete from public.material_request_items where request_id = p_request_id;
   if v_parent is not null then
     for c in
       select bc.component_item_id as item_id, it.code, it.description, it.unit, bc.apply_allowance,
-             bc.quantity * v_batch.total_quantity as required_qty, coalesce(s.quantity,0) as stock_qty
+             bc.quantity * v_total as required_qty, coalesce(s.quantity,0) as stock_qty
       from public.bom_components bc join public.items it on it.id = bc.component_item_id
       left join public.item_stock s on s.item_id = bc.component_item_id and s.factory_code = v_batch.factory_code
       where bc.parent_item_id = v_parent
