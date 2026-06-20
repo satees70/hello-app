@@ -169,6 +169,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     ] },
     { header: 'Setup', items: [
       { href: '/admin/packing-lines', label: 'Packing Lines', module: 'packing_lines' as ModuleKey },
+      ...(isHO ? [{ href: '/admin/factories', label: 'Factories' }] : []),
       ...(isHO && isAdmin ? [{ href: '/admin/users', label: 'Users' }] : []),
       ...(isHO ? [{ href: '/admin/allowed-networks', label: 'Allowed Networks' }] : []),
     ] },
