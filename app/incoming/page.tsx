@@ -411,7 +411,7 @@ export default function IncomingPage() {
 
         <h2 className="font-semibold text-lg mb-2">Uploaded Documents</h2>
         {/* Mobile: one card per document */}
-        <div className="md:hidden space-y-3 mb-8">
+        <div className="md:hidden space-y-3 mb-8 max-h-[26rem] overflow-y-auto pr-1">
           {docs.length === 0 && <p className="text-center py-6 text-gray-400 border rounded-lg bg-white">No delivery orders uploaded yet</p>}
           {docs.map(doc => (
             <div key={doc.id} className="bg-white rounded-xl shadow-sm border p-3">
@@ -429,10 +429,10 @@ export default function IncomingPage() {
             </div>
           ))}
         </div>
-        {/* Desktop: table */}
-        <div className="hidden md:block bg-white rounded-xl shadow-sm border overflow-x-auto mb-8">
+        {/* Desktop: table (scrolls inside the box after ~5 rows) */}
+        <div className="hidden md:block bg-white rounded-xl shadow-sm border overflow-auto mb-8 max-h-[24rem]">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>{['File', 'DO No.', 'Factory', 'Status', 'Uploaded', 'Actions'].map(h => (
                 <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
             </thead>
