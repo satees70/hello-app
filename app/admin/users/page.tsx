@@ -247,9 +247,9 @@ export default function UsersPage() {
 
         {success && mode === 'closed' && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-4">{success}</p>}
 
-        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[30rem]">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>
                 {['Name', 'Email', 'Factory / HO', 'Role', 'Access', ''].map((h, i) => (
                   <th key={i} className="text-left px-4 py-3 font-medium text-gray-600">{h}</th>

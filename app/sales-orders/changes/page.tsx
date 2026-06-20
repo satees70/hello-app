@@ -365,9 +365,9 @@ export default function PendingChangesPage() {
           </div>
         )}
 
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+        <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem]">
           <table className="w-full text-xs">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>
                 {isHO && <th className="px-3 py-2"><input type="checkbox" checked={crAllSel} onChange={toggleCrAll} className="h-4 w-4" /></th>}
                 {['Document', 'Line', 'Field', 'Change', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
@@ -440,9 +440,9 @@ export default function PendingChangesPage() {
             <button onClick={() => setSelCorr(new Set())} className="text-gray-500 hover:underline">Clear</button>
           </div>
         )}
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+        <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem]">
           <table className="w-full text-xs">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>
                 {isHO && <th className="px-3 py-2"><input type="checkbox" checked={corrAllSel} onChange={() => setSelCorr(corrAllSel ? new Set() : new Set(corrPending.map(c => c.id)))} className="h-4 w-4" /></th>}
                 {['Timer', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
@@ -493,9 +493,9 @@ export default function PendingChangesPage() {
             <button onClick={() => setSelDo(new Set())} className="text-gray-500 hover:underline">Clear</button>
           </div>
         )}
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+        <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem]">
           <table className="w-full text-xs">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>
                 {isHO && <th className="px-3 py-2"><input type="checkbox" checked={doAllSel} onChange={() => setSelDo(doAllSel ? new Set() : new Set(doPending.map(c => c.id)))} className="h-4 w-4" /></th>}
                 {['Line', 'Change', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
@@ -552,9 +552,9 @@ export default function PendingChangesPage() {
             <button onClick={() => setSelSplit(new Set())} className="text-gray-500 hover:underline">Clear</button>
           </div>
         )}
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+        <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem]">
           <table className="w-full text-xs">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>
                 {isHO && <th className="px-3 py-2"><input type="checkbox" checked={splitAllSel} onChange={() => setSelSplit(splitAllSel ? new Set() : new Set(splitPending.map(c => c.id)))} className="h-4 w-4" /></th>}
                 {['Order to split out', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
@@ -605,9 +605,9 @@ export default function PendingChangesPage() {
             <button onClick={() => setSelSA(new Set())} className="text-gray-500 hover:underline">Clear</button>
           </div>
         )}
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+        <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem]">
           <table className="w-full text-xs">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>
                 {isHO && <th className="px-3 py-2"><input type="checkbox" checked={saAllSel} onChange={() => setSelSA(saAllSel ? new Set() : new Set(saPending.map(a => a.id)))} className="h-4 w-4" /></th>}
                 {['Item', 'In/Out', 'Qty', 'Batch', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
@@ -661,9 +661,9 @@ export default function PendingChangesPage() {
             <button onClick={() => setSelRM(new Set())} className="text-gray-500 hover:underline">Clear</button>
           </div>
         )}
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+        <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem]">
           <table className="w-full text-xs">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>
                 {isHO && <th className="px-3 py-2"><input type="checkbox" checked={rmAllSel} onChange={() => setSelRM(rmAllSel ? new Set() : new Set(rmPending.map(a => a.id)))} className="h-4 w-4" /></th>}
                 {['Batch / item', 'Change', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
@@ -715,9 +715,9 @@ export default function PendingChangesPage() {
             <button onClick={() => setSelMC(new Set())} className="text-gray-500 hover:underline">Clear</button>
           </div>
         )}
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+        <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem]">
           <table className="w-full text-xs">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>
                 {isHO && <th className="px-3 py-2"><input type="checkbox" checked={mcAllSel} onChange={() => setSelMC(mcAllSel ? new Set() : new Set(mcPending.map(a => a.id)))} className="h-4 w-4" /></th>}
                 {['Request', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (

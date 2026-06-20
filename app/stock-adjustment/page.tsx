@@ -182,9 +182,9 @@ export default function StockAdjustmentPage() {
           ))}
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+        <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem]">
           <table className="w-full text-xs">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>{[...(isHO ? ['Factory'] : []), 'Item', 'In/Out', 'Qty', 'Batch', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
                 <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
             </thead>

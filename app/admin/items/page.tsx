@@ -246,9 +246,9 @@ export default function ItemsPage() {
           </label>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[30rem]">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>
                 {['Code', 'Description', 'Unit', 'Stock Group', 'Type', 'Source', ...(isHO ? ['Actions'] : [])].map(h => (
                   <th key={h} className="text-left px-4 py-3 font-medium text-gray-600">{h}</th>

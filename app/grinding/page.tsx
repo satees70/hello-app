@@ -244,9 +244,9 @@ export default function GrindingPage() {
               </div>
             )}
 
-            <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+            <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem]">
               <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b">
+                <thead className="bg-gray-50 border-b sticky top-0 z-10">
                   <tr>{['Date', ...(isHO ? ['Factory'] : []), 'Product', 'Type', 'Lots', 'Crusher B/A', 'Rework', 'Reject', 'Verified', ''].map(h => (
                     <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
                   <tr className="border-b">
@@ -309,9 +309,9 @@ export default function GrindingPage() {
         {tab === 'recipes' && canRecipeView && (
           <>
             {canRecipeEdit && <button onClick={newRecipe} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium mb-4">+ New recipe</button>}
-            <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+            <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem]">
               <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b">
+                <thead className="bg-gray-50 border-b sticky top-0 z-10">
                   <tr>{['Product', 'Type', ...(isHO ? ['Factory'] : []), 'Ingredients (per lot)', 'Active', ''].map(h => (
                     <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
                 </thead>

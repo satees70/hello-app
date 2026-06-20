@@ -459,9 +459,9 @@ export default function SalesOrdersPage() {
         </form>
 
         <h2 className="font-semibold text-lg mb-3">Uploaded Documents</h2>
-        <div className="bg-white rounded-xl shadow-sm border overflow-hidden mb-8">
+        <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[24rem] mb-8">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>{['File', 'Locations', 'Status', 'Issues', 'Uploaded', 'Actions'].map(h => (
                 <th key={h} className="text-left px-4 py-3 font-medium text-gray-600">{h}</th>))}</tr>
             </thead>
@@ -617,11 +617,11 @@ export default function SalesOrdersPage() {
               </div>
             )}
 
-            <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+            <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[32rem]">
               <table className="w-full text-xs">
-                <thead className="bg-gray-50 border-b">
+                <thead className="bg-gray-50 border-b sticky top-0 z-10">
                   <tr>
-                    <th className="px-3 py-2"><input type="checkbox" checked={allSelected} onChange={toggleAll} className="h-4 w-4" /></th>
+                    <th className="px-3 py-2 bg-gray-50"><input type="checkbox" checked={allSelected} onChange={toggleAll} className="h-4 w-4" /></th>
                     {COLS.map(c => (<th key={c.key} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{c.label}</th>))}
                     <th className="px-3 py-2"></th>
                   </tr>
