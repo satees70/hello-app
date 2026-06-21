@@ -9,6 +9,22 @@ import { can } from '@/lib/permissions'
 
 interface Item { id: string; code: string; description: string; unit: string; type: string; stock_group: string; supplied_by_factory: boolean; kg_per_bag: number | null; pcs_per_roll: number | null }
 const EMPTY = { code: '', description: '', unit: '', type: 'Material', stock_group: '', supplied_by_factory: false, kg_per_bag: '', pcs_per_roll: '' }
+// Fields that can be edited (the Code is locked — it's referenced across documents)
+const ITEM_FIELDS = [
+  { key: 'description', label: 'Description' },
+  { key: 'unit', label: 'Unit' },
+  { key: 'type', label: 'Type' },
+  { key: 'stock_group', label: 'Stock Group' },
+  { key: 'supplied_by_factory', label: 'Made at factory' },
+  { key: 'kg_per_bag', label: 'KG per bag/carton' },
+  { key: 'pcs_per_roll', label: 'Pieces per roll' },
+] as const
+// String form of an item's value, for comparing/recording changes
+const itemStr = (it: Item, k: string): string => {
+  const v = (it as unknown as Record<string, unknown>)[k]
+  if (k === 'supplied_by_factory') return v ? 'true' : 'false'
+  return v == null ? '' : String(v)
+}
 
 export default function ItemsPage() {
   const { profile, loading } = useProfile()
@@ -29,13 +45,22 @@ export default function ItemsPage() {
   const [bulkMsg, setBulkMsg] = useState('')
   const [existingMode, setExistingMode] = useState<'update' | 'skip'>('update')
   const bulkRef = useRef<HTMLInputElement>(null)
+  const [success, setSuccess] = useState('')
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkField, setBulkField] = useState('stock_group')
+  const [bulkValue, setBulkValue] = useState('')
+  const [bulkEditBusy, setBulkEditBusy] = useState(false)
+  const [pendingItemIds, setPendingItemIds] = useState<Set<string>>(new Set())
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
+  const toggleSel = (id: string) => setSelected(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
 
   useEffect(() => { if (profile) { loadItems(); loadBomParents() } }, [profile])
 
   async function loadItems() {
     setItems(await fetchAll<Item>('items', '*', 'code'))
+    const { data: pend } = await supabase.from('item_change_requests').select('item_id').eq('status', 'Pending')
+    setPendingItemIds(new Set((pend || []).map(r => r.item_id).filter(Boolean)))
   }
 
   async function loadBomParents() {
@@ -46,10 +71,41 @@ export default function ItemsPage() {
   function openCreate() { setEditing(null); setForm(EMPTY); setError(''); setShowForm(true) }
   function openEdit(item: Item) { setEditing(item); setForm({ code: item.code, description: item.description, unit: item.unit, type: item.type, stock_group: item.stock_group || '', supplied_by_factory: item.supplied_by_factory || false, kg_per_bag: item.kg_per_bag != null ? String(item.kg_per_bag) : '', pcs_per_roll: item.pcs_per_roll != null ? String(item.pcs_per_roll) : '' }); setError(''); setShowForm(true) }
 
+  // Turn a form field into the string we store on a change request
+  const formStr = (k: string): string => {
+    const v = (form as unknown as Record<string, unknown>)[k]
+    if (k === 'supplied_by_factory') return v ? 'true' : 'false'
+    return v == null ? '' : String(v)
+  }
+
+  // Insert one change request per (item, field). Returns true on success.
+  async function submitItemRequests(rows: { item: Item; field: string; value: string }[], reason: string): Promise<boolean> {
+    if (!profile) return false
+    const payload = rows.map(r => ({
+      item_id: r.item.id, item_code: r.item.code, field: r.field,
+      old_value: itemStr(r.item, r.field), new_value: r.value, reason: reason || null,
+      requested_by: profile.id, requested_by_name: profile.full_name || null,
+    }))
+    const { error } = await supabase.from('item_change_requests').insert(payload)
+    if (error) { setError(error.message); return false }
+    return true
+  }
+
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
-    setSaving(true); setError('')
+    setSaving(true); setError(''); setSuccess('')
     const payload = { ...form, kg_per_bag: form.kg_per_bag === '' ? null : Number(form.kg_per_bag), pcs_per_roll: form.pcs_per_roll === '' ? null : Number(form.pcs_per_roll) }
+    if (editing && !isHO) {
+      // Staff: send each changed field to Head Office for approval (code is locked)
+      const changed = ITEM_FIELDS.filter(f => formStr(f.key) !== itemStr(editing, f.key))
+      if (changed.length === 0) { setError('Nothing changed.'); setSaving(false); return }
+      const reason = window.prompt('Reason for these changes (sent to Head Office):') || ''
+      if (reason === null) { setSaving(false); return }
+      const ok = await submitItemRequests(changed.map(f => ({ item: editing, field: f.key, value: formStr(f.key) })), reason)
+      setSaving(false)
+      if (ok) { setShowForm(false); setSuccess(`Sent ${changed.length} change(s) to Head Office for approval.`); loadItems() }
+      return
+    }
     if (editing) {
       const { error } = await supabase.from('items').update(payload).eq('id', editing.id)
       if (error) { setError(error.message); setSaving(false); return }
@@ -58,6 +114,30 @@ export default function ItemsPage() {
       if (error) { setError(error.message); setSaving(false); return }
     }
     setShowForm(false); setSaving(false); loadItems()
+  }
+
+  // Bulk-set one field on all selected items (HO applies; staff request approval)
+  async function applyBulk() {
+    setError(''); setSuccess('')
+    const targets = items.filter(i => selected.has(i.id))
+    if (targets.length === 0) { setError('Tick at least one item first.'); return }
+    const label = ITEM_FIELDS.find(f => f.key === bulkField)?.label || bulkField
+    if (!confirm(`Set "${label}" to "${bulkValue || '(blank)'}" on ${targets.length} item(s)${isHO ? '' : ' — sent to Head Office for approval'}?`)) return
+    setBulkEditBusy(true)
+    if (isHO) {
+      const value: unknown = bulkField === 'supplied_by_factory' ? (bulkValue === 'true')
+        : (bulkField === 'kg_per_bag' || bulkField === 'pcs_per_roll') ? (bulkValue === '' ? null : Number(bulkValue))
+          : bulkValue
+      const { error } = await supabase.from('items').update({ [bulkField]: value }).in('id', targets.map(t => t.id))
+      setBulkEditBusy(false)
+      if (error) { setError(error.message); return }
+      setSuccess(`Updated ${label} on ${targets.length} item(s).`); setSelected(new Set()); loadItems()
+    } else {
+      const reason = window.prompt('Reason for this bulk change (sent to Head Office):') || ''
+      const ok = await submitItemRequests(targets.map(t => ({ item: t, field: bulkField, value: bulkValue })), reason)
+      setBulkEditBusy(false)
+      if (ok) { setSuccess(`Sent ${targets.length} change(s) to Head Office for approval.`); setSelected(new Set()); loadItems() }
+    }
   }
 
   async function handleDelete(id: string) {
@@ -137,7 +217,7 @@ export default function ItemsPage() {
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
       <div className="max-w-6xl mx-auto px-6 py-8">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-3">
           <h1 className="text-2xl font-bold">Items Master</h1>
           {isHO && canEdit && (
             <button onClick={openCreate}
@@ -146,6 +226,9 @@ export default function ItemsPage() {
             </button>
           )}
         </div>
+        {!isHO && canEdit && <p className="text-gray-500 text-sm mb-4">You can edit item fields — changes are sent to Head Office for approval.</p>}
+        {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}
+        {error && !showForm && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
 
         {isHO && canEdit && (
           <div className="bg-white rounded-xl shadow-sm border p-5 mb-6">
@@ -172,9 +255,9 @@ export default function ItemsPage() {
           </div>
         )}
 
-        {showForm && isHO && (
+        {showForm && (isHO || editing) && (
           <form onSubmit={handleSave} className="bg-white rounded-xl shadow-sm border p-6 mb-6 space-y-4">
-            <h2 className="font-semibold text-lg">{editing ? 'Edit Item' : 'New Item'}</h2>
+            <h2 className="font-semibold text-lg">{editing ? (isHO ? 'Edit Item' : 'Request item changes') : 'New Item'}</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Item Code</label>
@@ -228,7 +311,7 @@ export default function ItemsPage() {
             <div className="flex gap-3">
               <button type="submit" disabled={saving}
                 className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
-                {saving ? 'Saving...' : 'Save'}
+                {saving ? 'Saving...' : editing && !isHO ? 'Send for approval' : 'Save'}
               </button>
               <button type="button" onClick={() => setShowForm(false)}
                 className="border px-6 py-2 rounded-lg hover:bg-gray-50">Cancel</button>
@@ -249,21 +332,45 @@ export default function ItemsPage() {
           </label>
         </div>
 
+        {canEdit && selected.size > 0 && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 mb-3 flex flex-wrap items-end gap-3 text-sm">
+            <span className="font-medium text-blue-800">{selected.size} selected — bulk set:</span>
+            <div className="flex flex-col gap-1"><span className="text-xs text-gray-600">Field</span>
+              <select value={bulkField} onChange={e => { setBulkField(e.target.value); setBulkValue('') }} className="border rounded px-2 py-1.5 bg-white">
+                {ITEM_FIELDS.filter(f => f.key !== 'description').map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
+              </select></div>
+            <div className="flex flex-col gap-1"><span className="text-xs text-gray-600">New value</span>
+              {bulkField === 'type' ? (
+                <select value={bulkValue} onChange={e => setBulkValue(e.target.value)} className="border rounded px-2 py-1.5 bg-white"><option value="">—</option><option value="Material">Material</option><option value="Manufactured">Manufactured</option></select>
+              ) : bulkField === 'supplied_by_factory' ? (
+                <select value={bulkValue} onChange={e => setBulkValue(e.target.value)} className="border rounded px-2 py-1.5 bg-white"><option value="">—</option><option value="true">🏭 Factory</option><option value="false">📦 Warehouse</option></select>
+              ) : (bulkField === 'kg_per_bag' || bulkField === 'pcs_per_roll') ? (
+                <input type="number" step="any" min="0" value={bulkValue} onChange={e => setBulkValue(e.target.value)} className="border rounded px-2 py-1.5" placeholder="blank = clear" />
+              ) : (
+                <input value={bulkValue} onChange={e => setBulkValue(e.target.value)} className="border rounded px-2 py-1.5" />
+              )}
+            </div>
+            <button onClick={applyBulk} disabled={bulkEditBusy} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{bulkEditBusy ? 'Working…' : isHO ? 'Apply to selected' : 'Request for selected'}</button>
+            <button onClick={() => setSelected(new Set())} className="text-gray-500 hover:underline">Clear</button>
+          </div>
+        )}
+
         <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[30rem]">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>
-                {['Code', 'Description', 'Unit', 'Stock Group', 'Type', 'Source', ...(isHO ? ['Actions'] : [])].map(h => (
-                  <th key={h} className="text-left px-4 py-3 font-medium text-gray-600">{h}</th>
+                {[...(canEdit ? [''] : []), 'Code', 'Description', 'Unit', 'Stock Group', 'Type', 'Source', ...(canEdit || canDelete ? ['Actions'] : [])].map((h, i) => (
+                  <th key={i} className="text-left px-4 py-3 font-medium text-gray-600">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={7} className="text-center py-8 text-gray-400">No items found</td></tr>
+                <tr><td colSpan={9} className="text-center py-8 text-gray-400">No items found</td></tr>
               )}
               {filtered.map(item => (
                 <tr key={item.id} className="border-b last:border-0 hover:bg-gray-50">
+                  {canEdit && <td className="px-4 py-3"><input type="checkbox" checked={selected.has(item.id)} onChange={() => toggleSel(item.id)} className="h-4 w-4" /></td>}
                   <td className="px-4 py-3 font-mono font-medium">{item.code}</td>
                   <td className="px-4 py-3">{item.description}</td>
                   <td className="px-4 py-3 text-gray-600">{item.unit || '—'}</td>
@@ -278,11 +385,11 @@ export default function ItemsPage() {
                       ? <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">🏭 Factory</span>
                       : <span className="text-gray-400 text-xs">📦 Warehouse</span>}
                   </td>
-                  {isHO && (
-                    <td className="px-4 py-3 flex gap-2">
-                      {canEdit && <button onClick={() => openEdit(item)} className="text-blue-600 hover:underline text-xs">Edit</button>}
-                      {canDelete && <button onClick={() => handleDelete(item.id)} className="text-red-500 hover:underline text-xs">Delete</button>}
-                      {!canEdit && !canDelete && <span className="text-gray-300 text-xs">view only</span>}
+                  {(canEdit || canDelete) && (
+                    <td className="px-4 py-3 flex gap-2 items-center">
+                      {canEdit && <button onClick={() => openEdit(item)} className="text-blue-600 hover:underline text-xs">{isHO ? 'Edit' : 'Request edit'}</button>}
+                      {canDelete && isHO && <button onClick={() => handleDelete(item.id)} className="text-red-500 hover:underline text-xs">Delete</button>}
+                      {pendingItemIds.has(item.id) && <span className="text-amber-600 text-xs whitespace-nowrap">⏳ pending</span>}
                     </td>
                   )}
                 </tr>

@@ -497,6 +497,24 @@ export default function IncomingPage() {
               <button onClick={() => setLinesFor(null)} className="text-gray-400 hover:text-gray-600 text-sm">Close</button>
             </div>
             <p className="text-gray-500 text-sm mb-3">For each line: QC <strong>ticks</strong> and adds a <strong>photo</strong>, then <strong>Receive</strong> that item. You can receive some now and the rest later (partial). Matched items go against their order; known items with no order go into stock flagged <em>unplanned</em>; unknown codes are skipped. Bag/carton quantities convert to KG.</p>
+            {(() => {
+              const probs = lines.filter(l => !l.received_at).map(l => ({ l, c: lineCalc(l) })).filter(x => !x.c.known || x.c.factor === null)
+              if (probs.length === 0) return null
+              return (
+                <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 mb-3 text-sm">
+                  <p className="font-semibold text-amber-800 mb-1">⚠ {probs.length} line(s) need attention before they can be received:</p>
+                  <ul className="space-y-0.5 text-amber-800">
+                    {probs.map(({ l, c }) => (
+                      <li key={l.id}>
+                        <span className="font-mono font-medium">{l.item_code}</span> — {!c.known
+                          ? <span>unknown item code → add it in <strong>Items</strong> (or fix the code via <em>Request edit</em>)</span>
+                          : <span>delivered in {l.unit || 'a pack'} but no KG-per-{(l.unit || 'pack').toLowerCase()} set → open <strong>Items</strong>, edit <span className="font-mono">{baseCode(l.item_code)}</span> and set <strong>KG per bag / carton</strong></span>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )
+            })()}
             {/* Mobile: one card per line (no side-scrolling) */}
             <div className="md:hidden space-y-3">
               {lines.length === 0 && <p className="text-center py-6 text-gray-400 border rounded-lg">No lines read from this document.</p>}

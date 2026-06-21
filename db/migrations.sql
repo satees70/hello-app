@@ -136,6 +136,58 @@ grant execute on function public.create_delivery_order(uuid[], jsonb) to authent
 
 
 -- ============================================================================
+-- Items master · staff request field edits (single or bulk); Head Office approves
+-- ============================================================================
+create table if not exists public.item_change_requests (
+  id uuid primary key default gen_random_uuid(),
+  item_id uuid references public.items(id) on delete cascade,
+  item_code text, field text, old_value text, new_value text, reason text,
+  status text not null default 'Pending',
+  requested_by uuid, requested_by_name text, created_at timestamptz not null default now(),
+  reviewed_by uuid, reviewed_by_name text, reviewed_at timestamptz
+);
+grant select, insert on public.item_change_requests to authenticated;
+grant all on public.item_change_requests to service_role;
+alter table public.item_change_requests enable row level security;
+drop policy if exists icr_read on public.item_change_requests;
+create policy icr_read on public.item_change_requests for select using (true);   -- items are company-wide
+drop policy if exists icr_insert on public.item_change_requests;
+create policy icr_insert on public.item_change_requests for insert with check (requested_by = auth.uid() and has_perm('items', 'edit'));
+
+-- Code is never changed here (it's referenced across documents). Only these fields.
+create or replace function public.approve_item_change(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_req public.item_change_requests; v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can approve item changes'; end if;
+  select * into v_req from public.item_change_requests where id = p_id and status = 'Pending';
+  if not found then raise exception 'Request not found or already reviewed'; end if;
+  if v_req.field = any (array['description', 'unit', 'type', 'stock_group']) then
+    execute format('update public.items set %I = $1 where id = $2', v_req.field) using nullif(v_req.new_value, ''), v_req.item_id;
+  elsif v_req.field = 'supplied_by_factory' then
+    update public.items set supplied_by_factory = (lower(coalesce(v_req.new_value, '')) in ('true', 't', 'yes', '1')) where id = v_req.item_id;
+  elsif v_req.field = any (array['kg_per_bag', 'pcs_per_roll']) then
+    execute format('update public.items set %I = $1 where id = $2', v_req.field) using nullif(v_req.new_value, '')::numeric, v_req.item_id;
+  else
+    raise exception 'Field % cannot be edited', v_req.field;
+  end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.item_change_requests set status = 'Approved', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id;
+end $$;
+grant execute on function public.approve_item_change(uuid) to authenticated;
+
+create or replace function public.reject_item_change(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can reject item changes'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.item_change_requests set status = 'Rejected', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id and status = 'Pending';
+end $$;
+grant execute on function public.reject_item_change(uuid) to authenticated;
+
+
+-- ============================================================================
 -- Material returns · edit quantity/reason with Head Office approval
 -- (approving adjusts the lot's stock by the quantity difference)
 -- ============================================================================
