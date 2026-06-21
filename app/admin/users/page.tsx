@@ -56,6 +56,20 @@ export default function UsersPage() {
     })
     setMode('edit')
   }
+  // Copy another user's access into a NEW user — same factories/role/permissions,
+  // but a fresh username & password for the admin to fill in.
+  function openCopy(u: UserRow) {
+    setEditingId(null); setError(''); setSuccess('')
+    setForm({
+      username: '', email: '', password: '', full_name: '', factory_code: u.factory_code,
+      factory_codes: u.factory_codes?.length ? u.factory_codes : (u.factory_code ? [u.factory_code] : []),
+      readonly_factories: u.readonly_factories || [],
+      role: u.role,
+      permissions: isConfigured(u.permissions) ? (u.permissions as Permissions) : defaultGrid(),
+    })
+    setMode('create')
+    setSuccess(`Copied access from ${u.username || u.full_name || u.email} — set a username & password, adjust if needed, then create.`)
+  }
   function closeForm() { setMode('closed'); setEditingId(null) }
 
   // Factory access (multi-select). Head Office is exclusive (sees everything).
@@ -351,8 +365,9 @@ export default function UsersPage() {
                     </td>
                     <td className="px-4 py-3 capitalize">{u.role}</td>
                     <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${al.cls}`}>{al.text}</span></td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-right whitespace-nowrap space-x-3">
                       <button onClick={() => openEdit(u)} className="text-blue-600 hover:underline text-sm font-medium">Edit</button>
+                      <button onClick={() => openCopy(u)} className="text-gray-600 hover:underline text-sm font-medium" title="Create a new user with the same access">Copy</button>
                     </td>
                   </tr>
                 )
