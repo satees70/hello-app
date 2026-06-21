@@ -19,6 +19,8 @@ interface MRItem {
   label_batch_no?: string | null
   label_exp_date?: string | null
   label_print_qty?: number | null
+  label_photo_path?: string | null
+  label_received_at?: string | null
 }
 interface MaterialRequest {
   id: string
@@ -74,6 +76,8 @@ export default function MaterialRequestsPage() {
   const [moveReason, setMoveReason] = useState('')
   const [movePending, setMovePending] = useState<Set<string>>(new Set())
   const [labelEdits, setLabelEdits] = useState<Record<string, { batch: string; exp: string; qty: string }>>({}) // item id -> label batch/exp/print-qty being typed
+  const [selLabels, setSelLabels] = useState<Set<string>>(new Set())   // labels ticked to send
+  const toggleLabel = (id: string) => setSelLabels(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
   const isWarehouse = !!profile?.warehouse_user   // warehouse staff: only released pick runs + SO entry
@@ -241,6 +245,35 @@ export default function MaterialRequestsPage() {
     setBusy('')
     setLabelEdits(prev => { const n = { ...prev }; delete n[it.id]; return n })
     load()
+  }
+  // Printer attaches a photo of the printed label
+  async function uploadLabelPhoto(it: MRItem, r: MaterialRequest, file: File) {
+    if (!canEditFac(r.factory_code)) { setError("You have view-only access at this factory."); return }
+    setBusy(`lphoto|${it.id}`); setError('')
+    const path = `labels/${it.id}.jpg`
+    const { error: upErr } = await supabase.storage.from('delivery-orders').upload(path, file, { upsert: true, contentType: file.type || 'image/jpeg' })
+    if (upErr) { setError(`Photo upload failed: ${upErr.message}`); setBusy(''); return }
+    await supabase.from('material_request_items').update({ label_photo_path: path }).eq('id', it.id)
+    setBusy(''); setSuccess(`Photo attached for ${it.item_code}.`); load()
+  }
+  async function viewLabelPhoto(path: string) {
+    const { data } = await supabase.storage.from('delivery-orders').createSignedUrl(path, 120)
+    if (data) window.open(data.signedUrl, '_blank')
+  }
+  // Send the ticked labels into stock (each needs a saved print qty + a photo)
+  async function sendLabels(run: { runNo: string; reqs: MaterialRequest[] }) {
+    if (!canEditFac(run.reqs[0]?.factory_code || '')) { setError("You have view-only access at this factory."); return }
+    const labels = run.reqs.flatMap(r => (r.material_request_items || []).filter(it => factoryItems.has(it.item_code) && selLabels.has(it.id) && !it.label_received_at))
+    if (labels.length === 0) { setError('Tick at least one label to send.'); return }
+    for (const it of labels) {
+      if (!it.label_photo_path) { setError(`Attach a photo for ${it.item_code} before sending.`); return }
+      if (!(Number(it.label_print_qty) > 0)) { setError(`Save a print quantity for ${it.item_code} before sending.`); return }
+    }
+    if (!confirm(`Send ${labels.length} label(s) into stock?`)) return
+    setBusy(`sendlabels|${run.runNo}`); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('receive_labels', { p_item_ids: labels.map(l => l.id) })
+    if (e) { setError(e.message); setBusy(''); return }
+    setSuccess(`${labels.length} label(s) sent into stock.`); setBusy(''); setSelLabels(new Set()); load()
   }
 
   async function requestRunCancel(run: { runNo: string; reqs: MaterialRequest[] }) {
@@ -631,9 +664,16 @@ export default function MaterialRequestsPage() {
                               <div className="flex flex-wrap items-center gap-2 mb-2">
                                 <span className="text-sm font-semibold text-purple-700">🏭 Made at factory <span className="font-normal text-gray-400">— labels</span></span>
                                 <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 font-mono">L{run.runNo}</span>
+                                {(() => {
+                                  const sel = facReqs.flatMap(r => (r.material_request_items || []).filter(it => factoryItems.has(it.item_code) && selLabels.has(it.id) && !it.label_received_at))
+                                  return sel.length > 0 ? (
+                                    <button onClick={() => sendLabels(run)} disabled={busy === `sendlabels|${run.runNo}`}
+                                      className="ml-auto bg-green-600 text-white px-3 py-1 rounded-lg hover:bg-green-700 text-xs font-medium disabled:opacity-50">{busy === `sendlabels|${run.runNo}` ? 'Sending…' : `Send ${sel.length} label(s) → stock`}</button>
+                                  ) : null
+                                })()}
                                 <button onClick={() => downloadFactoryPdf(run.runNo, run.factory, run.released_at, facReqs)} disabled={facLocked || labelsMissing}
                                   title={facLocked ? 'Locked until the Goods Received Note is uploaded' : labelsMissing ? 'Enter a batch no. or expiry for every label first' : ''}
-                                  className="ml-auto border border-purple-600 text-purple-600 px-3 py-1 rounded-lg hover:bg-purple-50 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed">⬇ Factory PDF</button>
+                                  className={`border border-purple-600 text-purple-600 px-3 py-1 rounded-lg hover:bg-purple-50 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed${facReqs.flatMap(r => (r.material_request_items || []).filter(it => factoryItems.has(it.item_code) && selLabels.has(it.id) && !it.label_received_at)).length > 0 ? '' : ' ml-auto'}`}>⬇ Factory PDF</button>
                               </div>
                               <div className="space-y-3">
                                 {facReqs.map(r => {
@@ -666,6 +706,14 @@ export default function MaterialRequestsPage() {
                                                   <label className="text-xs text-gray-500">Batch No.<input value={le.batch} onChange={e => setLe({ batch: e.target.value })} placeholder="batch no." className="border rounded px-2 py-1 text-sm w-full" /></label>
                                                   <label className="text-xs text-gray-500">Expiry<input type="date" value={le.exp} onChange={e => setLe({ exp: e.target.value })} className="border rounded px-2 py-1 text-sm w-full" /></label>
                                                   <button onClick={() => saveLabel(it, r)} disabled={busy === `label|${it.id}`} className="col-span-2 bg-blue-600 text-white rounded px-3 py-1.5 text-sm font-medium disabled:opacity-50">{busy === `label|${it.id}` ? 'Saving…' : 'Save'}{(it.label_batch_no || it.label_exp_date) ? ' ✓' : ''}</button>
+                                                  {it.label_received_at ? <span className="col-span-2 text-green-600 text-xs font-medium">✓ Sent to stock</span> : (
+                                                    <div className="col-span-2 flex items-center gap-3">
+                                                      {it.label_photo_path
+                                                        ? <button onClick={() => viewLabelPhoto(it.label_photo_path!)} className="text-green-600 hover:underline text-xs">✓ Photo</button>
+                                                        : <label className="text-blue-600 hover:underline text-xs cursor-pointer">{busy === `lphoto|${it.id}` ? '…' : '📷 Photo'}<input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) uploadLabelPhoto(it, r, f); e.target.value = '' }} /></label>}
+                                                      <label className="text-xs text-gray-600 flex items-center gap-1"><input type="checkbox" className="h-4 w-4" checked={selLabels.has(it.id)} onChange={() => toggleLabel(it.id)} /> send</label>
+                                                    </div>
+                                                  )}
                                                 </div>
                                               )}
                                             </div>
@@ -698,7 +746,17 @@ export default function MaterialRequestsPage() {
                                                     <td className="px-3 py-2"><input type="number" min="0" max={avail} value={le.qty} onChange={e => setLe({ qty: e.target.value })} className="border rounded px-2 py-1 text-xs w-20 text-right" /></td>
                                                     <td className="px-3 py-2"><input value={le.batch} onChange={e => setLe({ batch: e.target.value })} placeholder="batch no." className="border rounded px-2 py-1 text-xs w-28" /></td>
                                                     <td className="px-3 py-2"><input type="date" min="2020-01-01" max="2100-12-31" value={le.exp} onChange={e => setLe({ exp: e.target.value })} className="border rounded px-2 py-1 text-xs" /></td>
-                                                    <td className="px-3 py-2 whitespace-nowrap"><button onClick={() => saveLabel(it, r)} disabled={busy === `label|${it.id}`} className="text-blue-600 hover:underline text-xs disabled:opacity-50">{busy === `label|${it.id}` ? 'Saving…' : 'Save'}</button>{(it.label_batch_no || it.label_exp_date) && <span className="text-green-600 text-xs ml-1">✓</span>}</td>
+                                                    <td className="px-3 py-2 whitespace-nowrap">
+                                                      {it.label_received_at ? <span className="text-green-600 text-xs font-medium">✓ Sent to stock</span> : (<>
+                                                        <button onClick={() => saveLabel(it, r)} disabled={busy === `label|${it.id}`} className="text-blue-600 hover:underline text-xs disabled:opacity-50">{busy === `label|${it.id}` ? 'Saving…' : 'Save'}</button>{(it.label_batch_no || it.label_exp_date) && <span className="text-green-600 text-xs ml-0.5">✓</span>}
+                                                        <span className="text-gray-300 mx-1">·</span>
+                                                        {it.label_photo_path
+                                                          ? <button onClick={() => viewLabelPhoto(it.label_photo_path!)} className="text-green-600 hover:underline text-xs">✓ Photo</button>
+                                                          : <label className="text-blue-600 hover:underline text-xs cursor-pointer">{busy === `lphoto|${it.id}` ? '…' : '📷 Photo'}<input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) uploadLabelPhoto(it, r, f); e.target.value = '' }} /></label>}
+                                                        <span className="text-gray-300 mx-1">·</span>
+                                                        <input type="checkbox" className="h-4 w-4 align-middle" checked={selLabels.has(it.id)} onChange={() => toggleLabel(it.id)} title="Tick to send into stock" />
+                                                      </>)}
+                                                    </td>
                                                   </>}
                                                 </tr>
                                               )
