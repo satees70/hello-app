@@ -1246,6 +1246,14 @@ end $$;
 grant execute on function public.remap_unmapped_lines(uuid) to authenticated;
 
 
+-- 2026-06 · BOM editable by anyone with the 'bom' edit permission (was HEAD_OFFICE only)
+alter table public.bom_components enable row level security;
+drop policy if exists bom_components_edit on public.bom_components;
+create policy bom_components_edit on public.bom_components for all to authenticated
+  using (public.has_perm('bom','edit'))
+  with check (public.has_perm('bom','edit'));
+
+
 -- 2026-06 · Per-factory view-only — a user can see records for these factories but
 -- not edit/delete them (enforced in the app via can(module, action, factory_code)).
 alter table public.profiles add column if not exists readonly_factories text[] not null default '{}';
