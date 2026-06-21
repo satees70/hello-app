@@ -53,7 +53,9 @@ export default function MaterialRequestsPage() {
   const { profile, loading, error: profileError } = useProfile()
   useRequireView(profile, 'material_requests')
   const canEdit = profile ? can(profile, 'material_requests', 'edit') : false
-  const canEditFac = (fc: string) => can(profile, 'material_requests', 'edit', fc)   // honours per-factory view-only
+  // Warehouse staff record receipts/SO for every released run they see, so they're
+  // never treated as view-only here; everyone else honours per-factory view-only.
+  const canEditFac = (fc: string) => isWarehouse || can(profile, 'material_requests', 'edit', fc)
   const [requests, setRequests] = useState<MaterialRequest[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [filter, setFilter] = useState<Filter>('Open')
@@ -579,7 +581,7 @@ export default function MaterialRequestsPage() {
                                   {run.reqs[0].so_set_by_name && <span className="text-[11px] text-gray-400">by {run.reqs[0].so_set_by_name}{run.reqs[0].so_set_at ? ` · ${new Date(run.reqs[0].so_set_at).toLocaleString()}` : ''}</span>}
                                   {canEditFac(run.factory) && hasCap(profile, 'so_edit') && <button onClick={() => requestSoChange(run)} className="text-blue-600 hover:underline text-xs">Request change</button>}
                                 </>
-                              ) : hasCap(profile, 'so_edit') ? (
+                              ) : canEditFac(run.factory) && hasCap(profile, 'so_edit') ? (
                                 <>
                                   <input value={soEdits[run.runNo] ?? ''} onChange={e => setSoEdits(prev => ({ ...prev, [run.runNo]: e.target.value }))}
                                     placeholder="enter SO number" className="border rounded px-2 py-1 text-xs w-40" />
