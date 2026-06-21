@@ -80,6 +80,11 @@ interface SoChangeReq {
   requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
 }
 
+interface QtyMoveReq {
+  id: string; item_code: string | null; qty: number | null; from_label: string | null; to_label: string | null; reason: string | null; status: string
+  requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
+}
+
 const FIELD_LABEL: Record<string, string> = {
   customer_name: 'Customer',
   item_code: 'Item Code',
@@ -130,6 +135,7 @@ export default function PendingChangesPage() {
   const [retEdits, setRetEdits] = useState<RetEditReq[]>([])
   const [itemChanges, setItemChanges] = useState<ItemChangeReq[]>([])
   const [soChanges, setSoChanges] = useState<SoChangeReq[]>([])
+  const [qtyMoves, setQtyMoves] = useState<QtyMoveReq[]>([])
 
   // Distinct values present in a list, for a filter dropdown
   const distinctOf = <T,>(arr: T[], get: (x: T) => string) => [...new Set(arr.map(get))].filter(Boolean).sort()
@@ -142,7 +148,7 @@ export default function PendingChangesPage() {
 
   useEffect(() => {
     if (!profile) return
-    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadItemChanges(); loadSoChanges()
+    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves()
     // Live refresh on any change-request activity, with a poll fallback
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) supabase.realtime.setAuth(data.session.access_token)
@@ -160,8 +166,9 @@ export default function PendingChangesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'return_edit_requests' }, () => loadRetEdits())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'item_change_requests' }, () => loadItemChanges())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'so_change_requests' }, () => loadSoChanges())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mr_qty_move_requests' }, () => loadQtyMoves())
       .subscribe()
-    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadItemChanges(); loadSoChanges() }, 20000)
+    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves() }, 20000)
     return () => { supabase.removeChannel(channel); clearInterval(timer) }
   }, [profile])
 
@@ -319,6 +326,23 @@ export default function PendingChangesPage() {
     if (e) { setError(e.message); setBusyId(''); return }
     setSuccess('SO number change rejected.'); setBusyId(''); loadSoChanges()
   }
+  async function loadQtyMoves() {
+    const { data } = await supabase.from('mr_qty_move_requests').select('*').order('created_at', { ascending: false })
+    setQtyMoves((data as QtyMoveReq[]) || [])
+  }
+  async function approveQM(id: string) {
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('approve_mr_qty_move', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Quantity move approved.'); setBusyId(''); loadQtyMoves()
+  }
+  async function rejectQM(id: string) {
+    if (!confirm('Reject this quantity move? Nothing changes.')) return
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('reject_mr_qty_move', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Quantity move rejected.'); setBusyId(''); loadQtyMoves()
+  }
   async function approveRM(id: string) {
     setBusyId(id); setError(''); setSuccess('')
     const { error: e } = await supabase.rpc('approve_run_mode', { p_id: id })
@@ -435,6 +459,7 @@ export default function PendingChangesPage() {
   const ITEM_FIELD_LABEL: Record<string, string> = { description: 'Description', unit: 'Unit', type: 'Type', stock_group: 'Stock Group', supplied_by_factory: 'Made at factory', kg_per_bag: 'KG per bag', pcs_per_roll: 'Pieces per roll' }
   const shownIC = filter === 'All' ? itemChanges : itemChanges.filter(a => a.status === filter)
   const shownSO = filter === 'All' ? soChanges : soChanges.filter(a => a.status === filter)
+  const shownQM = filter === 'All' ? qtyMoves : qtyMoves.filter(a => a.status === filter)
   const counts: Record<string, number> = { Pending: 0, Approved: 0, Rejected: 0 }
   requests.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1 })
 
@@ -990,6 +1015,42 @@ export default function PendingChangesPage() {
                         <div className="flex gap-2">
                           <button onClick={() => approveSO(a.id)} disabled={busyId === a.id} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">Approve</button>
                           <button onClick={() => rejectSO(a.id)} disabled={busyId === a.id} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>
+                        </div>
+                      ) : <span className="text-gray-400">done</span>}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Move received qty between requests */}
+        <h2 className="text-lg font-semibold mt-8 mb-2">Received-quantity moves</h2>
+        <p className="text-gray-500 text-sm mb-3">{isHO ? 'Approve to move a received quantity from one material request to another (same material).' : 'Track your requests to move received quantity between requests.'}</p>
+        <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem] mb-10">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 border-b sticky top-0 z-10">
+              <tr>{['Material', 'Move', 'From → To', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
+                <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+            </thead>
+            <tbody>
+              {shownQM.length === 0 && (<tr><td colSpan={8} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} quantity moves.</td></tr>)}
+              {shownQM.map(a => (
+                <tr key={a.id} className="border-b last:border-0 align-top hover:bg-gray-50">
+                  <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{a.item_code}</td>
+                  <td className="px-3 py-2 text-right font-semibold">{a.qty}</td>
+                  <td className="px-3 py-2 text-gray-600 min-w-[160px]">{a.from_label} → <strong>{a.to_label}</strong></td>
+                  <td className="px-3 py-2 text-gray-600 min-w-[120px]">{a.reason}</td>
+                  <td className="px-3 py-2 whitespace-nowrap"><span className="block">{a.requested_by_name || '—'}</span><span className="block text-gray-400">{fmt(a.created_at)}</span></td>
+                  <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full font-medium ${STATUS_STYLES[a.status] || 'bg-gray-100 text-gray-700'}`}>{a.status}</span></td>
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-600">{a.status === 'Pending' ? '—' : (<><span className="block">{a.reviewed_by_name}</span><span className="block text-gray-400">{fmt(a.reviewed_at)}</span></>)}</td>
+                  {isHO && (
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {a.status === 'Pending' ? (
+                        <div className="flex gap-2">
+                          <button onClick={() => approveQM(a.id)} disabled={busyId === a.id} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">Approve</button>
+                          <button onClick={() => rejectQM(a.id)} disabled={busyId === a.id} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>
                         </div>
                       ) : <span className="text-gray-400">done</span>}
                     </td>

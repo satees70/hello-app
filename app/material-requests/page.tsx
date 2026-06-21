@@ -65,6 +65,12 @@ export default function MaterialRequestsPage() {
   const [notReq, setNotReq] = useState<PlannedBatch[]>([]) // batches with no material request raised yet
   const [pcsPerRoll, setPcsPerRoll] = useState<Record<string, number>>({}) // roll items: code -> pieces per roll
   const [soEdits, setSoEdits] = useState<Record<string, string>>({}) // run no -> SO number being typed
+  // Move-received-qty modal
+  const [moveSrc, setMoveSrc] = useState<{ it: MRItem; r: MaterialRequest } | null>(null)
+  const [moveQty, setMoveQty] = useState('')
+  const [moveTargetId, setMoveTargetId] = useState('')
+  const [moveReason, setMoveReason] = useState('')
+  const [movePending, setMovePending] = useState<Set<string>>(new Set())
   const [labelEdits, setLabelEdits] = useState<Record<string, { batch: string; exp: string; qty: string }>>({}) // item id -> label batch/exp/print-qty being typed
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -96,6 +102,44 @@ export default function MaterialRequestsPage() {
       .select('*, production_batches!batch_id(batch_no, item_code, description, exp_date), material_request_items(*)')
       .order('created_at', { ascending: false })
     setRequests((data as MaterialRequest[]) || [])
+    const { data: mv } = await supabase.from('mr_qty_move_requests').select('from_item_id').eq('status', 'Pending')
+    setMovePending(new Set((mv || []).map(x => x.from_item_id).filter(Boolean)))
+  }
+
+  // Candidate target request-items to move received qty INTO: same material, a
+  // different request, still needing some (released requests only).
+  function moveTargets(it: MRItem, r: MaterialRequest) {
+    const out: { id: string; label: string; remaining: number }[] = []
+    requests.forEach(r2 => {
+      if (r2.id === r.id || !r2.released_at) return
+      ;(r2.material_request_items || []).forEach(t => {
+        if (t.item_code !== it.item_code) return
+        out.push({ id: t.id, label: `${r2.pick_run_no || r2.request_no} · ${r2.production_batches?.batch_no || ''}`, remaining: Math.max(0, t.requested_qty - t.received_qty) })
+      })
+    })
+    return out
+  }
+  function openMove(it: MRItem, r: MaterialRequest) {
+    setMoveSrc({ it, r }); setMoveQty(''); setMoveTargetId(''); setMoveReason(''); setError(''); setSuccess('')
+  }
+  async function submitMove() {
+    if (!moveSrc || !profile) return
+    const { it, r } = moveSrc
+    const q = Number(moveQty)
+    if (!(q > 0)) { setError('Enter a quantity greater than zero.'); return }
+    if (q > it.received_qty) { setError(`Only ${it.received_qty} ${it.unit} received on this request.`); return }
+    if (!moveTargetId) { setError('Pick the request to move it to.'); return }
+    if (!moveReason.trim()) { setError('Please give a reason.'); return }
+    const tgt = moveTargets(it, r).find(t => t.id === moveTargetId)
+    setBusy('move'); setError(''); setSuccess('')
+    const { error: e } = await supabase.from('mr_qty_move_requests').insert({
+      from_item_id: it.id, to_item_id: moveTargetId, factory_code: r.factory_code, item_code: it.item_code, qty: q, reason: moveReason.trim(),
+      from_label: `${r.pick_run_no || r.request_no} · ${r.production_batches?.batch_no || ''}`, to_label: tgt?.label || '',
+      requested_by: profile.id, requested_by_name: profile.full_name || null,
+    })
+    setBusy('')
+    if (e) { setError(e.message); return }
+    setMoveSrc(null); setSuccess('Move request sent to Head Office for approval.'); load()
   }
   async function loadFactoryItems() {
     const { data } = await supabase.from('items').select('code').eq('supplied_by_factory', true)
@@ -684,8 +728,8 @@ export default function MaterialRequestsPage() {
                 <div className="overflow-x-auto border rounded-lg">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b">
-                      <tr>{['Material', 'Description', 'Unit', 'Requested', 'Received', 'Remaining'].map(h => (
-                        <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+                      <tr>{['Material', 'Description', 'Unit', 'Requested', 'Received', 'Remaining', ...(canEditFac(r.factory_code) ? [''] : [])].map((h, i) => (
+                        <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
                     </thead>
                     <tbody>
                       {(r.material_request_items || []).filter(it => !factoryItems.has(it.item_code)).map(it => {
@@ -699,6 +743,11 @@ export default function MaterialRequestsPage() {
                             <td className="px-3 py-2 text-right font-semibold text-blue-700">{it.requested_qty}</td>
                             <td className="px-3 py-2 text-right text-gray-700">{it.received_qty}</td>
                             <td className={`px-3 py-2 text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{remaining}</td>
+                            {canEditFac(r.factory_code) && <td className="px-3 py-2 whitespace-nowrap text-right">
+                              {movePending.has(it.id) ? <span className="text-amber-600 text-xs">⏳ move pending</span>
+                                : it.received_qty > 0 && moveTargets(it, r).length > 0 ? <button onClick={() => openMove(it, r)} className="text-blue-600 hover:underline text-xs">Move qty</button>
+                                  : null}
+                            </td>}
                           </tr>
                         )
                       })}
@@ -715,6 +764,35 @@ export default function MaterialRequestsPage() {
         )}
 
       </div>
+
+      {/* Move received qty to another request (HO approval) */}
+      {moveSrc && (() => {
+        const { it, r } = moveSrc
+        const targets = moveTargets(it, r)
+        return (
+          <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setMoveSrc(null)}>
+            <div className="bg-white rounded-xl shadow-xl border w-full max-w-md my-8 p-6" onClick={e => e.stopPropagation()}>
+              <h2 className="font-semibold text-lg mb-1">Move received quantity</h2>
+              <p className="text-gray-500 text-sm mb-4"><span className="font-mono">{it.item_code}</span> — from {r.pick_run_no || r.request_no} ({it.received_qty} {it.unit} received). Goes to Head Office for approval.</p>
+              <div className="space-y-3">
+                <div><label className="block text-sm font-medium mb-1">Quantity to move ({it.unit})</label>
+                  <input type="number" step="any" min="0" max={it.received_qty} value={moveQty} onChange={e => setMoveQty(e.target.value)} className="w-full border rounded-lg px-3 py-2" /></div>
+                <div><label className="block text-sm font-medium mb-1">Move to request</label>
+                  <select value={moveTargetId} onChange={e => setMoveTargetId(e.target.value)} className="w-full border rounded-lg px-3 py-2 bg-white">
+                    <option value="">Choose a request…</option>
+                    {targets.map(t => <option key={t.id} value={t.id}>{t.label} · still needs {t.remaining} {it.unit}</option>)}
+                  </select></div>
+                <div><label className="block text-sm font-medium mb-1">Reason</label>
+                  <input value={moveReason} onChange={e => setMoveReason(e.target.value)} placeholder="Why move it?" className="w-full border rounded-lg px-3 py-2" /></div>
+              </div>
+              <div className="flex gap-2 mt-5">
+                <button onClick={submitMove} disabled={busy === 'move'} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{busy === 'move' ? 'Sending…' : 'Send for approval'}</button>
+                <button onClick={() => setMoveSrc(null)} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

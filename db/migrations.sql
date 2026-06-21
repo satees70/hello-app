@@ -136,6 +136,68 @@ grant execute on function public.create_delivery_order(uuid[], jsonb) to authent
 
 
 -- ============================================================================
+-- Material requests · move received qty from one request to another (HO approval)
+-- (same material; e.g. when received stock was booked against the wrong request)
+-- ============================================================================
+create table if not exists public.mr_qty_move_requests (
+  id uuid primary key default gen_random_uuid(),
+  from_item_id uuid references public.material_request_items(id) on delete cascade,
+  to_item_id uuid references public.material_request_items(id) on delete cascade,
+  factory_code text, item_code text, qty numeric, reason text, from_label text, to_label text,
+  status text not null default 'Pending',
+  requested_by uuid, requested_by_name text, created_at timestamptz not null default now(),
+  reviewed_by uuid, reviewed_by_name text, reviewed_at timestamptz
+);
+grant select, insert on public.mr_qty_move_requests to authenticated;
+grant all on public.mr_qty_move_requests to service_role;
+alter table public.mr_qty_move_requests enable row level security;
+drop policy if exists mqm_read on public.mr_qty_move_requests;
+create policy mqm_read on public.mr_qty_move_requests for select using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()) or requested_by = auth.uid());
+drop policy if exists mqm_insert on public.mr_qty_move_requests;
+create policy mqm_insert on public.mr_qty_move_requests for insert with check (requested_by = auth.uid() and has_perm('material_requests', 'edit'));
+
+create or replace function public.recompute_mr_status(p_request_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  update public.material_requests set status =
+    case when (select bool_and(received_qty >= requested_qty) from public.material_request_items where request_id = p_request_id) then 'Fulfilled'
+         when (select bool_or(received_qty > 0) from public.material_request_items where request_id = p_request_id) then 'Partially Received'
+         else 'Open' end
+  where id = p_request_id and released_at is not null;   -- don't touch unreleased drafts
+end $$;
+
+create or replace function public.approve_mr_qty_move(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_req public.mr_qty_move_requests; v_from public.material_request_items; v_to public.material_request_items; v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can approve quantity moves'; end if;
+  select * into v_req from public.mr_qty_move_requests where id = p_id and status = 'Pending';
+  if not found then raise exception 'Request not found or already reviewed'; end if;
+  select * into v_from from public.material_request_items where id = v_req.from_item_id;
+  select * into v_to from public.material_request_items where id = v_req.to_item_id;
+  if not found or v_from.id is null then raise exception 'A request line no longer exists'; end if;
+  if v_req.qty > v_from.received_qty then raise exception 'Cannot move % — only % received on the source', v_req.qty, v_from.received_qty; end if;
+  update public.material_request_items set received_qty = received_qty - v_req.qty where id = v_from.id;
+  update public.material_request_items set received_qty = received_qty + v_req.qty where id = v_to.id;
+  perform public.recompute_mr_status(v_from.request_id);
+  perform public.recompute_mr_status(v_to.request_id);
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.mr_qty_move_requests set status = 'Approved', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id;
+end $$;
+grant execute on function public.approve_mr_qty_move(uuid) to authenticated;
+
+create or replace function public.reject_mr_qty_move(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can reject quantity moves'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.mr_qty_move_requests set status = 'Rejected', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id and status = 'Pending';
+end $$;
+grant execute on function public.reject_mr_qty_move(uuid) to authenticated;
+
+
+-- ============================================================================
 -- Pick run SO number · lock after set; record who/when; change needs HO approval
 -- ============================================================================
 alter table public.material_requests add column if not exists so_set_by uuid;
