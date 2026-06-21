@@ -10,6 +10,14 @@
 -- Add a new section here whenever a DB change is made.
 -- ============================================================================
 
+-- ============================================================================
+-- Goods Received · per-line partial receiving bookkeeping
+-- (was written by the app since commit 2b78342 but not recorded here — without
+--  these columns the "mark line received" update fails and receiving appears broken)
+-- ============================================================================
+alter table public.delivery_order_lines add column if not exists received_qty numeric;
+alter table public.delivery_order_lines add column if not exists stock_lot_id uuid;
+
 
 -- ============================================================================
 -- 2026-06 · Pick-run release & cut-off (Material Requests → Combined picking)

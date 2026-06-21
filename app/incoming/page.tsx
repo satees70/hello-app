@@ -35,6 +35,7 @@ export default function IncomingPage() {
   useRequireView(profile, 'goods_received')
   const canEdit = profile ? can(profile, 'goods_received', 'edit') : false
   const [docs, setDocs] = useState<DeliveryOrder[]>([])
+  const [lineCounts, setLineCounts] = useState<Record<string, { recv: number; total: number }>>({})
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
@@ -109,6 +110,14 @@ export default function IncomingPage() {
   async function loadDocs() {
     const { data } = await supabase.from('delivery_orders').select('*').order('created_at', { ascending: false })
     setDocs((data as DeliveryOrder[]) || [])
+    // Per-document progress: how many lines received out of the total
+    const { data: ls } = await supabase.from('delivery_order_lines').select('do_id, received_at')
+    const c: Record<string, { recv: number; total: number }> = {}
+    ;(ls || []).forEach((r: { do_id: string; received_at: string | null }) => {
+      const e = c[r.do_id] || (c[r.do_id] = { recv: 0, total: 0 })
+      e.total++; if (r.received_at) e.recv++
+    })
+    setLineCounts(c)
   }
   async function loadFactories() {
     const { data } = await supabase.from('factories').select('code, name').order('code')
@@ -374,7 +383,8 @@ export default function IncomingPage() {
         .order('created_at', { ascending: false }).limit(1).maybeSingle()
       lotId = lot?.id || null
     }
-    await supabase.from('delivery_order_lines').update({ received_at: new Date().toISOString(), stock_lot_id: lotId, received_qty: qty }).eq('id', l.id)
+    const { error: markErr } = await supabase.from('delivery_order_lines').update({ received_at: new Date().toISOString(), stock_lot_id: lotId, received_qty: qty }).eq('id', l.id)
+    if (markErr) { setError(`${l.item_code}: stock was added but the line could not be marked received — ${markErr.message}. Ask Head Office to run the database update.`); setBusyLine(''); return }
     if (!silent) {
       const { data } = await supabase.from('delivery_order_lines').select('*').eq('do_id', linesFor.id).order('item_code')
       const fresh = (data as DoLine[]) || []
@@ -428,7 +438,10 @@ export default function IncomingPage() {
             <div key={doc.id} className="bg-white rounded-xl shadow-sm border p-3">
               <div className="flex items-start justify-between gap-2">
                 <span className="font-medium text-sm break-all">{doc.file_name}</span>
-                <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[doc.status] || 'bg-gray-100 text-gray-700'}`}>{doc.status}</span>
+                <span className="shrink-0 text-right">
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[doc.status] || 'bg-gray-100 text-gray-700'}`}>{doc.status}</span>
+                  {lineCounts[doc.id]?.total ? <span className="block text-xs text-gray-500 mt-0.5">{lineCounts[doc.id].recv}/{lineCounts[doc.id].total} received</span> : null}
+                </span>
               </div>
               <div className="text-xs text-gray-500 mt-1">{doc.do_number ? <span className="font-mono">{doc.do_number}</span> : '—'} · {isHO ? factoryName(doc.factory_code) : doc.factory_code} · {new Date(doc.created_at).toLocaleDateString()}</div>
               <div className="flex flex-wrap gap-3 mt-2 pt-2 border-t text-xs">
@@ -454,7 +467,7 @@ export default function IncomingPage() {
                   <td className="px-4 py-3">{doc.file_name}</td>
                   <td className="px-4 py-3 font-mono text-gray-500 whitespace-nowrap">{doc.do_number || '—'}</td>
                   <td className="px-4 py-3 whitespace-nowrap">{isHO ? factoryName(doc.factory_code) : doc.factory_code}</td>
-                  <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[doc.status] || 'bg-gray-100 text-gray-700'}`}>{doc.status}</span></td>
+                  <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[doc.status] || 'bg-gray-100 text-gray-700'}`}>{doc.status}</span>{lineCounts[doc.id]?.total ? <span className="block text-xs text-gray-500 mt-1">{lineCounts[doc.id].recv}/{lineCounts[doc.id].total} received</span> : null}</td>
                   <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{new Date(doc.created_at).toLocaleString()}</td>
                   <td className="px-4 py-3 whitespace-nowrap flex gap-3">
                     <button onClick={() => viewLines(doc)} className="text-blue-600 hover:underline text-xs">View Lines</button>
