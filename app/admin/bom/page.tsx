@@ -8,7 +8,7 @@ import { supabase, fetchAll } from '@/lib/supabase'
 import { can } from '@/lib/permissions'
 
 interface Item { id: string; code: string; description: string; unit: string; type: string }
-interface BomComponent { id: string; parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean; use_mode: string }
+interface BomComponent { id: string; parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean; use_mode: string; main_ingredient?: boolean }
 
 // Type-to-search item picker (replaces a huge native dropdown)
 function ItemCombo({ items, value, onChange, placeholder }: {
@@ -200,6 +200,10 @@ export default function BomPage() {
     setComponents(prev => prev.map(c => (c.id === id ? { ...c, use_mode: mode } : c)))
     setDirty(true)
   }
+  function setRowMain(id: string) {
+    setComponents(prev => prev.map(c => (c.id === id ? { ...c, main_ingredient: !c.main_ingredient } : c)))
+    setDirty(true)
+  }
 
   function setRowComponent(id: string, newComponentId: string) {
     if (!newComponentId) return
@@ -213,7 +217,7 @@ export default function BomPage() {
   async function saveAll() {
     setError(''); setSuccess(''); setSaving(true)
     const results = await Promise.all(components.map(c =>
-      supabase.from('bom_components').update({ component_item_id: c.component_item_id, quantity: Number(c.quantity) || 0, apply_allowance: c.apply_allowance, use_mode: c.use_mode || 'any' }).eq('id', c.id)
+      supabase.from('bom_components').update({ component_item_id: c.component_item_id, quantity: Number(c.quantity) || 0, apply_allowance: c.apply_allowance, use_mode: c.use_mode || 'any', main_ingredient: !!c.main_ingredient }).eq('id', c.id)
     ))
     const failed = results.find(r => r.error)
     if (failed?.error) { setError(failed.error.message); setSaving(false); return }
@@ -338,14 +342,14 @@ export default function BomPage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b">
                   <tr>
-                    {['Component Code', 'Description', 'Type', 'Unit', 'Qty per unit', 'Allowance', 'Used when', 'Actions'].map(h => (
+                    {['Component Code', 'Description', 'Type', 'Unit', 'Qty per unit', 'Allowance', 'Main ingredient', 'Used when', 'Actions'].map(h => (
                       <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {components.length === 0 && (
-                    <tr><td colSpan={8} className="text-center py-8 text-gray-400">No components yet. Add the first one above.</td></tr>
+                    <tr><td colSpan={9} className="text-center py-8 text-gray-400">No components yet. Add the first one above.</td></tr>
                   )}
                   {components.map(c => {
                     const ci = itemById(c.component_item_id)
@@ -388,6 +392,12 @@ export default function BomPage() {
                           <label className="inline-flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" checked={c.apply_allowance} onChange={() => setRowAllowance(c.id)} className="h-4 w-4" />
                             <span className="text-xs text-gray-500">{c.apply_allowance ? '+10%' : 'none'}</span>
+                          </label>
+                        </td>
+                        <td className="px-4 py-3">
+                          <label className="inline-flex items-center gap-2 cursor-pointer" title="Tick if this is a main ingredient (used in the food-loss calculation)">
+                            <input type="checkbox" checked={!!c.main_ingredient} onChange={() => setRowMain(c.id)} className="h-4 w-4" />
+                            <span className="text-xs text-gray-500">{c.main_ingredient ? '★ main' : ''}</span>
                           </label>
                         </td>
                         <td className="px-4 py-3">
