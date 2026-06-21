@@ -26,10 +26,31 @@ alter table public.profiles add column if not exists location_perms jsonb not nu
 -- Factory labels · printer attaches a photo & sends; sending receives into stock
 -- ============================================================================
 alter table public.material_request_items add column if not exists label_photo_path text;
+alter table public.material_request_items add column if not exists label_sent_at timestamptz;
 alter table public.material_request_items add column if not exists label_received_at timestamptz;
 
--- Book the selected factory labels into stock (qty = label_print_qty, with batch/expiry),
--- mark them sent, and fulfil their request lines. Each needs a print qty and a photo.
+-- Printer SENDS the printed labels (needs a saved print qty + a photo). No stock yet.
+create or replace function public.send_labels(p_item_ids uuid[]) returns void
+language plpgsql security definer set search_path = public as $$
+declare it record;
+begin
+  if array_length(p_item_ids, 1) is null then raise exception 'No labels selected'; end if;
+  for it in
+    select mri.*, mr.factory_code as fac
+    from public.material_request_items mri
+    join public.material_requests mr on mr.id = mri.request_id
+    where mri.id = any (p_item_ids)
+  loop
+    if my_factory_code() <> 'HEAD_OFFICE' and not (it.fac = any (my_factory_codes())) then raise exception 'Not allowed for this factory'; end if;
+    if it.label_sent_at is not null then continue; end if;
+    if it.label_photo_path is null then raise exception 'Attach a photo for % before sending', it.item_code; end if;
+    if coalesce(it.label_print_qty, 0) <= 0 then raise exception 'Enter a print quantity for % before sending', it.item_code; end if;
+    update public.material_request_items set label_sent_at = now() where id = it.id;
+  end loop;
+end $$;
+grant execute on function public.send_labels(uuid[]) to authenticated;
+
+-- Requesting location RECEIVES the labels: books them into stock and completes the line.
 create or replace function public.receive_labels(p_item_ids uuid[]) returns void
 language plpgsql security definer set search_path = public as $$
 declare it record; v_item_id uuid; v_qty numeric;
@@ -42,10 +63,10 @@ begin
     where mri.id = any (p_item_ids)
   loop
     if my_factory_code() <> 'HEAD_OFFICE' and not (it.fac = any (my_factory_codes())) then raise exception 'Not allowed for this factory'; end if;
-    if it.label_received_at is not null then continue; end if;                       -- already sent
-    if it.label_photo_path is null then raise exception 'Attach a photo for % before sending', it.item_code; end if;
+    if it.label_received_at is not null then continue; end if;                       -- already received
+    if it.label_sent_at is null then raise exception 'Label % has not been sent yet', it.item_code; end if;
     v_qty := coalesce(it.label_print_qty, 0);
-    if v_qty <= 0 then raise exception 'Enter a print quantity for % before sending', it.item_code; end if;
+    if v_qty <= 0 then raise exception 'No print quantity for %', it.item_code; end if;
     v_item_id := coalesce(it.item_id, (select id from public.items where code = it.item_code limit 1));
     if v_item_id is null then raise exception 'Item % is not in the Items master', it.item_code; end if;
     insert into public.stock_lots (item_id, item_code, description, factory_code, batch_no, exp_date, qty_received, qty_remaining, request_item_id)

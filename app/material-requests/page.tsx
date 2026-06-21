@@ -38,7 +38,9 @@ interface MaterialRequest {
   material_request_items: MRItem[]
 }
 
+// 'Labels' moved to its own /labels page — kept in the type for the shared rendering, but hidden from the tab bar.
 const FILTERS = ['Open', 'Partially Received', 'Fulfilled', 'All', 'Combined picking', 'Labels', 'Not requested'] as const
+const TAB_FILTERS = FILTERS.filter(f => f !== 'Labels')
 interface PlannedBatch { id: string; batch_no: string; item_code: string; description: string; factory_code: string; total_quantity: number; produced_qty: number; delivery_date: string | null }
 type Filter = typeof FILTERS[number]
 
@@ -527,7 +529,7 @@ export default function MaterialRequestsPage() {
 
         {!isWarehouse && (
           <div className="flex gap-2 mb-5">
-            {FILTERS.map(f => (
+            {TAB_FILTERS.map(f => (
               <button key={f} onClick={() => setFilter(f)}
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${filter === f ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
                 {f}{f === 'Not requested' ? (notReq.length ? ` (${notReq.length})` : '') : (f !== 'All' && counts[f] ? ` (${counts[f]})` : '')}
