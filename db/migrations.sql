@@ -136,6 +136,53 @@ grant execute on function public.create_delivery_order(uuid[], jsonb) to authent
 
 
 -- ============================================================================
+-- Pick run SO number · lock after set; record who/when; change needs HO approval
+-- ============================================================================
+alter table public.material_requests add column if not exists so_set_by uuid;
+alter table public.material_requests add column if not exists so_set_by_name text;
+alter table public.material_requests add column if not exists so_set_at timestamptz;
+
+create table if not exists public.so_change_requests (
+  id uuid primary key default gen_random_uuid(),
+  pick_run_no text, factory_code text, old_so text, new_so text, reason text,
+  status text not null default 'Pending',
+  requested_by uuid, requested_by_name text, created_at timestamptz not null default now(),
+  reviewed_by uuid, reviewed_by_name text, reviewed_at timestamptz
+);
+grant select, insert on public.so_change_requests to authenticated;
+grant all on public.so_change_requests to service_role;
+alter table public.so_change_requests enable row level security;
+drop policy if exists socr_read on public.so_change_requests;
+create policy socr_read on public.so_change_requests for select using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()) or requested_by = auth.uid());
+drop policy if exists socr_insert on public.so_change_requests;
+create policy socr_insert on public.so_change_requests for insert with check (requested_by = auth.uid() and has_perm('material_requests', 'edit'));
+
+create or replace function public.approve_so_change(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_req public.so_change_requests; v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can approve SO changes'; end if;
+  select * into v_req from public.so_change_requests where id = p_id and status = 'Pending';
+  if not found then raise exception 'Request not found or already reviewed'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.material_requests set warehouse_so_no = v_req.new_so, so_set_by = auth.uid(), so_set_by_name = v_name, so_set_at = now()
+    where pick_run_no = v_req.pick_run_no and factory_code = v_req.factory_code;
+  update public.so_change_requests set status = 'Approved', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id;
+end $$;
+grant execute on function public.approve_so_change(uuid) to authenticated;
+
+create or replace function public.reject_so_change(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can reject SO changes'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.so_change_requests set status = 'Rejected', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id and status = 'Pending';
+end $$;
+grant execute on function public.reject_so_change(uuid) to authenticated;
+
+
+-- ============================================================================
 -- Items master · staff request field edits (single or bulk); Head Office approves
 -- ============================================================================
 create table if not exists public.item_change_requests (

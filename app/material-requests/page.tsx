@@ -29,6 +29,8 @@ interface MaterialRequest {
   released_at: string | null
   pick_run_no: string | null
   warehouse_so_no: string | null
+  so_set_by_name: string | null
+  so_set_at: string | null
   batch_id: string
   production_batches: { batch_no: string; item_code: string; description: string; exp_date: string | null } | null
   material_request_items: MRItem[]
@@ -204,18 +206,40 @@ export default function MaterialRequestsPage() {
     setSuccess(`Cancel request sent for ${run.runNo} — waiting for Head Office approval.`)
   }
 
-  // Warehouse records the SO number against a released pick run (saved on all its requests)
+  // Warehouse records the SO number against a released pick run (saved on all its requests).
+  // Once set it's locked — changing it later needs Head Office approval.
   async function saveSo(run: { runNo: string; reqs: MaterialRequest[] }) {
     if (!canEditFac(run.reqs[0]?.factory_code || '')) { setError("You have view-only access at this factory."); return }
-    const val = (soEdits[run.runNo] ?? run.reqs[0]?.warehouse_so_no ?? '').trim()
+    if (run.reqs[0]?.warehouse_so_no) { setError('SO number is already set — use “Request change” for Head Office approval.'); return }
+    const val = (soEdits[run.runNo] ?? '').trim()
+    if (!val) { setError('Enter an SO number first.'); return }
     setBusy(`so|${run.runNo}`); setError(''); setSuccess('')
     const ids = run.reqs.map(r => r.id)
-    const { error: upErr } = await supabase.from('material_requests').update({ warehouse_so_no: val || null }).in('id', ids)
+    const { error: upErr } = await supabase.from('material_requests')
+      .update({ warehouse_so_no: val, so_set_by: profile?.id || null, so_set_by_name: profile?.full_name || null, so_set_at: new Date().toISOString() })
+      .in('id', ids)
     if (upErr) { setError(upErr.message); setBusy(''); return }
     setSuccess(`SO number saved for ${run.runNo}.`)
     setBusy('')
     setSoEdits(prev => { const n = { ...prev }; delete n[run.runNo]; return n })
     load()
+  }
+
+  // Ask Head Office to change an already-set SO number.
+  async function requestSoChange(run: { runNo: string; reqs: MaterialRequest[] }) {
+    if (!profile) return
+    const cur = run.reqs[0]?.warehouse_so_no || ''
+    const next = window.prompt(`Change SO number for ${run.runNo} (currently ${cur}).\nNew SO number:`, cur)
+    if (next === null) return
+    if (!next.trim() || next.trim() === cur) { setError('Enter a different SO number.'); return }
+    const reason = window.prompt('Reason for the change (sent to Head Office):') || ''
+    setError(''); setSuccess('')
+    const { error: e } = await supabase.from('so_change_requests').insert({
+      pick_run_no: run.runNo, factory_code: run.reqs[0]?.factory_code, old_so: cur, new_so: next.trim(), reason: reason || null,
+      requested_by: profile.id, requested_by_name: profile.full_name || null,
+    })
+    if (e) { setError(e.message); return }
+    setSuccess(`SO change for ${run.runNo} sent to Head Office for approval.`)
   }
 
 
@@ -497,11 +521,21 @@ export default function MaterialRequestsPage() {
                             <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 font-mono">{run.runNo}</span>
                             <span className="text-sm text-gray-400">released {new Date(run.released_at).toLocaleString()}</span>
                             {filter !== 'Labels' && <>
-                            <span className="flex items-center gap-1 ml-auto">
+                            <span className="flex items-center gap-2 ml-auto">
                               <span className="text-xs font-medium text-gray-600">SO No.</span>
-                              <input value={soEdits[run.runNo] ?? run.reqs[0]?.warehouse_so_no ?? ''} onChange={e => setSoEdits(prev => ({ ...prev, [run.runNo]: e.target.value }))}
-                                placeholder="enter SO number" className="border rounded px-2 py-1 text-xs w-40" />
-                              <button onClick={() => saveSo(run)} disabled={busy === `so|${run.runNo}`} className="text-blue-600 hover:underline text-xs disabled:opacity-50">{busy === `so|${run.runNo}` ? 'Saving…' : 'Save'}</button>
+                              {run.reqs[0]?.warehouse_so_no ? (
+                                <>
+                                  <span className="font-mono font-medium text-sm">{run.reqs[0].warehouse_so_no}</span>
+                                  {run.reqs[0].so_set_by_name && <span className="text-[11px] text-gray-400">by {run.reqs[0].so_set_by_name}{run.reqs[0].so_set_at ? ` · ${new Date(run.reqs[0].so_set_at).toLocaleString()}` : ''}</span>}
+                                  {canEditFac(run.factory) && <button onClick={() => requestSoChange(run)} className="text-blue-600 hover:underline text-xs">Request change</button>}
+                                </>
+                              ) : (
+                                <>
+                                  <input value={soEdits[run.runNo] ?? ''} onChange={e => setSoEdits(prev => ({ ...prev, [run.runNo]: e.target.value }))}
+                                    placeholder="enter SO number" className="border rounded px-2 py-1 text-xs w-40" />
+                                  <button onClick={() => saveSo(run)} disabled={busy === `so|${run.runNo}`} className="text-blue-600 hover:underline text-xs disabled:opacity-50">{busy === `so|${run.runNo}` ? 'Saving…' : 'Save'}</button>
+                                </>
+                              )}
                             </span>
                             <button onClick={() => requestRunCancel(run)} disabled={busy === `runcancel|${run.runNo}`}
                               className="border border-red-300 text-red-600 px-3 py-1 rounded-lg hover:bg-red-50 text-xs font-medium disabled:opacity-50">
