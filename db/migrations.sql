@@ -573,11 +573,11 @@ grant select, insert, update, delete on public.delivery_orders to authenticated,
 alter table public.delivery_orders enable row level security;
 drop policy if exists do_read on public.delivery_orders;
 create policy do_read on public.delivery_orders for select
-  using (my_factory_code() = 'HEAD_OFFICE' or factory_code = my_factory_code());
+  using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()));
 drop policy if exists do_write on public.delivery_orders;
 create policy do_write on public.delivery_orders for all
-  using (my_factory_code() = 'HEAD_OFFICE' or factory_code = my_factory_code())
-  with check (my_factory_code() = 'HEAD_OFFICE' or factory_code = my_factory_code());
+  using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()))
+  with check (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()));
 
 -- Extracted lines for each DO.
 create table if not exists public.delivery_order_lines (
@@ -595,11 +595,11 @@ grant select, insert, update, delete on public.delivery_order_lines to authentic
 alter table public.delivery_order_lines enable row level security;
 drop policy if exists dol_read on public.delivery_order_lines;
 create policy dol_read on public.delivery_order_lines for select
-  using (exists (select 1 from public.delivery_orders d where d.id = do_id and (my_factory_code() = 'HEAD_OFFICE' or d.factory_code = my_factory_code())));
+  using (exists (select 1 from public.delivery_orders d where d.id = do_id and (my_factory_code() = 'HEAD_OFFICE' or d.factory_code = any (my_factory_codes()))));
 drop policy if exists dol_write on public.delivery_order_lines;
 create policy dol_write on public.delivery_order_lines for all
-  using (exists (select 1 from public.delivery_orders d where d.id = do_id and (my_factory_code() = 'HEAD_OFFICE' or d.factory_code = my_factory_code())))
-  with check (exists (select 1 from public.delivery_orders d where d.id = do_id and (my_factory_code() = 'HEAD_OFFICE' or d.factory_code = my_factory_code())));
+  using (exists (select 1 from public.delivery_orders d where d.id = do_id and (my_factory_code() = 'HEAD_OFFICE' or d.factory_code = any (my_factory_codes()))))
+  with check (exists (select 1 from public.delivery_orders d where d.id = do_id and (my_factory_code() = 'HEAD_OFFICE' or d.factory_code = any (my_factory_codes()))));
 
 
 -- ============================================================================

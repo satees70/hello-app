@@ -35,7 +35,8 @@ const PACK = 'BAG|CTN|CARTON'
 export default function IncomingPage() {
   const { profile, loading, error: profileError } = useProfile()
   useRequireView(profile, 'goods_received')
-  const canEditFac = (fc: string | undefined) => can(profile, 'goods_received', 'edit', fc)   // honours per-factory view-only
+  const isWarehouse = !!profile?.warehouse_user   // warehouse staff receive for every factory they serve
+  const canEditFac = (fc: string | undefined) => isWarehouse || can(profile, 'goods_received', 'edit', fc)   // honours per-factory view-only
   const [docs, setDocs] = useState<DeliveryOrder[]>([])
   const [lineCounts, setLineCounts] = useState<Record<string, { recv: number; total: number }>>({})
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
