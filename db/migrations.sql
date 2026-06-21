@@ -1295,13 +1295,16 @@ create policy mret_read on public.material_returns for select using (my_factory_
 -- Create a delivery order from completed batches, marking them dispatched
 create or replace function public.create_dispatch_order(p_batch_ids uuid[]) returns text
 language plpgsql security definer set search_path = public as $$
-declare v_fac text; v_no text; v_id uuid; v_name text; b record;
+declare v_fac text; v_no text; v_id uuid; v_name text; v_seq int; b record;
 begin
   if not has_perm('dispatch', 'edit') then raise exception 'Not allowed to create delivery orders'; end if;
   if array_length(p_batch_ids, 1) is null then raise exception 'Select at least one batch'; end if;
   select factory_code into v_fac from public.production_batches where id = p_batch_ids[1];
   if my_factory_code() <> 'HEAD_OFFICE' and not (v_fac = any (my_factory_codes())) then raise exception 'Not allowed for this factory'; end if;
-  v_no := 'DSP-' || to_char(now(), 'YYMMDD') || '/' || lpad(nextval('public.dispatch_seq')::text, 4, '0');
+  -- Per-factory, per-month running number, e.g. factory 101 in Jun 2026 -> DO101-2606/0001
+  select count(*) + 1 into v_seq from public.dispatch_orders
+    where factory_code = v_fac and to_char(created_at, 'YYMM') = to_char(now(), 'YYMM');
+  v_no := 'DO' || v_fac || '-' || to_char(now(), 'YYMM') || '/' || lpad(v_seq::text, 4, '0');
   select full_name into v_name from public.profiles where id = auth.uid();
   insert into public.dispatch_orders (do_number, factory_code, created_by, created_by_name)
   values (v_no, v_fac, auth.uid(), v_name) returning id into v_id;
