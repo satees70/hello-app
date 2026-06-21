@@ -50,6 +50,7 @@ export default function DispatchPage() {
   const [code, setCode] = useState('')
   const [lotId, setLotId] = useState('')
   const [qty, setQty] = useState('')
+  const [issue, setIssue] = useState<'no' | 'yes'>('no')
   const [reason, setReason] = useState('')
   const [returnCart, setReturnCart] = useState<CartReturn[]>([])
 
@@ -104,10 +105,12 @@ export default function DispatchPage() {
     if (!lot) { setError('Pick the batch you are returning.'); return }
     const num = Number(qty)
     if (!(num > 0)) { setError('Enter a quantity greater than zero.'); return }
+    if (issue === 'yes' && !reason.trim()) { setError('Please give the reason for the issue.'); return }
     const already = returnCart.filter(r => r.lotId === lot.id).reduce((s, r) => s + r.qty, 0)
     if (already + num > lot.qty_remaining) { setError(`Batch ${lot.batch_no || '—'} only has ${lot.qty_remaining} ${it.unit} left${already ? ` (you already added ${already})` : ''}.`); return }
-    setReturnCart(c => [...c, { lotId: lot.id, itemCode: it.code, description: it.description, unit: it.unit, batchNo: lot.batch_no, qty: num, reason: reason.trim(), factory, factoryName: factoryName(factory) }])
-    setCode(''); setLotId(''); setQty(''); setReason('')
+    const note = issue === 'yes' ? reason.trim() : ''
+    setReturnCart(c => [...c, { lotId: lot.id, itemCode: it.code, description: it.description, unit: it.unit, batchNo: lot.batch_no, qty: num, reason: note, factory, factoryName: factoryName(factory) }])
+    setCode(''); setLotId(''); setQty(''); setIssue('no'); setReason('')
   }
 
   // Create ONE delivery order with all ticked finished goods + all cart returns.
@@ -232,8 +235,15 @@ export default function DispatchPage() {
               )}
               <div className="flex flex-col gap-1 w-28"><span className="text-xs font-medium text-gray-600">Quantity {item ? `(${item.unit})` : ''}</span>
                 <input type="number" step="any" min="0" value={qty} onChange={e => setQty(e.target.value)} className="border rounded px-2 py-1.5 text-sm" /></div>
-              <div className="flex flex-col gap-1 min-w-[220px] flex-1"><span className="text-xs font-medium text-gray-600">Reason</span>
-                <input value={reason} onChange={e => setReason(e.target.value)} placeholder="Why is it being returned?" className="border rounded px-2 py-1.5 text-sm" /></div>
+              <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Stock has an issue?</span>
+                <select value={issue} onChange={e => setIssue(e.target.value as 'no' | 'yes')} className="border rounded px-2 py-1.5 text-sm bg-white">
+                  <option value="no">No</option>
+                  <option value="yes">Yes — has a problem</option>
+                </select></div>
+              {issue === 'yes' && (
+                <div className="flex flex-col gap-1 min-w-[220px] flex-1"><span className="text-xs font-medium text-gray-600">Reason</span>
+                  <input value={reason} onChange={e => setReason(e.target.value)} placeholder="What is the problem?" className="border rounded px-2 py-1.5 text-sm" /></div>
+              )}
               <button className="bg-orange-600 text-white px-5 py-2 rounded-lg hover:bg-orange-700 text-sm font-medium">Add to delivery order</button>
             </div>
             {lot && Number(qty) > lot.qty_remaining && <p className="text-amber-600 text-xs mt-2">⚠ Only {lot.qty_remaining} {item?.unit} left in this batch.</p>}
