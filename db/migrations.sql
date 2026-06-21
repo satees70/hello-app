@@ -214,6 +214,7 @@ grant execute on function public.reject_mr_qty_move(uuid) to authenticated;
 -- ============================================================================
 -- Pick run SO number · lock after set; record who/when; change needs HO approval
 -- ============================================================================
+alter table public.material_requests add column if not exists warehouse_so_no text;   -- the SO number the warehouse records against a pick run
 alter table public.material_requests add column if not exists so_set_by uuid;
 alter table public.material_requests add column if not exists so_set_by_name text;
 alter table public.material_requests add column if not exists so_set_at timestamptz;
