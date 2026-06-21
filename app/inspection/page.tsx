@@ -65,7 +65,9 @@ export default function InspectionPage() {
   const [recording, setRecording] = useState(false)
   const [timer, setTimer] = useState<Timer>(EMPTY_TIMER)
   const [now, setNow] = useState(Date.now())
-  const [packLines, setPackLines] = useState<{ name: string; line_code: string | null }[]>([])
+  const [packLines, setPackLines] = useState<{ name: string; line_code: string | null; line_mode: string | null }[]>([])
+  const [batchMode, setBatchMode] = useState('')   // batch run mode: auto | manual
+  const [stockLots, setStockLots] = useState<Record<string, { batch_no: string; qty_remaining: number; exp_date: string | null }[]>>({})
 
   useEffect(() => { setBatchId(new URLSearchParams(window.location.search).get('batch') || '') }, [])
   useEffect(() => { if (profile && batchId) loadForBatch(batchId) }, [profile, batchId])
@@ -74,9 +76,9 @@ export default function InspectionPage() {
   useEffect(() => { if (f.area_machine && !f.no && packLines.length && f.date && factoryCode) genNo(String(f.area_machine), String(f.date)) }, [f.area_machine, f.date, packLines, factoryCode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadForBatch(id: string) {
-    const { data: batch } = await supabase.from('production_batches').select('batch_no, item_code, description, factory_code, exp_date, total_quantity, produced_qty, pack_line').eq('id', id).single()
-    if (batch) { setFactoryCode(batch.factory_code); setBatchNo(batch.batch_no); setPlanned(Number(batch.total_quantity || 0)); setProduced(Number(batch.produced_qty || 0))
-      const { data: pl } = await supabase.from('packing_lines').select('name, line_code').eq('factory_code', batch.factory_code).eq('active', true).order('name'); setPackLines(pl || [])
+    const { data: batch } = await supabase.from('production_batches').select('batch_no, item_code, description, factory_code, exp_date, total_quantity, produced_qty, pack_line, run_mode').eq('id', id).single()
+    if (batch) { setFactoryCode(batch.factory_code); setBatchNo(batch.batch_no); setPlanned(Number(batch.total_quantity || 0)); setProduced(Number(batch.produced_qty || 0)); setBatchMode(batch.run_mode || 'auto')
+      const { data: pl } = await supabase.from('packing_lines').select('name, line_code, line_mode').eq('factory_code', batch.factory_code).eq('active', true).order('name'); setPackLines(pl || [])
     }
     const { data: rec } = await supabase.from('inspection_records').select('*').eq('production_batch_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle()
     if (rec) {
@@ -102,6 +104,16 @@ export default function InspectionPage() {
           return { code: it?.code || '', desc: it?.description || '', unit: it?.unit || '', planned: Number(c.quantity || 0) * total, main: !!c.main_ingredient, batch: '', used: '' } })
       }
     }
+    // Available stock batches per material (from GRN → stock), oldest expiry first
+    const codes = mats.map(m => m.code).filter(Boolean)
+    const lotMap: Record<string, { batch_no: string; qty_remaining: number; exp_date: string | null }[]> = {}
+    if (codes.length && batch?.factory_code) {
+      const { data: lots } = await supabase.from('stock_lots').select('item_code, batch_no, qty_remaining, exp_date')
+        .eq('factory_code', batch.factory_code).gt('qty_remaining', 0).in('item_code', codes)
+        .order('exp_date', { ascending: true, nullsFirst: false }).order('received_at', { ascending: true })
+      ;(lots || []).forEach(l => { if (!l.batch_no) return; (lotMap[l.item_code] = lotMap[l.item_code] || []).push({ batch_no: l.batch_no, qty_remaining: Number(l.qty_remaining), exp_date: l.exp_date }) })
+    }
+    setStockLots(lotMap)
     setF({ ...EMPTY, date: localToday, area_machine: batch?.pack_line || '', code: batch?.item_code || '', product: batch?.description || '', bn_raw_material: rmBatches, exp_in: batch?.exp_date || '', exp_out: batch?.exp_date || '', materials: mats })
   }
   const setMat = (i: number, k: keyof Mat, v: string) => setF(prev => { const m = [...(prev.materials as Mat[])]; m[i] = { ...m[i], [k]: v }; return { ...prev, materials: m } })
@@ -266,12 +278,12 @@ export default function InspectionPage() {
           {/* Header */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 border-t pt-3">
             <Field label="Date"><In k="date" type="date" /></Field>
-            <Field label="Area / Line">{packLines.length > 0
-              ? <select value={s('area_machine')} onChange={e => genNo(e.target.value, s('date'))} className="border rounded px-2 py-1 text-sm bg-white">
+            <Field label={`Area / Line${batchMode ? ` · ${batchMode} run` : ''}`}>{(() => { const elig = packLines.filter(p => !p.line_mode || p.line_mode === 'any' || p.line_mode === batchMode); return elig.length > 0
+              ? <select value={s('area_machine')} onChange={e => genNo(e.target.value, s('date'))} className="border rounded px-3 py-2 text-sm bg-white w-full">
                   <option value="">Choose a line…</option>
-                  {packLines.map(p => <option key={p.name} value={p.name}>{p.name}{p.line_code ? ` (${p.line_code})` : ''}</option>)}
+                  {elig.map(p => <option key={p.name} value={p.name}>{p.name}{p.line_code ? ` (${p.line_code})` : ''}</option>)}
                 </select>
-              : <In k="area_machine" />}</Field>
+              : <In k="area_machine" /> })()}</Field>
             <Field label="No. (auto)"><div className="border rounded px-2 py-1 text-sm bg-gray-50 text-gray-700 font-mono min-h-[2rem]">{s('no') || '—'}</div></Field>
             <Field label="Code"><In k="code" /></Field>
             <Field label="Product"><In k="product" /></Field>
@@ -298,7 +310,12 @@ export default function InspectionPage() {
                       <td className="px-3 py-2 text-gray-600">{m.desc}</td>
                       <td className="px-3 py-2 text-gray-500">{m.unit}</td>
                       <td className="px-3 py-2 text-right font-medium">{n(m.planned)}</td>
-                      <td className="px-3 py-2"><input value={m.batch} onChange={e => setMat(i, 'batch', e.target.value)} placeholder="batch no." className="border rounded px-2 py-1.5 text-sm w-36" /></td>
+                      <td className="px-3 py-2">{(stockLots[m.code] || []).length > 0
+                        ? <select value={m.batch} onChange={e => setMat(i, 'batch', e.target.value)} className="border rounded px-2 py-1.5 text-sm w-44 bg-white">
+                            <option value="">Choose batch…</option>
+                            {(stockLots[m.code] || []).map(lt => <option key={lt.batch_no} value={lt.batch_no}>{lt.batch_no} · {n(lt.qty_remaining)} {m.unit}{lt.exp_date ? ` · exp ${lt.exp_date.split('-').reverse().join('/')}` : ''}</option>)}
+                          </select>
+                        : <input value={m.batch} onChange={e => setMat(i, 'batch', e.target.value)} placeholder="no stock — type" className="border rounded px-2 py-1.5 text-sm w-36" />}</td>
                       <td className="px-3 py-2"><input type="number" step="any" value={m.used} onChange={e => setMat(i, 'used', e.target.value)} className="border rounded px-2 py-1.5 text-sm w-24 text-right" /></td>
                       <td className={`px-3 py-2 text-right ${m.used === '' ? 'text-gray-300' : diff > 0 ? 'text-red-600' : 'text-green-600'}`}>{m.used === '' ? '—' : (diff > 0 ? '+' : '') + n(diff)}</td>
                       <td className="px-3 py-2">{m.main ? '★' : ''}</td>

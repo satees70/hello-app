@@ -22,7 +22,7 @@ interface Batch {
   delivery_date: string | null
   production_batch_items: PBItem[]
 }
-interface PackLine { factory_code: string; name: string; active: boolean }
+interface PackLine { factory_code: string; name: string; active: boolean; line_mode: string | null }
 interface Item { id: string; code: string; description: string; unit: string }
 interface BomComp { parent_item_id: string; component_item_id: string; quantity: number; use_mode: string }
 
@@ -67,7 +67,7 @@ export default function PackingPage() {
       .select('id, batch_no, item_code, description, factory_code, total_quantity, produced_qty, material_request_id, pack_line, pack_date, run_mode, delivery_date, production_batch_items(customer_name, quantity)')
       .order('delivery_date')
     setBatches((data as Batch[]) || [])
-    const { data: pl } = await supabase.from('packing_lines').select('factory_code, name, active').order('name')
+    const { data: pl } = await supabase.from('packing_lines').select('factory_code, name, active, line_mode').order('name')
     setPackLines((pl as PackLine[]) || [])
     setItems(await fetchAll<Item>('items', 'id, code, description, unit'))
     setBoms(await fetchAll<BomComp>('bom_components', 'parent_item_id, component_item_id, quantity, use_mode'))
@@ -196,7 +196,8 @@ export default function PackingPage() {
 
   function PackForm({ b }: { b: Batch }) {
     const cur = packEdit[b.id]?.line ?? b.pack_line ?? ''
-    const opts = packLines.filter(p => p.factory_code === b.factory_code && (p.active || p.name === cur)).map(p => p.name)
+    const bMode = b.run_mode || 'auto'
+    const opts = packLines.filter(p => p.factory_code === b.factory_code && (p.active || p.name === cur) && (!p.line_mode || p.line_mode === 'any' || p.line_mode === bMode || p.name === cur)).map(p => p.name)
     const setField = (patch: Partial<{ line: string; date: string; mode: string }>) =>
       setPackEdit(p => ({ ...p, [b.id]: { line: p[b.id]?.line ?? b.pack_line ?? '', date: p[b.id]?.date ?? b.pack_date ?? today, mode: p[b.id]?.mode ?? b.run_mode ?? 'auto', ...patch } }))
     return (
