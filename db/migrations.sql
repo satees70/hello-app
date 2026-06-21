@@ -18,6 +18,8 @@ create unique index if not exists profiles_username_lower_key on public.profiles
 alter table public.profiles add column if not exists warehouse_user boolean not null default false;
 -- Fine-grained capability toggles (e.g. so_edit, move_received_qty, request_*) — empty = all allowed
 alter table public.profiles add column if not exists capabilities jsonb not null default '{}'::jsonb;
+-- Per-location permission overrides: { "AVINA101": { sales:{view,edit,delete}, ... } }; empty = use the default grid
+alter table public.profiles add column if not exists location_perms jsonb not null default '{}'::jsonb;
 
 -- ============================================================================
 -- Goods Received · per-line partial receiving bookkeeping

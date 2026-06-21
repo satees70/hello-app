@@ -70,6 +70,9 @@ export type ModuleKey = typeof PERMISSION_MODULES[number]['key']
 export type Action = 'view' | 'edit' | 'delete'
 export type ModulePerm = { view?: boolean; edit?: boolean; delete?: boolean }
 export type Permissions = Record<string, ModulePerm>
+// Optional per-location overrides: factory_code -> its own grid. A location without
+// an override falls back to the default grid (+ view-only list).
+export type LocationPerms = Record<string, Permissions>
 
 // Sensible starting grid for a user who has never been configured: can view &
 // edit everything (matching today's behaviour), but cannot delete. Head Office
@@ -94,13 +97,16 @@ export function isConfigured(perms: Permissions | null | undefined): boolean {
 //  - not-yet-configured (empty {}): legacy full access (don't break existing users)
 //  - otherwise: the explicit tick (delete implies nothing; each action is independent)
 export function can(
-  profile: { role?: string; permissions?: Permissions | null; readonly_factories?: string[] | null } | null | undefined,
+  profile: { role?: string; permissions?: Permissions | null; readonly_factories?: string[] | null; location_perms?: LocationPerms | null } | null | undefined,
   module: ModuleKey,
   action: Action,
-  factoryCode?: string,   // pass a record's factory to honour per-factory view-only
+  factoryCode?: string,   // pass a record's factory to honour per-location rules
 ): boolean {
   if (!profile) return false
   if (profile.role === 'admin') return true
+  // Per-location override wins when we know the record's location and one is set.
+  const ov = factoryCode ? profile.location_perms?.[factoryCode] : undefined
+  if (ov && ov[module]) return !!ov[module][action]
   // View-only at certain factories: the user may see records there but not edit/delete them.
   if (action !== 'view' && factoryCode && (profile.readonly_factories || []).includes(factoryCode)) return false
   // Restricted sections need an explicit grant (no legacy-full default).

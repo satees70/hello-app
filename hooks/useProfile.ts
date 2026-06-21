@@ -16,6 +16,7 @@ export interface Profile {
   role: string
   permissions?: Permissions | null
   capabilities?: Record<string, boolean> | null
+  location_perms?: Record<string, Permissions> | null
 }
 
 async function fetchProfile(userId: string) {

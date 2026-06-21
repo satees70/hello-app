@@ -9,7 +9,7 @@ const supabaseAdmin = createClient(
 const LOGIN_DOMAIN = 'avina.local'
 
 export async function POST(request: Request) {
-  const { username, email, password, full_name, factory_code, factory_codes, readonly_factories, warehouse_user, role, permissions, capabilities } = await request.json()
+  const { username, email, password, full_name, factory_code, factory_codes, readonly_factories, warehouse_user, role, permissions, capabilities, location_perms } = await request.json()
 
   const uname = (username || '').trim().toLowerCase()
   if (!uname || !/^[a-z0-9._-]+$/.test(uname)) {
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
 
   const { error: profileError } = await supabaseAdmin
     .from('profiles')
-    .insert({ id: authData.user.id, username: uname, email: email || loginEmail, full_name, factory_code, factory_codes: factory_codes ?? [factory_code], readonly_factories: readonly_factories ?? [], warehouse_user: !!warehouse_user, role, permissions: permissions ?? {}, capabilities: capabilities ?? {} })
+    .insert({ id: authData.user.id, username: uname, email: email || loginEmail, full_name, factory_code, factory_codes: factory_codes ?? [factory_code], readonly_factories: readonly_factories ?? [], warehouse_user: !!warehouse_user, role, permissions: permissions ?? {}, capabilities: capabilities ?? {}, location_perms: location_perms ?? {} })
   if (profileError) {
     await supabaseAdmin.auth.admin.deleteUser(authData.user.id)   // roll back the auth user so the username frees up
     return NextResponse.json({ error: profileError.message }, { status: 400 })

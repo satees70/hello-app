@@ -7,9 +7,9 @@ import { supabase } from '@/lib/supabase'
 import { PERMISSION_MODULES, CAPABILITIES, defaultGrid, defaultCaps, isConfigured, type Permissions, type Action } from '@/lib/permissions'
 import MultiFilter from '@/components/MultiFilter'
 
-interface UserRow { id: string; username: string | null; email: string; full_name: string; factory_code: string; factory_codes: string[] | null; readonly_factories: string[] | null; warehouse_user?: boolean | null; role: string; permissions: Permissions | null; capabilities?: Record<string, boolean> | null }
-type FormState = { username: string; email: string; password: string; full_name: string; factory_code: string; factory_codes: string[]; readonly_factories: string[]; warehouse_user: boolean; role: string; permissions: Permissions; capabilities: Record<string, boolean> }
-const blankForm = (): FormState => ({ username: '', email: '', password: '', full_name: '', factory_code: '', factory_codes: [], readonly_factories: [], warehouse_user: false, role: 'user', permissions: defaultGrid(), capabilities: defaultCaps() })
+interface UserRow { id: string; username: string | null; email: string; full_name: string; factory_code: string; factory_codes: string[] | null; readonly_factories: string[] | null; warehouse_user?: boolean | null; role: string; permissions: Permissions | null; capabilities?: Record<string, boolean> | null; location_perms?: Record<string, Permissions> | null }
+type FormState = { username: string; email: string; password: string; full_name: string; factory_code: string; factory_codes: string[]; readonly_factories: string[]; warehouse_user: boolean; role: string; permissions: Permissions; capabilities: Record<string, boolean>; location_perms: Record<string, Permissions> }
+const blankForm = (): FormState => ({ username: '', email: '', password: '', full_name: '', factory_code: '', factory_codes: [], readonly_factories: [], warehouse_user: false, role: 'user', permissions: defaultGrid(), capabilities: defaultCaps(), location_perms: {} })
 
 export default function UsersPage() {
   const { profile, loading } = useProfile()
@@ -55,6 +55,7 @@ export default function UsersPage() {
       role: u.role,
       permissions: isConfigured(u.permissions) ? (u.permissions as Permissions) : defaultGrid(),
       capabilities: { ...defaultCaps(), ...(u.capabilities || {}) },
+      location_perms: u.location_perms || {},
     })
     setMode('edit')
   }
@@ -70,6 +71,7 @@ export default function UsersPage() {
       role: u.role,
       permissions: isConfigured(u.permissions) ? (u.permissions as Permissions) : defaultGrid(),
       capabilities: { ...defaultCaps(), ...(u.capabilities || {}) },
+      location_perms: u.location_perms ? JSON.parse(JSON.stringify(u.location_perms)) : {},
     })
     setMode('create')
     setSuccess(`Copied access from ${u.username || u.full_name || u.email} — set a username & password, adjust if needed, then create.`)
@@ -92,26 +94,88 @@ export default function UsersPage() {
     })
   }
 
-  const setPerm = (moduleKey: string, action: Action, checked: boolean) =>
-    setForm(prev => ({ ...prev, permissions: { ...prev.permissions, [moduleKey]: { ...prev.permissions[moduleKey], [action]: checked } } }))
+  // Grid helpers take an optional location: null = the default grid; a factory code
+  // = that location's override grid (in form.location_perms).
+  const gridOf = (loc: string | null): Permissions => loc === null ? form.permissions : (form.location_perms[loc] || {})
+  const writeGrid = (loc: string | null, g: Permissions) => setForm(prev => loc === null
+    ? { ...prev, permissions: g }
+    : { ...prev, location_perms: { ...prev.location_perms, [loc]: g } })
+  const setPerm = (loc: string | null, moduleKey: string, action: Action, checked: boolean) =>
+    writeGrid(loc, { ...gridOf(loc), [moduleKey]: { ...gridOf(loc)[moduleKey], [action]: checked } })
   const setAll = (checked: boolean) => {
     const g: Permissions = {}
     for (const m of PERMISSION_MODULES) g[m.key] = { view: checked, edit: checked, delete: checked }
-    setForm(prev => ({ ...prev, permissions: g }))
+    writeGrid(null, g)
   }
   // One-click level for a single section: none | view | edit | full
-  const setRow = (moduleKey: string, level: 'none' | 'view' | 'edit' | 'full') =>
-    setForm(prev => ({ ...prev, permissions: { ...prev.permissions, [moduleKey]: {
-      view: level !== 'none', edit: level === 'edit' || level === 'full', delete: level === 'full',
-    } } }))
+  const setRow = (loc: string | null, moduleKey: string, level: 'none' | 'view' | 'edit' | 'full') =>
+    writeGrid(loc, { ...gridOf(loc), [moduleKey]: { view: level !== 'none', edit: level === 'edit' || level === 'full', delete: level === 'full' } })
   // Apply a level to every section in a menu group at once
-  const setGroup = (group: string, level: 'none' | 'view' | 'edit' | 'full') =>
-    setForm(prev => {
-      const g = { ...prev.permissions }
-      for (const m of PERMISSION_MODULES) if (m.group === group) g[m.key] = { view: level !== 'none', edit: level === 'edit' || level === 'full', delete: level === 'full' }
-      return { ...prev, permissions: g }
-    })
+  const setGroup = (loc: string | null, group: string, level: 'none' | 'view' | 'edit' | 'full') => {
+    const g = { ...gridOf(loc) }
+    for (const m of PERMISSION_MODULES) if (m.group === group) g[m.key] = { view: level !== 'none', edit: level === 'edit' || level === 'full', delete: level === 'full' }
+    writeGrid(loc, g)
+  }
   const PERM_GROUPS = [...new Set(PERMISSION_MODULES.map(m => m.group))]
+  // Per-location overrides: start a location pre-filled (ticked) from the default grid.
+  const addOverride = (loc: string) => setForm(prev => ({ ...prev, location_perms: { ...prev.location_perms, [loc]: JSON.parse(JSON.stringify(prev.permissions)) } }))
+  const removeOverride = (loc: string) => setForm(prev => { const lp = { ...prev.location_perms }; delete lp[loc]; return { ...prev, location_perms: lp } })
+  const facName = (code: string) => factories.find(f => f.code === code)?.name || code
+
+  // The view/edit/delete grid, reused for the default (loc=null) and each location override.
+  const permTable = (loc: string | null) => {
+    const grid = gridOf(loc)
+    return (
+      <div className="overflow-x-auto border rounded-lg">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 border-b">
+            <tr>
+              <th className="text-left px-3 py-2 font-medium text-gray-600">Section</th>
+              <th className="px-3 py-2 font-medium text-gray-600 w-16 text-center">👁 View</th>
+              <th className="px-3 py-2 font-medium text-gray-600 w-24 text-center">✏️ Edit<span className="block text-[10px] font-normal text-gray-400">(or request)</span></th>
+              <th className="px-3 py-2 font-medium text-gray-600 w-16 text-center">🗑 Delete</th>
+              <th className="px-3 py-2 font-medium text-gray-600 w-40 text-center">Quick set</th>
+            </tr>
+          </thead>
+          <tbody>
+            {PERM_GROUPS.map(grp => (
+              <Fragment key={grp}>
+                <tr className="bg-gray-50/70 border-b">
+                  <td className="px-3 py-1.5 font-semibold text-gray-700">{grp}</td>
+                  <td colSpan={3}></td>
+                  <td className="px-3 py-1.5 text-center text-xs space-x-2 whitespace-nowrap">
+                    <button type="button" onClick={() => setGroup(loc, grp, 'view')} className="text-blue-600 hover:underline">View all</button>
+                    <button type="button" onClick={() => setGroup(loc, grp, 'edit')} className="text-blue-600 hover:underline">Edit all</button>
+                    <button type="button" onClick={() => setGroup(loc, grp, 'none')} className="text-gray-400 hover:underline">Off</button>
+                  </td>
+                </tr>
+                {PERMISSION_MODULES.filter(m => m.group === grp).map(m => (
+                  <tr key={m.key} className="border-b last:border-0">
+                    <td className="px-3 py-2">
+                      <div className="font-medium">{m.label} {m.needsApproval && <span title="Factory edits here need Head Office approval" className="text-amber-600">⚑</span>}</div>
+                      <div className="text-xs text-gray-400">{m.desc}</div>
+                    </td>
+                    {(['view', 'edit', 'delete'] as Action[]).map(a => (
+                      <td key={a} className="px-3 py-2 text-center">
+                        <input type="checkbox" className="h-4 w-4" checked={!!grid[m.key]?.[a]}
+                          onChange={e => setPerm(loc, m.key, a, e.target.checked)} />
+                      </td>
+                    ))}
+                    <td className="px-3 py-2 text-center text-xs space-x-1.5 whitespace-nowrap">
+                      <button type="button" onClick={() => setRow(loc, m.key, 'view')} className="text-blue-600 hover:underline">View</button>
+                      <button type="button" onClick={() => setRow(loc, m.key, 'edit')} className="text-blue-600 hover:underline">Edit</button>
+                      <button type="button" onClick={() => setRow(loc, m.key, 'full')} className="text-blue-600 hover:underline">Full</button>
+                      <button type="button" onClick={() => setRow(loc, m.key, 'none')} className="text-gray-400 hover:underline">Off</button>
+                    </td>
+                  </tr>
+                ))}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -120,8 +184,8 @@ export default function UsersPage() {
     const isEdit = mode === 'edit'
     const url = isEdit ? '/api/update-user' : '/api/create-user'
     const body = isEdit
-      ? { id: editingId, username: form.username || undefined, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, warehouse_user: form.warehouse_user, role: form.role, permissions: form.permissions, capabilities: form.capabilities, password: form.password || undefined }
-      : { username: form.username, email: form.email || undefined, password: form.password, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, warehouse_user: form.warehouse_user, role: form.role, permissions: form.permissions, capabilities: form.capabilities }
+      ? { id: editingId, username: form.username || undefined, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, warehouse_user: form.warehouse_user, role: form.role, permissions: form.permissions, capabilities: form.capabilities, location_perms: form.location_perms, password: form.password || undefined }
+      : { username: form.username, email: form.email || undefined, password: form.password, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, warehouse_user: form.warehouse_user, role: form.role, permissions: form.permissions, capabilities: form.capabilities, location_perms: form.location_perms }
     const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     const data = await res.json()
     if (data.error) { setError(data.error); setSaving(false); return }
@@ -275,54 +339,30 @@ export default function UsersPage() {
                   <p>🗑 <strong>Delete</strong> — can remove records (usually leave off).</p>
                   <p className="text-gray-400">Quick set per row: <strong>View</strong> · <strong>Edit</strong> · <strong>Full</strong> (incl. delete) · <strong>Off</strong>.</p>
                 </div>
-                <div className="overflow-x-auto border rounded-lg">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 border-b">
-                      <tr>
-                        <th className="text-left px-3 py-2 font-medium text-gray-600">Section</th>
-                        <th className="px-3 py-2 font-medium text-gray-600 w-16 text-center">👁 View</th>
-                        <th className="px-3 py-2 font-medium text-gray-600 w-24 text-center">✏️ Edit<span className="block text-[10px] font-normal text-gray-400">(or request)</span></th>
-                        <th className="px-3 py-2 font-medium text-gray-600 w-16 text-center">🗑 Delete</th>
-                        <th className="px-3 py-2 font-medium text-gray-600 w-40 text-center">Quick set</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {PERM_GROUPS.map(grp => (
-                        <Fragment key={grp}>
-                          <tr className="bg-gray-50/70 border-b">
-                            <td className="px-3 py-1.5 font-semibold text-gray-700">{grp}</td>
-                            <td colSpan={3}></td>
-                            <td className="px-3 py-1.5 text-center text-xs space-x-2 whitespace-nowrap">
-                              <button type="button" onClick={() => setGroup(grp, 'view')} className="text-blue-600 hover:underline">View all</button>
-                              <button type="button" onClick={() => setGroup(grp, 'edit')} className="text-blue-600 hover:underline">Edit all</button>
-                              <button type="button" onClick={() => setGroup(grp, 'none')} className="text-gray-400 hover:underline">Off</button>
-                            </td>
-                          </tr>
-                          {PERMISSION_MODULES.filter(m => m.group === grp).map(m => (
-                            <tr key={m.key} className="border-b last:border-0">
-                              <td className="px-3 py-2">
-                                <div className="font-medium">{m.label} {m.needsApproval && <span title="Factory edits here need Head Office approval" className="text-amber-600">⚑</span>}</div>
-                                <div className="text-xs text-gray-400">{m.desc}</div>
-                              </td>
-                              {(['view', 'edit', 'delete'] as Action[]).map(a => (
-                                <td key={a} className="px-3 py-2 text-center">
-                                  <input type="checkbox" className="h-4 w-4"
-                                    checked={!!form.permissions[m.key]?.[a]}
-                                    onChange={e => setPerm(m.key, a, e.target.checked)} />
-                                </td>
-                              ))}
-                              <td className="px-3 py-2 text-center text-xs space-x-1.5 whitespace-nowrap">
-                                <button type="button" onClick={() => setRow(m.key, 'view')} className="text-blue-600 hover:underline">View</button>
-                                <button type="button" onClick={() => setRow(m.key, 'edit')} className="text-blue-600 hover:underline">Edit</button>
-                                <button type="button" onClick={() => setRow(m.key, 'full')} className="text-blue-600 hover:underline">Full</button>
-                                <button type="button" onClick={() => setRow(m.key, 'none')} className="text-gray-400 hover:underline">Off</button>
-                              </td>
-                            </tr>
-                          ))}
-                        </Fragment>
-                      ))}
-                    </tbody>
-                  </table>
+                <p className="text-xs font-medium text-gray-500 mb-1">Default — applies to every location the user can access</p>
+                {permTable(null)}
+
+                {/* Per-location overrides */}
+                <div className="mt-5">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-sm font-medium">Per-location overrides <span className="text-gray-400 font-normal">(optional)</span></label>
+                    <select value="" onChange={e => { if (e.target.value) addOverride(e.target.value) }} className="border rounded px-2 py-1 text-sm bg-white">
+                      <option value="">+ Add a location…</option>
+                      {factories.filter(f => f.code !== 'HEAD_OFFICE' && !form.location_perms[f.code]).map(f => <option key={f.code} value={f.code}>{f.name}</option>)}
+                    </select>
+                  </div>
+                  <p className="text-xs text-gray-400 mb-2">A location added here uses its <strong>own</strong> grid instead of the default above. It starts <strong>pre-ticked from the default</strong> — just change what differs.</p>
+                  {Object.keys(form.location_perms).length === 0
+                    ? <p className="text-xs text-gray-400">No overrides — the default grid applies everywhere.</p>
+                    : Object.keys(form.location_perms).sort().map(loc => (
+                      <div key={loc} className="border rounded-lg p-3 mb-3 bg-gray-50/40">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-medium text-sm">🏭 {facName(loc)}</span>
+                          <button type="button" onClick={() => removeOverride(loc)} className="text-red-500 hover:underline text-xs">Remove override</button>
+                        </div>
+                        {permTable(loc)}
+                      </div>
+                    ))}
                 </div>
               </div>
             )}
