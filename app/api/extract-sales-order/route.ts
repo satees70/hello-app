@@ -97,6 +97,18 @@ export async function POST(request: Request) {
     }
     const lines = (toolUse.input as { lines: SalesLine[] }).lines || []
 
+    // 2b. Wrong document type guard: a Delivery Order (DO-…) uploaded into Sales
+    //     Orders. If EVERY document number looks like a DO, reject and clean up —
+    //     don't leave a half-imported document behind.
+    const withDoc = lines.filter(l => (l.so_number || '').trim())
+    const isDoNumber = (s: string) => /^do[\s\-/]?\d/i.test(s.trim())
+    if (withDoc.length > 0 && withDoc.every(l => isDoNumber(l.so_number))) {
+      await supabaseAdmin.storage.from('sales-orders').remove([filePath])
+      await supabaseAdmin.from('sales_order_lines').delete().eq('import_id', importId)
+      await supabaseAdmin.from('sales_imports').delete().eq('id', importId)
+      return NextResponse.json({ error: 'This looks like a Delivery Order (the document numbers start with "DO-"), not a Sales Order. Please upload it under Goods Received instead. Nothing was saved.' }, { status: 400 })
+    }
+
     // 3. Auto-fill each line's factory by looking its location code up in the map.
     const { data: lmRows } = await supabaseAdmin
       .from('location_map')
