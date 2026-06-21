@@ -33,6 +33,9 @@ const EMPTY: Form = {
   moisture_pct: '', moisture_max: '', temp_in: '', temp_out: '', speed_in: '', speed_out: '', time_in: '', time_out: '',
   printing_clear: false, product_weigh: '', exp_in: '', exp_out: '', bubble: '', broken: '', ok: '',
   sample1: '', sample2: '', sample3: '', alu_pad: '',
+  s1_print: '', s1_bubble: '', s1_drop: '', s1_ok: '',
+  s2_print: '', s2_bubble: '', s2_drop: '', s2_ok: '',
+  s3_print: '', s3_bubble: '', s3_drop: '', s3_ok: '',
   md_ferrous: '', md_nonferrous: '', md_stainless: '', md_qty_reject: '', md_remark: '', md_action: '',
   qc_colour: '', qc_odour: '', qc_physical: '', cleanliness: '', prev_batch_removed: '', prev_batch_remark: '',
   yield_pack: '', yield_bottle: '', yield_balance: '', done_by: '', checked_by: '', verified_by: '',
@@ -64,9 +67,11 @@ export default function InspectionPage() {
   useEffect(() => { setBatchId(new URLSearchParams(window.location.search).get('batch') || '') }, [])
   useEffect(() => { if (profile && batchId) loadForBatch(batchId) }, [profile, batchId])
   useEffect(() => { if (timer.status !== 'running' && timer.status !== 'paused') return; const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id) }, [timer.status])
+  // Auto-fill No. once the scheduled line + date + packing lines are known (don't overwrite an existing one)
+  useEffect(() => { if (f.area_machine && !f.no && packLines.length && f.date && factoryCode) genNo(String(f.area_machine), String(f.date)) }, [f.area_machine, f.date, packLines, factoryCode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadForBatch(id: string) {
-    const { data: batch } = await supabase.from('production_batches').select('batch_no, item_code, description, factory_code, exp_date, total_quantity, produced_qty').eq('id', id).single()
+    const { data: batch } = await supabase.from('production_batches').select('batch_no, item_code, description, factory_code, exp_date, total_quantity, produced_qty, pack_line').eq('id', id).single()
     if (batch) { setFactoryCode(batch.factory_code); setBatchNo(batch.batch_no); setPlanned(Number(batch.total_quantity || 0)); setProduced(Number(batch.produced_qty || 0))
       const { data: pl } = await supabase.from('packing_lines').select('name, line_code').eq('factory_code', batch.factory_code).eq('active', true).order('name'); setPackLines(pl || [])
     }
@@ -82,7 +87,7 @@ export default function InspectionPage() {
     const { data: cons } = await supabase.from('production_consumption').select('batch_no').eq('production_batch_id', id)
     const rmBatches = [...new Set((cons || []).map(c => c.batch_no).filter(Boolean))].join(', ')
     const td = new Date(); const localToday = `${td.getFullYear()}-${String(td.getMonth() + 1).padStart(2, '0')}-${String(td.getDate()).padStart(2, '0')}`
-    setF({ ...EMPTY, date: localToday, code: batch?.item_code || '', product: batch?.description || '', bn_raw_material: rmBatches, exp_in: batch?.exp_date || '', exp_out: batch?.exp_date || '' })
+    setF({ ...EMPTY, date: localToday, area_machine: batch?.pack_line || '', code: batch?.item_code || '', product: batch?.description || '', bn_raw_material: rmBatches, exp_in: batch?.exp_date || '', exp_out: batch?.exp_date || '' })
   }
 
   const set = (k: string, v: string | boolean) => setF(prev => ({ ...prev, [k]: v }))
@@ -232,7 +237,7 @@ export default function InspectionPage() {
                   {packLines.map(p => <option key={p.name} value={p.name}>{p.name}{p.line_code ? ` (${p.line_code})` : ''}</option>)}
                 </select>
               : <In k="area_machine" />}</Field>
-            <Field label="No."><In k="no" /></Field>
+            <Field label="No. (auto)"><div className="border rounded px-2 py-1 text-sm bg-gray-50 text-gray-700 font-mono min-h-[2rem]">{s('no') || '—'}</div></Field>
             <Field label="Code"><In k="code" /></Field>
             <Field label="Product"><In k="product" /></Field>
             <Field label="B/N Raw Material"><In k="bn_raw_material" /></Field>
@@ -265,16 +270,25 @@ export default function InspectionPage() {
               <Field label="Product weigh, g"><In k="product_weigh" /></Field>
               <Field label="Cond. of aluminium pad seal (bottle)"><In k="alu_pad" /></Field>
             </div>
-            <div className="flex flex-wrap gap-x-6 gap-y-2 mt-3">
-              <label className="inline-flex items-center gap-1 text-xs"><input type="checkbox" checked={bv('printing_clear')} onChange={e => set('printing_clear', e.target.checked)} className="h-3.5 w-3.5" /> Printing &amp; expiry date clear &amp; permanent</label>
-              <span className="text-xs"><span className="font-medium">Bubble test:</span> <Radio k="bubble" val="no" label="No bubble" /><Radio k="bubble" val="rework" label="Bubble (Rework)" /></span>
-              <span className="text-xs"><span className="font-medium">Dropping test (Auto / Press test):</span> <Radio k="broken" val="no" label="No broken" /><Radio k="broken" val="rework" label="Broken (Rework)" /></span>
-              <span className="text-xs"><Radio k="ok" val="ok" label="Ok" /><Radio k="ok" val="rework" label="Rework" /></span>
-            </div>
-            <div className="flex flex-wrap gap-x-6 gap-y-2 mt-2">
-              {['sample1', 'sample2', 'sample3'].map((k, i) => (
-                <span key={k} className="text-xs"><span className="font-medium">Sample {i + 1}:</span> <Radio k={k} val="clear" label="Clear" /><Radio k={k} val="unclear" label="Unclear" /></span>
-              ))}
+            {/* 3 samples — one row each, per the manual form */}
+            <div className="overflow-x-auto border rounded-lg mt-3">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 border-b">
+                  <tr>{['Sample', 'Printing & expiry date', 'Bubble test', 'Dropping test (Auto / Press)', 'Result'].map(h => (
+                    <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+                </thead>
+                <tbody>
+                  {[1, 2, 3].map(i => (
+                    <tr key={i} className="border-b last:border-0">
+                      <td className="px-3 py-2 font-medium whitespace-nowrap">Sample {i}</td>
+                      <td className="px-3 py-2"><Radio k={`s${i}_print`} val="clear" label="Clear" /><Radio k={`s${i}_print`} val="unclear" label="Unclear" /></td>
+                      <td className="px-3 py-2"><Radio k={`s${i}_bubble`} val="no" label="No bubble" /><Radio k={`s${i}_bubble`} val="rework" label="Bubble (Rework)" /></td>
+                      <td className="px-3 py-2"><Radio k={`s${i}_drop`} val="no" label="No broken" /><Radio k={`s${i}_drop`} val="rework" label="Broken (Rework)" /></td>
+                      <td className="px-3 py-2"><Radio k={`s${i}_ok`} val="ok" label="Ok" /><Radio k={`s${i}_ok`} val="rework" label="Rework" /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
 
