@@ -335,59 +335,6 @@ export default function InspectionPage() {
           </div>
           <Field label="Remarks"><textarea value={s('remarks')} onChange={e => set('remarks', e.target.value)} className="border rounded px-2 py-1 text-sm w-full" rows={2} /></Field>
 
-          {/* Hourly checking log (form b, Ver.06) */}
-          <div className="border-t pt-3">
-            <div className="flex items-center justify-between mb-2">
-              <div className="font-semibold text-sm">Hourly Checking <span className="font-normal text-gray-400">(page 2 · metal detector every 4 hours)</span></div>
-              <button onClick={addHour} className="text-blue-600 hover:underline text-xs no-print">+ Add row</button>
-            </div>
-            {/* Mobile: one card per hourly check */}
-            <div className="md:hidden space-y-3">
-              {(f.hourly as Hourly[]).map((h, i) => {
-                const txt: [keyof Hourly, string][] = [['time', 'Time'], ['weight', 'Weight'], ['ink', 'Ink'], ['temp', 'Temp °C'], ['speed', 'Speed'], ['press', 'Press'], ['drop', 'Drop'], ['alu', 'Al pad']]
-                const gn: [keyof Hourly, string][] = [['qc_color', 'Color'], ['qc_odour', 'Odour'], ['qc_phy', 'Phy'], ['fe', 'Fe'], ['nonfe', 'Non-Fe'], ['ss', 'SS']]
-                return (
-                  <div key={i} className="border rounded-lg p-3">
-                    <div className="text-xs font-semibold text-gray-500 mb-2">Check #{i + 1}</div>
-                    <div className="grid grid-cols-3 gap-2">
-                      {txt.map(([k, lbl]) => <label key={k} className="text-[11px] text-gray-500">{lbl}<input value={h[k]} onChange={e => setHour(i, k, e.target.value)} className="border rounded px-2 py-1 text-sm w-full" /></label>)}
-                      {gn.map(([k, lbl]) => <label key={k} className="text-[11px] text-gray-500">{lbl}<select value={h[k]} onChange={e => setHour(i, k, e.target.value)} className="border rounded px-1 py-1 text-sm w-full bg-white"><option value="">—</option><option value="G">G</option><option value="NG">NG</option></select></label>)}
-                    </div>
-                    <label className="text-[11px] text-gray-500 block mt-2">Remarks / Action<input value={h.remarks} onChange={e => setHour(i, 'remarks', e.target.value)} className="border rounded px-2 py-1 text-sm w-full" /></label>
-                  </div>
-                )
-              })}
-            </div>
-            {/* Desktop: table */}
-            <div className="hidden md:block overflow-x-auto border rounded-lg">
-              <table className="w-full text-xs">
-                <thead className="bg-gray-50 border-b">
-                  <tr>{['Time', 'Weight', 'Ink', 'Color', 'Odour', 'Phy', 'Temp °C', 'Speed', 'Press', 'Drop (Auto)', 'Al pad', 'Fe', 'Non-Fe', 'SS', 'Remarks / Action'].map(h => (
-                    <th key={h} className="px-2 py-1.5 font-medium text-gray-600 text-left whitespace-nowrap">{h}</th>))}</tr>
-                </thead>
-                <tbody>
-                  {(f.hourly as Hourly[]).map((h, i) => (
-                    <tr key={i} className="border-b last:border-0">
-                      {(['time', 'weight', 'ink'] as (keyof Hourly)[]).map(k => (
-                        <td key={k} className="px-1 py-1"><input value={h[k]} onChange={e => setHour(i, k, e.target.value)} className="border rounded px-1 py-0.5 w-14 text-xs" /></td>
-                      ))}
-                      {(['qc_color', 'qc_odour', 'qc_phy'] as (keyof Hourly)[]).map(k => (
-                        <td key={k} className="px-1 py-1"><select value={h[k]} onChange={e => setHour(i, k, e.target.value)} className="border rounded px-1 py-0.5 text-xs"><option value="">—</option><option value="G">G</option><option value="NG">NG</option></select></td>
-                      ))}
-                      {(['temp', 'speed', 'press', 'drop', 'alu'] as (keyof Hourly)[]).map(k => (
-                        <td key={k} className="px-1 py-1"><input value={h[k]} onChange={e => setHour(i, k, e.target.value)} className="border rounded px-1 py-0.5 w-14 text-xs" /></td>
-                      ))}
-                      {(['fe', 'nonfe', 'ss'] as (keyof Hourly)[]).map(k => (
-                        <td key={k} className="px-1 py-1"><select value={h[k]} onChange={e => setHour(i, k, e.target.value)} className="border rounded px-1 py-0.5 text-xs"><option value="">—</option><option value="G">G</option><option value="NG">NG</option></select></td>
-                      ))}
-                      <td className="px-1 py-1"><input value={h.remarks} onChange={e => setHour(i, 'remarks', e.target.value)} className="border rounded px-1 py-0.5 w-28 text-xs" /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
           <div className="text-xs text-gray-400 flex justify-between pt-2 border-t">
             <span>Prepared by: Sn QC Executive</span><span>Approved by: Factory Manager</span>
           </div>
