@@ -71,7 +71,7 @@ export default function IncomingPage() {
     if (!canEditFac(linesFor?.factory_code)) { setError("You have view-only access at this factory."); return }
     if (!editReq || !linesFor) return
     const orig: Record<string, string> = { item_code: editReq.item_code || '', description: editReq.description || '', quantity: String(editReq.quantity ?? ''), unit: editReq.unit || '', batch_no: editReq.batch_no || '' }
-    if (editForm.item_code && !itemByCode(editForm.item_code)) { setError('Pick a valid item code from the Items master.'); return }
+    if (editForm.item_code && !itemByCode(editForm.item_code) && !itemByCode(baseCode(editForm.item_code))) { setError('Pick a valid item code from the Items master.'); return }
     const changed = EDIT_FIELDS.filter(f => (editForm[f.key] || '') !== orig[f.key])
     if (changed.length === 0) { setError('Nothing changed.'); return }
     const reason = window.prompt('Reason for these changes (sent to Head Office):')
@@ -623,7 +623,7 @@ export default function IncomingPage() {
                         onChange={e => { const code = e.target.value; const it = itemByCode(code); setEditForm({ ...editForm, item_code: code, ...(it ? { description: it.description } : {}) }) }}
                         className="w-full border rounded-lg px-3 py-2" />
                       <datalist id="grn-items">{itemsMaster.map(i => <option key={i.code} value={i.code}>{i.description}</option>)}</datalist>
-                      {editForm.item_code ? (itemByCode(editForm.item_code) ? null : <span className="text-xs text-red-500">Not in Items master</span>) : null}
+                      {editForm.item_code && !itemByCode(editForm.item_code) ? (itemByCode(baseCode(editForm.item_code)) ? <span className="text-xs text-gray-400">→ {baseCode(editForm.item_code)} (in stock as the base material)</span> : <span className="text-xs text-red-500">Not in Items master</span>) : null}
                     </>
                   ) : f.key === 'description' ? (
                     <input value={editForm.description || ''} disabled className="w-full border rounded-lg px-3 py-2 bg-gray-100 text-gray-500" title="Follows the item code" />
