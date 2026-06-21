@@ -295,7 +295,10 @@ export default function InspectionPage() {
 
           {/* Header */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 border-t pt-3">
-            <Field label="Date"><div className="border rounded px-3 py-2 text-sm bg-gray-50 text-gray-700 min-h-[2.5rem]">{s('date') ? s('date').split('-').reverse().join('/') : '—'}</div></Field>
+            <Field label="Date">{(() => { const t = new Date(); const today = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`; const notToday = !!s('date') && s('date') !== today; return (<>
+              <div className={`border rounded px-3 py-2 text-sm min-h-[2.5rem] ${notToday ? 'bg-red-50 border-red-300 text-red-700' : 'bg-gray-50 text-gray-700'}`}>{s('date') ? s('date').split('-').reverse().join('/') : '—'}</div>
+              {notToday && <span className="text-xs text-red-600">⚠ Not today’s date — this is the scheduled pack date. Amend it in Packing Schedule if it’s wrong.</span>}
+            </>) })()}</Field>
             <Field label={`Area / Line${batchMode ? ` · ${batchMode} run` : ''}`}><div className="border rounded px-3 py-2 text-sm bg-gray-50 text-gray-700 min-h-[2.5rem]">{s('area_machine') || '—'}</div></Field>
             <Field label="No. (auto)"><div className="border rounded px-3 py-2 text-sm bg-gray-50 text-gray-700 font-mono min-h-[2.5rem]">{s('no') || '—'}</div></Field>
             <Field label="Code"><div className="border rounded px-3 py-2 text-sm bg-gray-50 text-gray-700 min-h-[2.5rem]">{s('code') || '—'}</div></Field>

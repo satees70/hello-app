@@ -32,12 +32,41 @@ const STATUS_STYLES: Record<string, string> = {
 const ACTIVE = ['Open', 'Partially Received']
 const PACK = 'BAG|CTN|CARTON'
 
+// Searchable item picker — type a code OR a name, then click a row. Works on every browser
+// (the native datalist arrow is unreliable and was hiding matches).
+function ItemCombo({ items, value, onPick }: { items: { code: string; description: string; unit: string }[]; value: string; onPick: (code: string, description: string, unit: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const term = q.trim().toLowerCase()
+  const matches = (term ? items.filter(i => i.code.toLowerCase().includes(term) || i.description.toLowerCase().includes(term)) : items).slice(0, 60)
+  return (
+    <div className="relative">
+      <input value={open ? q : value} onChange={e => { setQ(e.target.value); setOpen(true) }}
+        onFocus={() => { setQ(''); setOpen(true) }} onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="Type a code or name…" className="w-full border rounded-lg px-3 py-2" />
+      {open && (
+        <div className="absolute z-20 mt-1 w-full max-h-60 overflow-y-auto bg-white border rounded-lg shadow-lg">
+          {matches.length === 0 && <div className="px-3 py-2 text-sm text-gray-400">No matching item — check the code is in the Items master.</div>}
+          {matches.map(i => (
+            <button key={i.code} type="button" onMouseDown={e => { e.preventDefault(); onPick(i.code, i.description, i.unit); setOpen(false) }}
+              className="block w-full text-left px-3 py-2 text-sm hover:bg-blue-50 border-b last:border-0">
+              <span className="font-mono font-medium">{i.code}</span> <span className="text-gray-500">{i.description}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function IncomingPage() {
   const { profile, loading, error: profileError } = useProfile()
   useRequireView(profile, 'goods_received')
   const isWarehouse = !!profile?.warehouse_user   // warehouse staff receive for every factory they serve
   const canEditFac = (fc: string | undefined) => isWarehouse || can(profile, 'goods_received', 'edit', fc)   // honours per-factory view-only
   const [docs, setDocs] = useState<DeliveryOrder[]>([])
+  const [docFilters, setDocFilters] = useState({ file: '', do: '', factory: '', status: '', uploaded: '' })
+  const [docQ, setDocQ] = useState('')   // single search box used on mobile
   const [lineCounts, setLineCounts] = useState<Record<string, { recv: number; total: number }>>({})
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [uploading, setUploading] = useState(false)
@@ -156,7 +185,7 @@ export default function IncomingPage() {
     setLineCounts(c)
   }
   async function loadItemsMaster() {
-    const { data } = await supabase.from('items').select('code, description, unit').order('code')
+    const { data } = await supabase.from('items').select('code, description, unit').order('code').limit(10000)
     setItemsMaster((data as { code: string; description: string; unit: string }[]) || [])
   }
   async function loadFactories() {
@@ -164,6 +193,14 @@ export default function IncomingPage() {
     setFactories(data || [])
   }
   const factoryName = (c: string) => factories.find(f => f.code === c)?.name || c || '—'
+
+  const docFacName = (d: DeliveryOrder) => isHO ? factoryName(d.factory_code) : d.factory_code
+  const inc = (v: string | null | undefined, q: string) => !q || (v || '').toLowerCase().includes(q.toLowerCase())
+  const colDocs = docs.filter(d =>
+    inc(d.file_name, docFilters.file) && inc(d.do_number, docFilters.do) && inc(docFacName(d), docFilters.factory) &&
+    (!docFilters.status || d.status === docFilters.status) && inc(new Date(d.created_at).toLocaleString(), docFilters.uploaded))
+  const mobDocs = docs.filter(d => !docQ || [d.file_name, d.do_number, docFacName(d), d.status].some(v => inc(v, docQ)))
+  const docStatuses = [...new Set(docs.map(d => d.status))].sort()
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -477,9 +514,12 @@ export default function IncomingPage() {
 
         <h2 className="font-semibold text-lg mb-2">Uploaded Documents</h2>
         {/* Mobile: one card per document */}
+        <input value={docQ} onChange={e => setDocQ(e.target.value)} placeholder="Search file, DO no, factory, status…"
+          className="md:hidden w-full border rounded-lg px-3 py-2 text-sm mb-3" />
         <div className="md:hidden space-y-3 mb-8 max-h-[26rem] overflow-y-auto pr-1">
           {docs.length === 0 && <p className="text-center py-6 text-gray-400 border rounded-lg bg-white">No delivery orders uploaded yet</p>}
-          {docs.map(doc => (
+          {docs.length > 0 && mobDocs.length === 0 && <p className="text-center py-6 text-gray-400 border rounded-lg bg-white">No documents match your search</p>}
+          {mobDocs.map(doc => (
             <div key={doc.id} className="bg-white rounded-xl shadow-sm border p-3">
               <div className="flex items-start justify-between gap-2">
                 <span className="font-medium text-sm break-all">{doc.file_name}</span>
@@ -504,10 +544,19 @@ export default function IncomingPage() {
             <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>{['File', 'DO No.', 'Factory', 'Status', 'Uploaded', 'Actions'].map(h => (
                 <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+              <tr className="border-b">
+                <th className="px-3 py-2"><input value={docFilters.file} onChange={e => setDocFilters({ ...docFilters, file: e.target.value })} placeholder="Filter…" className="w-full border rounded px-2 py-1 text-xs font-normal" /></th>
+                <th className="px-3 py-2"><input value={docFilters.do} onChange={e => setDocFilters({ ...docFilters, do: e.target.value })} placeholder="Filter…" className="w-full border rounded px-2 py-1 text-xs font-normal" /></th>
+                <th className="px-3 py-2"><input value={docFilters.factory} onChange={e => setDocFilters({ ...docFilters, factory: e.target.value })} placeholder="Filter…" className="w-full border rounded px-2 py-1 text-xs font-normal" /></th>
+                <th className="px-3 py-2"><select value={docFilters.status} onChange={e => setDocFilters({ ...docFilters, status: e.target.value })} className="w-full border rounded px-2 py-1 text-xs font-normal bg-white"><option value="">All</option>{docStatuses.map(s => <option key={s} value={s}>{s}</option>)}</select></th>
+                <th className="px-3 py-2"><input value={docFilters.uploaded} onChange={e => setDocFilters({ ...docFilters, uploaded: e.target.value })} placeholder="Filter…" className="w-full border rounded px-2 py-1 text-xs font-normal" /></th>
+                <th className="px-3 py-2"></th>
+              </tr>
             </thead>
             <tbody>
               {docs.length === 0 && <tr><td colSpan={6} className="text-center py-8 text-gray-400">No delivery orders uploaded yet</td></tr>}
-              {docs.map(doc => (
+              {docs.length > 0 && colDocs.length === 0 && <tr><td colSpan={6} className="text-center py-8 text-gray-400">No documents match the filters</td></tr>}
+              {colDocs.map(doc => (
                 <tr key={doc.id} className="border-b last:border-0 hover:bg-gray-50">
                   <td className="px-4 py-3">{doc.file_name}</td>
                   <td className="px-4 py-3 font-mono text-gray-500 whitespace-nowrap">{doc.do_number || '—'}</td>
@@ -652,11 +701,9 @@ export default function IncomingPage() {
                   <label className="block text-sm font-medium mb-1">{f.label}</label>
                   {f.key === 'item_code' ? (
                     <>
-                      <input list="grn-items" value={editForm.item_code || ''} placeholder="Pick an item code…"
-                        onChange={e => { const code = e.target.value; const it = itemByCode(code); setEditForm({ ...editForm, item_code: code, ...(it ? { description: it.description } : {}) }) }}
-                        className="w-full border rounded-lg px-3 py-2" />
-                      <datalist id="grn-items">{itemsMaster.map(i => <option key={i.code} value={i.code}>{i.description}</option>)}</datalist>
-                      {editForm.item_code && !itemByCode(editForm.item_code) ? (itemByCode(baseCode(editForm.item_code)) ? <span className="text-xs text-gray-400">→ {baseCode(editForm.item_code)} (in stock as the base material)</span> : <span className="text-xs text-amber-600">Pick an item from the dropdown list</span>) : null}
+                      <ItemCombo items={itemsMaster} value={editForm.item_code || ''}
+                        onPick={(code, description) => setEditForm({ ...editForm, item_code: code, description })} />
+                      {editForm.item_code && !itemByCode(editForm.item_code) ? (itemByCode(baseCode(editForm.item_code)) ? <span className="text-xs text-gray-400">→ {baseCode(editForm.item_code)} (in stock as the base material)</span> : <span className="text-xs text-amber-600">This code isn’t in the Items master — type a code or name and pick it from the list.</span>) : null}
                     </>
                   ) : f.key === 'description' ? (
                     <input value={editForm.description || ''} disabled className="w-full border rounded-lg px-3 py-2 bg-gray-100 text-gray-500" title="Follows the item code" />
