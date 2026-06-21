@@ -4,7 +4,7 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
-import { can } from '@/lib/permissions'
+import { can, hasCap } from '@/lib/permissions'
 
 interface MRItem {
   id: string
@@ -577,17 +577,17 @@ export default function MaterialRequestsPage() {
                                 <>
                                   <span className="font-mono font-medium text-sm">{run.reqs[0].warehouse_so_no}</span>
                                   {run.reqs[0].so_set_by_name && <span className="text-[11px] text-gray-400">by {run.reqs[0].so_set_by_name}{run.reqs[0].so_set_at ? ` · ${new Date(run.reqs[0].so_set_at).toLocaleString()}` : ''}</span>}
-                                  {canEditFac(run.factory) && <button onClick={() => requestSoChange(run)} className="text-blue-600 hover:underline text-xs">Request change</button>}
+                                  {canEditFac(run.factory) && hasCap(profile, 'so_edit') && <button onClick={() => requestSoChange(run)} className="text-blue-600 hover:underline text-xs">Request change</button>}
                                 </>
-                              ) : (
+                              ) : hasCap(profile, 'so_edit') ? (
                                 <>
                                   <input value={soEdits[run.runNo] ?? ''} onChange={e => setSoEdits(prev => ({ ...prev, [run.runNo]: e.target.value }))}
                                     placeholder="enter SO number" className="border rounded px-2 py-1 text-xs w-40" />
                                   <button onClick={() => saveSo(run)} disabled={busy === `so|${run.runNo}`} className="text-blue-600 hover:underline text-xs disabled:opacity-50">{busy === `so|${run.runNo}` ? 'Saving…' : 'Save'}</button>
                                 </>
-                              )}
+                              ) : <span className="text-gray-300 text-xs">—</span>}
                             </span>
-                            {!isWarehouse && <button onClick={() => requestRunCancel(run)} disabled={busy === `runcancel|${run.runNo}`}
+                            {!isWarehouse && hasCap(profile, 'request_mr_cancel') && <button onClick={() => requestRunCancel(run)} disabled={busy === `runcancel|${run.runNo}`}
                               className="border border-red-300 text-red-600 px-3 py-1 rounded-lg hover:bg-red-50 text-xs font-medium disabled:opacity-50">
                               {busy === `runcancel|${run.runNo}` ? 'Sending…' : '✕ Request cancel (HQ approval)'}</button>}
                             </>}
@@ -720,7 +720,7 @@ export default function MaterialRequestsPage() {
                   </span>
                   <span className="text-sm text-gray-500">· {isHO ? factoryName(r.factory_code) : r.factory_code}</span>
                   <span className="text-sm text-gray-400 ml-auto">{new Date(r.created_at).toLocaleString()}</span>
-                  {r.status === 'Open' && (r.released_at ? (
+                  {r.status === 'Open' && hasCap(profile, 'request_mr_cancel') && (r.released_at ? (
                     <button onClick={() => requestMrCancel(r)} disabled={busy === `reqcancel|${r.id}`}
                       className="border border-red-300 text-red-600 px-3 py-1 rounded-lg hover:bg-red-50 text-xs font-medium disabled:opacity-50">
                       {busy === `reqcancel|${r.id}` ? 'Sending…' : '✕ Request cancel (HQ approval)'}</button>
@@ -751,7 +751,7 @@ export default function MaterialRequestsPage() {
                             <td className={`px-3 py-2 text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{remaining}</td>
                             {canEditFac(r.factory_code) && <td className="px-3 py-2 whitespace-nowrap text-right">
                               {movePending.has(it.id) ? <span className="text-amber-600 text-xs">⏳ move pending</span>
-                                : it.received_qty > 0 && moveTargets(it, r).length > 0 ? <button onClick={() => openMove(it, r)} className="text-blue-600 hover:underline text-xs">Move qty</button>
+                                : it.received_qty > 0 && hasCap(profile, 'move_received_qty') && moveTargets(it, r).length > 0 ? <button onClick={() => openMove(it, r)} className="text-blue-600 hover:underline text-xs">Move qty</button>
                                   : null}
                             </td>}
                           </tr>

@@ -4,7 +4,7 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
-import { can } from '@/lib/permissions'
+import { can, hasCap } from '@/lib/permissions'
 
 interface Item { id: string; code: string; description: string; unit: string }
 interface Lot { id: string; item_code: string; factory_code: string; batch_no: string | null; exp_date: string | null; qty_remaining: number }
@@ -374,7 +374,7 @@ export default function DispatchPage() {
                   <td className="px-3 py-2 whitespace-nowrap text-gray-400">{fmt(r.created_at)}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-right">
                     {editPending.has(r.id) ? <span className="text-amber-600">⏳ edit pending</span>
-                      : canFac(r.factory_code) ? <button onClick={() => openRetEdit(r)} className="text-blue-600 hover:underline">Edit</button>
+                      : canFac(r.factory_code) && hasCap(profile, 'request_return_edit') ? <button onClick={() => openRetEdit(r)} className="text-blue-600 hover:underline">Edit</button>
                         : null}
                   </td>
                 </tr>

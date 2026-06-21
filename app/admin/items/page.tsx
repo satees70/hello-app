@@ -5,7 +5,7 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
-import { can } from '@/lib/permissions'
+import { can, hasCap } from '@/lib/permissions'
 
 interface Item { id: string; code: string; description: string; unit: string; type: string; stock_group: string; supplied_by_factory: boolean; kg_per_bag: number | null; pcs_per_roll: number | null }
 const EMPTY = { code: '', description: '', unit: '', type: 'Material', stock_group: '', supplied_by_factory: false, kg_per_bag: '', pcs_per_roll: '' }
@@ -350,7 +350,7 @@ export default function ItemsPage() {
                 <input value={bulkValue} onChange={e => setBulkValue(e.target.value)} className="border rounded px-2 py-1.5" />
               )}
             </div>
-            <button onClick={applyBulk} disabled={bulkEditBusy} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{bulkEditBusy ? 'Working…' : isHO ? 'Apply to selected' : 'Request for selected'}</button>
+            <button onClick={applyBulk} disabled={bulkEditBusy || (!isHO && !hasCap(profile, 'request_item_change'))} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{bulkEditBusy ? 'Working…' : isHO ? 'Apply to selected' : 'Request for selected'}</button>
             <button onClick={() => setSelected(new Set())} className="text-gray-500 hover:underline">Clear</button>
           </div>
         )}
@@ -387,7 +387,7 @@ export default function ItemsPage() {
                   </td>
                   {(canEdit || canDelete) && (
                     <td className="px-4 py-3 flex gap-2 items-center">
-                      {canEdit && <button onClick={() => openEdit(item)} className="text-blue-600 hover:underline text-xs">{isHO ? 'Edit' : 'Request edit'}</button>}
+                      {canEdit && (isHO || hasCap(profile, 'request_item_change')) && <button onClick={() => openEdit(item)} className="text-blue-600 hover:underline text-xs">{isHO ? 'Edit' : 'Request edit'}</button>}
                       {canDelete && isHO && <button onClick={() => handleDelete(item.id)} className="text-red-500 hover:underline text-xs">Delete</button>}
                       {pendingItemIds.has(item.id) && <span className="text-amber-600 text-xs whitespace-nowrap">⏳ pending</span>}
                     </td>

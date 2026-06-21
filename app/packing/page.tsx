@@ -4,7 +4,7 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
-import { can } from '@/lib/permissions'
+import { can, hasCap } from '@/lib/permissions'
 
 interface PBItem { customer_name: string; quantity: number }
 interface Batch {
@@ -209,7 +209,7 @@ export default function PackingPage() {
         <input type="date" value={packEdit[b.id]?.date ?? b.pack_date ?? today} onChange={e => setField({ date: e.target.value })} className="border rounded px-2 py-1 text-xs" />
         <div className="flex flex-col items-start text-xs">
           <span className="px-2 py-1 rounded bg-gray-100 text-gray-700 whitespace-nowrap">{(b.run_mode || 'auto') === 'manual' ? 'Manual' : 'Auto'}</span>
-          <button type="button" onClick={() => requestRunModeChange(b)} className="text-blue-600 hover:underline mt-0.5 whitespace-nowrap">change (needs approval)</button>
+          {hasCap(profile, 'request_run_mode') && <button type="button" onClick={() => requestRunModeChange(b)} className="text-blue-600 hover:underline mt-0.5 whitespace-nowrap">change (needs approval)</button>}
         </div>
         <button onClick={() => savePack(b)} disabled={savingId === b.id} className="bg-teal-600 text-white px-3 py-1 rounded-lg hover:bg-teal-700 disabled:opacity-50 text-xs font-medium">{savingId === b.id ? 'Saving…' : 'Schedule'}</button>
       </div>

@@ -4,12 +4,12 @@ import { useRouter } from 'next/navigation'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { supabase } from '@/lib/supabase'
-import { PERMISSION_MODULES, defaultGrid, isConfigured, type Permissions, type Action } from '@/lib/permissions'
+import { PERMISSION_MODULES, CAPABILITIES, defaultGrid, defaultCaps, isConfigured, type Permissions, type Action } from '@/lib/permissions'
 import MultiFilter from '@/components/MultiFilter'
 
-interface UserRow { id: string; username: string | null; email: string; full_name: string; factory_code: string; factory_codes: string[] | null; readonly_factories: string[] | null; warehouse_user?: boolean | null; role: string; permissions: Permissions | null }
-type FormState = { username: string; email: string; password: string; full_name: string; factory_code: string; factory_codes: string[]; readonly_factories: string[]; warehouse_user: boolean; role: string; permissions: Permissions }
-const blankForm = (): FormState => ({ username: '', email: '', password: '', full_name: '', factory_code: '', factory_codes: [], readonly_factories: [], warehouse_user: false, role: 'user', permissions: defaultGrid() })
+interface UserRow { id: string; username: string | null; email: string; full_name: string; factory_code: string; factory_codes: string[] | null; readonly_factories: string[] | null; warehouse_user?: boolean | null; role: string; permissions: Permissions | null; capabilities?: Record<string, boolean> | null }
+type FormState = { username: string; email: string; password: string; full_name: string; factory_code: string; factory_codes: string[]; readonly_factories: string[]; warehouse_user: boolean; role: string; permissions: Permissions; capabilities: Record<string, boolean> }
+const blankForm = (): FormState => ({ username: '', email: '', password: '', full_name: '', factory_code: '', factory_codes: [], readonly_factories: [], warehouse_user: false, role: 'user', permissions: defaultGrid(), capabilities: defaultCaps() })
 
 export default function UsersPage() {
   const { profile, loading } = useProfile()
@@ -54,6 +54,7 @@ export default function UsersPage() {
       warehouse_user: !!u.warehouse_user,
       role: u.role,
       permissions: isConfigured(u.permissions) ? (u.permissions as Permissions) : defaultGrid(),
+      capabilities: { ...defaultCaps(), ...(u.capabilities || {}) },
     })
     setMode('edit')
   }
@@ -68,6 +69,7 @@ export default function UsersPage() {
       warehouse_user: !!u.warehouse_user,
       role: u.role,
       permissions: isConfigured(u.permissions) ? (u.permissions as Permissions) : defaultGrid(),
+      capabilities: { ...defaultCaps(), ...(u.capabilities || {}) },
     })
     setMode('create')
     setSuccess(`Copied access from ${u.username || u.full_name || u.email} — set a username & password, adjust if needed, then create.`)
@@ -118,8 +120,8 @@ export default function UsersPage() {
     const isEdit = mode === 'edit'
     const url = isEdit ? '/api/update-user' : '/api/create-user'
     const body = isEdit
-      ? { id: editingId, username: form.username || undefined, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, warehouse_user: form.warehouse_user, role: form.role, permissions: form.permissions, password: form.password || undefined }
-      : { username: form.username, email: form.email || undefined, password: form.password, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, warehouse_user: form.warehouse_user, role: form.role, permissions: form.permissions }
+      ? { id: editingId, username: form.username || undefined, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, warehouse_user: form.warehouse_user, role: form.role, permissions: form.permissions, capabilities: form.capabilities, password: form.password || undefined }
+      : { username: form.username, email: form.email || undefined, password: form.password, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, warehouse_user: form.warehouse_user, role: form.role, permissions: form.permissions, capabilities: form.capabilities }
     const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     const data = await res.json()
     if (data.error) { setError(data.error); setSaving(false); return }
@@ -321,6 +323,29 @@ export default function UsersPage() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              </div>
+            )}
+
+            {/* Special permissions — individual capabilities on top of the section grid */}
+            {form.role !== 'admin' && (
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-sm font-medium">Special permissions</label>
+                  <div className="text-xs space-x-3">
+                    <button type="button" onClick={() => setForm(p => ({ ...p, capabilities: defaultCaps() }))} className="text-blue-600 hover:underline">Allow all</button>
+                    <button type="button" onClick={() => setForm(p => ({ ...p, capabilities: Object.fromEntries(CAPABILITIES.map(c => [c.key, false])) }))} className="text-blue-600 hover:underline">Disallow all</button>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-400 mb-2">Specific actions on top of the grid. A user still needs the section&apos;s Edit (and factory access) — these let you switch the sensitive ones on/off per person.</p>
+                <div className="border rounded-lg divide-y">
+                  {CAPABILITIES.map(c => (
+                    <label key={c.key} className="flex items-start gap-2 px-3 py-2 cursor-pointer hover:bg-gray-50">
+                      <input type="checkbox" className="h-4 w-4 mt-0.5" checked={form.capabilities[c.key] !== false}
+                        onChange={e => setForm(p => ({ ...p, capabilities: { ...p.capabilities, [c.key]: e.target.checked } }))} />
+                      <span className="text-sm"><span className="font-medium">{c.label}</span><span className="block text-xs text-gray-400">{c.desc}</span></span>
+                    </label>
+                  ))}
                 </div>
               </div>
             )}

@@ -4,7 +4,7 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
-import { can } from '@/lib/permissions'
+import { can, hasCap } from '@/lib/permissions'
 
 interface BatchItem { id: string; customer_name: string; so_number: string; quantity: number }
 interface Batch {
@@ -392,8 +392,8 @@ export default function ProductionPage() {
                                         <div key={m.id} className="border rounded-lg bg-white p-2">
                                           <div className="flex justify-between items-center mb-1">
                                             <span className="text-xs"><span className="font-mono font-semibold">{m.batch_no}</span> · due {m.delivery_date || '—'} · qty <strong>{m.total_quantity}</strong></span>
-                                            <button onClick={() => requestUncombine(m)}
-                                              title="Request to run this batch on its own — Head Office must approve" className="text-red-600 hover:underline text-xs font-medium whitespace-nowrap">✕ Run on its own (needs approval)</button>
+                                            {hasCap(profile, 'request_split') && <button onClick={() => requestUncombine(m)}
+                                              title="Request to run this batch on its own — Head Office must approve" className="text-red-600 hover:underline text-xs font-medium whitespace-nowrap">✕ Run on its own (needs approval)</button>}
                                           </div>
                                           <ul className="space-y-0.5 pl-1">
                                             {m.production_batch_items?.map(it => (
@@ -450,7 +450,7 @@ export default function ProductionPage() {
                                         <span className="flex-shrink-0 flex items-baseline gap-2">
                                           {it.so_number && <span className="text-gray-400 font-mono text-xs">{it.so_number}</span>}
                                           <span className="font-medium">{it.quantity}</span>
-                                          {b.status === 'Planned' && !b.material_request_id && (b.production_batch_items?.length || 0) > 1 && (
+                                          {b.status === 'Planned' && !b.material_request_id && (b.production_batch_items?.length || 0) > 1 && hasCap(profile, 'request_split') && (
                                             <button onClick={() => requestSplit(b, it)} title="Request to split this order into its own batch — Head Office must approve"
                                               className="text-red-600 hover:underline text-xs font-medium whitespace-nowrap">✕ Split (needs approval)</button>
                                           )}

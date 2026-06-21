@@ -4,7 +4,7 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
-import { can } from '@/lib/permissions'
+import { can, hasCap } from '@/lib/permissions'
 import MultiFilter from '@/components/MultiFilter'
 
 interface SalesImport {
@@ -554,7 +554,7 @@ export default function SalesOrdersPage() {
                     <button onClick={() => handleDownload(doc.file_path)} className="text-blue-600 hover:underline text-xs">View PDF</button>
                     {isHO ? <button onClick={() => handleDelete(doc)} className="text-red-600 hover:underline text-xs">Delete</button>
                       : docDelPending.has(doc.id) ? <span className="text-amber-600 text-xs">⏳ Delete requested</span>
-                        : <button onClick={() => requestDocDelete(doc)} className="text-red-600 hover:underline text-xs">Request delete</button>}
+                        : hasCap(profile, 'request_doc_delete') ? <button onClick={() => requestDocDelete(doc)} className="text-red-600 hover:underline text-xs">Request delete</button> : null}
                   </td>
                 </tr>
               ))}

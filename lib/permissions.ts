@@ -33,6 +33,39 @@ export const PERMISSION_MODULES = [
 // sensitive processes like Grinding that most staff shouldn't see.
 export const RESTRICTED_MODULES: ModuleKey[] = ['grinding', 'grinding_recipe']
 
+// Fine-grained "special" capabilities the admin can tick/untick per user, on top
+// of the section grid. Each is allowed by default (legacy behaviour) unless the
+// admin explicitly turns it OFF for that user. They are AND-ed with the normal
+// section/factory checks — turning one off hides that action even if the user can
+// otherwise edit the section.
+export const CAPABILITIES = [
+  { key: 'so_edit', label: 'Edit pick-run SO number', desc: 'Enter & change the SO number on a released pick run' },
+  { key: 'move_received_qty', label: 'Move received quantity', desc: 'Shift received qty between material requests (HO approves)' },
+  { key: 'request_mr_cancel', label: 'Request material-request cancel', desc: 'Ask to cancel a material request / released pick run' },
+  { key: 'request_doc_delete', label: 'Request sales-document delete', desc: 'Ask Head Office to delete a Sales Order document' },
+  { key: 'request_item_change', label: 'Request item-master change', desc: 'Edit item fields (sent to Head Office for approval)' },
+  { key: 'request_return_edit', label: 'Edit material return', desc: 'Change a recorded raw-material return (HO approves)' },
+  { key: 'request_split', label: 'Request batch split / un-combine', desc: 'Split or un-combine a production batch (Order Board)' },
+  { key: 'request_run_mode', label: 'Request run-mode change', desc: 'Change Auto / Manual run mode (Order Board)' },
+] as const
+export type CapabilityKey = typeof CAPABILITIES[number]['key']
+
+// Is this capability allowed for the user? Allowed unless explicitly set false.
+export function hasCap(
+  profile: { role?: string; capabilities?: Record<string, boolean> | null } | null | undefined,
+  cap: CapabilityKey,
+): boolean {
+  if (!profile) return false
+  if (profile.role === 'admin') return true
+  if (!profile.capabilities) return true   // never configured → legacy allow
+  return profile.capabilities[cap] !== false
+}
+export function defaultCaps(): Record<string, boolean> {
+  const c: Record<string, boolean> = {}
+  for (const cap of CAPABILITIES) c[cap.key] = true
+  return c
+}
+
 export type ModuleKey = typeof PERMISSION_MODULES[number]['key']
 export type Action = 'view' | 'edit' | 'delete'
 export type ModulePerm = { view?: boolean; edit?: boolean; delete?: boolean }

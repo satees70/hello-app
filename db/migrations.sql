@@ -16,6 +16,8 @@
 alter table public.profiles add column if not exists username text;
 create unique index if not exists profiles_username_lower_key on public.profiles (lower(username)) where username is not null;
 alter table public.profiles add column if not exists warehouse_user boolean not null default false;
+-- Fine-grained capability toggles (e.g. so_edit, move_received_qty, request_*) — empty = all allowed
+alter table public.profiles add column if not exists capabilities jsonb not null default '{}'::jsonb;
 
 -- ============================================================================
 -- Goods Received · per-line partial receiving bookkeeping
