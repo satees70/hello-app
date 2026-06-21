@@ -472,15 +472,17 @@ create policy stock_lots_write on public.stock_lots for all
 -- Receive a delivery against ONE request line.
 create or replace function public.receive_material_lot(p_item_id uuid, p_qty numeric, p_batch_no text, p_exp_date date, p_do_number text default null)
 returns void language plpgsql security definer set search_path = public as $$
-declare v_it public.material_request_items; v_req public.material_requests;
+declare v_it public.material_request_items; v_req public.material_requests; v_item_id uuid;
 begin
   if p_qty is null or p_qty <= 0 then raise exception 'Received quantity must be greater than zero'; end if;
   select * into v_it from public.material_request_items where id = p_item_id;
   if not found then raise exception 'Request line not found'; end if;
   select * into v_req from public.material_requests where id = v_it.request_id;
-  if my_factory_code() <> 'HEAD_OFFICE' and v_req.factory_code <> my_factory_code() then raise exception 'Not allowed for this factory'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_req.factory_code = any (my_factory_codes())) then raise exception 'Not allowed for this factory'; end if;
+  v_item_id := coalesce(v_it.item_id, (select id from public.items where code = v_it.item_code limit 1));
+  if v_item_id is null then raise exception 'Item % is not in the Items master — add it there first', v_it.item_code; end if;
   insert into public.stock_lots (item_id, item_code, description, factory_code, batch_no, exp_date, qty_received, qty_remaining, request_item_id, do_number)
-  values (v_it.item_id, v_it.item_code, v_it.description, v_req.factory_code, nullif(p_batch_no,''), p_exp_date, p_qty, p_qty, p_item_id, nullif(p_do_number,''));
+  values (v_item_id, v_it.item_code, v_it.description, v_req.factory_code, nullif(p_batch_no,''), p_exp_date, p_qty, p_qty, p_item_id, nullif(p_do_number,''));
   update public.material_request_items set received_qty = received_qty + p_qty where id = p_item_id;
   update public.material_requests set status =
     case when (select bool_and(received_qty >= requested_qty) from public.material_request_items where request_id = v_req.id) then 'Fulfilled'
@@ -488,7 +490,7 @@ begin
          else 'Open' end
   where id = v_req.id;
   insert into public.item_stock (item_id, factory_code, quantity, updated_at)
-  values (v_it.item_id, v_req.factory_code, p_qty, now())
+  values (v_item_id, v_req.factory_code, p_qty, now())
   on conflict (item_id, factory_code) do update set quantity = item_stock.quantity + p_qty, updated_at = now();
 end $$;
 grant execute on function public.receive_material_lot(uuid, numeric, text, date, text) to authenticated;
@@ -497,15 +499,17 @@ grant execute on function public.receive_material_lot(uuid, numeric, text, date,
 -- lines (oldest first); leftover/over-delivery goes onto the last line.
 create or replace function public.receive_combined_lot(p_item_ids uuid[], p_qty numeric, p_batch_no text, p_exp_date date, p_do_number text default null)
 returns void language plpgsql security definer set search_path = public as $$
-declare v_first public.material_request_items; v_factory text; v_remaining numeric := p_qty; v_alloc numeric; c record; v_reqid uuid;
+declare v_first public.material_request_items; v_factory text; v_remaining numeric := p_qty; v_alloc numeric; c record; v_reqid uuid; v_item_id uuid;
 begin
   if p_qty is null or p_qty <= 0 then raise exception 'Received quantity must be greater than zero'; end if;
   if array_length(p_item_ids,1) is null then raise exception 'No request lines given'; end if;
   select * into v_first from public.material_request_items where id = p_item_ids[1];
   select factory_code into v_factory from public.material_requests where id = v_first.request_id;
-  if my_factory_code() <> 'HEAD_OFFICE' and v_factory <> my_factory_code() then raise exception 'Not allowed for this factory'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_factory = any (my_factory_codes())) then raise exception 'Not allowed for this factory'; end if;
+  v_item_id := coalesce(v_first.item_id, (select id from public.items where code = v_first.item_code limit 1));
+  if v_item_id is null then raise exception 'Item % is not in the Items master — add it there first', v_first.item_code; end if;
   insert into public.stock_lots (item_id, item_code, description, factory_code, batch_no, exp_date, qty_received, qty_remaining, do_number)
-  values (v_first.item_id, v_first.item_code, v_first.description, v_factory, nullif(p_batch_no,''), p_exp_date, p_qty, p_qty, nullif(p_do_number,''));
+  values (v_item_id, v_first.item_code, v_first.description, v_factory, nullif(p_batch_no,''), p_exp_date, p_qty, p_qty, nullif(p_do_number,''));
   for c in select mri.id, mri.requested_qty, mri.received_qty from public.material_request_items mri join public.material_requests mr on mr.id = mri.request_id where mri.id = any(p_item_ids) order by mr.created_at asc, mri.id asc
   loop
     exit when v_remaining <= 0;
@@ -523,7 +527,7 @@ begin
     where id = v_reqid;
   end loop;
   insert into public.item_stock (item_id, factory_code, quantity, updated_at)
-  values (v_first.item_id, v_factory, p_qty, now())
+  values (v_item_id, v_factory, p_qty, now())
   on conflict (item_id, factory_code) do update set quantity = item_stock.quantity + p_qty, updated_at = now();
 end $$;
 grant execute on function public.receive_combined_lot(uuid[], numeric, text, date, text) to authenticated;
@@ -535,7 +539,7 @@ returns void language plpgsql security definer set search_path = public as $$
 declare v_item public.items;
 begin
   if p_qty is null or p_qty <= 0 then raise exception 'Received quantity must be greater than zero'; end if;
-  if my_factory_code() <> 'HEAD_OFFICE' and p_factory <> my_factory_code() then raise exception 'Not allowed for this factory'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (p_factory = any (my_factory_codes())) then raise exception 'Not allowed for this factory'; end if;
   select * into v_item from public.items where code = p_item_code limit 1;
   if not found then raise exception 'Unknown item %', p_item_code; end if;
   insert into public.stock_lots (item_id, item_code, description, factory_code, batch_no, exp_date, qty_received, qty_remaining, request_item_id, unplanned, do_number)
