@@ -101,6 +101,7 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields, 
   }
 
   async function save() {
+    if (!canEdit) { setError('You have view-only access here.'); return }
     setSaving(true); setError('')
     if (!factory) { setError('Pick a factory.'); setSaving(false); return }
     const payload: Record<string, unknown> = { factory_code: factory }

@@ -100,6 +100,7 @@ export default function GrindingPage() {
   const fmt = (d: string | null) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ''); return m ? `${m[3]}/${m[2]}/${m[1]}` : '—' }
 
   async function produce() {
+    if (!canEdit) { setError("You have view-only access here."); return }
     setError('')
     const r = recipes.filter(x => x.active).find(x => x.product === prodSearch.trim())
     if (!r) { setError('Pick a product from the list (it must have a saved recipe).'); return }
@@ -142,6 +143,7 @@ export default function GrindingPage() {
   const setMixMat = (i: number, k: 'batch_no', v: string) => setMixMats(p => { const m = [...p]; m[i] = { ...m[i], [k]: v }; return m })
   const toggleMixMat = (i: number) => setMixMats(p => { const m = [...p]; m[i] = { ...m[i], added: !m[i].added }; return m })
   async function saveRecord() {
+    if (!canEdit && !canRecipeEdit) { setError("You have view-only access here."); return }
     if (!openRec) return
     setSaving(true); setError('')
     try {
@@ -170,6 +172,7 @@ export default function GrindingPage() {
   function openRecipe(r: Recipe) { setError(''); setEditRecipe(r); setRecipeForm({ factory_code: r.factory_code, product: r.product, recipe_type: r.recipe_type, active: r.active, components: compByRecipe[r.id]?.length ? compByRecipe[r.id] : [{ item: '', qty_per_lot: '' }] }) }
   const setComp = (i: number, k: keyof Component, v: string) => setRecipeForm(p => { if (!p) return p; const c = [...p.components]; c[i] = { ...c[i], [k]: v }; return { ...p, components: c } })
   async function saveRecipe() {
+    if (!canRecipeEdit) { setError("You have view-only access to recipes."); return }
     if (!recipeForm) return
     setSaving(true); setError('')
     try {
@@ -190,6 +193,7 @@ export default function GrindingPage() {
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not save') } finally { setSaving(false) }
   }
   async function deleteRecipe(r: Recipe) {
+    if (!canRecipeEdit) { setError("You have view-only access to recipes."); return }
     if (!confirm(`Delete recipe for ${r.product}?`)) return
     const { error } = await supabase.from('grinding_recipes').delete().eq('id', r.id)
     if (error) { setError(error.message); return }
