@@ -90,6 +90,8 @@ begin
   if v_fac is null and v_has_returns then select factory_code into v_fac from public.stock_lots where id = (p_returns->0->>'lot_id')::uuid; end if;
   if v_fac is null then raise exception 'Could not work out the factory for this delivery order'; end if;
   if my_factory_code() <> 'HEAD_OFFICE' and not (v_fac = any (my_factory_codes())) then raise exception 'Not allowed for this factory'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and exists (select 1 from public.profiles where id = auth.uid() and v_fac = any (readonly_factories))
+    then raise exception 'You have view-only access at this factory'; end if;
   if v_has_batches and exists (select 1 from public.production_batches where id = any (p_batch_ids) and factory_code <> v_fac)
     then raise exception 'All finished goods must be from the same factory'; end if;
 

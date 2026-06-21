@@ -60,7 +60,10 @@ export default function DispatchPage() {
     setItems(await fetchAll<Item>('items', 'id, code, description, unit', 'code'))
     const { data: f } = await supabase.from('factories').select('code, name').order('code')
     setFactories(f || [])
-    if (!isHO && profile) setFactory(profile.factory_code)
+    // Default to the first factory the user may actually act on (edit) at.
+    const codes = profile?.factory_codes?.length ? profile.factory_codes : [profile?.factory_code || '']
+    const editable = (f || []).filter(x => isHO || (codes.includes(x.code) && can(profile, 'dispatch', 'edit', x.code)))
+    if (!isHO) setFactory(editable[0]?.code || '')
     else if (f && f.length && !factory) setFactory(f[0].code)
     const { data: st } = await supabase.from('item_stock').select('item_id, factory_code, quantity')
     const m: Record<string, number> = {}; (st || []).forEach(r => { m[`${r.item_id}|${r.factory_code}`] = Number(r.quantity) })
@@ -133,7 +136,8 @@ export default function DispatchPage() {
   if (!profile) return null
 
   const myCodes = profile.factory_codes && profile.factory_codes.length ? profile.factory_codes : [profile.factory_code]
-  const myFactories = isHO ? factories : factories.filter(f => myCodes.includes(f.code))
+  const canFac = (fc: string) => can(profile, 'dispatch', 'edit', fc)   // honours per-factory view-only
+  const myFactories = isHO ? factories : factories.filter(f => myCodes.includes(f.code) && canFac(f.code))
   const facList = [...new Set(batches.map(b => b.factory_code))]
   const multiFac = isHO || facList.length > 1
 
@@ -155,7 +159,7 @@ export default function DispatchPage() {
           {batches.length === 0 && <p className="text-gray-400 text-sm bg-white border rounded-xl p-6 text-center">Nothing produced yet to send.</p>}
           {batches.map(b => (
             <label key={b.id} className="flex gap-3 bg-white border rounded-xl p-3 shadow-sm">
-              {canEdit && <input type="checkbox" checked={picked.has(b.id)} onChange={() => toggle(b.id)} className="mt-1 h-4 w-4" />}
+              {canEdit && canFac(b.factory_code) && <input type="checkbox" checked={picked.has(b.id)} onChange={() => toggle(b.id)} className="mt-1 h-4 w-4" />}
               <div className="flex-1 text-sm">
                 <div className="font-mono font-medium">{b.item_code}</div>
                 <div className="text-gray-500">{b.description}</div>
@@ -184,7 +188,7 @@ export default function DispatchPage() {
                   )}
                   {!collapsed.has(fc) && batches.filter(b => b.factory_code === fc).map(b => (
                     <tr key={b.id} className="border-b last:border-0 hover:bg-gray-50">
-                      <td className="px-3 py-2">{canEdit && <input type="checkbox" checked={picked.has(b.id)} onChange={() => toggle(b.id)} className="h-4 w-4" />}</td>
+                      <td className="px-3 py-2">{canEdit && canFac(b.factory_code) && <input type="checkbox" checked={picked.has(b.id)} onChange={() => toggle(b.id)} className="h-4 w-4" />}</td>
                       <td className="px-3 py-2"><span className="font-mono font-medium">{b.item_code}</span><span className="block text-gray-400">{b.description}</span></td>
                       <td className="px-3 py-2 whitespace-nowrap">{b.batch_no || '—'}</td>
                       <td className="px-3 py-2 text-right font-semibold">{b.produced_qty}</td>
