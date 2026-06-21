@@ -587,9 +587,9 @@ export default function MaterialRequestsPage() {
                                 </>
                               )}
                             </span>
-                            <button onClick={() => requestRunCancel(run)} disabled={busy === `runcancel|${run.runNo}`}
+                            {!isWarehouse && <button onClick={() => requestRunCancel(run)} disabled={busy === `runcancel|${run.runNo}`}
                               className="border border-red-300 text-red-600 px-3 py-1 rounded-lg hover:bg-red-50 text-xs font-medium disabled:opacity-50">
-                              {busy === `runcancel|${run.runNo}` ? 'Sending…' : '✕ Request cancel (HQ approval)'}</button>
+                              {busy === `runcancel|${run.runNo}` ? 'Sending…' : '✕ Request cancel (HQ approval)'}</button>}
                             </>}
                           </div>
                           {filter !== 'Labels' && Object.keys(warehouse).length > 0 && (
