@@ -59,6 +59,7 @@ export default function InspectionPage() {
   const [recording, setRecording] = useState(false)
   const [timer, setTimer] = useState<Timer>(EMPTY_TIMER)
   const [now, setNow] = useState(Date.now())
+  const [packLines, setPackLines] = useState<{ name: string; line_code: string | null }[]>([])
 
   useEffect(() => { setBatchId(new URLSearchParams(window.location.search).get('batch') || '') }, [])
   useEffect(() => { if (profile && batchId) loadForBatch(batchId) }, [profile, batchId])
@@ -66,7 +67,9 @@ export default function InspectionPage() {
 
   async function loadForBatch(id: string) {
     const { data: batch } = await supabase.from('production_batches').select('batch_no, item_code, description, factory_code, exp_date, total_quantity, produced_qty').eq('id', id).single()
-    if (batch) { setFactoryCode(batch.factory_code); setBatchNo(batch.batch_no); setPlanned(Number(batch.total_quantity || 0)); setProduced(Number(batch.produced_qty || 0)) }
+    if (batch) { setFactoryCode(batch.factory_code); setBatchNo(batch.batch_no); setPlanned(Number(batch.total_quantity || 0)); setProduced(Number(batch.produced_qty || 0))
+      const { data: pl } = await supabase.from('packing_lines').select('name, line_code').eq('factory_code', batch.factory_code).eq('active', true).order('name'); setPackLines(pl || [])
+    }
     const { data: rec } = await supabase.from('inspection_records').select('*').eq('production_batch_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle()
     if (rec) {
       setRecordId(rec.id)
@@ -83,6 +86,18 @@ export default function InspectionPage() {
   }
 
   const set = (k: string, v: string | boolean) => setF(prev => ({ ...prev, [k]: v }))
+  // Auto No. = PR<location digits><line letter>-YYMMDD/<running>, e.g. PR101A-260622/00001
+  async function genNo(area: string, dateStr: string) {
+    const letter = (packLines.find(p => p.name === area)?.line_code || '').toUpperCase()
+    const loc = factoryCode.match(/\d+/)?.[0] || factoryCode
+    const d = (dateStr || '').replaceAll('-', '').slice(2)
+    if (!letter || !d) return
+    const prefix = `PR${loc}${letter}-${d}/`
+    const { data } = await supabase.from('inspection_records').select('data').eq('factory_code', factoryCode)
+    const used = (data || []).map(r => String((r.data as Record<string, unknown>)?.no || '')).filter(n => n.startsWith(prefix))
+    const maxN = used.reduce((m, n) => { const x = parseInt(n.split('/')[1] || '0', 10); return Number.isFinite(x) && x > m ? x : m }, 0)
+    setF(prev => ({ ...prev, area_machine: area, no: prefix + String(maxN + 1).padStart(5, '0') }))
+  }
   const setHour = (i: number, k: keyof Hourly, v: string) => setF(prev => { const h = [...(prev.hourly as Hourly[])]; h[i] = { ...h[i], [k]: v }; return { ...prev, hourly: h } })
   const addHour = () => setF(prev => ({ ...prev, hourly: [...(prev.hourly as Hourly[]), blankHour()] }))
 
@@ -161,24 +176,7 @@ export default function InspectionPage() {
             <div className="text-xs text-gray-500 text-right">Ver. 06 · P07-F01<br />Eff. 26.01.2026 · Page 1 of 2</div>
           </div>
 
-          {/* Header */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Field label="Date"><In k="date" type="date" /></Field>
-            <Field label="Area / Machine"><In k="area_machine" /></Field>
-            <Field label="No."><In k="no" /></Field>
-            <Field label="Code"><In k="code" /></Field>
-            <Field label="Product"><In k="product" /></Field>
-            <Field label="B/N Raw Material"><In k="bn_raw_material" /></Field>
-            <Field label="RM Weight (In)"><In k="rm_weight_in" /></Field>
-            <Field label="Total Used (b)"><In k="total_used" /></Field>
-            <Field label="Plastic weight (g)"><In k="plastic" type="number" /></Field>
-            <Field label="B/N Plastic"><In k="bn_plastic" /></Field>
-            <Field label="Weigh of wastage & type"><In k="wastage" /></Field>
-            <Field label="Food Loss & Waste (a)"><In k="food_loss_a" /></Field>
-            <Field label={`Food Loss & Waste % (a/b×100)`}><div className="border rounded px-2 py-1 text-sm bg-gray-50 text-gray-700">{lossPct}</div></Field>
-          </div>
-
-          {/* Production run */}
+          {/* Production run — at the top */}
           {batchId && (
             <div className="border-t pt-3 bg-blue-50/40 -mx-5 px-5 py-3">
               <div className="font-semibold text-sm mb-2">Production run <span className="font-normal text-gray-500">· batch {batchNo}</span></div>
@@ -224,6 +222,28 @@ export default function InspectionPage() {
               </div>
             </div>
           )}
+
+          {/* Header */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 border-t pt-3">
+            <Field label="Date"><In k="date" type="date" /></Field>
+            <Field label="Area / Line">{packLines.length > 0
+              ? <select value={s('area_machine')} onChange={e => genNo(e.target.value, s('date'))} className="border rounded px-2 py-1 text-sm bg-white">
+                  <option value="">Choose a line…</option>
+                  {packLines.map(p => <option key={p.name} value={p.name}>{p.name}{p.line_code ? ` (${p.line_code})` : ''}</option>)}
+                </select>
+              : <In k="area_machine" />}</Field>
+            <Field label="No."><In k="no" /></Field>
+            <Field label="Code"><In k="code" /></Field>
+            <Field label="Product"><In k="product" /></Field>
+            <Field label="B/N Raw Material"><In k="bn_raw_material" /></Field>
+            <Field label="RM Weight (In)"><In k="rm_weight_in" /></Field>
+            <Field label="Total Used (b)"><In k="total_used" /></Field>
+            <Field label="Plastic weight (g)"><In k="plastic" type="number" /></Field>
+            <Field label="B/N Plastic"><In k="bn_plastic" /></Field>
+            <Field label="Weigh of wastage & type"><In k="wastage" /></Field>
+            <Field label="Food Loss & Waste (a)"><In k="food_loss_a" /></Field>
+            <Field label={`Food Loss & Waste % (a/b×100)`}><div className="border rounded px-2 py-1 text-sm bg-gray-50 text-gray-700">{lossPct}</div></Field>
+          </div>
 
           {/* Process (CCP #2) */}
           <div className="border-t pt-3">
@@ -289,11 +309,8 @@ export default function InspectionPage() {
             </div>
           </div>
 
-          {/* Yield + sign-offs */}
+          {/* Sign-offs */}
           <div className="border-t pt-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Field label="Out / Yield — Pack"><In k="yield_pack" /></Field>
-            <Field label="Bottle"><In k="yield_bottle" /></Field>
-            <Field label="Balance"><In k="yield_balance" /></Field>
             <Field label="Weighed by (bulk pack)"><In k="weighed_by" /></Field>
             <Field label="Done by"><In k="done_by" /></Field>
             <Field label="Checked by"><In k="checked_by" /></Field>
