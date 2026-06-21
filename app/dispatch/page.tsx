@@ -199,7 +199,7 @@ export default function DispatchPage() {
               )}
               <div className="flex flex-col gap-1 min-w-[200px] flex-1"><span className="text-xs font-medium text-gray-600">Material</span>
                 <input list="ret-items" value={code} onChange={e => setCode(e.target.value)} placeholder="Type code…" className="border rounded px-2 py-1.5 text-sm" />
-                <datalist id="ret-items">{items.map(i => <option key={i.id} value={i.code}>{i.description}</option>)}</datalist>
+                <datalist id="ret-items">{items.filter(i => (onHand[`${i.id}|${factory}`] ?? 0) > 0).map(i => <option key={i.id} value={i.code}>{i.description} · {onHand[`${i.id}|${factory}`]} {i.unit}</option>)}</datalist>
                 {item ? <span className="text-xs text-gray-500">{item.description} · on hand: <strong>{onHandQty}</strong> {item.unit}</span> : code ? <span className="text-xs text-red-500">Unknown code</span> : null}
               </div>
               <div className="flex flex-col gap-1 w-28"><span className="text-xs font-medium text-gray-600">Quantity {item ? `(${item.unit})` : ''}</span>
