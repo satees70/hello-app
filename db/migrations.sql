@@ -1259,6 +1259,88 @@ create policy bom_components_edit on public.bom_components for all to authentica
 alter table public.profiles add column if not exists readonly_factories text[] not null default '{}';
 
 
+-- ============================================================================
+-- 2026-06 · Delivery Orders (finished goods factory → warehouse) + raw returns
+-- ============================================================================
+alter table public.production_batches add column if not exists dispatched_at timestamptz;
+create sequence if not exists public.dispatch_seq start 1;
+
+create table if not exists public.dispatch_orders (
+  id uuid primary key default gen_random_uuid(),
+  do_number text, factory_code text, status text not null default 'Sent',
+  created_by uuid, created_by_name text, created_at timestamptz not null default now()
+);
+create table if not exists public.dispatch_order_lines (
+  id uuid primary key default gen_random_uuid(),
+  dispatch_id uuid references public.dispatch_orders(id) on delete cascade,
+  batch_id uuid, item_code text, description text, quantity numeric
+);
+create table if not exists public.material_returns (
+  id uuid primary key default gen_random_uuid(),
+  factory_code text, item_code text, description text, quantity numeric, reason text,
+  created_by uuid, created_by_name text, created_at timestamptz not null default now()
+);
+grant select on public.dispatch_orders, public.dispatch_order_lines, public.material_returns to authenticated, anon, service_role;
+grant insert, update, delete on public.dispatch_orders, public.dispatch_order_lines, public.material_returns to service_role;
+alter table public.dispatch_orders enable row level security;
+alter table public.dispatch_order_lines enable row level security;
+alter table public.material_returns enable row level security;
+drop policy if exists do_read on public.dispatch_orders;
+create policy do_read on public.dispatch_orders for select using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()));
+drop policy if exists dol_read on public.dispatch_order_lines;
+create policy dol_read on public.dispatch_order_lines for select using (true);
+drop policy if exists mret_read on public.material_returns;
+create policy mret_read on public.material_returns for select using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()));
+
+-- Create a delivery order from completed batches, marking them dispatched
+create or replace function public.create_dispatch_order(p_batch_ids uuid[]) returns text
+language plpgsql security definer set search_path = public as $$
+declare v_fac text; v_no text; v_id uuid; v_name text; b record;
+begin
+  if not has_perm('dispatch', 'edit') then raise exception 'Not allowed to create delivery orders'; end if;
+  if array_length(p_batch_ids, 1) is null then raise exception 'Select at least one batch'; end if;
+  select factory_code into v_fac from public.production_batches where id = p_batch_ids[1];
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_fac = any (my_factory_codes())) then raise exception 'Not allowed for this factory'; end if;
+  v_no := 'DSP-' || to_char(now(), 'YYMMDD') || '/' || lpad(nextval('public.dispatch_seq')::text, 4, '0');
+  select full_name into v_name from public.profiles where id = auth.uid();
+  insert into public.dispatch_orders (do_number, factory_code, created_by, created_by_name)
+  values (v_no, v_fac, auth.uid(), v_name) returning id into v_id;
+  for b in select * from public.production_batches where id = any (p_batch_ids) and dispatched_at is null loop
+    insert into public.dispatch_order_lines (dispatch_id, batch_id, item_code, description, quantity)
+    values (v_id, b.id, b.item_code, b.description, b.produced_qty);
+    update public.production_batches set dispatched_at = now() where id = b.id;
+  end loop;
+  return v_no;
+end $$;
+grant execute on function public.create_dispatch_order(uuid[]) to authenticated;
+
+-- Return raw material to the warehouse — reduces factory stock immediately (FEFO)
+create or replace function public.return_material(p_factory text, p_item_code text, p_qty numeric, p_reason text) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_item public.items; v_need numeric; v_name text; r record;
+begin
+  if not has_perm('dispatch', 'edit') then raise exception 'Not allowed to return materials'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (p_factory = any (my_factory_codes())) then raise exception 'Not allowed for this factory'; end if;
+  if p_qty is null or p_qty <= 0 then raise exception 'Enter a quantity greater than zero'; end if;
+  select * into v_item from public.items where code = p_item_code limit 1;
+  if not found then raise exception 'Item % not found', p_item_code; end if;
+  v_need := p_qty;
+  for r in select id, qty_remaining from public.stock_lots
+           where item_code = p_item_code and factory_code = p_factory and qty_remaining > 0
+           order by exp_date asc nulls last, received_at asc loop
+    exit when v_need <= 0;
+    if r.qty_remaining <= v_need then update public.stock_lots set qty_remaining = 0 where id = r.id; v_need := v_need - r.qty_remaining;
+    else update public.stock_lots set qty_remaining = qty_remaining - v_need where id = r.id; v_need := 0; end if;
+  end loop;
+  if v_need > 0 then raise exception 'Not enough stock to return — short by %', v_need; end if;
+  update public.item_stock set quantity = quantity - p_qty, updated_at = now() where item_id = v_item.id and factory_code = p_factory;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  insert into public.material_returns (factory_code, item_code, description, quantity, reason, created_by, created_by_name)
+  values (p_factory, p_item_code, v_item.description, p_qty, p_reason, auth.uid(), v_name);
+end $$;
+grant execute on function public.return_material(text, text, numeric, text) to authenticated;
+
+
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
 --   • Backfilled the first released run to PR101-2606/0001.

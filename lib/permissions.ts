@@ -4,6 +4,7 @@
 
 export const PERMISSION_MODULES = [
   { key: 'sales', label: 'Sales orders', desc: 'Upload & view sales orders' },
+  { key: 'dispatch', label: 'Delivery orders', desc: 'Send finished goods to warehouse & return raw materials' },
   { key: 'changes', label: 'Pending changes', desc: 'Change-request approvals & status' },
   { key: 'order_board', label: 'Order board', desc: 'Production batches & planning' },
   { key: 'packing', label: 'Packing schedule', desc: 'What to pack, by line & date' },
