@@ -53,6 +53,12 @@ export default function DispatchPage() {
   const [issue, setIssue] = useState<'no' | 'yes'>('no')
   const [reason, setReason] = useState('')
   const [returnCart, setReturnCart] = useState<CartReturn[]>([])
+  // Edit-a-return modal (needs HO approval)
+  const [editRet, setEditRet] = useState<MReturn | null>(null)
+  const [editQty, setEditQty] = useState('')
+  const [editNewReason, setEditNewReason] = useState('')
+  const [editWhy, setEditWhy] = useState('')
+  const [editPending, setEditPending] = useState<Set<string>>(new Set())
 
   useEffect(() => { if (profile) load() }, [profile])
 
@@ -81,6 +87,8 @@ export default function DispatchPage() {
     setOrders((o as DOrder[]) || [])
     const { data: r } = await supabase.from('material_returns').select('*').order('created_at', { ascending: false }).limit(50)
     setReturns((r as MReturn[]) || [])
+    const { data: pe } = await supabase.from('return_edit_requests').select('return_id').eq('status', 'Pending')
+    setEditPending(new Set((pe || []).map(x => x.return_id).filter(Boolean)))
   }
 
   const factoryName = (c: string) => factories.find(f => f.code === c)?.name || c || '—'
@@ -135,6 +143,32 @@ export default function DispatchPage() {
     setPicked(p => { const n = new Set(p); batchIds.forEach(id => n.delete(id)); return n })
     setReturnCart(c => c.filter(r => r.factory !== fac))
     setBusy(false); load()
+  }
+
+  function openRetEdit(r: MReturn) {
+    setEditRet(r); setEditQty(String(r.quantity)); setEditNewReason(r.reason || ''); setEditWhy(''); setError(''); setSuccess('')
+  }
+  // Request an edit to a past return (qty/reason). HO approval applies the stock change.
+  async function submitRetEdit() {
+    if (!editRet || !profile) return
+    const nq = Number(editQty)
+    if (!(nq > 0)) { setError('Enter a quantity greater than zero.'); return }
+    if (!editWhy.trim()) { setError('Please give a reason for the edit.'); return }
+    setBusy(true); setError(''); setSuccess('')
+    const { data, error: e } = await supabase.from('return_edit_requests').insert({
+      return_id: editRet.id, factory_code: editRet.factory_code, item_code: editRet.item_code, batch_no: editRet.batch_no,
+      old_qty: editRet.quantity, new_qty: nq, old_reason: editRet.reason, new_reason: editNewReason.trim() || null,
+      reason: editWhy.trim(), requested_by: profile.id, requested_by_name: profile.full_name || null,
+    }).select('id').single()
+    if (e || !data) { setError(e?.message || 'Could not send request'); setBusy(false); return }
+    // Head Office applies immediately; others wait for approval.
+    if (isHO) {
+      const { error: apErr } = await supabase.rpc('approve_return_edit', { p_id: data.id })
+      if (apErr) { setError(`Saved, but could not apply: ${apErr.message}`); setBusy(false); setEditRet(null); load(); return }
+    }
+    setBusy(false); setEditRet(null)
+    setSuccess(isHO ? 'Return updated — stock adjusted.' : 'Edit request sent to Head Office for approval.')
+    load()
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
@@ -326,24 +360,52 @@ export default function DispatchPage() {
         <h2 className="text-lg font-semibold mb-2">Recent material returns</h2>
         <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[20rem]">
           <table className="w-full text-xs">
-            <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{[...(multiFac ? ['Factory'] : []), 'Material', 'Batch', 'Qty', 'Reason', 'By', 'When'].map((h, i) => <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
+            <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{[...(multiFac ? ['Factory'] : []), 'Material', 'Batch', 'Qty', 'Reason', 'By', 'When', ''].map((h, i) => <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
             <tbody>
-              {returns.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-gray-400">No returns yet.</td></tr>}
+              {returns.length === 0 && <tr><td colSpan={8} className="text-center py-8 text-gray-400">No returns yet.</td></tr>}
               {returns.map(r => (
                 <tr key={r.id} className="border-b last:border-0 align-top hover:bg-gray-50">
                   {multiFac && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(r.factory_code)}</td>}
                   <td className="px-3 py-2"><span className="font-mono font-medium">{r.item_code}</span><span className="block text-gray-400">{r.description}</span></td>
                   <td className="px-3 py-2 whitespace-nowrap">{r.batch_no || '—'}</td>
                   <td className="px-3 py-2 text-right font-semibold">{r.quantity}</td>
-                  <td className="px-3 py-2 text-gray-600 min-w-[120px]">{r.reason}</td>
+                  <td className="px-3 py-2 text-gray-600 min-w-[120px]">{r.reason || '—'}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-600">{r.created_by_name || '—'}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-400">{fmt(r.created_at)}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-right">
+                    {editPending.has(r.id) ? <span className="text-amber-600">⏳ edit pending</span>
+                      : canFac(r.factory_code) ? <button onClick={() => openRetEdit(r)} className="text-blue-600 hover:underline">Edit</button>
+                        : null}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Edit-a-return modal (HO approval) */}
+      {editRet && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setEditRet(null)}>
+          <div className="bg-white rounded-xl shadow-xl border w-full max-w-md my-8 p-6" onClick={e => e.stopPropagation()}>
+            <h2 className="font-semibold text-lg mb-1">Edit return</h2>
+            <p className="text-gray-500 text-sm mb-4"><span className="font-mono">{editRet.item_code}</span> · batch {editRet.batch_no || '—'} · {factoryName(editRet.factory_code)}. {isHO ? 'Applies immediately and adjusts stock.' : 'Goes to Head Office for approval; stock changes when approved.'}</p>
+            <div className="space-y-3">
+              <div><label className="block text-sm font-medium mb-1">Quantity returned</label>
+                <input type="number" step="any" min="0" value={editQty} onChange={e => setEditQty(e.target.value)} className="w-full border rounded-lg px-3 py-2" />
+                <span className="text-xs text-gray-500">Was {editRet.quantity}. Increasing returns more (reduces stock further); decreasing adds stock back.</span></div>
+              <div><label className="block text-sm font-medium mb-1">Reason on the return <span className="text-gray-400 font-normal">(optional)</span></label>
+                <input value={editNewReason} onChange={e => setEditNewReason(e.target.value)} className="w-full border rounded-lg px-3 py-2" /></div>
+              <div><label className="block text-sm font-medium mb-1">Reason for this edit</label>
+                <input value={editWhy} onChange={e => setEditWhy(e.target.value)} placeholder="Why are you changing it?" className="w-full border rounded-lg px-3 py-2" /></div>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={submitRetEdit} disabled={busy} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{busy ? 'Saving…' : isHO ? 'Apply' : 'Send for approval'}</button>
+              <button onClick={() => setEditRet(null)} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

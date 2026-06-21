@@ -70,6 +70,7 @@ grant execute on function public.reject_doc_delete(uuid) to authenticated;
 -- Delivery Orders · ONE consolidated DO holding finished goods + raw returns
 -- ============================================================================
 alter table public.material_returns add column if not exists dispatch_id uuid references public.dispatch_orders(id) on delete set null;
+alter table public.material_returns add column if not exists lot_id uuid;   -- the stock lot the return drew from (for exact later edits)
 
 -- p_batch_ids: completed production batches to send (finished goods)
 -- p_returns:   jsonb array of { lot_id, qty, reason } raw-material batches to return
@@ -124,14 +125,75 @@ begin
       if found and v_item.id is not null then
         update public.item_stock set quantity = quantity - v_qty, updated_at = now() where item_id = v_item.id and factory_code = v_fac;
       end if;
-      insert into public.material_returns (factory_code, item_code, description, batch_no, quantity, reason, dispatch_id, created_by, created_by_name)
-      values (v_fac, v_lot.item_code, v_item.description, v_lot.batch_no, v_qty, nullif(r->>'reason', ''), v_id, auth.uid(), v_name);
+      insert into public.material_returns (factory_code, item_code, description, batch_no, quantity, reason, dispatch_id, lot_id, created_by, created_by_name)
+      values (v_fac, v_lot.item_code, v_item.description, v_lot.batch_no, v_qty, nullif(r->>'reason', ''), v_id, v_lot.id, auth.uid(), v_name);
     end loop;
   end if;
 
   return v_no;
 end $$;
 grant execute on function public.create_delivery_order(uuid[], jsonb) to authenticated;
+
+
+-- ============================================================================
+-- Material returns · edit quantity/reason with Head Office approval
+-- (approving adjusts the lot's stock by the quantity difference)
+-- ============================================================================
+create table if not exists public.return_edit_requests (
+  id uuid primary key default gen_random_uuid(),
+  return_id uuid references public.material_returns(id) on delete cascade,
+  factory_code text, item_code text, batch_no text,
+  old_qty numeric, new_qty numeric, old_reason text, new_reason text,
+  reason text,                       -- why the edit is requested
+  status text not null default 'Pending',
+  requested_by uuid, requested_by_name text, created_at timestamptz not null default now(),
+  reviewed_by uuid, reviewed_by_name text, reviewed_at timestamptz
+);
+grant select, insert on public.return_edit_requests to authenticated;
+grant all on public.return_edit_requests to service_role;
+alter table public.return_edit_requests enable row level security;
+drop policy if exists rer_read on public.return_edit_requests;
+create policy rer_read on public.return_edit_requests for select using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()) or requested_by = auth.uid());
+drop policy if exists rer_insert on public.return_edit_requests;
+create policy rer_insert on public.return_edit_requests for insert with check (requested_by = auth.uid());
+
+create or replace function public.approve_return_edit(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_req public.return_edit_requests; v_ret public.material_returns; v_lot public.stock_lots; v_item public.items; v_delta numeric; v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can approve return edits'; end if;
+  select * into v_req from public.return_edit_requests where id = p_id and status = 'Pending';
+  if not found then raise exception 'Request not found or already reviewed'; end if;
+  select * into v_ret from public.material_returns where id = v_req.return_id;
+  if not found then raise exception 'The material return no longer exists'; end if;
+  v_delta := coalesce(v_req.new_qty, v_ret.quantity) - v_ret.quantity;   -- extra to reduce from stock (can be negative)
+  if v_delta <> 0 then
+    select * into v_lot from public.stock_lots where id = v_ret.lot_id;
+    if not found then
+      select * into v_lot from public.stock_lots where item_code = v_ret.item_code and factory_code = v_ret.factory_code
+        and coalesce(batch_no, '') = coalesce(v_ret.batch_no, '') order by exp_date asc nulls last, received_at asc limit 1;
+    end if;
+    if not found then raise exception 'Cannot find the stock batch to adjust'; end if;
+    if v_delta > v_lot.qty_remaining then raise exception 'Not enough stock to increase the return — only % left in that batch', v_lot.qty_remaining; end if;
+    update public.stock_lots set qty_remaining = qty_remaining - v_delta where id = v_lot.id;
+    select * into v_item from public.items where code = v_ret.item_code limit 1;
+    if found then update public.item_stock set quantity = quantity - v_delta, updated_at = now() where item_id = v_item.id and factory_code = v_ret.factory_code; end if;
+  end if;
+  update public.material_returns set quantity = coalesce(v_req.new_qty, quantity), reason = v_req.new_reason where id = v_ret.id;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.return_edit_requests set status = 'Approved', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id;
+end $$;
+grant execute on function public.approve_return_edit(uuid) to authenticated;
+
+create or replace function public.reject_return_edit(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can reject return edits'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.return_edit_requests set status = 'Rejected', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id and status = 'Pending';
+end $$;
+grant execute on function public.reject_return_edit(uuid) to authenticated;
 
 
 -- ============================================================================

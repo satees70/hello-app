@@ -49,11 +49,11 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   }
 
   // Every kind of approval that lands in Pending Changes
-  const APPROVAL_TABLES = ['change_requests', 'correction_requests', 'do_change_requests', 'split_requests', 'stock_adjustments', 'run_mode_requests', 'mr_cancel_requests', 'doc_delete_requests'] as const
+  const APPROVAL_TABLES = ['change_requests', 'correction_requests', 'do_change_requests', 'split_requests', 'stock_adjustments', 'run_mode_requests', 'mr_cancel_requests', 'doc_delete_requests', 'return_edit_requests'] as const
   const TABLE_LABEL: Record<string, string> = {
     change_requests: 'change', correction_requests: 'timer cancellation', do_change_requests: 'Goods Received change',
     split_requests: 'batch split / un-combine', stock_adjustments: 'stock adjustment', run_mode_requests: 'run-mode change',
-    mr_cancel_requests: 'material request cancellation', doc_delete_requests: 'document delete',
+    mr_cancel_requests: 'material request cancellation', doc_delete_requests: 'document delete', return_edit_requests: 'material return edit',
   }
 
   // Head Office: total pending approvals across ALL approval types
