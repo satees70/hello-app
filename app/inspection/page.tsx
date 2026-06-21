@@ -173,7 +173,7 @@ export default function InspectionPage() {
   const s = (k: string) => (f[k] as string) || ''
   const bv = (k: string) => f[k] as boolean
   const In = ({ k, type = 'text', cls = '' }: { k: string; type?: string; cls?: string }) =>
-    <input type={type} value={s(k)} onChange={e => set(k, e.target.value)} className={`border rounded px-2 py-1 text-sm ${cls}`} />
+    <input type={type} value={s(k)} onChange={e => set(k, e.target.value)} className={`border rounded px-3 py-2 text-sm w-full ${cls}`} />
   const Radio = ({ k, val, label }: { k: string; val: string; label: string }) =>
     <label className="inline-flex items-center gap-1 text-xs cursor-pointer mr-3"><input type="checkbox" checked={s(k) === val} onChange={() => set(k, s(k) === val ? '' : val)} className="h-3.5 w-3.5" />{label}</label>
   const GoodBad = ({ k, label }: { k: string; label: string }) =>
@@ -264,7 +264,7 @@ export default function InspectionPage() {
           )}
 
           {/* Header */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 border-t pt-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 border-t pt-3">
             <Field label="Date"><In k="date" type="date" /></Field>
             <Field label="Area / Line">{packLines.length > 0
               ? <select value={s('area_machine')} onChange={e => genNo(e.target.value, s('date'))} className="border rounded px-2 py-1 text-sm bg-white">
@@ -276,7 +276,7 @@ export default function InspectionPage() {
             <Field label="Code"><In k="code" /></Field>
             <Field label="Product"><In k="product" /></Field>
             <Field label="Plastic weight (g)"><In k="plastic" type="number" /></Field>
-            <Field label="Weigh of wastage & type"><In k="wastage" /></Field>
+            <Field label="Type of waste"><In k="wastage" /></Field>
             <Field label="Weight of wastage (g)"><In k="food_loss_a" type="number" /></Field>
             <Field label="Food Loss %"><div className={`border rounded px-2 py-1 text-sm ${loss.over ? 'bg-red-50 text-red-700 font-semibold' : 'bg-gray-50 text-gray-700'}`}>{loss.pct == null ? '—' : loss.pct.toFixed(2) + '%'}{loss.over ? ' ⚠' : ''}</div></Field>
           </div>
@@ -298,8 +298,8 @@ export default function InspectionPage() {
                       <td className="px-3 py-2 text-gray-600">{m.desc}</td>
                       <td className="px-3 py-2 text-gray-500">{m.unit}</td>
                       <td className="px-3 py-2 text-right font-medium">{n(m.planned)}</td>
-                      <td className="px-3 py-2"><input value={m.batch} onChange={e => setMat(i, 'batch', e.target.value)} placeholder="batch no." className="border rounded px-2 py-1 text-xs w-28" /></td>
-                      <td className="px-3 py-2"><input type="number" step="any" value={m.used} onChange={e => setMat(i, 'used', e.target.value)} className="border rounded px-2 py-1 text-xs w-20 text-right" /></td>
+                      <td className="px-3 py-2"><input value={m.batch} onChange={e => setMat(i, 'batch', e.target.value)} placeholder="batch no." className="border rounded px-2 py-1.5 text-sm w-36" /></td>
+                      <td className="px-3 py-2"><input type="number" step="any" value={m.used} onChange={e => setMat(i, 'used', e.target.value)} className="border rounded px-2 py-1.5 text-sm w-24 text-right" /></td>
                       <td className={`px-3 py-2 text-right ${m.used === '' ? 'text-gray-300' : diff > 0 ? 'text-red-600' : 'text-green-600'}`}>{m.used === '' ? '—' : (diff > 0 ? '+' : '') + n(diff)}</td>
                       <td className="px-3 py-2">{m.main ? '★' : ''}</td>
                     </tr>
