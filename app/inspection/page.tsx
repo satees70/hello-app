@@ -171,7 +171,7 @@ export default function InspectionPage() {
             <Field label="B/N Raw Material"><In k="bn_raw_material" /></Field>
             <Field label="RM Weight (In)"><In k="rm_weight_in" /></Field>
             <Field label="Total Used (b)"><In k="total_used" /></Field>
-            <Field label="Plastic name, size & weight"><In k="plastic" /></Field>
+            <Field label="Plastic weight (g)"><In k="plastic" type="number" /></Field>
             <Field label="B/N Plastic"><In k="bn_plastic" /></Field>
             <Field label="Weigh of wastage & type"><In k="wastage" /></Field>
             <Field label="Food Loss & Waste (a)"><In k="food_loss_a" /></Field>
@@ -228,16 +228,13 @@ export default function InspectionPage() {
           {/* Process (CCP #2) */}
           <div className="border-t pt-3">
             <div className="text-xs text-gray-400 mb-1">CCP #2</div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 gap-3 max-w-2xl">
               <Field label="Moisture content %"><In k="moisture_pct" /></Field>
               <Field label="Max %"><In k="moisture_max" /></Field>
-              <div /><div />
               <Field label="Temp (In)"><In k="temp_in" /></Field>
               <Field label="Temp (Out)"><In k="temp_out" /></Field>
               <Field label="Speed (In)"><In k="speed_in" /></Field>
               <Field label="Speed (Out)"><In k="speed_out" /></Field>
-              <Field label="Time (In)"><In k="time_in" /></Field>
-              <Field label="Time (Out)"><In k="time_out" /></Field>
             </div>
           </div>
 
@@ -245,8 +242,6 @@ export default function InspectionPage() {
           <div className="border-t pt-3">
             <div className="font-semibold text-sm mb-2">Sealing Integrity</div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <Field label="Exp date (In)"><In k="exp_in" type="date" /></Field>
-              <Field label="Exp date (Out)"><In k="exp_out" type="date" /></Field>
               <Field label="Product weigh, g"><In k="product_weigh" /></Field>
               <Field label="Cond. of aluminium pad seal (bottle)"><In k="alu_pad" /></Field>
             </div>
