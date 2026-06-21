@@ -2,27 +2,30 @@
 // Stored on profiles.permissions as jsonb:
 //   { "sales": { "view": true, "edit": true, "delete": false }, ... }
 
+// `group` clusters sections the way the menu does, so the permission grid is easy
+// to scan. `needsApproval: true` means a factory user's Edit there doesn't change
+// things directly — it submits a request Head Office approves (HO edits apply at once).
 export const PERMISSION_MODULES = [
-  { key: 'sales', label: 'Sales orders', desc: 'Upload & view sales orders' },
-  { key: 'dispatch', label: 'Delivery orders', desc: 'Send finished goods to warehouse & return raw materials' },
-  { key: 'changes', label: 'Pending changes', desc: 'Change-request approvals & status' },
-  { key: 'order_board', label: 'Order board', desc: 'Production batches & planning' },
-  { key: 'packing', label: 'Packing schedule', desc: 'What to pack, by line & date' },
-  { key: 'packing_lines', label: 'Packing lines', desc: 'Maintain the list of packing lines' },
-  { key: 'inspection', label: 'Inspection', desc: 'Finished-good QC (P07-F01)' },
-  { key: 'drying', label: 'Drying & roasting', desc: 'Oven drying & roasting (P07-F05)' },
-  { key: 'moisture', label: 'Moisture', desc: 'Moisture content reading (P07-F08)' },
-  { key: 'oprp', label: 'OPRP', desc: 'OPRP record (P07-F03)' },
-  { key: 'grinding', label: 'Grinding', desc: 'Grinding & mixing record / QC (P07-F10)' },
-  { key: 'grinding_recipe', label: 'Grinding recipe', desc: 'Raw-material mixture / formula (secret)' },
-  { key: 'material_requests', label: 'Material requests', desc: 'Request materials from the warehouse' },
-  { key: 'goods_received', label: 'Goods received', desc: 'Receive deliveries into stock' },
-  { key: 'stock', label: 'Stock', desc: 'Stock on hand' },
-  { key: 'stock_adjustment', label: 'Stock adjustment', desc: 'Manual stock in/out (HOD approval)' },
-  { key: 'items', label: 'Items', desc: 'Items master' },
-  { key: 'bom', label: 'BOM', desc: 'Bill of materials' },
-  { key: 'traceability', label: 'Traceability', desc: 'Recall report' },
-  { key: 'users', label: 'Users', desc: 'User management' },
+  { key: 'sales', label: 'Sales orders', desc: 'Upload & view sales orders', group: 'Sales', needsApproval: true },
+  { key: 'dispatch', label: 'Delivery orders', desc: 'Send finished goods to warehouse & return raw materials', group: 'Sales', needsApproval: false },
+  { key: 'changes', label: 'Pending changes', desc: 'See & approve change requests', group: 'Sales', needsApproval: false },
+  { key: 'material_requests', label: 'Material requests', desc: 'Request materials from the warehouse', group: 'Receiving', needsApproval: true },
+  { key: 'goods_received', label: 'Goods received', desc: 'Receive deliveries into stock', group: 'Receiving', needsApproval: true },
+  { key: 'order_board', label: 'Order board', desc: 'Production batches & planning', group: 'Production', needsApproval: true },
+  { key: 'packing', label: 'Packing schedule', desc: 'What to pack, by line & date', group: 'Production', needsApproval: false },
+  { key: 'inspection', label: 'Inspection', desc: 'Finished-good QC (P07-F01)', group: 'Production', needsApproval: false },
+  { key: 'drying', label: 'Drying & roasting', desc: 'Oven drying & roasting (P07-F05)', group: 'Production', needsApproval: false },
+  { key: 'moisture', label: 'Moisture', desc: 'Moisture content reading (P07-F08)', group: 'Production', needsApproval: false },
+  { key: 'oprp', label: 'OPRP', desc: 'OPRP record (P07-F03)', group: 'Production', needsApproval: false },
+  { key: 'grinding', label: 'Grinding', desc: 'Grinding & mixing record / QC (P07-F10)', group: 'Production', needsApproval: false },
+  { key: 'grinding_recipe', label: 'Grinding recipe', desc: 'Raw-material mixture / formula (secret)', group: 'Production', needsApproval: false },
+  { key: 'stock', label: 'Stock', desc: 'Stock on hand', group: 'Reports', needsApproval: false },
+  { key: 'stock_adjustment', label: 'Stock adjustment', desc: 'Manual stock in/out (HOD approval)', group: 'Reports', needsApproval: true },
+  { key: 'traceability', label: 'Traceability', desc: 'Recall report', group: 'Reports', needsApproval: false },
+  { key: 'items', label: 'Items', desc: 'Items master', group: 'Setup', needsApproval: true },
+  { key: 'bom', label: 'BOM', desc: 'Bill of materials', group: 'Setup', needsApproval: false },
+  { key: 'packing_lines', label: 'Packing lines', desc: 'Maintain the list of packing lines', group: 'Setup', needsApproval: false },
+  { key: 'users', label: 'Users', desc: 'User management', group: 'Setup', needsApproval: false },
 ] as const
 
 // Sections that are HIDDEN by default — a user sees them ONLY if explicitly

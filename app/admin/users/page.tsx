@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
@@ -81,6 +81,19 @@ export default function UsersPage() {
     for (const m of PERMISSION_MODULES) g[m.key] = { view: checked, edit: checked, delete: checked }
     setForm(prev => ({ ...prev, permissions: g }))
   }
+  // One-click level for a single section: none | view | edit | full
+  const setRow = (moduleKey: string, level: 'none' | 'view' | 'edit' | 'full') =>
+    setForm(prev => ({ ...prev, permissions: { ...prev.permissions, [moduleKey]: {
+      view: level !== 'none', edit: level === 'edit' || level === 'full', delete: level === 'full',
+    } } }))
+  // Apply a level to every section in a menu group at once
+  const setGroup = (group: string, level: 'none' | 'view' | 'edit' | 'full') =>
+    setForm(prev => {
+      const g = { ...prev.permissions }
+      for (const m of PERMISSION_MODULES) if (m.group === group) g[m.key] = { view: level !== 'none', edit: level === 'edit' || level === 'full', delete: level === 'full' }
+      return { ...prev, permissions: g }
+    })
+  const PERM_GROUPS = [...new Set(PERMISSION_MODULES.map(m => m.group))]
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -226,32 +239,59 @@ export default function UsersPage() {
                     <button type="button" onClick={() => setAll(false)} className="text-blue-600 hover:underline">Clear all</button>
                   </div>
                 </div>
-                <p className="text-xs text-gray-400 mb-2">The user only sees their own factory&apos;s data, limited to what&apos;s ticked here.</p>
+                {/* Plain-language legend so it's obvious what each column does */}
+                <div className="text-xs text-gray-600 bg-gray-50 border rounded-lg p-3 mb-3 space-y-1">
+                  <p>The user only sees their own factory&apos;s data, limited to what&apos;s ticked here.</p>
+                  <p>👁 <strong>View</strong> — can open & read the section.</p>
+                  <p>✏️ <strong>Edit</strong> — can add/change records. <span className="text-amber-700">For ⚑-marked sections a factory user&apos;s changes are <strong>sent to Head Office for approval</strong> (Head Office&apos;s own edits apply immediately).</span></p>
+                  <p>🗑 <strong>Delete</strong> — can remove records (usually leave off).</p>
+                  <p className="text-gray-400">Quick set per row: <strong>View</strong> · <strong>Edit</strong> · <strong>Full</strong> (incl. delete) · <strong>Off</strong>.</p>
+                </div>
                 <div className="overflow-x-auto border rounded-lg">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b">
                       <tr>
                         <th className="text-left px-3 py-2 font-medium text-gray-600">Section</th>
-                        {(['view', 'edit', 'delete'] as Action[]).map(a => (
-                          <th key={a} className="px-3 py-2 font-medium text-gray-600 capitalize w-20 text-center">{a}</th>
-                        ))}
+                        <th className="px-3 py-2 font-medium text-gray-600 w-16 text-center">👁 View</th>
+                        <th className="px-3 py-2 font-medium text-gray-600 w-24 text-center">✏️ Edit<span className="block text-[10px] font-normal text-gray-400">(or request)</span></th>
+                        <th className="px-3 py-2 font-medium text-gray-600 w-16 text-center">🗑 Delete</th>
+                        <th className="px-3 py-2 font-medium text-gray-600 w-40 text-center">Quick set</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {PERMISSION_MODULES.map(m => (
-                        <tr key={m.key} className="border-b last:border-0">
-                          <td className="px-3 py-2">
-                            <div className="font-medium">{m.label}</div>
-                            <div className="text-xs text-gray-400">{m.desc}</div>
-                          </td>
-                          {(['view', 'edit', 'delete'] as Action[]).map(a => (
-                            <td key={a} className="px-3 py-2 text-center">
-                              <input type="checkbox" className="h-4 w-4"
-                                checked={!!form.permissions[m.key]?.[a]}
-                                onChange={e => setPerm(m.key, a, e.target.checked)} />
+                      {PERM_GROUPS.map(grp => (
+                        <Fragment key={grp}>
+                          <tr className="bg-gray-50/70 border-b">
+                            <td className="px-3 py-1.5 font-semibold text-gray-700">{grp}</td>
+                            <td colSpan={3}></td>
+                            <td className="px-3 py-1.5 text-center text-xs space-x-2 whitespace-nowrap">
+                              <button type="button" onClick={() => setGroup(grp, 'view')} className="text-blue-600 hover:underline">View all</button>
+                              <button type="button" onClick={() => setGroup(grp, 'edit')} className="text-blue-600 hover:underline">Edit all</button>
+                              <button type="button" onClick={() => setGroup(grp, 'none')} className="text-gray-400 hover:underline">Off</button>
                             </td>
+                          </tr>
+                          {PERMISSION_MODULES.filter(m => m.group === grp).map(m => (
+                            <tr key={m.key} className="border-b last:border-0">
+                              <td className="px-3 py-2">
+                                <div className="font-medium">{m.label} {m.needsApproval && <span title="Factory edits here need Head Office approval" className="text-amber-600">⚑</span>}</div>
+                                <div className="text-xs text-gray-400">{m.desc}</div>
+                              </td>
+                              {(['view', 'edit', 'delete'] as Action[]).map(a => (
+                                <td key={a} className="px-3 py-2 text-center">
+                                  <input type="checkbox" className="h-4 w-4"
+                                    checked={!!form.permissions[m.key]?.[a]}
+                                    onChange={e => setPerm(m.key, a, e.target.checked)} />
+                                </td>
+                              ))}
+                              <td className="px-3 py-2 text-center text-xs space-x-1.5 whitespace-nowrap">
+                                <button type="button" onClick={() => setRow(m.key, 'view')} className="text-blue-600 hover:underline">View</button>
+                                <button type="button" onClick={() => setRow(m.key, 'edit')} className="text-blue-600 hover:underline">Edit</button>
+                                <button type="button" onClick={() => setRow(m.key, 'full')} className="text-blue-600 hover:underline">Full</button>
+                                <button type="button" onClick={() => setRow(m.key, 'none')} className="text-gray-400 hover:underline">Off</button>
+                              </td>
+                            </tr>
                           ))}
-                        </tr>
+                        </Fragment>
                       ))}
                     </tbody>
                   </table>
