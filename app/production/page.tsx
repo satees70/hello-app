@@ -93,7 +93,7 @@ export default function ProductionPage() {
   const BUFFER = 1.1
 
   async function makeManufactured(it: Item) {
-    if (!canEdit) { setError("You have view-only access here."); return }
+    if (!can(profile, 'items', 'edit')) { setError("You have view-only access to Items."); return }
     if (!confirm(`Change ${it.code} to a Manufactured item? You can then set its BOM recipe.`)) return
     setError(''); setSuccess('')
     const { error: upErr } = await supabase.from('items').update({ type: 'Manufactured' }).eq('id', it.id)
@@ -107,14 +107,14 @@ export default function ProductionPage() {
     const it = items.find(i => i.code === itemCode)
     if (!it) return <span className="inline-block mt-0.5 bg-red-100 text-red-700 px-1.5 py-0.5 rounded text-[11px] font-medium">⚠ Not in Items Master</span>
     if (it.type !== 'Manufactured') {
-      if (!isHO) return null
+      if (!can(profile, 'items', 'edit')) return null
       return <button onClick={() => makeManufactured(it)} className="mt-0.5 inline-block text-blue-600 hover:underline text-[11px]">Set as Manufactured</button>
     }
     if (boms.some(b => b.parent_item_id === it.id)) return null
     return (
       <span className="mt-0.5 inline-flex items-center gap-2">
         <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[11px] font-medium">⚠ No BOM set</span>
-        {isHO && <a href={`/admin/bom?item=${encodeURIComponent(it.code)}`} className="text-blue-600 hover:underline text-[11px]">Create BOM →</a>}
+        {can(profile, 'bom', 'edit') && <a href={`/admin/bom?item=${encodeURIComponent(it.code)}`} className="text-blue-600 hover:underline text-[11px]">Create BOM →</a>}
       </span>
     )
   }
