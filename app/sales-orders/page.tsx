@@ -78,7 +78,7 @@ export default function SalesOrdersPage() {
   const [confirmingFactory, setConfirmingFactory] = useState('')
   const [dupKeys, setDupKeys] = useState<Set<string>>(new Set()) // "so_number||item_code" that appear >1 across all lines
   const [dupImports, setDupImports] = useState<Record<string, string[]>>({}) // key -> import ids that contain it
-  const [docSummary, setDocSummary] = useState<Record<string, { pending: number; dup: number; locations: string[] }>>({})
+  const [docSummary, setDocSummary] = useState<Record<string, { pending: number; dup: number; locations: string[]; locFactory: Record<string, string>; confirmed: string[] }>>({})
 
   // Factory display + valid location codes (for the location dropdown)
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
@@ -116,9 +116,10 @@ export default function SalesOrdersPage() {
 
   // Per-document overview: open change requests + duplicate SO+item lines
   async function loadSummary() {
-    const [{ data: crs }, { data: allLines }] = await Promise.all([
+    const [{ data: crs }, { data: allLines }, { data: confs }] = await Promise.all([
       supabase.from('change_requests').select('import_id, status'),
-      supabase.from('sales_order_lines').select('import_id, so_number, item_code, location_code'),
+      supabase.from('sales_order_lines').select('import_id, so_number, item_code, location_code, factory_code'),
+      supabase.from('document_confirmations').select('import_id, factory_code'),
     ])
     const pending: Record<string, number> = {}
     ;(crs || []).forEach(c => { if (c.status === 'Pending') pending[c.import_id] = (pending[c.import_id] || 0) + 1 })
@@ -126,13 +127,19 @@ export default function SalesOrdersPage() {
     ;(allLines || []).forEach(l => { if (l.so_number) { const k = `${l.so_number}||${l.item_code}`; if (!keyImports[k]) keyImports[k] = new Set(); keyImports[k].add(l.import_id) } })
     const dup: Record<string, number> = {}
     const locs: Record<string, Set<string>> = {}
+    const locFac: Record<string, Record<string, string>> = {}   // import -> location_code -> factory_code
     ;(allLines || []).forEach(l => {
       if (l.so_number && keyImports[`${l.so_number}||${l.item_code}`].size > 1) dup[l.import_id] = (dup[l.import_id] || 0) + 1
-      if (l.location_code) { if (!locs[l.import_id]) locs[l.import_id] = new Set(); locs[l.import_id].add(l.location_code) }
+      if (l.location_code) {
+        if (!locs[l.import_id]) locs[l.import_id] = new Set(); locs[l.import_id].add(l.location_code)
+        if (l.factory_code) { if (!locFac[l.import_id]) locFac[l.import_id] = {}; locFac[l.import_id][l.location_code] = l.factory_code }
+      }
     })
-    const summary: Record<string, { pending: number; dup: number; locations: string[] }> = {}
-    new Set([...Object.keys(pending), ...Object.keys(dup), ...Object.keys(locs)]).forEach(id => {
-      summary[id] = { pending: pending[id] || 0, dup: dup[id] || 0, locations: locs[id] ? [...locs[id]].sort() : [] }
+    const conf: Record<string, Set<string>> = {}   // import -> set of confirmed factory_codes
+    ;(confs || []).forEach(c => { if (!conf[c.import_id]) conf[c.import_id] = new Set(); conf[c.import_id].add(c.factory_code) })
+    const summary: Record<string, { pending: number; dup: number; locations: string[]; locFactory: Record<string, string>; confirmed: string[] }> = {}
+    new Set([...Object.keys(pending), ...Object.keys(dup), ...Object.keys(locs), ...Object.keys(conf)]).forEach(id => {
+      summary[id] = { pending: pending[id] || 0, dup: dup[id] || 0, locations: locs[id] ? [...locs[id]].sort() : [], locFactory: locFac[id] || {}, confirmed: conf[id] ? [...conf[id]] : [] }
     })
     setDocSummary(summary)
   }
@@ -499,9 +506,13 @@ export default function SalesOrdersPage() {
               {shownImports.map(doc => (
                 <tr key={doc.id} className={`border-b last:border-0 hover:bg-gray-50 ${linesFor?.id === doc.id ? 'bg-blue-50' : ''}`}>
                   <td className="px-4 py-3 font-medium">{doc.file_name}</td>
-                  <td className="px-4 py-3 text-xs text-gray-600 max-w-[200px]">
+                  <td className="px-4 py-3 text-xs text-gray-600 max-w-[220px]">
                     {docSummary[doc.id]?.locations?.length
-                      ? docSummary[doc.id].locations.join(', ')
+                      ? <span className="flex flex-wrap gap-x-2 gap-y-1">{docSummary[doc.id].locations.map(loc => {
+                          const fac = docSummary[doc.id].locFactory[loc]
+                          const ok = fac && docSummary[doc.id].confirmed.includes(fac)
+                          return <span key={loc} className={`inline-flex items-center gap-0.5 ${ok ? 'text-green-700 font-medium' : ''}`} title={ok ? 'Approved by this location' : 'Not yet approved'}>{ok && <span>✓</span>}{loc}</span>
+                        })}</span>
                       : <span className="text-gray-300">—</span>}
                   </td>
                   <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[doc.status] || 'bg-gray-100 text-gray-700'}`}>{doc.status}</span></td>
