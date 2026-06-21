@@ -435,7 +435,9 @@ begin
     v_alloc := least(v_remaining, greatest(c.requested_qty - c.received_qty, 0));
     if v_alloc > 0 then update public.material_request_items set received_qty = received_qty + v_alloc where id = c.id; v_remaining := v_remaining - v_alloc; end if;
   end loop;
-  if v_remaining > 0 then update public.material_request_items set received_qty = received_qty + v_remaining where id = p_item_ids[array_length(p_item_ids,1)]; end if;
+  -- Surplus beyond what the open requests asked for is NOT forced onto the last
+  -- request; it simply stays in stock (the lot + item_stock hold the full qty), so
+  -- the next FIFO request for this material can draw it next time.
   for v_reqid in select distinct request_id from public.material_request_items where id = any(p_item_ids) loop
     update public.material_requests set status =
       case when (select bool_and(received_qty >= requested_qty) from public.material_request_items where request_id = v_reqid) then 'Fulfilled'
