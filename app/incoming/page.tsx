@@ -53,6 +53,8 @@ export default function IncomingPage() {
   const [busyLine, setBusyLine] = useState('')
   const [editReq, setEditReq] = useState<DoLine | null>(null)
   const [editForm, setEditForm] = useState<Record<string, string>>({})
+  const [itemsMaster, setItemsMaster] = useState<{ code: string; description: string; unit: string }[]>([])
+  const itemByCode = (c: string) => itemsMaster.find(i => i.code.toLowerCase() === (c || '').trim().toLowerCase())
 
   const EDIT_FIELDS: { key: string; label: string }[] = [
     { key: 'item_code', label: 'Item code' }, { key: 'description', label: 'Description' },
@@ -66,6 +68,7 @@ export default function IncomingPage() {
     if (!canEditFac(linesFor?.factory_code)) { setError("You have view-only access at this factory."); return }
     if (!editReq || !linesFor) return
     const orig: Record<string, string> = { item_code: editReq.item_code || '', description: editReq.description || '', quantity: String(editReq.quantity ?? ''), unit: editReq.unit || '', batch_no: editReq.batch_no || '' }
+    if (editForm.item_code && !itemByCode(editForm.item_code)) { setError('Pick a valid item code from the Items master.'); return }
     const changed = EDIT_FIELDS.filter(f => (editForm[f.key] || '') !== orig[f.key])
     if (changed.length === 0) { setError('Nothing changed.'); return }
     const reason = window.prompt('Reason for these changes (sent to Head Office):')
@@ -105,7 +108,7 @@ export default function IncomingPage() {
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
-  useEffect(() => { if (profile) { loadDocs(); loadFactories() } }, [profile])
+  useEffect(() => { if (profile) { loadDocs(); loadFactories(); loadItemsMaster() } }, [profile])
 
   async function loadDocs() {
     const { data } = await supabase.from('delivery_orders').select('*').order('created_at', { ascending: false })
@@ -118,6 +121,10 @@ export default function IncomingPage() {
       e.total++; if (r.received_at) e.recv++
     })
     setLineCounts(c)
+  }
+  async function loadItemsMaster() {
+    const { data } = await supabase.from('items').select('code, description, unit').order('code')
+    setItemsMaster((data as { code: string; description: string; unit: string }[]) || [])
   }
   async function loadFactories() {
     const { data } = await supabase.from('factories').select('code, name').order('code')
@@ -569,13 +576,25 @@ export default function IncomingPage() {
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setEditReq(null)}>
           <div className="bg-white rounded-xl shadow-xl border w-full max-w-lg my-8 p-6" onClick={e => e.stopPropagation()}>
             <h2 className="font-semibold text-lg mb-1">Request changes to a line</h2>
-            <p className="text-gray-500 text-sm mb-4">Goes to Head Office for approval.{editReq.received_at ? ' This line is already received — item/qty/unit/batch changes need it deleted & received again; only description can be edited here.' : ''}</p>
+            <p className="text-gray-500 text-sm mb-4">Goes to Head Office for approval.{editReq.received_at ? ' This line is already received — item/qty/unit/batch changes need it deleted & received again.' : ''}</p>
             <div className="space-y-3">
               {EDIT_FIELDS.map(f => (
                 <div key={f.key}>
                   <label className="block text-sm font-medium mb-1">{f.label}</label>
-                  <input value={editForm[f.key] || ''} onChange={e => setEditForm({ ...editForm, [f.key]: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2" />
+                  {f.key === 'item_code' ? (
+                    <>
+                      <input list="grn-items" value={editForm.item_code || ''} placeholder="Pick an item code…"
+                        onChange={e => { const code = e.target.value; const it = itemByCode(code); setEditForm({ ...editForm, item_code: code, ...(it ? { description: it.description } : {}) }) }}
+                        className="w-full border rounded-lg px-3 py-2" />
+                      <datalist id="grn-items">{itemsMaster.map(i => <option key={i.code} value={i.code}>{i.description}</option>)}</datalist>
+                      {editForm.item_code ? (itemByCode(editForm.item_code) ? null : <span className="text-xs text-red-500">Not in Items master</span>) : null}
+                    </>
+                  ) : f.key === 'description' ? (
+                    <input value={editForm.description || ''} disabled className="w-full border rounded-lg px-3 py-2 bg-gray-100 text-gray-500" title="Follows the item code" />
+                  ) : (
+                    <input value={editForm[f.key] || ''} onChange={e => setEditForm({ ...editForm, [f.key]: e.target.value })}
+                      className="w-full border rounded-lg px-3 py-2" />
+                  )}
                 </div>
               ))}
             </div>

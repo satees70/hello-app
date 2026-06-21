@@ -49,8 +49,7 @@ const STATUS_STYLES: Record<string, string> = {
 const FIELDS: { value: keyof SalesLine; label: string }[] = [
   { value: 'customer_name', label: 'Customer' },
   { value: 'so_number', label: 'SO No' },
-  { value: 'item_code', label: 'Item Code' },
-  { value: 'description', label: 'Description' },
+  { value: 'item_code', label: 'Item Code (description follows)' },
   { value: 'quantity', label: 'Qty' },
   { value: 'outstanding_qty', label: 'Outstanding' },
   { value: 'delivery_date', label: 'Delivery Date' },
@@ -85,6 +84,8 @@ export default function SalesOrdersPage() {
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [locationCodes, setLocationCodes] = useState<string[]>([])
   const [locationMap, setLocationMap] = useState<Record<string, string>>({}) // location_code -> factory_code
+  const [items, setItems] = useState<{ code: string; description: string }[]>([]) // Items master for item-code lookups
+  const itemByCode = (c: string) => items.find(i => i.code.toLowerCase() === c.trim().toLowerCase())
   const [remapping, setRemapping] = useState(false)
 
   // Change-request form
@@ -148,13 +149,15 @@ export default function SalesOrdersPage() {
   }
 
   async function loadRefs() {
-    const [{ data: f }, { data: lm }] = await Promise.all([
+    const [{ data: f }, { data: lm }, { data: it }] = await Promise.all([
       supabase.from('factories').select('code, name').order('code'),
       supabase.from('location_map').select('location_code, factory_code').order('location_code'),
+      supabase.from('items').select('code, description').order('code'),
     ])
     setFactories(f || [])
     setLocationCodes((lm || []).map(r => r.location_code))
     const m: Record<string, string> = {}; (lm || []).forEach(r => { if (r.factory_code) m[r.location_code] = r.factory_code }); setLocationMap(m)
+    setItems((it as { code: string; description: string }[]) || [])
   }
 
   // Re-apply the current Location Map to lines still showing Unmapped (after a new
@@ -382,23 +385,28 @@ export default function SalesOrdersPage() {
     if (!reqLine || !profile || !linesFor) return
     if (!reqReason.trim()) { setError('Please give a reason.'); return }
     if (reqMode === 'edit' && !reqValue.trim()) { setError('Enter the proposed new value.'); return }
+    // Item code must come from the Items master; its description follows automatically.
+    const pickedItem = reqMode === 'edit' && reqField === 'item_code' ? itemByCode(reqValue) : null
+    if (reqMode === 'edit' && reqField === 'item_code' && !pickedItem) { setError('Pick a valid item code from the Items master.'); return }
     setSubmitting(true); setError(''); setSuccess('')
 
-    const payload = reqMode === 'delete'
-      ? { request_type: 'delete', field: '__line__', old_value: `${reqLine.item_code} — ${reqLine.description}`, new_value: '(delete line)' }
-      : { request_type: 'edit', field: reqField, old_value: String(reqLine[reqField] ?? ''), new_value: reqValue.trim() }
-
-    const { error: insErr } = await supabase.from('change_requests').insert({
-      line_id: reqLine.id,
-      import_id: linesFor.id,
-      reason: reqReason.trim(),
-      status: 'Pending',
-      requested_by: profile.id,
-      requested_by_email: profile.email,
+    const base = {
+      line_id: reqLine.id, import_id: linesFor.id, reason: reqReason.trim(), status: 'Pending',
+      requested_by: profile.id, requested_by_email: profile.email,
       requested_by_name: profile.full_name || profile.email,
       factory_code: reqLine.factory_code || profile.factory_code,
-      ...payload,
-    })
+    }
+    const rows = reqMode === 'delete'
+      ? [{ ...base, request_type: 'delete', field: '__line__', old_value: `${reqLine.item_code} — ${reqLine.description}`, new_value: '(delete line)' }]
+      : pickedItem
+        // Changing the item code also updates the description (kept in sync with the Items master)
+        ? [
+            { ...base, request_type: 'edit', field: 'item_code', old_value: String(reqLine.item_code ?? ''), new_value: pickedItem.code },
+            { ...base, request_type: 'edit', field: 'description', old_value: String(reqLine.description ?? ''), new_value: pickedItem.description },
+          ]
+        : [{ ...base, request_type: 'edit', field: reqField, old_value: String(reqLine[reqField] ?? ''), new_value: reqValue.trim() }]
+
+    const { error: insErr } = await supabase.from('change_requests').insert(rows)
     if (insErr) { setError(`Could not submit request: ${insErr.message}`); setSubmitting(false); return }
 
     setSuccess(reqMode === 'delete' ? 'Delete request submitted for Head Office approval.' : 'Change request submitted for Head Office approval.')
@@ -601,6 +609,13 @@ export default function SalesOrdersPage() {
                           <option value="">Select location…</option>
                           {locationCodes.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
+                      ) : reqField === 'item_code' ? (
+                        <>
+                          <input list="so-items" value={reqValue} onChange={e => setReqValue(e.target.value)} placeholder="Pick an item code…"
+                            className="w-full border rounded-lg px-3 py-2 text-sm bg-white" />
+                          <datalist id="so-items">{items.map(i => <option key={i.code} value={i.code}>{i.description}</option>)}</datalist>
+                          {reqValue ? (itemByCode(reqValue) ? <span className="text-xs text-gray-500">→ {itemByCode(reqValue)!.description}</span> : <span className="text-xs text-red-500">Not in Items master</span>) : null}
+                        </>
                       ) : (
                         <input value={reqValue} onChange={e => setReqValue(e.target.value)}
                           className="w-full border rounded-lg px-3 py-2 text-sm bg-white" />
