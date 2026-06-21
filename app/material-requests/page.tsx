@@ -573,7 +573,7 @@ export default function MaterialRequestsPage() {
                             <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 font-mono">{run.runNo}</span>
                             <span className="text-sm text-gray-400">released {new Date(run.released_at).toLocaleString()}</span>
                             {filter !== 'Labels' && <>
-                            <span className="flex items-center gap-2 ml-auto">
+                            <span className="flex items-center gap-2 ml-auto shrink-0">
                               <span className="text-xs font-medium text-gray-600">SO No.</span>
                               {run.reqs[0]?.warehouse_so_no ? (
                                 <>
@@ -584,7 +584,7 @@ export default function MaterialRequestsPage() {
                               ) : canEditFac(run.factory) && hasCap(profile, 'so_edit') ? (
                                 <>
                                   <input value={soEdits[run.runNo] ?? ''} onChange={e => setSoEdits(prev => ({ ...prev, [run.runNo]: e.target.value }))}
-                                    placeholder="enter SO number" className="border rounded px-2 py-1 text-xs w-40" />
+                                    placeholder="enter SO number" className="border rounded px-2 py-1 text-xs w-40 shrink-0" />
                                   <button onClick={() => saveSo(run)} disabled={busy === `so|${run.runNo}`} className="text-blue-600 hover:underline text-xs disabled:opacity-50">{busy === `so|${run.runNo}` ? 'Saving…' : 'Save'}</button>
                                 </>
                               ) : <span className="text-gray-300 text-xs">—</span>}
