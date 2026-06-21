@@ -623,7 +623,7 @@ export default function IncomingPage() {
                         onChange={e => { const code = e.target.value; const it = itemByCode(code); setEditForm({ ...editForm, item_code: code, ...(it ? { description: it.description } : {}) }) }}
                         className="w-full border rounded-lg px-3 py-2" />
                       <datalist id="grn-items">{itemsMaster.map(i => <option key={i.code} value={i.code}>{i.description}</option>)}</datalist>
-                      {editForm.item_code && !itemByCode(editForm.item_code) ? (itemByCode(baseCode(editForm.item_code)) ? <span className="text-xs text-gray-400">→ {baseCode(editForm.item_code)} (in stock as the base material)</span> : <span className="text-xs text-red-500">Not in Items master</span>) : null}
+                      {editForm.item_code && !itemByCode(editForm.item_code) ? (itemByCode(baseCode(editForm.item_code)) ? <span className="text-xs text-gray-400">→ {baseCode(editForm.item_code)} (in stock as the base material)</span> : <span className="text-xs text-amber-600">Pick an item from the dropdown list</span>) : null}
                     </>
                   ) : f.key === 'description' ? (
                     <input value={editForm.description || ''} disabled className="w-full border rounded-lg px-3 py-2 bg-gray-100 text-gray-500" title="Follows the item code" />
