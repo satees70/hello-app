@@ -85,6 +85,11 @@ interface QtyMoveReq {
   requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
 }
 
+interface FoodLossAlert {
+  id: string; factory_code: string | null; batch_no: string | null; item_code: string | null; pct: number | null; status: string
+  created_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
+}
+
 const FIELD_LABEL: Record<string, string> = {
   customer_name: 'Customer',
   item_code: 'Item Code',
@@ -136,6 +141,7 @@ export default function PendingChangesPage() {
   const [itemChanges, setItemChanges] = useState<ItemChangeReq[]>([])
   const [soChanges, setSoChanges] = useState<SoChangeReq[]>([])
   const [qtyMoves, setQtyMoves] = useState<QtyMoveReq[]>([])
+  const [foodLoss, setFoodLoss] = useState<FoodLossAlert[]>([])
 
   // Distinct values present in a list, for a filter dropdown
   const distinctOf = <T,>(arr: T[], get: (x: T) => string) => [...new Set(arr.map(get))].filter(Boolean).sort()
@@ -148,7 +154,7 @@ export default function PendingChangesPage() {
 
   useEffect(() => {
     if (!profile) return
-    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves()
+    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFoodLoss()
     // Live refresh on any change-request activity, with a poll fallback
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) supabase.realtime.setAuth(data.session.access_token)
@@ -167,6 +173,7 @@ export default function PendingChangesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'item_change_requests' }, () => loadItemChanges())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'so_change_requests' }, () => loadSoChanges())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mr_qty_move_requests' }, () => loadQtyMoves())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'food_loss_alerts' }, () => loadFoodLoss())
       .subscribe()
     const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves() }, 20000)
     return () => { supabase.removeChannel(channel); clearInterval(timer) }
@@ -343,6 +350,16 @@ export default function PendingChangesPage() {
     if (e) { setError(e.message); setBusyId(''); return }
     setSuccess('Quantity move rejected.'); setBusyId(''); loadQtyMoves()
   }
+  async function loadFoodLoss() {
+    const { data } = await supabase.from('food_loss_alerts').select('*').order('created_at', { ascending: false })
+    setFoodLoss((data as FoodLossAlert[]) || [])
+  }
+  async function ackFL(id: string) {
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('ack_food_loss', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Food-loss alert acknowledged.'); setBusyId(''); loadFoodLoss()
+  }
   async function approveRM(id: string) {
     setBusyId(id); setError(''); setSuccess('')
     const { error: e } = await supabase.rpc('approve_run_mode', { p_id: id })
@@ -460,6 +477,7 @@ export default function PendingChangesPage() {
   const shownIC = filter === 'All' ? itemChanges : itemChanges.filter(a => a.status === filter)
   const shownSO = filter === 'All' ? soChanges : soChanges.filter(a => a.status === filter)
   const shownQM = filter === 'All' ? qtyMoves : qtyMoves.filter(a => a.status === filter)
+  const shownFL = filter === 'All' ? foodLoss : foodLoss.filter(a => filter === 'Pending' ? a.status === 'Pending' : a.status !== 'Pending')
   const counts: Record<string, number> = { Pending: 0, Approved: 0, Rejected: 0 }
   requests.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1 })
 
@@ -1055,6 +1073,33 @@ export default function PendingChangesPage() {
                       ) : <span className="text-gray-400">done</span>}
                     </td>
                   )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Food-loss alerts (inspection) */}
+        <h2 className="text-lg font-semibold mt-8 mb-2">Food-loss alerts</h2>
+        <p className="text-gray-500 text-sm mb-3">{isHO ? 'Production runs where food loss exceeded 5%. Investigate, then acknowledge.' : 'Food-loss alerts raised at your factory.'}</p>
+        <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem] mb-10">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 border-b sticky top-0 z-10">
+              <tr>{['Factory', 'Batch', 'Item', 'Food loss %', 'Raised by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
+                <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+            </thead>
+            <tbody>
+              {shownFL.length === 0 && (<tr><td colSpan={8} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} food-loss alerts.</td></tr>)}
+              {shownFL.map(a => (
+                <tr key={a.id} className="border-b last:border-0 align-top hover:bg-gray-50">
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-600">{a.factory_code}</td>
+                  <td className="px-3 py-2 font-mono whitespace-nowrap">{a.batch_no}</td>
+                  <td className="px-3 py-2 font-mono whitespace-nowrap">{a.item_code}</td>
+                  <td className="px-3 py-2 text-right font-semibold text-red-600">{a.pct != null ? a.pct + '%' : '—'}</td>
+                  <td className="px-3 py-2 whitespace-nowrap"><span className="block">{a.created_by_name || '—'}</span><span className="block text-gray-400">{fmt(a.created_at)}</span></td>
+                  <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full font-medium ${a.status === 'Pending' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{a.status}</span></td>
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-600">{a.status === 'Pending' ? '—' : (<><span className="block">{a.reviewed_by_name}</span><span className="block text-gray-400">{fmt(a.reviewed_at)}</span></>)}</td>
+                  {isHO && (<td className="px-3 py-2 whitespace-nowrap">{a.status === 'Pending' ? <button onClick={() => ackFL(a.id)} disabled={busyId === a.id} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">Acknowledge</button> : <span className="text-gray-400">done</span>}</td>)}
                 </tr>
               ))}
             </tbody>

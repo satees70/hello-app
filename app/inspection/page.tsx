@@ -8,7 +8,9 @@ import { supabase } from '@/lib/supabase'
 import { can } from '@/lib/permissions'
 
 interface Hourly { time: string; weight: string; ink: string; qc_color: string; qc_odour: string; qc_phy: string; temp: string; speed: string; press: string; drop: string; alu: string; fe: string; nonfe: string; ss: string; remarks: string }
-type Form = Record<string, string | boolean | Hourly[]>
+// One BOM component on the production record: planned (from recipe) vs actually used, with its batch
+interface Mat { code: string; desc: string; unit: string; planned: number; main: boolean; batch: string; used: string }
+type Form = Record<string, string | boolean | Hourly[] | Mat[]>
 
 interface Seg { s: string; e: string | null }
 interface Timer { status: 'idle' | 'running' | 'paused' | 'stopped'; segments: Seg[] }
@@ -41,6 +43,7 @@ const EMPTY: Form = {
   yield_pack: '', yield_bottle: '', yield_balance: '', done_by: '', checked_by: '', verified_by: '',
   retained: '', retained_qty: '', weighed_by: '', remarks: '',
   hourly: [blankHour(), blankHour(), blankHour(), blankHour()],
+  materials: [],
 }
 
 export default function InspectionPage() {
@@ -87,8 +90,21 @@ export default function InspectionPage() {
     const { data: cons } = await supabase.from('production_consumption').select('batch_no').eq('production_batch_id', id)
     const rmBatches = [...new Set((cons || []).map(c => c.batch_no).filter(Boolean))].join(', ')
     const td = new Date(); const localToday = `${td.getFullYear()}-${String(td.getMonth() + 1).padStart(2, '0')}-${String(td.getDate()).padStart(2, '0')}`
-    setF({ ...EMPTY, date: localToday, area_machine: batch?.pack_line || '', code: batch?.item_code || '', product: batch?.description || '', bn_raw_material: rmBatches, exp_in: batch?.exp_date || '', exp_out: batch?.exp_date || '' })
+    // Build the materials table from the product's BOM (planned = recipe qty × planned units)
+    const total = Number(batch?.total_quantity || 0)
+    let mats: Mat[] = []
+    if (batch?.item_code) {
+      const { data: parent } = await supabase.from('items').select('id').eq('code', batch.item_code).maybeSingle()
+      if (parent) {
+        const { data: comps } = await supabase.from('bom_components')
+          .select('quantity, main_ingredient, items:component_item_id(code, description, unit)').eq('parent_item_id', parent.id)
+        mats = (comps || []).map(c => { const it = c.items as unknown as { code: string; description: string; unit: string } | null
+          return { code: it?.code || '', desc: it?.description || '', unit: it?.unit || '', planned: Number(c.quantity || 0) * total, main: !!c.main_ingredient, batch: '', used: '' } })
+      }
+    }
+    setF({ ...EMPTY, date: localToday, area_machine: batch?.pack_line || '', code: batch?.item_code || '', product: batch?.description || '', bn_raw_material: rmBatches, exp_in: batch?.exp_date || '', exp_out: batch?.exp_date || '', materials: mats })
   }
+  const setMat = (i: number, k: keyof Mat, v: string) => setF(prev => { const m = [...(prev.materials as Mat[])]; m[i] = { ...m[i], [k]: v }; return { ...prev, materials: m } })
 
   const set = (k: string, v: string | boolean) => setF(prev => ({ ...prev, [k]: v }))
   // Auto No. = PR<location digits><line letter>-YYMMDD/<running>, e.g. PR101A-260622/00001
@@ -126,6 +142,7 @@ export default function InspectionPage() {
 
   async function recordProductionFromForm() {
     if (!canEditHere()) { setError("You have view-only access at this factory."); return null }
+    if (!profile) return
     if (!batchId) { setError('No production batch linked.'); return }
     const qty = Number((f.qty_produced as string) || 0)
     if (!(qty > 0)) { setError('Enter the quantity produced first.'); return }
@@ -138,7 +155,14 @@ export default function InspectionPage() {
     if (rpcErr) { setError(rpcErr.message); await persist(recordedQty); setRecording(false); return }
     const short = (data as { shortfalls?: { item_code: string; short: number }[] })?.shortfalls || []
     setRecordedQty(qty); setProduced(p => p + delta)
-    setSuccess(`Recorded ${delta} produced (total ${qty}). Raw materials consumed from stock.` + (short.length ? ` ⚠ Short on: ${short.map(x => `${x.item_code} (${x.short})`).join(', ')}.` : ''))
+    // Food-loss alert to Head Office when over 5% (one open alert per batch)
+    if (loss.over && loss.pct != null) {
+      const { data: existing } = await supabase.from('food_loss_alerts').select('id').eq('production_batch_id', batchId).eq('status', 'Pending').limit(1)
+      if (!existing || existing.length === 0) {
+        await supabase.from('food_loss_alerts').insert({ production_batch_id: batchId, factory_code: factoryCode, batch_no: batchNo, item_code: s('code'), pct: Number(loss.pct.toFixed(2)), created_by: profile.id, created_by_name: profile.full_name || null })
+      }
+    }
+    setSuccess(`Recorded ${delta} produced (total ${qty}). Raw materials consumed from stock.` + (short.length ? ` ⚠ Short on: ${short.map(x => `${x.item_code} (${x.short})`).join(', ')}.` : '') + (loss.over ? ` ⚠ Food loss ${loss.pct?.toFixed(2)}% — flagged to Head Office.` : ''))
     setRecording(false)
   }
 
@@ -157,7 +181,18 @@ export default function InspectionPage() {
   const Field = ({ label, children }: { label: string; children: React.ReactNode }) =>
     <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">{label}</span>{children}</div>
 
-  const lossPct = (() => { const a = Number(s('food_loss_a')), b = Number(s('total_used')); return a > 0 && b > 0 ? (a / b * 100).toFixed(2) + '%' : '—' })()
+  const n = (x: number) => Number(Number(x).toPrecision(6))
+  // Food loss % = ((main ingredient used − main planned) + wastage) ÷ main used × 100. Alert HO when > 5%.
+  const loss = (() => {
+    const mats = (f.materials as Mat[]) || []
+    const main = mats.filter(m => m.main)
+    const used = main.reduce((t, m) => t + Number(m.used || 0), 0)
+    const planned = main.reduce((t, m) => t + Number(m.planned || 0), 0)
+    const waste = Number(s('food_loss_a') || 0)
+    if (!(used > 0)) return { pct: null as number | null, over: false }
+    const pct = ((used - planned) + waste) / used * 100
+    return { pct, over: pct > 5 }
+  })()
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -240,14 +275,38 @@ export default function InspectionPage() {
             <Field label="No. (auto)"><div className="border rounded px-2 py-1 text-sm bg-gray-50 text-gray-700 font-mono min-h-[2rem]">{s('no') || '—'}</div></Field>
             <Field label="Code"><In k="code" /></Field>
             <Field label="Product"><In k="product" /></Field>
-            <Field label="B/N Raw Material"><In k="bn_raw_material" /></Field>
-            <Field label="RM Weight (In)"><In k="rm_weight_in" /></Field>
-            <Field label="Total Used (b)"><In k="total_used" /></Field>
             <Field label="Plastic weight (g)"><In k="plastic" type="number" /></Field>
-            <Field label="B/N Plastic"><In k="bn_plastic" /></Field>
             <Field label="Weigh of wastage & type"><In k="wastage" /></Field>
-            <Field label="Food Loss & Waste (a)"><In k="food_loss_a" /></Field>
-            <Field label={`Food Loss & Waste % (a/b×100)`}><div className="border rounded px-2 py-1 text-sm bg-gray-50 text-gray-700">{lossPct}</div></Field>
+            <Field label="Weight of wastage (g)"><In k="food_loss_a" type="number" /></Field>
+            <Field label="Food Loss %"><div className={`border rounded px-2 py-1 text-sm ${loss.over ? 'bg-red-50 text-red-700 font-semibold' : 'bg-gray-50 text-gray-700'}`}>{loss.pct == null ? '—' : loss.pct.toFixed(2) + '%'}{loss.over ? ' ⚠' : ''}</div></Field>
+          </div>
+
+          {/* Materials used — from the BOM (planned vs actually used) */}
+          <div className="border-t pt-3">
+            <div className="font-semibold text-sm mb-2">Materials used <span className="font-normal text-gray-400">— from recipe (BOM)</span></div>
+            <div className="overflow-x-auto border rounded-lg">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 border-b">
+                  <tr>{['Item', 'Description', 'Unit', 'Planned', 'Batch', 'Qty used', 'Difference', 'Main'].map(h => (
+                    <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+                </thead>
+                <tbody>
+                  {(f.materials as Mat[]).length === 0 && <tr><td colSpan={8} className="text-center py-4 text-gray-400">No BOM for this product — set up its recipe in BOM.</td></tr>}
+                  {(f.materials as Mat[]).map((m, i) => { const used = Number(m.used || 0); const diff = used - m.planned; return (
+                    <tr key={i} className="border-b last:border-0">
+                      <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{m.code}{m.main && <span className="text-amber-600" title="Main ingredient"> ★</span>}</td>
+                      <td className="px-3 py-2 text-gray-600">{m.desc}</td>
+                      <td className="px-3 py-2 text-gray-500">{m.unit}</td>
+                      <td className="px-3 py-2 text-right font-medium">{n(m.planned)}</td>
+                      <td className="px-3 py-2"><input value={m.batch} onChange={e => setMat(i, 'batch', e.target.value)} placeholder="batch no." className="border rounded px-2 py-1 text-xs w-28" /></td>
+                      <td className="px-3 py-2"><input type="number" step="any" value={m.used} onChange={e => setMat(i, 'used', e.target.value)} className="border rounded px-2 py-1 text-xs w-20 text-right" /></td>
+                      <td className={`px-3 py-2 text-right ${m.used === '' ? 'text-gray-300' : diff > 0 ? 'text-red-600' : 'text-green-600'}`}>{m.used === '' ? '—' : (diff > 0 ? '+' : '') + n(diff)}</td>
+                      <td className="px-3 py-2">{m.main ? '★' : ''}</td>
+                    </tr>
+                  ) })}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {/* Process (CCP #2) */}

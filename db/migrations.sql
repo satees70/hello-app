@@ -11,6 +11,37 @@
 -- ============================================================================
 
 -- ============================================================================
+-- BOM main ingredient + packing-line letter + food-loss alerts (inspection)
+-- ============================================================================
+alter table public.bom_components add column if not exists main_ingredient boolean not null default false;
+alter table public.packing_lines add column if not exists line_code text;
+
+create table if not exists public.food_loss_alerts (
+  id uuid primary key default gen_random_uuid(),
+  production_batch_id uuid, factory_code text, batch_no text, item_code text, pct numeric,
+  status text not null default 'Pending',
+  created_by uuid, created_by_name text, created_at timestamptz not null default now(),
+  reviewed_by uuid, reviewed_by_name text, reviewed_at timestamptz
+);
+grant select, insert on public.food_loss_alerts to authenticated;
+grant all on public.food_loss_alerts to service_role;
+alter table public.food_loss_alerts enable row level security;
+drop policy if exists fla_read on public.food_loss_alerts;
+create policy fla_read on public.food_loss_alerts for select using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()) or created_by = auth.uid());
+drop policy if exists fla_insert on public.food_loss_alerts;
+create policy fla_insert on public.food_loss_alerts for insert with check (created_by = auth.uid());
+
+create or replace function public.ack_food_loss(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can acknowledge food-loss alerts'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.food_loss_alerts set status = 'Acknowledged', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id and status = 'Pending';
+end $$;
+grant execute on function public.ack_food_loss(uuid) to authenticated;
+
+-- ============================================================================
 -- Auth · username login + warehouse-only material-requests view
 -- ============================================================================
 alter table public.profiles add column if not exists username text;
