@@ -101,8 +101,29 @@ export default function IncomingPage() {
     if (e) { setError(e.message); return }
     setSuccess('Delete request sent to Head Office.')
   }
+  // Correct the quantity actually received into stock (HO approval re-books the difference)
+  async function requestCorrectQty(l: DoLine) {
+    if (!canEditFac(linesFor?.factory_code)) { setError("You have view-only access at this factory."); return }
+    if (!linesFor) return
+    const cur = l.received_qty ?? 0
+    const val = window.prompt(`Correct the quantity received into stock for ${l.item_code} (now ${cur}).\nEnter the correct total quantity received:`, String(cur))
+    if (val === null) return
+    const n = Number(val)
+    if (!(n >= 0)) { setError('Enter a valid quantity (0 or more).'); return }
+    const reason = window.prompt('Reason for the correction (sent to Head Office):') || ''
+    const { data: sess } = await supabase.auth.getSession()
+    const { error: e } = await supabase.from('do_change_requests').insert({
+      do_id: linesFor.id, line_id: l.id, factory_code: linesFor.factory_code, request_type: 'correct_qty',
+      field: 'received_qty', old_value: String(cur), new_value: String(n), reason: reason || null,
+      line_label: `${l.item_code} · ${l.description || ''}`,
+      requested_by: sess.session?.user.id || null, requested_by_name: profile?.full_name || null,
+    })
+    if (e) { setError(e.message); return }
+    setSuccess('Quantity correction sent to Head Office.')
+  }
   const reqCtl = (l: DoLine) => (
     <span className="whitespace-nowrap text-xs">
+      {l.received_at && <><button onClick={() => requestCorrectQty(l)} className="text-blue-600 hover:underline">Correct qty</button><span className="text-gray-300 mx-1">·</span></>}
       <button onClick={() => openEditReq(l)} className="text-blue-600 hover:underline">Request edit</button>
       <span className="text-gray-300 mx-1">·</span>
       <button onClick={() => requestDeleteLine(l)} className="text-red-600 hover:underline">delete</button>

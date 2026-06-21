@@ -647,7 +647,7 @@ export default function PendingChangesPage() {
                   <td className="px-3 py-2 min-w-[160px]">
                     {c.request_type === 'delete'
                       ? <span className="text-red-600 font-medium">🗑 Delete line</span>
-                      : <><span className="text-gray-500">{c.field}: </span><span className="line-through text-gray-400">{c.old_value || '(empty)'}</span><span className="mx-1">→</span><span className="font-medium text-gray-800">{c.new_value}</span></>}
+                      : <><span className="text-gray-500">{c.request_type === 'correct_qty' ? 'Correct received qty: ' : `${c.field}: `}</span><span className="line-through text-gray-400">{c.old_value || '(empty)'}</span><span className="mx-1">→</span><span className="font-medium text-gray-800">{c.new_value}</span></>}
                   </td>
                   <td className="px-3 py-2 text-gray-600 min-w-[120px]">{c.reason || '—'}</td>
                   <td className="px-3 py-2 whitespace-nowrap"><span className="block">{c.requested_by_name || '—'}</span><span className="block text-gray-400">{fmt(c.created_at)}</span></td>

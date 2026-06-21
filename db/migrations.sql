@@ -1132,6 +1132,34 @@ begin
       execute format('update public.delivery_order_lines set %I = $1 where id = $2', r.field) using nullif(r.new_value,''), r.line_id;
     end if;
 
+  elsif r.request_type = 'correct_qty' then
+    -- Fix the quantity that was received into stock; re-book the difference.
+    if not found then raise exception 'That line no longer exists'; end if;
+    if v_l.received_at is null then raise exception 'Line is not received yet — just receive it with the right quantity'; end if;
+    if v_l.stock_lot_id is null then raise exception 'This receipt predates the feature — correct its stock manually'; end if;
+    select * into v_lot from public.stock_lots where id = v_l.stock_lot_id;
+    if not found then raise exception 'The stock lot for this line no longer exists'; end if;
+    declare v_new numeric := nullif(r.new_value,'')::numeric; v_old numeric := coalesce(v_l.received_qty, 0); v_delta numeric;
+    begin
+      if v_new is null or v_new < 0 then raise exception 'Enter a valid corrected quantity'; end if;
+      v_delta := v_new - v_old;
+      if v_delta < 0 and v_lot.qty_remaining < (-v_delta) then
+        raise exception 'Cannot reduce below what is left — % already used from this batch', (v_old - v_lot.qty_remaining);
+      end if;
+      update public.stock_lots set qty_remaining = qty_remaining + v_delta, qty_received = qty_received + v_delta where id = v_lot.id;
+      update public.item_stock set quantity = quantity + v_delta, updated_at = now() where item_id = v_lot.item_id and factory_code = v_lot.factory_code;
+      update public.delivery_order_lines set received_qty = v_new where id = r.line_id;
+      if v_lot.request_item_id is not null then
+        update public.material_request_items set received_qty = greatest(received_qty + v_delta, 0) where id = v_lot.request_item_id;
+        select request_id into v_reqid from public.material_request_items where id = v_lot.request_item_id;
+        update public.material_requests set status =
+          case when (select bool_and(received_qty >= requested_qty) from public.material_request_items where request_id = v_reqid) then 'Fulfilled'
+               when (select bool_or(received_qty > 0) from public.material_request_items where request_id = v_reqid) then 'Partially Received'
+               else 'Open' end
+        where id = v_reqid;
+      end if;
+    end;
+
   elsif r.request_type = 'delete' then
     if found and v_l.received_at is not null then
       if v_l.stock_lot_id is null then raise exception 'This receipt predates the feature — reverse its stock manually, then delete'; end if;
