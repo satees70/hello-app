@@ -51,6 +51,7 @@ export default function MaterialRequestsPage() {
   const { profile, loading, error: profileError } = useProfile()
   useRequireView(profile, 'material_requests')
   const canEdit = profile ? can(profile, 'material_requests', 'edit') : false
+  const canEditFac = (fc: string) => can(profile, 'material_requests', 'edit', fc)   // honours per-factory view-only
   const [requests, setRequests] = useState<MaterialRequest[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [filter, setFilter] = useState<Filter>('Open')
@@ -126,7 +127,7 @@ export default function MaterialRequestsPage() {
   // Release the waiting (unreleased) requests of a factory to the warehouse as one pick run,
   // stamping them with the same released_at so they group together and stop growing.
   async function release(factory: string) {
-    if (!canEdit) { setError("You have view-only access here."); return }
+    if (!canEditFac(factory)) { setError("You have view-only access at this factory."); return }
     const key = `release|${factory}`
     setBusy(key); setError(''); setSuccess('')
     const { data, error: relErr } = await supabase.rpc('release_pick_run', { p_factory: factory })
@@ -139,7 +140,7 @@ export default function MaterialRequestsPage() {
   // Save an expiry date entered inline on the factory list (writes to the product's batch)
 
   async function cancelRequest(r: MaterialRequest) {
-    if (!canEdit) { setError("You have view-only access here."); return }
+    if (!canEditFac(r.factory_code)) { setError("You have view-only access at this factory."); return }
     if (!confirm(`Cancel ${r.request_no}? This frees its batch(es) so you can re-raise (e.g. combined). Nothing has been received yet.`)) return
     setBusy(`cancel|${r.id}`); setError(''); setSuccess('')
     const { error: e } = await supabase.rpc('cancel_material_request', { p_id: r.id })
@@ -151,7 +152,7 @@ export default function MaterialRequestsPage() {
 
   // Released to the warehouse already → cancelling needs Head Office approval
   async function requestMrCancel(r: MaterialRequest) {
-    if (!canEdit) { setError("You have view-only access here."); return }
+    if (!canEditFac(r.factory_code)) { setError("You have view-only access at this factory."); return }
     const reason = window.prompt(`Request to cancel ${r.request_no}?\n\nIt has already been sent to the warehouse, so Head Office must approve. On approval its batch(es) are freed.\n\nReason (optional):`, '')
     if (reason === null) return
     setBusy(`reqcancel|${r.id}`); setError(''); setSuccess('')
@@ -176,7 +177,7 @@ export default function MaterialRequestsPage() {
   const labelAvail = (r: MaterialRequest, it: MRItem) => Math.floor(rawFraction(r) * it.requested_qty)
   // Save a label item's batch no. / expiry / print qty (at least batch or expiry required)
   async function saveLabel(it: MRItem, r: MaterialRequest) {
-    if (!canEdit) { setError("You have view-only access here."); return }
+    if (!canEditFac(r.factory_code)) { setError("You have view-only access at this factory."); return }
     const e = labelEdits[it.id] ?? { batch: it.label_batch_no ?? '', exp: it.label_exp_date ?? '', qty: String(it.label_print_qty ?? labelAvail(r, it)) }
     const batch = e.batch.trim()
     if (!batch && !e.exp) { setError('Enter a batch number or an expiry date (at least one) for the label.'); return }
@@ -192,7 +193,7 @@ export default function MaterialRequestsPage() {
   }
 
   async function requestRunCancel(run: { runNo: string; reqs: MaterialRequest[] }) {
-    if (!canEdit) { setError("You have view-only access here."); return }
+    if (!canEditFac(run.reqs[0]?.factory_code || '')) { setError("You have view-only access at this factory."); return }
     if (!confirm(`Request to cancel released pick run ${run.runNo} (${run.reqs.length} request(s))?\n\nIt has been sent to the warehouse, so Head Office must approve. On approval the batches are freed.`)) return
     const reason = window.prompt('Reason (optional):', '') ?? ''
     setBusy(`runcancel|${run.runNo}`); setError(''); setSuccess('')
@@ -205,7 +206,7 @@ export default function MaterialRequestsPage() {
 
   // Warehouse records the SO number against a released pick run (saved on all its requests)
   async function saveSo(run: { runNo: string; reqs: MaterialRequest[] }) {
-    if (!canEdit) { setError("You have view-only access here."); return }
+    if (!canEditFac(run.reqs[0]?.factory_code || '')) { setError("You have view-only access at this factory."); return }
     const val = (soEdits[run.runNo] ?? run.reqs[0]?.warehouse_so_no ?? '').trim()
     setBusy(`so|${run.runNo}`); setError(''); setSuccess('')
     const ids = run.reqs.map(r => r.id)
@@ -462,7 +463,7 @@ export default function MaterialRequestsPage() {
                         <div className="flex items-center gap-3 mb-3">
                           <span className="font-semibold">{isHO ? factoryName(fac) : fac}</span>
                           <span className="text-sm text-gray-400">· {Object.keys(waiting[fac]).length} material(s) waiting</span>
-                          {canEdit && <button onClick={() => release(fac)} disabled={busy === `release|${fac}`}
+                          {canEditFac(fac) && <button onClick={() => release(fac)} disabled={busy === `release|${fac}`}
                             className="ml-auto bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">
                             {busy === `release|${fac}` ? 'Releasing…' : 'Release to warehouse →'}
                           </button>}

@@ -43,7 +43,6 @@ const EMPTY: Form = {
 export default function InspectionPage() {
   const { profile, loading, error: profileError } = useProfile()
   useRequireView(profile, 'inspection')
-  const canEdit = profile ? can(profile, 'inspection', 'edit') : false
   const [batchId, setBatchId] = useState('')
   const [recordId, setRecordId] = useState('')
   const [f, setF] = useState<Form>(EMPTY)
@@ -51,6 +50,8 @@ export default function InspectionPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [factoryCode, setFactoryCode] = useState('')
+  // Per-factory view-only: once the batch's factory is known, honour it.
+  const canEditHere = () => can(profile, 'inspection', 'edit', factoryCode || profile?.factory_code)
   const [batchNo, setBatchNo] = useState('')
   const [planned, setPlanned] = useState(0)
   const [produced, setProduced] = useState(0)
@@ -86,7 +87,7 @@ export default function InspectionPage() {
   const addHour = () => setF(prev => ({ ...prev, hourly: [...(prev.hourly as Hourly[]), blankHour()] }))
 
   async function persist(recQty: number, t: Timer = timer, form: Form = f): Promise<string | null> {
-    if (!canEdit) { setError("You have view-only access here."); return null }
+    if (!canEditHere()) { setError("You have view-only access at this factory."); return null }
     if (!profile) return null
     const payload = { production_batch_id: batchId || null, factory_code: factoryCode || profile.factory_code, data: { ...form, recorded_qty: recQty, timer: t }, updated_at: new Date().toISOString() }
     if (recordId) { const { error: e } = await supabase.from('inspection_records').update(payload).eq('id', recordId); if (e) { setError(e.message); return null } return recordId }
@@ -94,7 +95,7 @@ export default function InspectionPage() {
     if (e || !data) { setError(e?.message || 'Save failed'); return null }
     setRecordId(data.id); return data.id
   }
-  async function save() { if (!canEdit) { setError("You have view-only access here."); return } setBusy(true); setError(''); setSuccess(''); const id = await persist(recordedQty); setBusy(false); if (id) setSuccess('Inspection record saved.') }
+  async function save() { if (!canEditHere()) { setError("You have view-only access at this factory."); return } setBusy(true); setError(''); setSuccess(''); const id = await persist(recordedQty); setBusy(false); if (id) setSuccess('Inspection record saved.') }
 
   // Production timer — Start / Pause / Resume / Stop. Net run time excludes pauses.
   async function applyTimer(t: Timer, form: Form = f) { setTimer(t); setF(form); setNow(Date.now()); await persist(recordedQty, t, form) }
@@ -104,7 +105,7 @@ export default function InspectionPage() {
   const stopTimer = () => { const iso = new Date().toISOString(); const segs = timer.segments.map((sg, i) => i === timer.segments.length - 1 && !sg.e ? { ...sg, e: iso } : sg); applyTimer({ status: 'stopped', segments: segs }, { ...f, prod_end: iso }) }
 
   async function recordProductionFromForm() {
-    if (!canEdit) { setError("You have view-only access here."); return null }
+    if (!canEditHere()) { setError("You have view-only access at this factory."); return null }
     if (!batchId) { setError('No production batch linked.'); return }
     const qty = Number((f.qty_produced as string) || 0)
     if (!(qty > 0)) { setError('Enter the quantity produced first.'); return }

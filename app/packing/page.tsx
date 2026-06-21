@@ -58,6 +58,7 @@ export default function PackingPage() {
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
   const multiFac = isHO || (profile?.factory_codes?.length || 0) > 1   // sees more than one factory
   const canEdit = can(profile, 'packing', 'edit')
+  const canEditFac = (fc: string) => can(profile, 'packing', 'edit', fc)   // honours per-factory view-only
 
   useEffect(() => { if (profile) { load(); loadFactories() } }, [profile])
 
@@ -144,6 +145,7 @@ export default function PackingPage() {
   }
 
   async function savePack(b: Batch) {
+    if (!canEditFac(b.factory_code)) { setError('You have view-only access at this factory.'); return }
     const e = packEdit[b.id] ?? { line: b.pack_line || '', date: b.pack_date || '', mode: b.run_mode || 'auto' }
     if (!e.line || !e.date) { setError('Pick a pack line and a pack date first.'); return }
     setSavingId(b.id); setError(''); setSuccess('')
@@ -247,7 +249,7 @@ export default function PackingPage() {
               <div className="mt-1"><span className="font-medium">{b.item_code}</span> <span className="text-gray-500 text-sm">×{b.total_quantity}</span><span className="block text-gray-500 text-xs">{b.description}</span></div>
               <button onClick={() => toggleMat(b.id)} className="text-blue-600 hover:underline text-xs mt-1">{openMat.has(b.id) ? '▾ hide materials' : '▸ show materials'}</button>
               {openMat.has(b.id) && <div className="mt-2"><MaterialTable b={b} /></div>}
-              <div className="mt-3 pt-2 border-t">{canEdit ? <PackForm b={b} /> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${partial(b) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{partial(b) ? `Enough for ${availability(b).units}` : 'Materials ready'}</span>}</div>
+              <div className="mt-3 pt-2 border-t">{canEditFac(b.factory_code) ? <PackForm b={b} /> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${partial(b) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{partial(b) ? `Enough for ${availability(b).units}` : 'Materials ready'}</span>}</div>
             </div>
           ))}
         </div>
@@ -269,7 +271,7 @@ export default function PackingPage() {
                       <button onClick={() => toggleMat(b.id)} className="text-blue-600 hover:underline text-xs mt-0.5">{openMat.has(b.id) ? '▾ hide materials' : '▸ show materials'}</button></td>
                     <td className="px-3 py-2 text-right font-semibold">{b.total_quantity}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-gray-600">{b.delivery_date ? fmtDate(b.delivery_date) : '—'}</td>
-                    <td className="px-3 py-2">{canEdit ? <PackForm b={b} /> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${partial(b) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{partial(b) ? `Enough for ${availability(b).units}` : 'Materials ready'}</span>}</td>
+                    <td className="px-3 py-2">{canEditFac(b.factory_code) ? <PackForm b={b} /> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${partial(b) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{partial(b) ? `Enough for ${availability(b).units}` : 'Materials ready'}</span>}</td>
                   </tr>
                   {openMat.has(b.id) && (
                     <tr className="bg-gray-50/60 border-b"><td colSpan={multiFac ? 6 : 5} className="px-3 py-3">

@@ -37,6 +37,7 @@ export default function StockAdjustmentPage() {
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
   const canEdit = can(profile, 'stock_adjustment', 'edit')
+  const canEditFac = (fc: string) => can(profile, 'stock_adjustment', 'edit', fc)   // honours per-factory view-only
 
   // form
   const [factory, setFactory] = useState('')
@@ -54,7 +55,9 @@ export default function StockAdjustmentPage() {
     setItems(await fetchAll<Item>('items', 'id, code, description, unit', 'code'))
     const { data: f } = await supabase.from('factories').select('code, name').order('code')
     setFactories(f || [])
-    if (!isHO && profile) setFactory(profile.factory_code)
+    const codes = profile?.factory_codes?.length ? profile.factory_codes : [profile?.factory_code || '']
+    const editable = (f || []).filter(x => isHO || (codes.includes(x.code) && can(profile, 'stock_adjustment', 'edit', x.code)))
+    if (!isHO) setFactory(editable[0]?.code || '')
     else if (f && f.length && !factory) setFactory(f[0].code)
     const { data: st } = await supabase.from('item_stock').select('item_id, factory_code, quantity')
     const m: Record<string, number> = {}; (st || []).forEach(r => { m[`${r.item_id}|${r.factory_code}`] = Number(r.quantity) })
@@ -73,6 +76,7 @@ export default function StockAdjustmentPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     setError(''); setSuccess('')
+    if (!canEditFac(factory)) { setError('You have view-only access at this factory.'); return }
     const it = resolve(code)
     if (!it) { setError('Pick a valid item code from the list.'); return }
     const n = Number(qty)
@@ -117,7 +121,7 @@ export default function StockAdjustmentPage() {
   const factoryName = (c: string) => factories.find(f => f.code === c)?.name || c
   // Locations this user may adjust: all (HO), else their assigned factory_codes
   const myCodes = profile.factory_codes && profile.factory_codes.length ? profile.factory_codes : [profile.factory_code]
-  const myFactories = isHO ? factories : factories.filter(f => myCodes.includes(f.code))
+  const myFactories = isHO ? factories : factories.filter(f => myCodes.includes(f.code) && canEditFac(f.code))
   const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleString() : '—'
   const fmtD = (d: string | null) => d ? d.split('-').reverse().join('/') : '—'
   const shown = filter === 'All' ? adjs : adjs.filter(a => a.status === filter)

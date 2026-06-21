@@ -61,6 +61,12 @@ export default function GrindingPage() {
   const canEdit = can(profile, 'grinding', 'edit')
   const canRecipeView = can(profile, 'grinding_recipe', 'view')
   const canRecipeEdit = can(profile, 'grinding_recipe', 'edit')
+  // Per-factory view-only helpers (a user may edit at some factories, view-only at others)
+  const canEditFac = (fc: string) => can(profile, 'grinding', 'edit', fc)
+  const canRecipeEditFac = (fc: string) => can(profile, 'grinding_recipe', 'edit', fc)
+  // For the open inspection modal: edit rights at that record's factory
+  const recEdit = openRec ? canEditFac(openRec.factory_code) : false
+  const recRecipeEdit = openRec ? canRecipeEditFac(openRec.factory_code) : false
   const myFactoryOptions = isHO ? factories.map(f => f.code)
     : (profile?.factory_codes?.length ? profile.factory_codes : (profile?.factory_code ? [profile.factory_code] : []))
 
@@ -100,10 +106,10 @@ export default function GrindingPage() {
   const fmt = (d: string | null) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ''); return m ? `${m[3]}/${m[2]}/${m[1]}` : '—' }
 
   async function produce() {
-    if (!canEdit) { setError("You have view-only access here."); return }
     setError('')
     const r = recipes.filter(x => x.active).find(x => x.product === prodSearch.trim())
     if (!r) { setError('Pick a product from the list (it must have a saved recipe).'); return }
+    if (!canEditFac(r.factory_code)) { setError("You have view-only access at this factory."); return }
     setProducing(true)
     const { error } = await supabase.rpc('produce_grinding', { p_recipe_id: r.id, p_lots: Number(prodLots) })
     setProducing(false)
@@ -143,12 +149,13 @@ export default function GrindingPage() {
   const setMixMat = (i: number, k: 'batch_no', v: string) => setMixMats(p => { const m = [...p]; m[i] = { ...m[i], [k]: v }; return m })
   const toggleMixMat = (i: number) => setMixMats(p => { const m = [...p]; m[i] = { ...m[i], added: !m[i].added }; return m })
   async function saveRecord() {
-    if (!canEdit && !canRecipeEdit) { setError("You have view-only access here."); return }
     if (!openRec) return
+    const recEdit = canEditFac(openRec.factory_code), recRecipeEdit = canRecipeEditFac(openRec.factory_code)
+    if (!recEdit && !recRecipeEdit) { setError("You have view-only access at this factory."); return }
     setSaving(true); setError('')
     try {
       const payload: Record<string, unknown> = {}
-      if (canEdit) Object.assign(payload, {
+      if (recEdit) Object.assign(payload, {
         crusher_before: insp.crusher_before || null, crusher_after: insp.crusher_after || null,
         qty_rework: insp.qty_rework === '' ? null : Number(insp.qty_rework),
         qty_rejection: insp.qty_rejection === '' ? null : Number(insp.qty_rejection),
@@ -156,7 +163,7 @@ export default function GrindingPage() {
         verified_by: insp.verified_by || null, remark: insp.remark || null,
       })
       if (Object.keys(payload).length) { const { error } = await supabase.from('grinding_records').update(payload).eq('id', openRec.id); if (error) throw error }
-      if (canRecipeEdit) {
+      if (recRecipeEdit) {
         for (const m of mixMats) {
           if (!m.id) continue
           const { error } = await supabase.from('grinding_materials').update({ batch_no: m.batch_no || null, added: m.added }).eq('id', m.id)
@@ -172,8 +179,7 @@ export default function GrindingPage() {
   function openRecipe(r: Recipe) { setError(''); setEditRecipe(r); setRecipeForm({ factory_code: r.factory_code, product: r.product, recipe_type: r.recipe_type, active: r.active, components: compByRecipe[r.id]?.length ? compByRecipe[r.id] : [{ item: '', qty_per_lot: '' }] }) }
   const setComp = (i: number, k: keyof Component, v: string) => setRecipeForm(p => { if (!p) return p; const c = [...p.components]; c[i] = { ...c[i], [k]: v }; return { ...p, components: c } })
   async function saveRecipe() {
-    if (!canRecipeEdit) { setError("You have view-only access to recipes."); return }
-    if (!recipeForm) return
+    if (!recipeForm || !canRecipeEditFac(recipeForm.factory_code)) { setError("You have view-only access to recipes at this factory."); return }
     setSaving(true); setError('')
     try {
       let rid: string
@@ -193,7 +199,7 @@ export default function GrindingPage() {
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not save') } finally { setSaving(false) }
   }
   async function deleteRecipe(r: Recipe) {
-    if (!canRecipeEdit) { setError("You have view-only access to recipes."); return }
+    if (!canRecipeEditFac(r.factory_code)) { setError("You have view-only access to recipes at this factory."); return }
     if (!confirm(`Delete recipe for ${r.product}?`)) return
     const { error } = await supabase.from('grinding_recipes').delete().eq('id', r.id)
     if (error) { setError(error.message); return }
@@ -312,7 +318,7 @@ export default function GrindingPage() {
 
         {tab === 'recipes' && canRecipeView && (
           <>
-            {canRecipeEdit && <button onClick={newRecipe} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium mb-4">+ New recipe</button>}
+            {recRecipeEdit && <button onClick={newRecipe} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium mb-4">+ New recipe</button>}
             <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem]">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b sticky top-0 z-10">
@@ -329,7 +335,7 @@ export default function GrindingPage() {
                       <td className="px-3 py-2 text-xs">{(compByRecipe[r.id] || []).map((c, i) => <div key={i}>{c.item} — {c.qty_per_lot}</div>)}{!(compByRecipe[r.id]?.length) && '—'}</td>
                       <td className="px-3 py-2">{r.active ? 'Yes' : 'No'}</td>
                       <td className="px-3 py-2 text-right whitespace-nowrap">
-                        {canRecipeEdit && <><button onClick={() => openRecipe(r)} className="text-blue-600 hover:underline">Edit</button><button onClick={() => deleteRecipe(r)} className="text-red-600 hover:underline ml-3">Delete</button></>}
+                        {canRecipeEditFac(r.factory_code) && <><button onClick={() => openRecipe(r)} className="text-blue-600 hover:underline">Edit</button><button onClick={() => deleteRecipe(r)} className="text-red-600 hover:underline ml-3">Delete</button></>}
                       </td>
                     </tr>
                   ))}
@@ -359,10 +365,10 @@ export default function GrindingPage() {
                     <div key={m.id || i} className="grid grid-cols-12 gap-2 items-center text-sm">
                       <div className="col-span-5">{m.item}</div>
                       <div className="col-span-2 text-right">{m.qty}</div>
-                      <div className="col-span-4">{canRecipeEdit
+                      <div className="col-span-4">{recRecipeEdit
                         ? <input value={m.batch_no} onChange={e => setMixMat(i, 'batch_no', e.target.value)} placeholder="Batch no" className="w-full border rounded px-2 py-1 text-sm" />
                         : (m.batch_no || '—')}</div>
-                      <div className="col-span-1 text-center"><input type="checkbox" checked={m.added} disabled={!canRecipeEdit} onChange={() => toggleMixMat(i)} className="h-4 w-4" /></div>
+                      <div className="col-span-1 text-center"><input type="checkbox" checked={m.added} disabled={!recRecipeEdit} onChange={() => toggleMixMat(i)} className="h-4 w-4" /></div>
                     </div>
                   ))}
                 </div>
@@ -371,7 +377,7 @@ export default function GrindingPage() {
                 <div className="mt-3 border-t pt-3">
                   <div className="text-sm font-semibold mb-2">Mixing time</div>
                   <div className="flex flex-wrap items-center gap-2 mb-2">
-                    {canRecipeEdit && <>
+                    {recRecipeEdit && <>
                       {mixTimer.status === 'idle' && <button onClick={startMix} className="bg-green-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium">▶ Start</button>}
                       {mixTimer.status === 'running' && <>
                         <button onClick={pauseMix} className="bg-amber-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium">⏸ Pause</button>
@@ -385,7 +391,7 @@ export default function GrindingPage() {
                     </>}
                     <span className="font-mono text-xl font-bold ml-1">{fmtDur(totalMs(mixTimer, now))}</span>
                     <span className={`text-xs px-2 py-0.5 rounded-full ${mixTimer.status === 'running' ? 'bg-green-100 text-green-700' : mixTimer.status === 'paused' ? 'bg-amber-100 text-amber-700' : mixTimer.status === 'stopped' ? 'bg-gray-200 text-gray-700' : 'bg-gray-100 text-gray-500'}`}>{mixTimer.status === 'idle' ? 'not started' : mixTimer.status}</span>
-                    {canRecipeEdit && mixTimer.status !== 'idle' && <button onClick={cancelMixTimer} className="text-orange-600 hover:underline text-xs ml-1">Request to cancel</button>}
+                    {recRecipeEdit && mixTimer.status !== 'idle' && <button onClick={cancelMixTimer} className="text-orange-600 hover:underline text-xs ml-1">Request to cancel</button>}
                   </div>
                   <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-500">
                     <span>Started: {fmtClock(mixTimer.segments[0]?.s || null)}</span>
@@ -400,11 +406,11 @@ export default function GrindingPage() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
               {([['crusher_before', 'Crusher — before'], ['crusher_after', 'Crusher — after'], ['qty_rework', 'Qty Rework'], ['qty_rejection', 'Qty Rejection'], ['correction_action', 'Correction action'], ['prepared_by', 'Prepared by'], ['verified_by', 'Verified by'], ['remark', 'Remark']] as [string, string][]).map(([k, label]) => (
                 <div key={k}><label className="block text-sm font-medium mb-1">{label}</label>
-                  <input value={insp[k] || ''} onChange={e => setInsp(s => ({ ...s, [k]: e.target.value }))} disabled={!canEdit} className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100" /></div>
+                  <input value={insp[k] || ''} onChange={e => setInsp(s => ({ ...s, [k]: e.target.value }))} disabled={!recEdit} className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100" /></div>
               ))}
             </div>
             <div className="flex gap-2">
-              {(canEdit || canRecipeEdit) && <button onClick={saveRecord} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{saving ? 'Saving…' : 'Save'}</button>}
+              {(recEdit || recRecipeEdit) && <button onClick={saveRecord} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{saving ? 'Saving…' : 'Save'}</button>}
               <button onClick={() => setOpenRec(null)} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Close</button>
             </div>
           </div>

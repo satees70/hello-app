@@ -48,8 +48,11 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields, 
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
   const canEdit = can(profile, moduleKey, 'edit')
-  const myFactoryOptions = isHO ? factories.map(f => f.code)
-    : (profile?.factory_codes?.length ? profile.factory_codes : (profile?.factory_code ? [profile.factory_code] : []))
+  const canEditFac = (fc: string) => can(profile, moduleKey, 'edit', fc)   // honours per-factory view-only
+  const myFactoryOptions = (isHO ? factories.map(f => f.code)
+    : (profile?.factory_codes?.length ? profile.factory_codes : (profile?.factory_code ? [profile.factory_code] : []))).filter(c => canEditFac(c))
+  // Can the user edit the record/form currently open (by its factory)?
+  const formEditable = canEditFac(factory)
   const factoryName = (c: string) => factories.find(f => f.code === c)?.name || c
   const listFields = fields.filter(f => f.list)
   const visibleRows = rows.filter(r => {
@@ -101,7 +104,7 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields, 
   }
 
   async function save() {
-    if (!canEdit) { setError('You have view-only access here.'); return }
+    if (!formEditable) { setError('You have view-only access at this factory.'); return }
     setSaving(true); setError('')
     if (!factory) { setError('Pick a factory.'); setSaving(false); return }
     const payload: Record<string, unknown> = { factory_code: factory }
@@ -138,7 +141,7 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields, 
       <div className="max-w-6xl mx-auto px-6 py-8">
         <div className="flex items-center justify-between mb-1">
           <h1 className="text-2xl font-bold">{title}</h1>
-          {canEdit && <button onClick={() => (editing ? close() : openNew())} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">{editing ? 'Cancel' : '+ New record'}</button>}
+          {(editing || (canEdit && myFactoryOptions.length > 0)) && <button onClick={() => (editing ? close() : openNew())} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">{editing ? 'Cancel' : '+ New record'}</button>}
         </div>
         {subtitle && <p className="text-gray-500 text-sm mb-5">{subtitle}</p>}
 
@@ -159,7 +162,7 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields, 
               {!isHO && visibleRows.map(r => (
                 <tr key={r.id as string} className="border-b last:border-0 hover:bg-gray-50">
                   {listFields.map(fl => <td key={fl.key} className="px-3 py-2 whitespace-nowrap">{cell(r, fl)}</td>)}
-                  <td className="px-3 py-2 text-right"><button onClick={() => openEdit(r)} className="text-blue-600 hover:underline">{canEdit ? 'Open' : 'View'}</button></td>
+                  <td className="px-3 py-2 text-right"><button onClick={() => openEdit(r)} className="text-blue-600 hover:underline">{canEditFac(r.factory_code as string) ? 'Open' : 'View'}</button></td>
                 </tr>
               ))}
               {isHO && [...new Set(visibleRows.map(r => r.factory_code as string))].map(fc => {
@@ -174,7 +177,7 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields, 
                       <tr key={r.id as string} className="border-b last:border-0 hover:bg-gray-50">
                         <td className="px-3 py-2 whitespace-nowrap">{factoryName(r.factory_code as string)}</td>
                         {listFields.map(fl => <td key={fl.key} className="px-3 py-2 whitespace-nowrap">{cell(r, fl)}</td>)}
-                        <td className="px-3 py-2 text-right"><button onClick={() => openEdit(r)} className="text-blue-600 hover:underline">{canEdit ? 'Open' : 'View'}</button></td>
+                        <td className="px-3 py-2 text-right"><button onClick={() => openEdit(r)} className="text-blue-600 hover:underline">{canEditFac(r.factory_code as string) ? 'Open' : 'View'}</button></td>
                       </tr>
                     ))}
                   </Fragment>
@@ -203,24 +206,24 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields, 
                     const dur = sv ? (Date.parse(fv || new Date(now).toISOString()) - Date.parse(sv)) : 0
                     return (
                       <div className="flex flex-wrap items-center gap-2 border rounded-lg px-3 py-2">
-                        {canEdit && !sv && <button type="button" onClick={() => setField(fl.startKey!, new Date().toISOString())} className="bg-green-600 text-white px-3 py-1 rounded-lg text-sm font-medium">▶ Start</button>}
-                        {canEdit && sv && !fv && <button type="button" onClick={() => setField(fl.finishKey!, new Date().toISOString())} className="bg-red-600 text-white px-3 py-1 rounded-lg text-sm font-medium">⏹ Finish</button>}
-                        {canEdit && sv && editing === 'new' && <button type="button" onClick={() => { setField(fl.startKey!, ''); setField(fl.finishKey!, '') }} className="border px-3 py-1 rounded-lg text-sm">↻ Reset</button>}
+                        {formEditable && !sv && <button type="button" onClick={() => setField(fl.startKey!, new Date().toISOString())} className="bg-green-600 text-white px-3 py-1 rounded-lg text-sm font-medium">▶ Start</button>}
+                        {formEditable && sv && !fv && <button type="button" onClick={() => setField(fl.finishKey!, new Date().toISOString())} className="bg-red-600 text-white px-3 py-1 rounded-lg text-sm font-medium">⏹ Finish</button>}
+                        {formEditable && sv && editing === 'new' && <button type="button" onClick={() => { setField(fl.startKey!, ''); setField(fl.finishKey!, '') }} className="border px-3 py-1 rounded-lg text-sm">↻ Reset</button>}
                         <span className="font-mono text-sm font-semibold">{sv ? fmtDur(dur) : '—'}</span>
                         <span className="text-xs text-gray-500">{sv && `Start ${fmtClock(sv)}`}{fv ? ` · End ${fmtClock(fv)}` : sv ? ' · running' : ''}</span>
-                        {canEdit && sv && editing !== 'new' && fl.cancelKey && <button type="button" onClick={() => requestCancel(fl)} className="text-orange-600 hover:underline text-xs ml-1">Request to cancel</button>}
+                        {formEditable && sv && editing !== 'new' && fl.cancelKey && <button type="button" onClick={() => requestCancel(fl)} className="text-orange-600 hover:underline text-xs ml-1">Request to cancel</button>}
                       </div>
                     )
                   })() : fl.type === 'select' ? (
-                    <select value={form[fl.key] || ''} onChange={e => setForm({ ...form, [fl.key]: e.target.value })} disabled={!canEdit} className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100">
+                    <select value={form[fl.key] || ''} onChange={e => setForm({ ...form, [fl.key]: e.target.value })} disabled={!formEditable} className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100">
                       <option value="">—</option>{(fl.options || []).map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
                   ) : fl.type === 'item' ? (
-                    <input list="process-items" value={form[fl.key] || ''} onChange={e => setForm({ ...form, [fl.key]: e.target.value })} disabled={!canEdit}
+                    <input list="process-items" value={form[fl.key] || ''} onChange={e => setForm({ ...form, [fl.key]: e.target.value })} disabled={!formEditable}
                       placeholder="Search code or name…" className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100" />
                   ) : (
                     <input type={fl.type === 'number' ? 'number' : fl.type === 'date' ? 'date' : fl.type === 'time' ? 'time' : 'text'}
-                      value={form[fl.key] || ''} onChange={e => setForm({ ...form, [fl.key]: e.target.value })} disabled={!canEdit}
+                      value={form[fl.key] || ''} onChange={e => setForm({ ...form, [fl.key]: e.target.value })} disabled={!formEditable}
                       className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100" />
                   )}
                 </div>
@@ -228,8 +231,8 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields, 
             </div>
             {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mt-3">{error}</p>}
             <div className="flex flex-wrap gap-2 mt-4 items-center">
-              {canEdit && <button onClick={save} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{saving ? 'Saving…' : 'Save'}</button>}
-              {applyAction && canEdit && editing !== 'new' && (
+              {formEditable && <button onClick={save} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{saving ? 'Saving…' : 'Save'}</button>}
+              {applyAction && formEditable && editing !== 'new' && (
                 (editing as Record<string, unknown>)[applyAction.flagField]
                   ? <span className="text-green-700 text-sm font-medium">✓ {applyAction.doneLabel}</span>
                   : <button onClick={runApply} disabled={saving} className="bg-emerald-600 text-white px-5 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium">{applyAction.label}</button>

@@ -33,7 +33,7 @@ const PACK = 'BAG|CTN|CARTON'
 export default function IncomingPage() {
   const { profile, loading, error: profileError } = useProfile()
   useRequireView(profile, 'goods_received')
-  const canEdit = profile ? can(profile, 'goods_received', 'edit') : false
+  const canEditFac = (fc: string | undefined) => can(profile, 'goods_received', 'edit', fc)   // honours per-factory view-only
   const [docs, setDocs] = useState<DeliveryOrder[]>([])
   const [lineCounts, setLineCounts] = useState<Record<string, { recv: number; total: number }>>({})
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
@@ -63,7 +63,7 @@ export default function IncomingPage() {
     setEditForm({ item_code: l.item_code || '', description: l.description || '', quantity: String(l.quantity ?? ''), unit: l.unit || '', batch_no: l.batch_no || '' })
   }
   async function submitEditReq() {
-    if (!canEdit) { setError("You have view-only access here."); return }
+    if (!canEditFac(linesFor?.factory_code)) { setError("You have view-only access at this factory."); return }
     if (!editReq || !linesFor) return
     const orig: Record<string, string> = { item_code: editReq.item_code || '', description: editReq.description || '', quantity: String(editReq.quantity ?? ''), unit: editReq.unit || '', batch_no: editReq.batch_no || '' }
     const changed = EDIT_FIELDS.filter(f => (editForm[f.key] || '') !== orig[f.key])
@@ -82,7 +82,7 @@ export default function IncomingPage() {
     setEditReq(null); setSuccess('Change request sent to Head Office.')
   }
   async function requestDeleteLine(l: DoLine) {
-    if (!canEdit) { setError("You have view-only access here."); return }
+    if (!canEditFac(linesFor?.factory_code)) { setError("You have view-only access at this factory."); return }
     if (!linesFor) return
     const reason = window.prompt(`Request to DELETE line "${l.item_code}".\nReason (sent to Head Office):`)
     if (reason === null) return
@@ -133,7 +133,7 @@ export default function IncomingPage() {
 
   async function doUpload(file: File) {
     if (!profile) return
-    if (!canEdit) { setError('You have view-only access to Goods Received.'); return }
+    if (!canEditFac(profile.factory_code)) { setError('You have view-only access to Goods Received at your factory.'); return }
     if (file.type !== 'application/pdf') { setError('Please choose a PDF file.'); return }
     setUploading(true); setError(''); setSuccess('')
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
@@ -186,7 +186,7 @@ export default function IncomingPage() {
 
   // QC ticks a line as checked (or unchecks)
   async function toggleQc(line: DoLine) {
-    if (!canEdit) { setError("You have view-only access here."); return }
+    if (!canEditFac(linesFor?.factory_code)) { setError("You have view-only access at this factory."); return }
     await supabase.from('delivery_order_lines').update({ qc_checked: !line.qc_checked }).eq('id', line.id)
     reloadLines()
   }
@@ -213,7 +213,7 @@ export default function IncomingPage() {
 
   // Attach one photo to a line (compressed), stored under the document's folder
   async function onLinePhoto(line: DoLine, file: File) {
-    if (!canEdit) { setError("You have view-only access here."); return }
+    if (!canEditFac(linesFor?.factory_code)) { setError("You have view-only access at this factory."); return }
     if (!linesFor) return
     setBusyLine(line.id); setError('')
     try {
@@ -234,7 +234,7 @@ export default function IncomingPage() {
 
   // Re-run extraction for a document stuck on Processing or Error
   async function reExtract(doc: DeliveryOrder) {
-    if (!canEdit) { setError("You have view-only access here."); return }
+    if (!canEditFac(doc.factory_code)) { setError("You have view-only access at this factory."); return }
     setError(''); setSuccess('')
     await supabase.from('delivery_orders').update({ status: 'Processing' }).eq('id', doc.id)
     loadDocs()
@@ -254,7 +254,7 @@ export default function IncomingPage() {
   }
 
   async function handleDelete(doc: DeliveryOrder) {
-    if (!canEdit) { setError("You have view-only access here."); return }
+    if (!canEditFac(doc.factory_code)) { setError("You have view-only access at this factory."); return }
     if (!confirm(`Delete "${doc.file_name}"? This removes the document record (received stock is not reversed).`)) return
     await supabase.storage.from('delivery-orders').remove([doc.file_path])
     await supabase.from('delivery_order_lines').delete().eq('do_id', doc.id)
@@ -358,7 +358,7 @@ export default function IncomingPage() {
 
   // Receive ONE line into stock (partial receiving). Requires QC tick + photo.
   async function receiveLine(l: DoLine, silent = false) {
-    if (!canEdit) { setError("You have view-only access here."); return }
+    if (!canEditFac(linesFor?.factory_code)) { setError("You have view-only access at this factory."); return }
     if (!linesFor || l.received_at) return
     const c = lineCalc(l)
     if (!c.known || c.factor === null) { setError(`${l.item_code}: cannot be received (unknown item or pack size).`); return }
@@ -396,7 +396,7 @@ export default function IncomingPage() {
 
   // Receive every line that's ready (QC-ticked + photo + receivable) and not yet received
   async function receiveAllReady() {
-    if (!canEdit) { setError("You have view-only access here."); return }
+    if (!canEditFac(linesFor?.factory_code)) { setError("You have view-only access at this factory."); return }
     if (!linesFor) return
     setReceiving(true); setError(''); setSuccess('')
     const ready = lines.filter(l => !l.received_at && l.qc_checked && l.photo_path && (() => { const c = lineCalc(l); return c.known && c.factor !== null })())
@@ -495,7 +495,7 @@ export default function IncomingPage() {
               {lines.length === 0 && <p className="text-center py-6 text-gray-400 border rounded-lg">No lines read from this document.</p>}
               {lines.map(l => {
                 const c = lineCalc(l)
-                const editable = !l.received_at
+                const editable = !l.received_at && canEditFac(linesFor.factory_code)
                 return (
                   <div key={l.id} className={`border rounded-lg p-3 ${l.received_at ? 'border-green-300 bg-green-50/60' : (l.qc_checked && l.photo_path ? 'border-green-200 bg-green-50/30' : '')}`}>
                     <div className="flex items-start justify-between gap-2">
@@ -530,7 +530,7 @@ export default function IncomingPage() {
                   {lines.length === 0 && <tr><td colSpan={9} className="text-center py-6 text-gray-400">No lines read from this document.</td></tr>}
                   {lines.map(l => {
                     const c = lineCalc(l)
-                    const editable = !l.received_at
+                    const editable = !l.received_at && canEditFac(linesFor.factory_code)
                     return (
                       <tr key={l.id} className={`border-b last:border-0 ${l.received_at ? 'bg-green-50/40' : ''}`}>
                         <td className="px-3 py-2 text-center">{qcBox(l, editable)}</td>
