@@ -236,6 +236,63 @@ export default function PackingPage() {
           </div>
         )}
 
+        {/* Scheduled — what each line packs on the chosen day (shown first) */}
+        <h2 className="font-semibold text-gray-800 mb-2">📅 Scheduled to pack</h2>
+        <div className="flex flex-wrap gap-2 items-center mb-4 text-sm">
+          <span className="text-gray-500">Pack date:</span>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-2 bg-white" />
+          <button onClick={() => setDate(today)} className="text-blue-600 hover:underline">Today</button>
+          <label className="flex items-center gap-2 cursor-pointer ml-2"><input type="checkbox" checked={hideDone} onChange={e => setHideDone(e.target.checked)} className="h-4 w-4" /><span className="text-gray-700">Hide completed</span></label>
+        </div>
+
+        {facs.length === 0 ? (
+          <div className="bg-white rounded-xl shadow-sm border p-10 text-center text-gray-400 mb-8">
+            Nothing scheduled to pack on {fmtDate(date)}.
+            <br />Schedule a batch from “Ready to pack” below.
+          </div>
+        ) : (
+          <div className="space-y-6 mb-8">
+            {facs.map(fc => (
+              <div key={fc}>
+                {(isHO || facs.length > 1) && <button onClick={() => toggleFac(fc)} className="flex items-center gap-1 font-semibold text-gray-700 mb-2 hover:text-gray-900"><span className="text-gray-400 w-3 inline-block">{collapsedFacs.has(fc) ? '▸' : '▾'}</span> 🏭 {factoryName(fc)}</button>}
+                {!collapsedFacs.has(fc) && <div className="space-y-4">
+                  {Object.keys(byFactory[fc]).sort().map(line => (
+                    <div key={line} className="bg-white rounded-xl shadow-sm border p-4">
+                      <div className="font-semibold mb-2">📅 {fmtDate(date)} · <span className="text-teal-700">{line}</span> <span className="text-gray-400 font-normal text-sm">· {byFactory[fc][line].length} item(s)</span></div>
+                      <div className="overflow-x-auto border rounded-lg">
+                        <table className="w-full text-sm">
+                          <thead className="bg-gray-50 border-b">
+                            <tr>{['Batch', 'Item', 'To pack', 'Produced', 'Backorder', 'Status', ''].map(h => (
+                              <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+                          </thead>
+                          <tbody>
+                            {byFactory[fc][line].map(b => {
+                              const backorder = Math.max(0, b.total_quantity - (b.produced_qty || 0))
+                              return (
+                                <tr key={b.id} className="border-b last:border-0">
+                                  <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}</td>
+                                  <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span></td>
+                                  <td className="px-3 py-2 text-right font-semibold">{b.total_quantity}</td>
+                                  <td className="px-3 py-2 text-right text-green-700">{b.produced_qty || 0}</td>
+                                  <td className={`px-3 py-2 text-right font-semibold ${backorder > 0 ? 'text-red-600' : 'text-green-600'}`}>{backorder}</td>
+                                  <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[status(b)] || 'bg-gray-100 text-gray-700'}`}>{status(b)}</span></td>
+                                  <td className="px-3 py-2 whitespace-nowrap text-right">
+                                    <a href={`/inspection?batch=${b.id}`} className="border border-green-600 text-green-700 px-3 py-1 rounded-lg hover:bg-green-50 text-xs font-medium">📋 Packing &amp; Finished Goods Inspection Record</a>
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                </div>}
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Ready to pack — materials received, not yet scheduled */}
         <h2 className="font-semibold text-gray-800 mb-2">✅ Ready to pack <span className="text-gray-400 font-normal text-sm">· {readyToPack.length} waiting to schedule</span></h2>
         {/* Mobile: cards */}
@@ -319,62 +376,7 @@ export default function PackingPage() {
           </table>
         </div>
 
-        {/* Scheduled — what each line packs on the chosen day */}
-        <h2 className="font-semibold text-gray-800 mb-2">📅 Scheduled to pack</h2>
-        <div className="flex flex-wrap gap-2 items-center mb-4 text-sm">
-          <span className="text-gray-500">Pack date:</span>
-          <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-2 bg-white" />
-          <button onClick={() => setDate(today)} className="text-blue-600 hover:underline">Today</button>
-          <label className="flex items-center gap-2 cursor-pointer ml-2"><input type="checkbox" checked={hideDone} onChange={e => setHideDone(e.target.checked)} className="h-4 w-4" /><span className="text-gray-700">Hide completed</span></label>
-        </div>
-
-        {facs.length === 0 ? (
-          <div className="bg-white rounded-xl shadow-sm border p-10 text-center text-gray-400">
-            Nothing scheduled to pack on {fmtDate(date)}.
-            <br />Schedule a batch from “Ready to pack” above.
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {facs.map(fc => (
-              <div key={fc}>
-                {(isHO || facs.length > 1) && <button onClick={() => toggleFac(fc)} className="flex items-center gap-1 font-semibold text-gray-700 mb-2 hover:text-gray-900"><span className="text-gray-400 w-3 inline-block">{collapsedFacs.has(fc) ? '▸' : '▾'}</span> 🏭 {factoryName(fc)}</button>}
-                {!collapsedFacs.has(fc) && <div className="space-y-4">
-                  {Object.keys(byFactory[fc]).sort().map(line => (
-                    <div key={line} className="bg-white rounded-xl shadow-sm border p-4">
-                      <div className="font-semibold mb-2">📅 {fmtDate(date)} · <span className="text-teal-700">{line}</span> <span className="text-gray-400 font-normal text-sm">· {byFactory[fc][line].length} item(s)</span></div>
-                      <div className="overflow-x-auto border rounded-lg">
-                        <table className="w-full text-sm">
-                          <thead className="bg-gray-50 border-b">
-                            <tr>{['Batch', 'Item', 'To pack', 'Produced', 'Backorder', 'Status', ''].map(h => (
-                              <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
-                          </thead>
-                          <tbody>
-                            {byFactory[fc][line].map(b => {
-                              const backorder = Math.max(0, b.total_quantity - (b.produced_qty || 0))
-                              return (
-                                <tr key={b.id} className="border-b last:border-0">
-                                  <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}</td>
-                                  <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span></td>
-                                  <td className="px-3 py-2 text-right font-semibold">{b.total_quantity}</td>
-                                  <td className="px-3 py-2 text-right text-green-700">{b.produced_qty || 0}</td>
-                                  <td className={`px-3 py-2 text-right font-semibold ${backorder > 0 ? 'text-red-600' : 'text-green-600'}`}>{backorder}</td>
-                                  <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[status(b)] || 'bg-gray-100 text-gray-700'}`}>{status(b)}</span></td>
-                                  <td className="px-3 py-2 whitespace-nowrap text-right">
-                                    <a href={`/inspection?batch=${b.id}`} className="border border-green-600 text-green-700 px-3 py-1 rounded-lg hover:bg-green-50 text-xs font-medium">📋 Packing &amp; Finished Goods Inspection Record</a>
-                                  </td>
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ))}
-                </div>}
-              </div>
-            ))}
-          </div>
-        )}
+        {/* (Scheduled to pack moved above Ready to pack) */}
       </div>
     </div>
   )
