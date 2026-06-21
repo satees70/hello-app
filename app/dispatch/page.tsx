@@ -17,7 +17,9 @@ interface DOrder {
   id: string; do_number: string | null; factory_code: string; status: string
   created_by_name: string | null; created_at: string
   dispatch_order_lines?: { item_code: string; description: string | null; quantity: number }[]
+  material_returns?: { item_code: string; description: string | null; quantity: number; batch_no: string | null }[]
 }
+interface CartReturn { lotId: string; itemCode: string; description: string; unit: string; batchNo: string | null; qty: number; reason: string; factory: string; factoryName: string }
 interface MReturn {
   id: string; factory_code: string; item_code: string; description: string | null
   batch_no: string | null; quantity: number; reason: string | null; created_by_name: string | null; created_at: string
@@ -49,7 +51,7 @@ export default function DispatchPage() {
   const [lotId, setLotId] = useState('')
   const [qty, setQty] = useState('')
   const [reason, setReason] = useState('')
-  const [saving, setSaving] = useState(false)
+  const [returnCart, setReturnCart] = useState<CartReturn[]>([])
 
   useEffect(() => { if (profile) load() }, [profile])
 
@@ -70,7 +72,7 @@ export default function DispatchPage() {
       .is('dispatched_at', null).gt('produced_qty', 0).order('delivery_date')
     setBatches((b as Batch[]) || [])
     const { data: o } = await supabase.from('dispatch_orders')
-      .select('id, do_number, factory_code, status, created_by_name, created_at, dispatch_order_lines(item_code, description, quantity)')
+      .select('id, do_number, factory_code, status, created_by_name, created_at, dispatch_order_lines(item_code, description, quantity), material_returns(item_code, description, quantity, batch_no)')
       .order('created_at', { ascending: false }).limit(50)
     setOrders((o as DOrder[]) || [])
     const { data: r } = await supabase.from('material_returns').select('*').order('created_at', { ascending: false }).limit(50)
@@ -90,19 +92,11 @@ export default function DispatchPage() {
 
   const toggle = (id: string) => setPicked(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
 
-  async function createDO() {
-    if (picked.size === 0) { setError('Tick at least one item to send.'); return }
-    const facs = new Set(batches.filter(b => picked.has(b.id)).map(b => b.factory_code))
-    if (facs.size > 1) { setError('Please send one factory at a time — the ticked items are from different factories.'); return }
-    if (!confirm(`Create a delivery order for ${picked.size} item(s) and send to the warehouse?`)) return
-    setBusy(true); setError(''); setSuccess('')
-    const { data, error: e } = await supabase.rpc('create_dispatch_order', { p_batch_ids: Array.from(picked) })
-    if (e) { setError(e.message); setBusy(false); return }
-    setSuccess(`Delivery order ${data} created — ${picked.size} item(s) sent to warehouse.`)
-    setPicked(new Set()); setBusy(false); load()
-  }
+  const cartFactories = new Set<string>([...batches.filter(b => picked.has(b.id)).map(b => b.factory_code), ...returnCart.map(r => r.factory)])
+  const cartCount = picked.size + returnCart.length
 
-  async function submitReturn(e: React.FormEvent) {
+  // Add a raw-material return to the delivery-order cart (stock isn't reduced until the DO is created).
+  function addReturn(e: React.FormEvent) {
     e.preventDefault()
     setError(''); setSuccess('')
     const it = resolve(code)
@@ -110,13 +104,25 @@ export default function DispatchPage() {
     if (!lot) { setError('Pick the batch you are returning.'); return }
     const num = Number(qty)
     if (!(num > 0)) { setError('Enter a quantity greater than zero.'); return }
-    if (!reason.trim()) { setError('Please give a reason for the return.'); return }
-    setSaving(true)
-    const { error: rErr } = await supabase.rpc('return_material', { p_factory: factory, p_item_code: it.code, p_lot_id: lot.id, p_qty: num, p_reason: reason.trim() })
-    if (rErr) { setError(rErr.message); setSaving(false); return }
-    setSaving(false)
-    setSuccess(`Returned ${num} ${it.unit} of ${it.code} (batch ${lot.batch_no || '—'}) — factory stock reduced.`)
-    setCode(''); setLotId(''); setQty(''); setReason(''); load()
+    const already = returnCart.filter(r => r.lotId === lot.id).reduce((s, r) => s + r.qty, 0)
+    if (already + num > lot.qty_remaining) { setError(`Batch ${lot.batch_no || '—'} only has ${lot.qty_remaining} ${it.unit} left${already ? ` (you already added ${already})` : ''}.`); return }
+    setReturnCart(c => [...c, { lotId: lot.id, itemCode: it.code, description: it.description, unit: it.unit, batchNo: lot.batch_no, qty: num, reason: reason.trim(), factory, factoryName: factoryName(factory) }])
+    setCode(''); setLotId(''); setQty(''); setReason('')
+  }
+
+  // Create ONE delivery order with all ticked finished goods + all cart returns.
+  async function createDO() {
+    if (cartCount === 0) { setError('Add at least one item — finished goods or a raw-material return.'); return }
+    if (cartFactories.size > 1) { setError('One factory per delivery order — your items are from different factories.'); return }
+    if (!confirm(`Create a delivery order with ${cartCount} item(s) and send to the warehouse?`)) return
+    setBusy(true); setError(''); setSuccess('')
+    const { data, error: e } = await supabase.rpc('create_delivery_order', {
+      p_batch_ids: Array.from(picked),
+      p_returns: returnCart.map(r => ({ lot_id: r.lotId, qty: r.qty, reason: r.reason })),
+    })
+    if (e) { setError(e.message); setBusy(false); return }
+    setSuccess(`Delivery order ${data} created — ${cartCount} item(s) sent to warehouse.`)
+    setPicked(new Set()); setReturnCart([]); setBusy(false); load()
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
@@ -133,16 +139,13 @@ export default function DispatchPage() {
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         <h1 className="text-2xl font-bold mb-1">Delivery Orders</h1>
-        <p className="text-gray-500 text-sm mb-5">Send finished goods to the warehouse, or return raw materials.</p>
+        <p className="text-gray-500 text-sm mb-5">Tick finished goods and/or add raw-material returns, then create one delivery order to the warehouse.</p>
 
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
         {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}
 
         {/* ---- Finished goods to deliver ---- */}
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-lg font-semibold">Finished goods ready to send</h2>
-          {canEdit && <button onClick={createDO} disabled={busy || picked.size === 0} className="bg-teal-600 text-white px-4 py-2 rounded-lg hover:bg-teal-700 disabled:opacity-50 text-sm font-medium">Create delivery order{picked.size ? ` (${picked.size})` : ''}</button>}
-        </div>
+        <h2 className="text-lg font-semibold mb-2">Finished goods ready to send</h2>
 
         {/* mobile cards */}
         <div className="md:hidden space-y-2 mb-8">
@@ -195,9 +198,9 @@ export default function DispatchPage() {
 
         {/* ---- Raw material return ---- */}
         <h2 className="text-lg font-semibold mb-2">Return raw material</h2>
-        <p className="text-gray-500 text-xs mb-3">Pick the batch being returned — its factory stock is reduced immediately.</p>
+        <p className="text-gray-500 text-xs mb-3">Pick a batch and add it to the delivery order below. Stock is reduced when the order is created.</p>
         {canEdit && (
-          <form onSubmit={submitReturn} className="bg-white border rounded-xl shadow-sm p-4 mb-8">
+          <form onSubmit={addReturn} className="bg-white border rounded-xl shadow-sm p-4 mb-8">
             <div className="flex flex-wrap gap-4 items-end">
               {myFactories.length > 1 ? (
                 <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Factory (location)</span>
@@ -231,10 +234,43 @@ export default function DispatchPage() {
                 <input type="number" step="any" min="0" value={qty} onChange={e => setQty(e.target.value)} className="border rounded px-2 py-1.5 text-sm" /></div>
               <div className="flex flex-col gap-1 min-w-[220px] flex-1"><span className="text-xs font-medium text-gray-600">Reason</span>
                 <input value={reason} onChange={e => setReason(e.target.value)} placeholder="Why is it being returned?" className="border rounded px-2 py-1.5 text-sm" /></div>
-              <button disabled={saving} className="bg-orange-600 text-white px-5 py-2 rounded-lg hover:bg-orange-700 disabled:opacity-50 text-sm font-medium">{saving ? 'Saving…' : 'Return material'}</button>
+              <button className="bg-orange-600 text-white px-5 py-2 rounded-lg hover:bg-orange-700 text-sm font-medium">Add to delivery order</button>
             </div>
-            {item && onHandQty !== null && Number(qty) > onHandQty && <p className="text-amber-600 text-xs mt-2">⚠ Returning more than on-hand ({onHandQty}). This will fail — there isn’t enough stock.</p>}
+            {lot && Number(qty) > lot.qty_remaining && <p className="text-amber-600 text-xs mt-2">⚠ Only {lot.qty_remaining} {item?.unit} left in this batch.</p>}
           </form>
+        )}
+
+        {/* ---- Consolidated delivery-order cart ---- */}
+        {canEdit && cartCount > 0 && (
+          <div className="bg-white border-2 border-teal-300 rounded-xl shadow-sm p-4 mb-8">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold">This delivery order <span className="text-gray-400 font-normal text-sm">· {cartCount} item(s)</span></h2>
+              <button onClick={createDO} disabled={busy || cartFactories.size > 1} className="bg-teal-600 text-white px-4 py-2 rounded-lg hover:bg-teal-700 disabled:opacity-50 text-sm font-medium">{busy ? 'Creating…' : 'Create delivery order'}</button>
+            </div>
+            <div className="text-sm divide-y">
+              {batches.filter(b => picked.has(b.id)).map(b => (
+                <div key={b.id} className="flex items-center gap-2 py-1.5">
+                  <span title="Finished goods">📦</span>
+                  <span className="font-mono">{b.item_code}</span>
+                  <span className="text-gray-400 flex-1 truncate">{b.description}{b.batch_no ? ` · ${b.batch_no}` : ''}</span>
+                  <span className="font-medium whitespace-nowrap">× {b.produced_qty}</span>
+                  {multiFac && <span className="text-gray-400 text-xs whitespace-nowrap">{factoryName(b.factory_code)}</span>}
+                  <button onClick={() => toggle(b.id)} className="text-red-500 text-xs hover:underline">remove</button>
+                </div>
+              ))}
+              {returnCart.map((r, i) => (
+                <div key={i} className="flex items-center gap-2 py-1.5">
+                  <span title="Raw-material return" className="text-orange-600">↩</span>
+                  <span className="font-mono">{r.itemCode}</span>
+                  <span className="text-gray-400 flex-1 truncate">{r.description} · batch {r.batchNo || '—'}{r.reason ? ` · ${r.reason}` : ''}</span>
+                  <span className="font-medium whitespace-nowrap">× {r.qty} {r.unit}</span>
+                  {multiFac && <span className="text-gray-400 text-xs whitespace-nowrap">{r.factoryName}</span>}
+                  <button onClick={() => setReturnCart(c => c.filter((_, j) => j !== i))} className="text-red-500 text-xs hover:underline">remove</button>
+                </div>
+              ))}
+            </div>
+            {cartFactories.size > 1 && <p className="text-amber-600 text-xs mt-2">⚠ Items are from different factories. A delivery order must be for one factory — remove the others.</p>}
+          </div>
         )}
 
         {/* ---- History ---- */}
@@ -248,7 +284,10 @@ export default function DispatchPage() {
                 <tr key={o.id} className="border-b last:border-0 align-top hover:bg-gray-50">
                   <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{o.do_number}</td>
                   {multiFac && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(o.factory_code)}</td>}
-                  <td className="px-3 py-2 text-gray-600">{(o.dispatch_order_lines || []).map((l, i) => <span key={i} className="block"><span className="font-mono">{l.item_code}</span> × {l.quantity}</span>)}</td>
+                  <td className="px-3 py-2 text-gray-600">
+                    {(o.dispatch_order_lines || []).map((l, i) => <span key={`f${i}`} className="block">📦 <span className="font-mono">{l.item_code}</span> × {l.quantity}</span>)}
+                    {(o.material_returns || []).map((l, i) => <span key={`r${i}`} className="block text-orange-600">↩ <span className="font-mono">{l.item_code}</span> × {l.quantity}</span>)}
+                  </td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-600">{o.created_by_name || '—'}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-400">{fmt(o.created_at)}</td>
                 </tr>
