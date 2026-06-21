@@ -131,6 +131,15 @@ export default function IncomingPage() {
   )
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
+  const photoReq = !isHO   // Head Office can receive without a photo; factory staff must attach one
+
+  // Tick QC on every not-yet-received line at once
+  async function tickAllQc() {
+    if (!canEditFac(linesFor?.factory_code)) { setError("You have view-only access at this factory."); return }
+    if (!linesFor) return
+    await supabase.from('delivery_order_lines').update({ qc_checked: true }).eq('do_id', linesFor.id).is('received_at', null)
+    reloadLines()
+  }
 
   useEffect(() => { if (profile) { loadDocs(); loadFactories(); loadItemsMaster() } }, [profile])
 
@@ -371,7 +380,7 @@ export default function IncomingPage() {
   const receiveBtn = (l: DoLine) => {
     if (l.received_at) return <span className="text-green-600 text-xs font-medium whitespace-nowrap">✓ Received</span>
     const c = lineCalc(l)
-    const ready = l.qc_checked && !!l.photo_path && c.known && c.factor !== null
+    const ready = l.qc_checked && (!photoReq || !!l.photo_path) && c.known && c.factor !== null
     return (
       <button onClick={() => receiveLine(l)} disabled={!ready || busyLine === l.id}
         className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-medium disabled:opacity-40 whitespace-nowrap">
@@ -398,7 +407,7 @@ export default function IncomingPage() {
     if (!linesFor || l.received_at) return
     const c = lineCalc(l)
     if (!c.known || c.factor === null) { setError(`${l.item_code}: cannot be received (unknown item or pack size).`); return }
-    if (!l.qc_checked || !l.photo_path) { setError(`${l.item_code}: tick QC and add a photo first.`); return }
+    if (!l.qc_checked || (photoReq && !l.photo_path)) { setError(`${l.item_code}: tick QC${photoReq ? ' and add a photo' : ''} first.`); return }
     if (!silent) { setBusyLine(l.id); setError(''); setSuccess('') }
     const qty = Number(l.quantity) * c.factor
     const ml = matchLines(l.item_code)
@@ -435,7 +444,7 @@ export default function IncomingPage() {
     if (!canEditFac(linesFor?.factory_code)) { setError("You have view-only access at this factory."); return }
     if (!linesFor) return
     setReceiving(true); setError(''); setSuccess('')
-    const ready = lines.filter(l => !l.received_at && l.qc_checked && l.photo_path && (() => { const c = lineCalc(l); return c.known && c.factor !== null })())
+    const ready = lines.filter(l => !l.received_at && l.qc_checked && (!photoReq || l.photo_path) && (() => { const c = lineCalc(l); return c.known && c.factor !== null })())
     for (const l of ready) await receiveLine(l, true)
     const { data } = await supabase.from('delivery_order_lines').select('*').eq('do_id', linesFor.id).order('item_code')
     const fresh = (data as DoLine[]) || []
@@ -535,7 +544,7 @@ export default function IncomingPage() {
                 </div>
               )
             })()}
-            <p className="text-gray-500 text-sm mb-3">For each line: QC <strong>ticks</strong> and adds a <strong>photo</strong>, then <strong>Receive</strong> that item. You can receive some now and the rest later (partial). Matched items go against their order; known items with no order go into stock flagged <em>unplanned</em>; unknown codes are skipped. Bag/carton quantities convert to KG.</p>
+            <p className="text-gray-500 text-sm mb-3">For each line: QC <strong>ticks</strong>{photoReq ? <> and adds a <strong>photo</strong></> : <> (photo optional for Head Office)</>}, then <strong>Receive</strong> that item. You can receive some now and the rest later (partial). Matched items go against their order; known items with no order go into stock flagged <em>unplanned</em>; unknown codes are skipped. Bag/carton quantities convert to KG.</p>
             {(() => {
               const probs = lines.filter(l => !l.received_at).map(l => ({ l, c: lineCalc(l) })).filter(x => !x.c.known || x.c.factor === null)
               if (probs.length === 0) return null
@@ -614,12 +623,15 @@ export default function IncomingPage() {
             </div>
             {(() => {
               const receivedCount = lines.filter(l => l.received_at).length
-              const readyCount = lines.filter(l => !l.received_at && l.qc_checked && l.photo_path && (() => { const c = lineCalc(l); return c.known && c.factor !== null })()).length
+              const readyCount = lines.filter(l => !l.received_at && l.qc_checked && (!photoReq || l.photo_path) && (() => { const c = lineCalc(l); return c.known && c.factor !== null })()).length
               return (
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 mt-4">
                   <span className="text-sm text-gray-500">{receivedCount} of {lines.length} item(s) received{readyCount ? ` · ${readyCount} ready` : ''}.</span>
+                  {canEditFac(linesFor.factory_code) && lines.some(l => !l.received_at && !l.qc_checked) && (
+                    <button onClick={tickAllQc} className="sm:ml-auto border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 font-medium text-sm w-full sm:w-auto">✓ Tick all QC</button>
+                  )}
                   <button onClick={receiveAllReady} disabled={receiving || readyCount === 0}
-                    className="sm:ml-auto bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium w-full sm:w-auto">
+                    className={`bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium w-full sm:w-auto${lines.some(l => !l.received_at && !l.qc_checked) && canEditFac(linesFor.factory_code) ? '' : ' sm:ml-auto'}`}>
                     {receiving ? 'Receiving…' : `Receive all ready${readyCount ? ` (${readyCount})` : ''}`}
                   </button>
                 </div>
