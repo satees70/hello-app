@@ -77,6 +77,7 @@ export default function DispatchPage() {
   const resolve = (c: string) => items.find(i => i.code.toLowerCase() === c.trim().toLowerCase())
   const item = resolve(code)
   const onHandQty = item ? (onHand[`${item.id}|${factory}`] ?? 0) : null
+  const inStock = items.filter(i => (onHand[`${i.id}|${factory}`] ?? 0) > 0)
 
   const toggle = (id: string) => setPicked(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
 
@@ -197,10 +198,16 @@ export default function DispatchPage() {
                 <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Factory (location)</span>
                   <div className="border rounded px-2 py-1.5 text-sm bg-gray-50 text-gray-700 min-w-[140px]">{factoryName(factory)}</div></div>
               )}
-              <div className="flex flex-col gap-1 min-w-[200px] flex-1"><span className="text-xs font-medium text-gray-600">Material</span>
-                <input list="ret-items" value={code} onChange={e => setCode(e.target.value)} placeholder="Type code…" className="border rounded px-2 py-1.5 text-sm" />
-                <datalist id="ret-items">{items.filter(i => (onHand[`${i.id}|${factory}`] ?? 0) > 0).map(i => <option key={i.id} value={i.code}>{i.description} · {onHand[`${i.id}|${factory}`]} {i.unit}</option>)}</datalist>
-                {item ? <span className="text-xs text-gray-500">{item.description} · on hand: <strong>{onHandQty}</strong> {item.unit}</span> : code ? <span className="text-xs text-red-500">Unknown code</span> : null}
+              <div className="flex flex-col gap-1 min-w-[220px] flex-1"><span className="text-xs font-medium text-gray-600">Material</span>
+                {inStock.length > 0 ? (
+                  <select value={code} onChange={e => setCode(e.target.value)} className="border rounded px-2 py-1.5 text-sm bg-white">
+                    <option value="">Choose a material…</option>
+                    {inStock.map(i => <option key={i.id} value={i.code}>{i.code} — {i.description} · {onHand[`${i.id}|${factory}`]} {i.unit}</option>)}
+                  </select>
+                ) : (
+                  <div className="border rounded px-2 py-1.5 text-sm bg-gray-50 text-gray-400">No materials in stock at {factoryName(factory)}.</div>
+                )}
+                {item ? <span className="text-xs text-gray-500">On hand: <strong>{onHandQty}</strong> {item.unit}</span> : null}
               </div>
               <div className="flex flex-col gap-1 w-28"><span className="text-xs font-medium text-gray-600">Quantity {item ? `(${item.unit})` : ''}</span>
                 <input type="number" step="any" min="0" value={qty} onChange={e => setQty(e.target.value)} className="border rounded px-2 py-1.5 text-sm" /></div>
