@@ -87,6 +87,15 @@ export async function POST(request: Request) {
     const input = toolUse.input as { do_number: string; do_date: string; factory_no: string; lines: DoLine[] }
     const lines = input.lines || []
 
+    // Wrong document type guard: a Sales Order (SO-…) uploaded into Goods Received.
+    // If the document number looks like a Sales Order, reject and clean up.
+    if (/^so[\s\-/]?\d/i.test((input.do_number || '').trim())) {
+      await supabaseAdmin.storage.from('delivery-orders').remove([filePath])
+      await supabaseAdmin.from('delivery_order_lines').delete().eq('do_id', doId)
+      await supabaseAdmin.from('delivery_orders').delete().eq('id', doId)
+      return NextResponse.json({ error: 'This looks like a Sales Order (the document number starts with "SO-"), not a Delivery Order. Please upload it under Sales Orders instead. Nothing was saved.' }, { status: 400 })
+    }
+
     // Header: set the DO number/date, and the factory from the branch number if present.
     const headerUpdate: Record<string, string> = { do_number: input.do_number || '', do_date: input.do_date || '', status: 'Review' }
     if (input.factory_no) headerUpdate.factory_code = `AVINA${input.factory_no}`
