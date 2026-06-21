@@ -6,7 +6,7 @@ import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
 import { can } from '@/lib/permissions'
 
-interface PackLine { id: string; factory_code: string; name: string; active: boolean }
+interface PackLine { id: string; factory_code: string; name: string; active: boolean; line_code: string | null }
 
 export default function PackingLinesPage() {
   const { profile, loading, error: profileError } = useProfile()
@@ -15,6 +15,7 @@ export default function PackingLinesPage() {
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [factory, setFactory] = useState('')
   const [name, setName] = useState('')
+  const [lineCode, setLineCode] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -38,10 +39,15 @@ export default function PackingLinesPage() {
     e.preventDefault()
     if (!factory || !name.trim()) return
     setSaving(true); setError(''); setSuccess('')
-    const { error: e1 } = await supabase.from('packing_lines').insert({ factory_code: factory, name: name.trim() })
+    const { error: e1 } = await supabase.from('packing_lines').insert({ factory_code: factory, name: name.trim(), line_code: lineCode.trim().toUpperCase() || null })
     setSaving(false)
     if (e1) { setError(e1.message.includes('duplicate') ? 'That line already exists for this factory.' : e1.message); return }
-    setName(''); setSuccess('Packing line added.'); load()
+    setName(''); setLineCode(''); setSuccess('Packing line added.'); load()
+  }
+  async function saveLetter(l: PackLine, val: string) {
+    const code = val.trim().toUpperCase() || null
+    await supabase.from('packing_lines').update({ line_code: code }).eq('id', l.id)
+    setLines(prev => prev.map(x => (x.id === l.id ? { ...x, line_code: code } : x)))
   }
 
   async function toggleActive(l: PackLine) {
@@ -85,6 +91,8 @@ export default function PackingLinesPage() {
             )}
             <div className="flex flex-col gap-1 flex-1 min-w-[180px]"><span className="text-xs font-medium text-gray-600">Packing line name</span>
               <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Line 1" className="border rounded px-2 py-1.5 text-sm" /></div>
+            <div className="flex flex-col gap-1 w-24"><span className="text-xs font-medium text-gray-600">Letter</span>
+              <input value={lineCode} onChange={e => setLineCode(e.target.value)} maxLength={3} placeholder="A" className="border rounded px-2 py-1.5 text-sm uppercase" /></div>
             <button disabled={saving || !name.trim()} className="bg-teal-600 text-white px-4 py-1.5 rounded-lg hover:bg-teal-700 disabled:opacity-50 text-sm font-medium">{saving ? 'Adding…' : 'Add line'}</button>
           </form>
         )}
@@ -95,16 +103,18 @@ export default function PackingLinesPage() {
               <tr>
                 {isHO && <th className="text-left px-4 py-2 font-medium text-gray-600">Factory</th>}
                 <th className="text-left px-4 py-2 font-medium text-gray-600">Packing line</th>
+                <th className="text-left px-4 py-2 font-medium text-gray-600">Letter</th>
                 <th className="text-left px-4 py-2 font-medium text-gray-600">Status</th>
                 {(canEdit || canDelete) && <th className="text-left px-4 py-2 font-medium text-gray-600">Action</th>}
               </tr>
             </thead>
             <tbody>
-              {shown.length === 0 && <tr><td colSpan={4} className="text-center py-8 text-gray-400">No packing lines yet.</td></tr>}
+              {shown.length === 0 && <tr><td colSpan={5} className="text-center py-8 text-gray-400">No packing lines yet.</td></tr>}
               {shown.map(l => (
                 <tr key={l.id} className="border-b last:border-0 hover:bg-gray-50">
                   {isHO && <td className="px-4 py-2 text-gray-600">{factoryName(l.factory_code)}</td>}
                   <td className="px-4 py-2 font-medium">{l.name}</td>
+                  <td className="px-4 py-2">{canEdit ? <input defaultValue={l.line_code || ''} maxLength={3} onBlur={e => { if ((e.target.value.trim().toUpperCase() || null) !== (l.line_code || null)) saveLetter(l, e.target.value) }} placeholder="—" className="border rounded px-2 py-1 text-sm w-16 uppercase" /> : <span className="font-mono">{l.line_code || '—'}</span>}</td>
                   <td className="px-4 py-2"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${l.active ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'}`}>{l.active ? 'Active' : 'Hidden'}</span></td>
                   {(canEdit || canDelete) && (
                     <td className="px-4 py-2 whitespace-nowrap">
