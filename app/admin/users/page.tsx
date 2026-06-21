@@ -7,9 +7,9 @@ import { supabase } from '@/lib/supabase'
 import { PERMISSION_MODULES, defaultGrid, isConfigured, type Permissions, type Action } from '@/lib/permissions'
 import MultiFilter from '@/components/MultiFilter'
 
-interface UserRow { id: string; email: string; full_name: string; factory_code: string; factory_codes: string[] | null; readonly_factories: string[] | null; role: string; permissions: Permissions | null }
-type FormState = { email: string; password: string; full_name: string; factory_code: string; factory_codes: string[]; readonly_factories: string[]; role: string; permissions: Permissions }
-const blankForm = (): FormState => ({ email: '', password: '', full_name: '', factory_code: '', factory_codes: [], readonly_factories: [], role: 'user', permissions: defaultGrid() })
+interface UserRow { id: string; username: string | null; email: string; full_name: string; factory_code: string; factory_codes: string[] | null; readonly_factories: string[] | null; role: string; permissions: Permissions | null }
+type FormState = { username: string; email: string; password: string; full_name: string; factory_code: string; factory_codes: string[]; readonly_factories: string[]; role: string; permissions: Permissions }
+const blankForm = (): FormState => ({ username: '', email: '', password: '', full_name: '', factory_code: '', factory_codes: [], readonly_factories: [], role: 'user', permissions: defaultGrid() })
 
 export default function UsersPage() {
   const { profile, loading } = useProfile()
@@ -48,7 +48,7 @@ export default function UsersPage() {
   function openEdit(u: UserRow) {
     setEditingId(u.id); setError(''); setSuccess('')
     setForm({
-      email: u.email, password: '', full_name: u.full_name || '', factory_code: u.factory_code,
+      username: u.username || '', email: u.email, password: '', full_name: u.full_name || '', factory_code: u.factory_code,
       factory_codes: u.factory_codes?.length ? u.factory_codes : (u.factory_code ? [u.factory_code] : []),
       readonly_factories: u.readonly_factories || [],
       role: u.role,
@@ -89,8 +89,8 @@ export default function UsersPage() {
     const isEdit = mode === 'edit'
     const url = isEdit ? '/api/update-user' : '/api/create-user'
     const body = isEdit
-      ? { id: editingId, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, role: form.role, permissions: form.permissions, password: form.password || undefined }
-      : { email: form.email, password: form.password, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, role: form.role, permissions: form.permissions }
+      ? { id: editingId, username: form.username || undefined, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, role: form.role, permissions: form.permissions, password: form.password || undefined }
+      : { username: form.username, email: form.email || undefined, password: form.password, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, role: form.role, permissions: form.permissions }
     const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     const data = await res.json()
     if (data.error) { setError(data.error); setSaving(false); return }
@@ -114,7 +114,7 @@ export default function UsersPage() {
   const uDist = (get: (u: UserRow) => string) => [...new Set(users.map(get))].filter(Boolean).sort()
   const allFacCodes = [...new Set(users.flatMap(uFacs))].sort()
   const visibleUsers = users.filter(u =>
-    uPass(uFilters.name, u.full_name || '—') && uPass(uFilters.email, u.email) && uPass(uFilters.role, u.role) &&
+    uPass(uFilters.name, u.full_name || '—') && uPass(uFilters.email, u.username || '—') && uPass(uFilters.role, u.role) &&
     (!uFilters.factory || !uFilters.factory.size || uFacs(u).some(f => uFilters.factory!.has(f))))
 
   if (loading) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
@@ -134,7 +134,7 @@ export default function UsersPage() {
 
         {mode !== 'closed' && (
           <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-sm border p-6 mb-6 space-y-4">
-            <h2 className="font-semibold text-lg">{mode === 'edit' ? `Edit User — ${form.email}` : 'Create New User'}</h2>
+            <h2 className="font-semibold text-lg">{mode === 'edit' ? `Edit User — ${form.username || form.email}` : 'Create New User'}</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Full Name</label>
@@ -142,9 +142,15 @@ export default function UsersPage() {
                   className="w-full border rounded-lg px-3 py-2" required />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Email</label>
+                <label className="block text-sm font-medium mb-1">Username <span className="text-gray-400 font-normal">(used to log in)</span></label>
+                <input type="text" autoCapitalize="none" autoCorrect="off" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2" placeholder="e.g. gopi or avina14store" required={mode === 'create'} />
+                {mode === 'edit' && <p className="text-xs text-gray-400 mt-1">Changing this changes how they log in.</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Email <span className="text-gray-400 font-normal">(optional — for reference, can be shared)</span></label>
                 <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })}
-                  className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100 disabled:text-gray-500" required disabled={mode === 'edit'} />
+                  className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100 disabled:text-gray-500" disabled={mode === 'edit'} />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">{mode === 'edit' ? 'New Password (leave blank to keep)' : 'Password'}</label>
@@ -271,13 +277,13 @@ export default function UsersPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>
-                {['Name', 'Email', 'Factory / HO', 'Role', 'Access', ''].map((h, i) => (
+                {['Name', 'Username', 'Factory / HO', 'Role', 'Access', ''].map((h, i) => (
                   <th key={i} className="text-left px-4 py-3 font-medium text-gray-600">{h}</th>
                 ))}
               </tr>
               <tr className="border-b">
                 <th className="px-3 py-1.5 min-w-[120px]"><MultiFilter values={uDist(u => u.full_name || '—')} selected={uFilters.name || new Set()} onChange={s => setUFilters(p => ({ ...p, name: s }))} /></th>
-                <th className="px-3 py-1.5 min-w-[120px]"><MultiFilter values={uDist(u => u.email)} selected={uFilters.email || new Set()} onChange={s => setUFilters(p => ({ ...p, email: s }))} /></th>
+                <th className="px-3 py-1.5 min-w-[120px]"><MultiFilter values={uDist(u => u.username || '—')} selected={uFilters.email || new Set()} onChange={s => setUFilters(p => ({ ...p, email: s }))} /></th>
                 <th className="px-3 py-1.5 min-w-[120px]"><MultiFilter values={allFacCodes} selected={uFilters.factory || new Set()} onChange={s => setUFilters(p => ({ ...p, factory: s }))} /></th>
                 <th className="px-3 py-1.5 min-w-[90px]"><MultiFilter values={uDist(u => u.role)} selected={uFilters.role || new Set()} onChange={s => setUFilters(p => ({ ...p, role: s }))} /></th>
                 <th className="px-3 py-1.5"></th><th className="px-3 py-1.5"></th>
@@ -295,7 +301,7 @@ export default function UsersPage() {
                 return (
                   <tr key={u.id} className="border-b last:border-0 hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium">{u.full_name || '—'}</td>
-                    <td className="px-4 py-3 text-gray-600">{u.email}</td>
+                    <td className="px-4 py-3 text-gray-600">{u.username || <span className="text-gray-400">{u.email}</span>}</td>
                     <td className="px-4 py-3">
                       {(u.factory_codes?.length ? u.factory_codes : [u.factory_code]).filter(Boolean).map(fc => (
                         <span key={fc} className={`mr-1 mb-1 inline-block px-2 py-0.5 rounded-full text-xs font-medium ${fc === 'HEAD_OFFICE' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>

@@ -3,6 +3,10 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
+// Usernames are stored in Supabase as a hidden internal email, e.g. "gopi@avina.local".
+// Users type just their username; an email with "@" is still accepted as-is.
+const LOGIN_DOMAIN = 'avina.local'
+
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -14,7 +18,9 @@ export default function LoginPage() {
     e.preventDefault()
     setLoading(true)
     setError('')
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    const id = email.trim()
+    const loginEmail = id.includes('@') ? id : `${id.toLowerCase()}@${LOGIN_DOMAIN}`
+    const { data, error } = await supabase.auth.signInWithPassword({ email: loginEmail, password })
     if (error) { setError(error.message); setLoading(false); return }
     if (!data.session) { setError('Login succeeded but no session returned. Please try again.'); setLoading(false); return }
     // Verify session is actually stored before redirecting
@@ -30,9 +36,9 @@ export default function LoginPage() {
         <p className="text-center text-gray-500 mb-6 text-sm">Sign in to your account</p>
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-1">Email</label>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900" required />
+            <label className="block text-sm font-medium mb-1">Username</label>
+            <input type="text" autoCapitalize="none" autoCorrect="off" value={email} onChange={e => setEmail(e.target.value)}
+              placeholder="your username" className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900" required />
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Password</label>
