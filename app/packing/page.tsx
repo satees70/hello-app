@@ -174,7 +174,7 @@ export default function PackingPage() {
   if (!profile) return null
 
   const fmtDate = (d: string) => d.split('-').reverse().join('/')
-  const facFilter = (b: Batch) => !(isHO && factoryFilter) || b.factory_code === factoryFilter
+  const facFilter = (b: Batch) => !factoryFilter || b.factory_code === factoryFilter
 
   // Unscheduled, still-to-produce batches split by whether materials are in
   const unscheduled = batches.filter(b => !b.pack_date && status(b) !== 'Completed' && facFilter(b))
