@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
@@ -8,9 +8,36 @@ import { supabase } from '@/lib/supabase'
 import { can } from '@/lib/permissions'
 
 interface Hourly { time: string; weight: string; ink: string; qc_color: string; qc_odour: string; qc_phy: string; temp: string; speed: string; press: string; drop: string; alu: string; fe: string; nonfe: string; ss: string; remarks: string }
-// One BOM component on the production record: planned (from recipe) vs actually used, with its batch
-interface Mat { code: string; desc: string; unit: string; planned: number; main: boolean; batch: string; used: string }
+// One batch of a material used: which stock batch and how much
+interface MatUse { batch: string; qty: string }
+// One BOM component on the production record: planned (from recipe) vs actually used (one or more batches)
+interface Mat { code: string; desc: string; unit: string; planned: number; main: boolean; uses: MatUse[] }
 type Form = Record<string, string | boolean | Hourly[] | Mat[]>
+// Old records stored a single { batch, used }; lift them to the new { uses: [...] } shape
+function normMat(m: Record<string, unknown>): Mat {
+  const uses = Array.isArray(m.uses) ? (m.uses as MatUse[]) : [{ batch: (m.batch as string) || '', qty: (m.used as string) || '' }]
+  return { code: (m.code as string) || '', desc: (m.desc as string) || '', unit: (m.unit as string) || '', planned: Number(m.planned || 0), main: !!m.main, uses: uses.length ? uses : [{ batch: '', qty: '' }] }
+}
+const matTotal = (m: Mat) => m.uses.reduce((t, u) => t + Number(u.qty || 0), 0)
+
+// Form-field helpers are module-level (stable component identities) and read the
+// live form through context — so typing a character doesn't remount the input
+// and steal focus (the old in-render definitions did exactly that).
+const FormCtx = createContext<{ s: (k: string) => string; set: (k: string, v: string | boolean) => void }>({ s: () => '', set: () => {} })
+function In({ k, type = 'text', cls = '' }: { k: string; type?: string; cls?: string }) {
+  const { s, set } = useContext(FormCtx)
+  return <input type={type} value={s(k)} onChange={e => set(k, e.target.value)} className={`border rounded px-3 py-2 text-sm w-full ${cls}`} />
+}
+function Radio({ k, val, label }: { k: string; val: string; label: string }) {
+  const { s, set } = useContext(FormCtx)
+  return <label className="inline-flex items-center gap-1 text-xs cursor-pointer mr-3"><input type="checkbox" checked={s(k) === val} onChange={() => set(k, s(k) === val ? '' : val)} className="h-3.5 w-3.5" />{label}</label>
+}
+function GoodBad({ k, label }: { k: string; label: string }) {
+  return <span className="text-xs"><span className="font-medium">{label}:</span> <Radio k={k} val="good" label="Good" /><Radio k={k} val="notgood" label="Not good" /></span>
+}
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">{label}</span>{children}</div>
+}
 
 interface Seg { s: string; e: string | null }
 interface Timer { status: 'idle' | 'running' | 'paused' | 'stopped'; segments: Seg[] }
@@ -98,9 +125,20 @@ export default function InspectionPage() {
   useEffect(() => { if (f.area_machine && !f.no && packLines.length && f.date && factoryCode) genNo(String(f.area_machine), String(f.date)) }, [f.area_machine, f.date, packLines, factoryCode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadForBatch(id: string) {
-    const { data: batch } = await supabase.from('production_batches').select('batch_no, item_code, description, factory_code, exp_date, total_quantity, produced_qty, pack_line, pack_date, run_mode').eq('id', id).single()
+    const { data: batch } = await supabase.from('production_batches').select('batch_no, item_code, description, factory_code, exp_date, total_quantity, produced_qty, pack_line, pack_date, run_mode, material_request_id').eq('id', id).single()
     if (batch) { setFactoryCode(batch.factory_code); setBatchNo(batch.batch_no); setPlanned(Number(batch.total_quantity || 0)); setProduced(Number(batch.produced_qty || 0)); setBatchMode(batch.run_mode || 'auto')
       const { data: pl } = await supabase.from('packing_lines').select('name, line_code, line_mode').eq('factory_code', batch.factory_code).eq('active', true).order('name'); setPackLines(pl || [])
+    }
+    // Stock allocated to this batch's material request → pushed in as the batches/qty to use.
+    // (Stock received against a request line is tagged with request_item_id on the lot.)
+    const allocByCode: Record<string, { batch: string; qty: string }[]> = {}
+    if (batch?.material_request_id) {
+      const { data: mri } = await supabase.from('material_request_items').select('id, item_code').eq('request_id', batch.material_request_id)
+      const ids = (mri || []).map(x => x.id)
+      if (ids.length) {
+        const { data: alots } = await supabase.from('stock_lots').select('item_code, batch_no, qty_received, qty_remaining, request_item_id').in('request_item_id', ids)
+        ;(alots || []).forEach(l => { if (!l.batch_no) return; (allocByCode[l.item_code] = allocByCode[l.item_code] || []).push({ batch: l.batch_no, qty: String(Number(l.qty_received ?? l.qty_remaining ?? 0)) }) })
+      }
     }
     // Build the materials table from the product's BOM (planned = recipe qty × planned units)
     const total = Number(batch?.total_quantity || 0)
@@ -111,12 +149,13 @@ export default function InspectionPage() {
         const { data: comps } = await supabase.from('bom_components')
           .select('quantity, main_ingredient, items:component_item_id(code, description, unit)').eq('parent_item_id', parent.id)
         bomMats = (comps || []).map(c => { const it = c.items as unknown as { code: string; description: string; unit: string } | null
-          return { code: it?.code || '', desc: it?.description || '', unit: it?.unit || '', planned: Number(c.quantity || 0) * total, main: !!c.main_ingredient, batch: '', used: '' } })
+          const code = it?.code || ''; const alloc = allocByCode[code] || []
+          return { code, desc: it?.description || '', unit: it?.unit || '', planned: Number(c.quantity || 0) * total, main: !!c.main_ingredient, uses: alloc.length ? alloc : [{ batch: '', qty: '' }] } })
       }
     }
     const { data: rec } = await supabase.from('inspection_records').select('*').eq('production_batch_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle()
     const recData = rec ? (rec.data as Record<string, unknown>) : null
-    const savedMats = (recData?.materials as Mat[]) || []
+    const savedMats = ((recData?.materials as Record<string, unknown>[]) || []).map(normMat)
     const mats = savedMats.length ? savedMats : bomMats
     // Available stock batches per material (from GRN → stock), oldest expiry first — for both new & saved records
     const codes = mats.map(m => m.code).filter(Boolean)
@@ -127,6 +166,10 @@ export default function InspectionPage() {
         .order('exp_date', { ascending: true, nullsFirst: false }).order('received_at', { ascending: true })
       ;(lots || []).forEach(l => { if (!l.batch_no) return; (lotMap[l.item_code] = lotMap[l.item_code] || []).push({ batch_no: l.batch_no, qty_remaining: Number(l.qty_remaining), exp_date: l.exp_date }) })
     }
+    // Make sure every allocated/used batch is selectable even if its remaining qty has since changed
+    const ensureBatch = (code: string, b: string) => { if (!code || !b) return; const arr = lotMap[code] = lotMap[code] || []; if (!arr.some(x => x.batch_no === b)) arr.push({ batch_no: b, qty_remaining: 0, exp_date: null }) }
+    Object.entries(allocByCode).forEach(([code, us]) => us.forEach(u => ensureBatch(code, u.batch)))
+    mats.forEach(m => m.uses.forEach(u => ensureBatch(m.code, u.batch)))
     setStockLots(lotMap)
     if (rec && recData) {
       setRecordId(rec.id)
@@ -140,7 +183,10 @@ export default function InspectionPage() {
     const td = new Date(); const localToday = `${td.getFullYear()}-${String(td.getMonth() + 1).padStart(2, '0')}-${String(td.getDate()).padStart(2, '0')}`
     setF({ ...EMPTY, date: batch?.pack_date || localToday, area_machine: batch?.pack_line || '', code: batch?.item_code || '', product: batch?.description || '', bn_raw_material: rmBatches, exp_in: batch?.exp_date || '', exp_out: batch?.exp_date || '', materials: mats })
   }
-  const setMat = (i: number, k: keyof Mat, v: string) => setF(prev => { const m = [...(prev.materials as Mat[])]; m[i] = { ...m[i], [k]: v }; return { ...prev, materials: m } })
+  // Edit one batch-line of a material (i = material row, j = batch line)
+  const setUse = (i: number, j: number, k: keyof MatUse, v: string) => setF(prev => { const m = [...(prev.materials as Mat[])]; const uses = [...m[i].uses]; uses[j] = { ...uses[j], [k]: v }; m[i] = { ...m[i], uses }; return { ...prev, materials: m } })
+  const addUse = (i: number) => setF(prev => { const m = [...(prev.materials as Mat[])]; m[i] = { ...m[i], uses: [...m[i].uses, { batch: '', qty: '' }] }; return { ...prev, materials: m } })
+  const removeUse = (i: number, j: number) => setF(prev => { const m = [...(prev.materials as Mat[])]; const uses = m[i].uses.filter((_, x) => x !== j); m[i] = { ...m[i], uses: uses.length ? uses : [{ batch: '', qty: '' }] }; return { ...prev, materials: m } })
 
   const set = (k: string, v: string | boolean) => setF(prev => ({ ...prev, [k]: v }))
   // Auto No. = PR<location digits><line letter>-YYMMDD/<running>, e.g. PR101A-260622/00001
@@ -207,22 +253,13 @@ export default function InspectionPage() {
   if (!profile) return null
 
   const s = (k: string) => (f[k] as string) || ''
-  const bv = (k: string) => f[k] as boolean
-  const In = ({ k, type = 'text', cls = '' }: { k: string; type?: string; cls?: string }) =>
-    <input type={type} value={s(k)} onChange={e => set(k, e.target.value)} className={`border rounded px-3 py-2 text-sm w-full ${cls}`} />
-  const Radio = ({ k, val, label }: { k: string; val: string; label: string }) =>
-    <label className="inline-flex items-center gap-1 text-xs cursor-pointer mr-3"><input type="checkbox" checked={s(k) === val} onChange={() => set(k, s(k) === val ? '' : val)} className="h-3.5 w-3.5" />{label}</label>
-  const GoodBad = ({ k, label }: { k: string; label: string }) =>
-    <span className="text-xs"><span className="font-medium">{label}:</span> <Radio k={k} val="good" label="Good" /><Radio k={k} val="notgood" label="Not good" /></span>
-  const Field = ({ label, children }: { label: string; children: React.ReactNode }) =>
-    <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">{label}</span>{children}</div>
 
   const n = (x: number) => Number(Number(x).toPrecision(6))
   // Food loss % = ((main ingredient used − main planned) + wastage) ÷ main used × 100. Alert HO when > 5%.
   const loss = (() => {
     const mats = (f.materials as Mat[]) || []
     const main = mats.filter(m => m.main)
-    const used = main.reduce((t, m) => t + Number(m.used || 0), 0)
+    const used = main.reduce((t, m) => t + matTotal(m), 0)
     const planned = main.reduce((t, m) => t + Number(m.planned || 0), 0)
     const waste = Number(s('food_loss_a') || 0)
     if (!(used > 0)) return { pct: null as number | null, over: false }
@@ -231,6 +268,7 @@ export default function InspectionPage() {
   })()
 
   return (
+    <FormCtx.Provider value={{ s, set }}>
     <div className="min-h-screen bg-gray-50">
       <style>{`@media print { nav, .no-print { display: none !important } body { background: white } .printable { box-shadow: none !important; border: none !important } }`}</style>
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
@@ -320,21 +358,36 @@ export default function InspectionPage() {
                 </thead>
                 <tbody>
                   {(f.materials as Mat[]).length === 0 && <tr><td colSpan={8} className="text-center py-4 text-gray-400">No BOM for this product — set up its recipe in BOM.</td></tr>}
-                  {(f.materials as Mat[]).map((m, i) => { const used = Number(m.used || 0); const diff = used - m.planned; return (
+                  {(f.materials as Mat[]).map((m, i) => { const total = matTotal(m); const diff = total - m.planned; const blank = m.uses.every(u => u.qty === ''); const lots = stockLots[m.code] || []; return (
                     <tr key={i} className="border-b last:border-0">
-                      <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{m.code}{m.main && <span className="text-amber-600" title="Main ingredient"> ★</span>}</td>
-                      <td className="px-3 py-2 text-gray-600">{m.desc}</td>
-                      <td className="px-3 py-2 text-gray-500">{m.unit}</td>
-                      <td className="px-3 py-2 text-right font-medium">{n(m.planned)}</td>
-                      <td className="px-3 py-2">{(stockLots[m.code] || []).length > 0
-                        ? <select value={m.batch} onChange={e => setMat(i, 'batch', e.target.value)} className="border rounded px-2 py-1.5 text-sm w-44 bg-white">
-                            <option value="">Choose batch…</option>
-                            {(stockLots[m.code] || []).map(lt => <option key={lt.batch_no} value={lt.batch_no}>{lt.batch_no} · {n(lt.qty_remaining)} {m.unit}{lt.exp_date ? ` · exp ${lt.exp_date.split('-').reverse().join('/')}` : ''}</option>)}
-                          </select>
-                        : <input value={m.batch} onChange={e => setMat(i, 'batch', e.target.value)} placeholder="no stock — type" className="border rounded px-2 py-1.5 text-sm w-36" />}</td>
-                      <td className="px-3 py-2"><input type="number" step="any" value={m.used} onChange={e => setMat(i, 'used', e.target.value)} className="border rounded px-2 py-1.5 text-sm w-24 text-right" /></td>
-                      <td className={`px-3 py-2 text-right ${m.used === '' ? 'text-gray-300' : diff > 0 ? 'text-red-600' : 'text-green-600'}`}>{m.used === '' ? '—' : (diff > 0 ? '+' : '') + n(diff)}</td>
-                      <td className="px-3 py-2">{m.main ? '★' : ''}</td>
+                      <td className="px-3 py-2 font-mono font-medium whitespace-nowrap align-top">{m.code}{m.main && <span className="text-amber-600" title="Main ingredient"> ★</span>}</td>
+                      <td className="px-3 py-2 text-gray-600 align-top">{m.desc}</td>
+                      <td className="px-3 py-2 text-gray-500 align-top">{m.unit}</td>
+                      <td className="px-3 py-2 text-right font-medium align-top">{n(m.planned)}</td>
+                      <td className="px-3 py-2 align-top">
+                        <div className="space-y-1">
+                          {m.uses.map((u, j) => lots.length > 0
+                            ? <select key={j} value={u.batch} onChange={e => setUse(i, j, 'batch', e.target.value)} className="border rounded px-2 py-1.5 text-sm w-44 bg-white block">
+                                <option value="">Choose batch…</option>
+                                {lots.map(lt => <option key={lt.batch_no} value={lt.batch_no}>{lt.batch_no} · {n(lt.qty_remaining)} {m.unit}{lt.exp_date ? ` · exp ${lt.exp_date.split('-').reverse().join('/')}` : ''}</option>)}
+                              </select>
+                            : <input key={j} value={u.batch} onChange={e => setUse(i, j, 'batch', e.target.value)} placeholder="no stock — type" className="border rounded px-2 py-1.5 text-sm w-44 block" />)}
+                          <button type="button" onClick={() => addUse(i)} className="text-blue-600 hover:underline text-xs no-print">+ add batch</button>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <div className="space-y-1">
+                          {m.uses.map((u, j) => (
+                            <div key={j} className="flex items-center gap-1">
+                              <input type="number" step="any" value={u.qty} onChange={e => setUse(i, j, 'qty', e.target.value)} className="border rounded px-2 py-1.5 text-sm w-24 text-right" />
+                              {m.uses.length > 1 && <button type="button" onClick={() => removeUse(i, j)} className="text-red-500 text-xs no-print" title="Remove this batch">✕</button>}
+                            </div>
+                          ))}
+                          {m.uses.length > 1 && <div className="text-right text-gray-500 text-xs pr-6">Total {n(total)}</div>}
+                        </div>
+                      </td>
+                      <td className={`px-3 py-2 text-right align-top ${blank ? 'text-gray-300' : diff > 0 ? 'text-red-600' : 'text-green-600'}`}>{blank ? '—' : (diff > 0 ? '+' : '') + n(diff)}</td>
+                      <td className="px-3 py-2 align-top">{m.main ? '★' : ''}</td>
                     </tr>
                   ) })}
                 </tbody>
@@ -433,5 +486,6 @@ export default function InspectionPage() {
         </div>
       </div>
     </div>
+    </FormCtx.Provider>
   )
 }

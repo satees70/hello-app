@@ -42,6 +42,8 @@ export default function PackingPage() {
   const [items, setItems] = useState<Item[]>([])
   const [boms, setBoms] = useState<BomComp[]>([])
   const [stock, setStock] = useState<Record<string, number>>({}) // item_id|factory -> qty
+  const [lots, setLots] = useState<Record<string, { batch_no: string; qty: number; exp_date: string | null; reqItem: string | null }[]>>({}) // item_code|factory -> stock batches (FEFO)
+  const [mriReq, setMriReq] = useState<Record<string, string>>({}) // request_item_id -> request_id (to spot stock allocated to this batch's request)
   const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })() // local date (not UTC)
   const [date, setDate] = useState(today)
   const [factoryFilter, setFactoryFilter] = useState('')
@@ -74,6 +76,18 @@ export default function PackingPage() {
     const { data: st } = await supabase.from('item_stock').select('item_id, factory_code, quantity')
     const sm: Record<string, number> = {}; (st || []).forEach(r => { sm[`${r.item_id}|${r.factory_code}`] = Number(r.quantity) })
     setStock(sm)
+    // Stock batches per material (FEFO) so the line keeper can arrange them before starting
+    const lotRows = await fetchAll<{ item_code: string; factory_code: string; batch_no: string; qty_remaining: number; exp_date: string | null; request_item_id: string | null }>(
+      'stock_lots', 'item_code, factory_code, batch_no, qty_remaining, exp_date, request_item_id', q => q.gt('qty_remaining', 0).order('exp_date', { ascending: true, nullsFirst: false }).order('received_at', { ascending: true }))
+    const lm: Record<string, { batch_no: string; qty: number; exp_date: string | null; reqItem: string | null }[]> = {}
+    lotRows.forEach(l => { if (!l.batch_no) return; (lm[`${l.item_code}|${l.factory_code}`] = lm[`${l.item_code}|${l.factory_code}`] || []).push({ batch_no: l.batch_no, qty: Number(l.qty_remaining), exp_date: l.exp_date, reqItem: l.request_item_id }) })
+    setLots(lm)
+    // Which request each allocated lot belongs to (request_item_id → request_id)
+    const reqIds = [...new Set(((data as Batch[]) || []).map(b => b.material_request_id).filter(Boolean))] as string[]
+    if (reqIds.length) {
+      const { data: mri } = await supabase.from('material_request_items').select('id, request_id').in('request_id', reqIds)
+      const mm: Record<string, string> = {}; (mri || []).forEach(x => { mm[x.id] = x.request_id }); setMriReq(mm)
+    }
   }
   async function loadFactories() {
     const { data } = await supabase.from('factories').select('code, name').order('code')
@@ -120,26 +134,37 @@ export default function PackingPage() {
   const MaterialTable = ({ b }: { b: Batch }) => {
     const a = availability(b)
     if (!a.hasBom) return <p className="text-amber-600 text-xs">No BOM defined for this item — add a recipe in BOM first.</p>
+    const isAlloc = (l: { reqItem: string | null }) => !!l.reqItem && !!b.material_request_id && mriReq[l.reqItem] === b.material_request_id
     return (
-      <div className="overflow-x-auto border rounded-lg max-w-3xl">
+      <div className="overflow-x-auto border rounded-lg max-w-4xl">
         <table className="w-full text-xs">
           <thead className="bg-gray-50 border-b">
-            <tr>{['Material', 'Description', 'Unit', 'Required', 'Stock (system)', 'Shortfall'].map(h => (
+            <tr>{['Material', 'Description', 'Unit', 'Required', 'Stock batches to use (qty)', 'Stock (system)', 'Shortfall'].map(h => (
               <th key={h} className="text-left px-3 py-1.5 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
           </thead>
           <tbody>
-            {a.comps.map(c => (
+            {a.comps.map(c => {
+              const cl = [...(lots[`${c.code}|${b.factory_code}`] || [])].sort((x, y) => (isAlloc(y) ? 1 : 0) - (isAlloc(x) ? 1 : 0))
+              return (
               <tr key={c.code} className={`border-b last:border-0 ${c.shortfall > 0 ? '' : 'bg-green-50/40'}`}>
-                <td className="px-3 py-1.5 font-mono font-medium whitespace-nowrap">{c.code}</td>
-                <td className="px-3 py-1.5 text-gray-600">{c.description}</td>
-                <td className="px-3 py-1.5 text-gray-500">{c.unit}</td>
-                <td className="px-3 py-1.5 text-right">{n(c.required)}</td>
-                <td className="px-3 py-1.5 text-right font-medium">{n(c.avail)}</td>
-                <td className={`px-3 py-1.5 text-right font-semibold ${c.shortfall > 0 ? 'text-red-600' : 'text-green-600'}`}>{n(c.shortfall)}</td>
+                <td className="px-3 py-1.5 font-mono font-medium whitespace-nowrap align-top">{c.code}</td>
+                <td className="px-3 py-1.5 text-gray-600 align-top">{c.description}</td>
+                <td className="px-3 py-1.5 text-gray-500 align-top">{c.unit}</td>
+                <td className="px-3 py-1.5 text-right align-top">{n(c.required)}</td>
+                <td className="px-3 py-1.5 align-top">
+                  {cl.length === 0 ? <span className="text-gray-400">— no stock</span> : (
+                    <div className="space-y-0.5">
+                      {cl.map(l => <div key={l.batch_no} className={isAlloc(l) ? 'text-green-700 font-medium' : ''}>{isAlloc(l) && '★ '}<span className="font-mono">{l.batch_no}</span> · {n(l.qty)} {c.unit}{l.exp_date ? ` · exp ${l.exp_date.split('-').reverse().join('/')}` : ''}</div>)}
+                    </div>
+                  )}
+                </td>
+                <td className="px-3 py-1.5 text-right font-medium align-top">{n(c.avail)}</td>
+                <td className={`px-3 py-1.5 text-right font-semibold align-top ${c.shortfall > 0 ? 'text-red-600' : 'text-green-600'}`}>{n(c.shortfall)}</td>
               </tr>
-            ))}
+            ) })}
           </tbody>
         </table>
+        {b.material_request_id && <p className="text-xs text-gray-500 mt-1">★ = batch allocated to this run’s material request — use these first.</p>}
       </div>
     )
   }

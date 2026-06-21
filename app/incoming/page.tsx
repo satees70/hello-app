@@ -37,8 +37,11 @@ const PACK = 'BAG|CTN|CARTON'
 function ItemCombo({ items, value, onPick }: { items: { code: string; description: string; unit: string }[]; value: string; onPick: (code: string, description: string, unit: string) => void }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
-  const term = q.trim().toLowerCase()
-  const matches = (term ? items.filter(i => i.code.toLowerCase().includes(term) || i.description.toLowerCase().includes(term)) : items).slice(0, 60)
+  // Tolerant search: ignore punctuation/spacing and match each typed word in any order,
+  // against code + description (so "s.biji sawi" finds "BIJI SAWI KUNING 25KG").
+  const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+  const words = norm(q).split(' ').filter(Boolean)
+  const matches = (words.length ? items.filter(i => { const hay = norm(i.code + ' ' + i.description); return words.every(w => hay.includes(w)) }) : items).slice(0, 60)
   return (
     <div className="relative">
       <input value={open ? q : value} onChange={e => { setQ(e.target.value); setOpen(true) }}
