@@ -20,6 +20,53 @@ alter table public.delivery_order_lines add column if not exists stock_lot_id uu
 
 
 -- ============================================================================
+-- Sales Orders · staff can request to delete a whole document; HO approves
+-- ============================================================================
+create table if not exists public.doc_delete_requests (
+  id uuid primary key default gen_random_uuid(),
+  import_id uuid references public.sales_imports(id) on delete set null,
+  file_name text, file_path text, factory_code text, reason text,
+  status text not null default 'Pending',
+  requested_by uuid, requested_by_name text, created_at timestamptz not null default now(),
+  reviewed_by uuid, reviewed_by_name text, reviewed_at timestamptz
+);
+grant select, insert on public.doc_delete_requests to authenticated;
+grant all on public.doc_delete_requests to service_role;
+alter table public.doc_delete_requests enable row level security;
+drop policy if exists ddr_read on public.doc_delete_requests;
+create policy ddr_read on public.doc_delete_requests for select using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()) or requested_by = auth.uid());
+drop policy if exists ddr_insert on public.doc_delete_requests;
+create policy ddr_insert on public.doc_delete_requests for insert with check (requested_by = auth.uid());
+
+-- HO approves: deletes the sales import (cascades lines/change-requests) and returns
+-- the storage path so the caller can remove the PDF. The request row stays as an
+-- audit record (import_id becomes null via the FK's on-delete-set-null).
+create or replace function public.approve_doc_delete(p_id uuid) returns text
+language plpgsql security definer set search_path = public as $$
+declare v_path text; v_import uuid; v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can approve document deletions'; end if;
+  select file_path, import_id into v_path, v_import from public.doc_delete_requests where id = p_id and status = 'Pending';
+  if not found then raise exception 'Request not found or already reviewed'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.doc_delete_requests set status = 'Approved', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id;
+  if v_import is not null then delete from public.sales_imports where id = v_import; end if;
+  return v_path;
+end $$;
+grant execute on function public.approve_doc_delete(uuid) to authenticated;
+
+create or replace function public.reject_doc_delete(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can reject document deletions'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.doc_delete_requests set status = 'Rejected', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id and status = 'Pending';
+end $$;
+grant execute on function public.reject_doc_delete(uuid) to authenticated;
+
+
+-- ============================================================================
 -- 2026-06 · Pick-run release & cut-off (Material Requests → Combined picking)
 -- ============================================================================
 

@@ -79,6 +79,7 @@ export default function SalesOrdersPage() {
   const [dupKeys, setDupKeys] = useState<Set<string>>(new Set()) // "so_number||item_code" that appear >1 across all lines
   const [dupImports, setDupImports] = useState<Record<string, string[]>>({}) // key -> import ids that contain it
   const [docSummary, setDocSummary] = useState<Record<string, { pending: number; dup: number; locations: string[]; locFactory: Record<string, string>; confirmed: string[] }>>({})
+  const [docDelPending, setDocDelPending] = useState<Set<string>>(new Set())
 
   // Factory display + valid location codes (for the location dropdown)
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
@@ -142,6 +143,8 @@ export default function SalesOrdersPage() {
       summary[id] = { pending: pending[id] || 0, dup: dup[id] || 0, locations: locs[id] ? [...locs[id]].sort() : [], locFactory: locFac[id] || {}, confirmed: conf[id] ? [...conf[id]] : [] }
     })
     setDocSummary(summary)
+    const { data: dels } = await supabase.from('doc_delete_requests').select('import_id').eq('status', 'Pending')
+    setDocDelPending(new Set((dels || []).map(d => d.import_id).filter(Boolean)))
   }
 
   async function loadRefs() {
@@ -440,6 +443,22 @@ export default function SalesOrdersPage() {
     loadSummary()
   }
 
+  // Non-HO staff ask Head Office to delete a whole document (with a reason).
+  async function requestDocDelete(doc: SalesImport) {
+    if (!profile) return
+    const reason = window.prompt(`Request to DELETE "${doc.file_name}".\nReason (sent to Head Office):`)
+    if (reason === null) return
+    if (!reason.trim()) { setError('Please give a reason for the delete request.'); return }
+    setError(''); setSuccess('')
+    const { error: insErr } = await supabase.from('doc_delete_requests').insert({
+      import_id: doc.id, file_name: doc.file_name, file_path: doc.file_path, factory_code: doc.factory_code,
+      reason: reason.trim(), requested_by: profile.id, requested_by_name: profile.full_name || null,
+    })
+    if (insErr) { setError(`Could not send request: ${insErr.message}`); return }
+    setDocDelPending(p => new Set(p).add(doc.id))
+    setSuccess(`Delete request for "${doc.file_name}" sent to Head Office.`)
+  }
+
   function formatDate(iso: string) { return new Date(iso).toLocaleString() }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
@@ -525,7 +544,9 @@ export default function SalesOrdersPage() {
                   <td className="px-4 py-3 space-x-3 whitespace-nowrap">
                     <button onClick={() => viewLines(doc)} className="text-blue-600 hover:underline text-xs">View Lines</button>
                     <button onClick={() => handleDownload(doc.file_path)} className="text-blue-600 hover:underline text-xs">View PDF</button>
-                    {isHO && <button onClick={() => handleDelete(doc)} className="text-red-600 hover:underline text-xs">Delete</button>}
+                    {isHO ? <button onClick={() => handleDelete(doc)} className="text-red-600 hover:underline text-xs">Delete</button>
+                      : docDelPending.has(doc.id) ? <span className="text-amber-600 text-xs">⏳ Delete requested</span>
+                        : <button onClick={() => requestDocDelete(doc)} className="text-red-600 hover:underline text-xs">Request delete</button>}
                   </td>
                 </tr>
               ))}

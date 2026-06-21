@@ -59,6 +59,11 @@ interface MrCancelReq {
   requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
 }
 
+interface DocDelReq {
+  id: string; file_name: string | null; file_path: string | null; factory_code: string | null; reason: string | null; status: string
+  requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
+}
+
 const FIELD_LABEL: Record<string, string> = {
   customer_name: 'Customer',
   item_code: 'Item Code',
@@ -105,6 +110,7 @@ export default function PendingChangesPage() {
   const [mrCancels, setMrCancels] = useState<MrCancelReq[]>([])
   const [selMC, setSelMC] = useState<Set<string>>(new Set())
   const [mcFilters, setMcFilters] = useState<Record<string, Set<string>>>({})
+  const [docDels, setDocDels] = useState<DocDelReq[]>([])
 
   // Distinct values present in a list, for a filter dropdown
   const distinctOf = <T,>(arr: T[], get: (x: T) => string) => [...new Set(arr.map(get))].filter(Boolean).sort()
@@ -117,7 +123,7 @@ export default function PendingChangesPage() {
 
   useEffect(() => {
     if (!profile) return
-    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels()
+    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels()
     // Live refresh on any change-request activity, with a poll fallback
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) supabase.realtime.setAuth(data.session.access_token)
@@ -131,8 +137,9 @@ export default function PendingChangesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_adjustments' }, () => loadStockAdjs())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'run_mode_requests' }, () => loadRunModes())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mr_cancel_requests' }, () => loadMrCancels())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'doc_delete_requests' }, () => loadDocDels())
       .subscribe()
-    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels() }, 20000)
+    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels() }, 20000)
     return () => { supabase.removeChannel(channel); clearInterval(timer) }
   }, [profile])
 
@@ -220,6 +227,24 @@ export default function PendingChangesPage() {
     const { error: e } = await supabase.rpc('reject_mr_cancel', { p_id: id })
     if (e) { setError(e.message); setBusyId(''); return }
     setSuccess('Cancellation rejected.'); setBusyId(''); loadMrCancels()
+  }
+  async function loadDocDels() {
+    const { data } = await supabase.from('doc_delete_requests').select('*').order('created_at', { ascending: false })
+    setDocDels((data as DocDelReq[]) || [])
+  }
+  async function approveDD(r: DocDelReq) {
+    setBusyId(r.id); setError(''); setSuccess('')
+    const { data: path, error: e } = await supabase.rpc('approve_doc_delete', { p_id: r.id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    if (path) await supabase.storage.from('sales-orders').remove([path as string])
+    setSuccess(`Deleted "${r.file_name}".`); setBusyId(''); loadDocDels()
+  }
+  async function rejectDD(id: string) {
+    if (!confirm('Reject this delete request? The document stays as it is.')) return
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('reject_doc_delete', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Delete request rejected.'); setBusyId(''); loadDocDels()
   }
   async function approveRM(id: string) {
     setBusyId(id); setError(''); setSuccess('')
@@ -332,6 +357,7 @@ export default function PendingChangesPage() {
   const mcPending = shownMC.filter(a => a.status === 'Pending')
   const mcAllSel = mcPending.length > 0 && mcPending.every(a => selMC.has(a.id))
   const selMCIds = mcPending.filter(a => selMC.has(a.id)).map(a => a.id)
+  const shownDD = filter === 'All' ? docDels : docDels.filter(a => a.status === filter)
   const counts: Record<string, number> = { Pending: 0, Approved: 0, Rejected: 0 }
   requests.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1 })
 
@@ -747,6 +773,40 @@ export default function PendingChangesPage() {
                         <div className="flex gap-2">
                           <button onClick={() => approveMC(a.id)} disabled={busyId === a.id} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">Approve</button>
                           <button onClick={() => rejectMC(a.id)} disabled={busyId === a.id} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>
+                        </div>
+                      ) : <span className="text-gray-400">done</span>}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Document delete requests (whole Sales Order document) */}
+        <h2 className="text-lg font-semibold mt-8 mb-2">Document delete requests</h2>
+        <p className="text-gray-500 text-sm mb-3">{isHO ? 'Approve to permanently delete the Sales Order document — its PDF, extracted lines and change requests are removed.' : 'Track your requests to delete a Sales Order document.'}</p>
+        <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem]">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 border-b sticky top-0 z-10">
+              <tr>{['File', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
+                <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+            </thead>
+            <tbody>
+              {shownDD.length === 0 && (<tr><td colSpan={6} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} document delete requests.</td></tr>)}
+              {shownDD.map(a => (
+                <tr key={a.id} className="border-b last:border-0 align-top hover:bg-gray-50">
+                  <td className="px-3 py-2 font-medium min-w-[160px]">{a.file_name || '—'}</td>
+                  <td className="px-3 py-2 text-gray-600 min-w-[120px]">{a.reason}</td>
+                  <td className="px-3 py-2 whitespace-nowrap"><span className="block">{a.requested_by_name || '—'}</span><span className="block text-gray-400">{fmt(a.created_at)}</span></td>
+                  <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full font-medium ${STATUS_STYLES[a.status] || 'bg-gray-100 text-gray-700'}`}>{a.status}</span></td>
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-600">{a.status === 'Pending' ? '—' : (<><span className="block">{a.reviewed_by_name}</span><span className="block text-gray-400">{fmt(a.reviewed_at)}</span></>)}</td>
+                  {isHO && (
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {a.status === 'Pending' ? (
+                        <div className="flex gap-2">
+                          <button onClick={() => approveDD(a)} disabled={busyId === a.id} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">Approve</button>
+                          <button onClick={() => rejectDD(a.id)} disabled={busyId === a.id} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>
                         </div>
                       ) : <span className="text-gray-400">done</span>}
                     </td>
