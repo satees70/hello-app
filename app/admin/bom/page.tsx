@@ -68,7 +68,7 @@ export default function BomPage() {
 
   useEffect(() => {
     if (!profile) return
-    if (profile.factory_code !== 'HEAD_OFFICE') { router.replace('/dashboard'); return }
+    if (!can(profile, 'bom', 'view')) { router.replace('/dashboard'); return }
     loadItems(); loadBomParents()
   }, [profile])
 

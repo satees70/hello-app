@@ -163,8 +163,8 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/stock-adjustment', label: 'Stock Adjustment', module: 'stock_adjustment' as ModuleKey },
       { href: '/traceability', label: 'Traceability', module: 'traceability' },
       { href: '/admin/items', label: 'Items', module: 'items' },
+      { href: '/admin/bom', label: 'BOM', module: 'bom' as ModuleKey },
       ...(isHO ? [
-        { href: '/admin/bom', label: 'BOM', module: 'bom' as ModuleKey },
         { href: '/admin/location-map', label: 'Location Map' },
       ] : []),
     ] },
