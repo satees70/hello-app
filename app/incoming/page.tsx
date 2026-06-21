@@ -15,10 +15,12 @@ interface DeliveryOrder {
   factory_code: string
   status: string
   created_at: string
+  so_number?: string | null
+  pick_run_no?: string | null
 }
 interface DoLine { id: string; item_code: string; description: string; quantity: number; unit: string; batch_no: string; qc_checked: boolean; photo_path: string | null; received_at: string | null; stock_lot_id?: string | null; received_qty?: number | null }
 interface MRItem { id: string; item_code: string; unit: string; requested_qty: number; received_qty: number }
-interface MatReq { id: string; factory_code: string; status: string; material_request_items: MRItem[] }
+interface MatReq { id: string; factory_code: string; status: string; pick_run_no: string | null; material_request_items: MRItem[] }
 
 const STATUS_STYLES: Record<string, string> = {
   Processing: 'bg-blue-100 text-blue-700',
@@ -169,7 +171,7 @@ export default function IncomingPage() {
     setLines(dl)
     // open requests for this factory (for matching)
     const { data: reqs } = await supabase.from('material_requests')
-      .select('id, factory_code, status, material_request_items(id, item_code, unit, requested_qty, received_qty)')
+      .select('id, factory_code, status, pick_run_no, material_request_items(id, item_code, unit, requested_qty, received_qty)')
       .eq('factory_code', doc.factory_code).in('status', ACTIVE)
     setRequests((reqs as MatReq[]) || [])
     // kg/bag overrides
@@ -274,8 +276,13 @@ export default function IncomingPage() {
   const baseCode = (code: string) => code.replace(new RegExp(`[-\\s]*\\d+(?:\\.\\d+)?\\s*KG\\s*\\/\\s*(?:${PACK})\\s*$`, 'i'), '').trim()
   const matchLines = (code: string): MRItem[] => {
     const base = baseCode(code)
+    // Oldest-first across open requests; but if this DO is linked to a pick run,
+    // fill that run's requests FIRST so the DO reconciles against its own run.
+    const run = linesFor?.pick_run_no || ''
+    const active = [...requests].reverse().filter(r => ACTIVE.includes(r.status))
+    const ordered = run ? [...active].sort((a, b) => (a.pick_run_no === run ? 0 : 1) - (b.pick_run_no === run ? 0 : 1)) : active
     const out: MRItem[] = []
-    ;[...requests].reverse().filter(r => ACTIVE.includes(r.status)).forEach(r => (r.material_request_items || []).forEach(it => { if (it.item_code === code || it.item_code === base) out.push(it) }))
+    ordered.forEach(r => (r.material_request_items || []).forEach(it => { if (it.item_code === code || it.item_code === base) out.push(it) }))
     return out
   }
   // Prefer the BASE code (the recipe's KG raw material, e.g. D242) over the bagged SKU (D242-25KG/BAG, unit BAG)
@@ -496,6 +503,16 @@ export default function IncomingPage() {
               <h2 className="font-semibold text-lg">{linesFor.do_number || linesFor.file_name} <span className="text-gray-400 font-normal text-sm">· {isHO ? factoryName(linesFor.factory_code) : linesFor.factory_code} · {linesFor.do_date || '—'}</span></h2>
               <button onClick={() => setLinesFor(null)} className="text-gray-400 hover:text-gray-600 text-sm">Close</button>
             </div>
+            {(linesFor.pick_run_no || linesFor.so_number) && (() => {
+              const linked = !!linesFor.pick_run_no && requests.some(r => r.pick_run_no === linesFor.pick_run_no)
+              return (
+                <div className="mb-2 text-sm flex flex-wrap items-center gap-2">
+                  {linesFor.so_number && <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-mono text-xs">SO {linesFor.so_number}</span>}
+                  {linesFor.pick_run_no && <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-mono text-xs">{linesFor.pick_run_no}</span>}
+                  <span className={linked ? 'text-green-700 text-xs' : 'text-amber-600 text-xs'}>{linked ? '✓ matched to its pick run — received items fill this run first' : 'no open pick run found with this number — items match by code (oldest request first)'}</span>
+                </div>
+              )
+            })()}
             <p className="text-gray-500 text-sm mb-3">For each line: QC <strong>ticks</strong> and adds a <strong>photo</strong>, then <strong>Receive</strong> that item. You can receive some now and the rest later (partial). Matched items go against their order; known items with no order go into stock flagged <em>unplanned</em>; unknown codes are skipped. Bag/carton quantities convert to KG.</p>
             {(() => {
               const probs = lines.filter(l => !l.received_at).map(l => ({ l, c: lineCalc(l) })).filter(x => !x.c.known || x.c.factor === null)

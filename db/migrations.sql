@@ -17,6 +17,9 @@
 -- ============================================================================
 alter table public.delivery_order_lines add column if not exists received_qty numeric;
 alter table public.delivery_order_lines add column if not exists stock_lot_id uuid;
+-- The warehouse DO prints the pick-run number and SO number it fulfils — capture them to link back
+alter table public.delivery_orders add column if not exists so_number text;
+alter table public.delivery_orders add column if not exists pick_run_no text;
 
 
 -- ============================================================================

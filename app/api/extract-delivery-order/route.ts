@@ -26,6 +26,8 @@ const EXTRACTION_TOOL: Anthropic.Tool = {
       do_number: { type: 'string', description: 'The Delivery Order number, e.g. DO-260613/0596.' },
       do_date: { type: 'string', description: 'The Date on the document exactly as printed, e.g. 13/6/2026.' },
       factory_no: { type: 'string', description: 'The factory/branch number from the company header, e.g. "102" from "SRRI EASWARI MILLS SDN BHD(NO.102)". Digits only; empty string if not shown.' },
+      pick_run_no: { type: 'string', description: 'The pick-run / batch reference printed on the document, format PR<digits>-<YYMM>/<NNNN>, e.g. PR101-2606/0001. Empty string if not shown.' },
+      so_number: { type: 'string', description: 'The Sales Order number this delivery is for, e.g. SO-40822 (often shown after "SO No." or in the Remarks column). Empty string if not shown.' },
       lines: {
         type: 'array',
         items: {
@@ -51,6 +53,8 @@ Extract:
 - The Delivery Order number (top right, e.g. DO-260613/0596).
 - The Date exactly as printed.
 - The factory/branch number from the company header — e.g. "102" from "SRRI EASWARI MILLS SDN BHD(NO.102)". Digits only.
+- The pick-run reference if printed (format PR101-2606/0001).
+- The SO number (after "SO No." or in the Remarks column, e.g. SO-40822).
 - Every numbered line item in the table. For each: Item Code, Description, Qty (number only — drop the unit word), the unit word, and the Batch value.
 
 Ignore the "Total" row at the bottom. Call record_delivery_order with one entry per numbered line.`
@@ -84,7 +88,7 @@ export async function POST(request: Request) {
     })
     const toolUse = message.content.find(b => b.type === 'tool_use')
     if (!toolUse || toolUse.type !== 'tool_use') { await markError(doId); return NextResponse.json({ error: 'No data could be read from the document.' }, { status: 400 }) }
-    const input = toolUse.input as { do_number: string; do_date: string; factory_no: string; lines: DoLine[] }
+    const input = toolUse.input as { do_number: string; do_date: string; factory_no: string; pick_run_no?: string; so_number?: string; lines: DoLine[] }
     const lines = input.lines || []
 
     // Wrong document type guard: a Sales Order (SO-…) uploaded into Goods Received.
@@ -97,7 +101,7 @@ export async function POST(request: Request) {
     }
 
     // Header: set the DO number/date, and the factory from the branch number if present.
-    const headerUpdate: Record<string, string> = { do_number: input.do_number || '', do_date: input.do_date || '', status: 'Review' }
+    const headerUpdate: Record<string, string> = { do_number: input.do_number || '', do_date: input.do_date || '', status: 'Review', pick_run_no: (input.pick_run_no || '').trim(), so_number: (input.so_number || '').trim() }
     if (input.factory_no) headerUpdate.factory_code = `AVINA${input.factory_no}`
     await supabaseAdmin.from('delivery_orders').update(headerUpdate).eq('id', doId)
 
