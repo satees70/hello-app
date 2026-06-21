@@ -11,6 +11,13 @@
 -- ============================================================================
 
 -- ============================================================================
+-- Auth · username login + warehouse-only material-requests view
+-- ============================================================================
+alter table public.profiles add column if not exists username text;
+create unique index if not exists profiles_username_lower_key on public.profiles (lower(username)) where username is not null;
+alter table public.profiles add column if not exists warehouse_user boolean not null default false;
+
+-- ============================================================================
 -- Goods Received · per-line partial receiving bookkeeping
 -- (was written by the app since commit 2b78342 but not recorded here — without
 --  these columns the "mark line received" update fails and receiving appears broken)

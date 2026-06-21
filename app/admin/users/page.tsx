@@ -7,9 +7,9 @@ import { supabase } from '@/lib/supabase'
 import { PERMISSION_MODULES, defaultGrid, isConfigured, type Permissions, type Action } from '@/lib/permissions'
 import MultiFilter from '@/components/MultiFilter'
 
-interface UserRow { id: string; username: string | null; email: string; full_name: string; factory_code: string; factory_codes: string[] | null; readonly_factories: string[] | null; role: string; permissions: Permissions | null }
-type FormState = { username: string; email: string; password: string; full_name: string; factory_code: string; factory_codes: string[]; readonly_factories: string[]; role: string; permissions: Permissions }
-const blankForm = (): FormState => ({ username: '', email: '', password: '', full_name: '', factory_code: '', factory_codes: [], readonly_factories: [], role: 'user', permissions: defaultGrid() })
+interface UserRow { id: string; username: string | null; email: string; full_name: string; factory_code: string; factory_codes: string[] | null; readonly_factories: string[] | null; warehouse_user?: boolean | null; role: string; permissions: Permissions | null }
+type FormState = { username: string; email: string; password: string; full_name: string; factory_code: string; factory_codes: string[]; readonly_factories: string[]; warehouse_user: boolean; role: string; permissions: Permissions }
+const blankForm = (): FormState => ({ username: '', email: '', password: '', full_name: '', factory_code: '', factory_codes: [], readonly_factories: [], warehouse_user: false, role: 'user', permissions: defaultGrid() })
 
 export default function UsersPage() {
   const { profile, loading } = useProfile()
@@ -51,6 +51,7 @@ export default function UsersPage() {
       username: u.username || '', email: u.email, password: '', full_name: u.full_name || '', factory_code: u.factory_code,
       factory_codes: u.factory_codes?.length ? u.factory_codes : (u.factory_code ? [u.factory_code] : []),
       readonly_factories: u.readonly_factories || [],
+      warehouse_user: !!u.warehouse_user,
       role: u.role,
       permissions: isConfigured(u.permissions) ? (u.permissions as Permissions) : defaultGrid(),
     })
@@ -64,6 +65,7 @@ export default function UsersPage() {
       username: '', email: '', password: '', full_name: '', factory_code: u.factory_code,
       factory_codes: u.factory_codes?.length ? u.factory_codes : (u.factory_code ? [u.factory_code] : []),
       readonly_factories: u.readonly_factories || [],
+      warehouse_user: !!u.warehouse_user,
       role: u.role,
       permissions: isConfigured(u.permissions) ? (u.permissions as Permissions) : defaultGrid(),
     })
@@ -116,8 +118,8 @@ export default function UsersPage() {
     const isEdit = mode === 'edit'
     const url = isEdit ? '/api/update-user' : '/api/create-user'
     const body = isEdit
-      ? { id: editingId, username: form.username || undefined, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, role: form.role, permissions: form.permissions, password: form.password || undefined }
-      : { username: form.username, email: form.email || undefined, password: form.password, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, role: form.role, permissions: form.permissions }
+      ? { id: editingId, username: form.username || undefined, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, warehouse_user: form.warehouse_user, role: form.role, permissions: form.permissions, password: form.password || undefined }
+      : { username: form.username, email: form.email || undefined, password: form.password, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, warehouse_user: form.warehouse_user, role: form.role, permissions: form.permissions }
     const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     const data = await res.json()
     if (data.error) { setError(data.error); setSaving(false); return }
@@ -238,6 +240,16 @@ export default function UsersPage() {
                 )
               })()}
             </div>
+
+            {/* Warehouse staff: restricted Material Requests view */}
+            <label className="flex items-start gap-2 cursor-pointer bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+              <input type="checkbox" className="h-4 w-4 mt-0.5" checked={form.warehouse_user}
+                onChange={e => setForm({ ...form, warehouse_user: e.target.checked })} />
+              <span className="text-sm">
+                <span className="font-medium">📦 Warehouse staff</span>
+                <span className="block text-gray-500 text-xs">On Material Requests they only see <strong>released pick runs</strong> — they can enter the SO number and record what they pick, but don&apos;t see the factory&apos;s open/draft requests. Give them factory access for the locations they pick for (or Head Office to see all).</span>
+              </span>
+            </label>
 
             {/* Permission grid */}
             {form.role === 'admin' ? (

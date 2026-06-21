@@ -74,6 +74,9 @@ export default function MaterialRequestsPage() {
   const [labelEdits, setLabelEdits] = useState<Record<string, { batch: string; exp: string; qty: string }>>({}) // item id -> label batch/exp/print-qty being typed
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
+  const isWarehouse = !!profile?.warehouse_user   // warehouse staff: only released pick runs + SO entry
+  // Warehouse staff land straight on the released pick runs and can't see the other tabs.
+  useEffect(() => { if (profile?.warehouse_user) setFilter('Combined picking') }, [profile])
   const multiFac = isHO || (profile?.factory_codes?.length || 0) > 1   // sees more than one factory
 
   useEffect(() => { if (profile) { load(); loadFactories(); loadFactoryItems(); loadRolls(); loadGrn(); loadNotReq() } }, [profile])
@@ -470,14 +473,17 @@ export default function MaterialRequestsPage() {
         </p>
         <p className="text-gray-400 text-xs mb-5 -mt-3">Open requests refresh automatically when the BOM or stock changes. Once you start recording received quantities, the request is frozen. To receive a whole Delivery Order at once, use the <strong>Goods Received</strong> tab.</p>
 
-        <div className="flex gap-2 mb-5">
-          {FILTERS.map(f => (
-            <button key={f} onClick={() => setFilter(f)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${filter === f ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
-              {f}{f === 'Not requested' ? (notReq.length ? ` (${notReq.length})` : '') : (f !== 'All' && counts[f] ? ` (${counts[f]})` : '')}
-            </button>
-          ))}
-        </div>
+        {!isWarehouse && (
+          <div className="flex gap-2 mb-5">
+            {FILTERS.map(f => (
+              <button key={f} onClick={() => setFilter(f)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${filter === f ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                {f}{f === 'Not requested' ? (notReq.length ? ` (${notReq.length})` : '') : (f !== 'All' && counts[f] ? ` (${counts[f]})` : '')}
+              </button>
+            ))}
+          </div>
+        )}
+        {isWarehouse && <p className="text-gray-500 text-sm bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mb-4">📦 Warehouse view — released pick runs only. Enter the SO number and record what you pick.</p>}
 
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
         {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}
@@ -518,7 +524,7 @@ export default function MaterialRequestsPage() {
             </div>
           ) : (
             <div className="space-y-8">
-              {filter !== 'Labels' && waitingFactories.length > 0 && (
+              {filter !== 'Labels' && !isWarehouse && waitingFactories.length > 0 && (
                 <div>
                   <h2 className="font-semibold text-gray-800 mb-1">⏳ Waiting to release</h2>
                   <p className="text-gray-500 text-sm mb-3">

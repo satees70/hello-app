@@ -11,6 +11,8 @@ export interface Profile {
   factory_code: string
   factory_codes?: string[] | null
   readonly_factories?: string[] | null
+  warehouse_user?: boolean | null
+  username?: string | null
   role: string
   permissions?: Permissions | null
 }
