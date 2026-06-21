@@ -116,19 +116,25 @@ export default function DispatchPage() {
     setCode(''); setLotId(''); setQty(''); setIssue('no'); setReason('')
   }
 
-  // Create ONE delivery order with all ticked finished goods + all cart returns.
-  async function createDO() {
-    if (cartCount === 0) { setError('Add at least one item — finished goods or a raw-material return.'); return }
-    if (cartFactories.size > 1) { setError('One factory per delivery order — your items are from different factories.'); return }
-    if (!confirm(`Create a delivery order with ${cartCount} item(s) and send to the warehouse?`)) return
+  // Create ONE delivery order for a single factory's items (finished goods + returns).
+  // A multi-factory user builds a mixed cart; each factory gets its own DO.
+  async function createDO(fac: string) {
+    const batchIds = batches.filter(b => picked.has(b.id) && b.factory_code === fac).map(b => b.id)
+    const facReturns = returnCart.filter(r => r.factory === fac)
+    const count = batchIds.length + facReturns.length
+    if (count === 0) return
+    if (!confirm(`Create a delivery order for ${factoryName(fac)} with ${count} item(s) and send to the warehouse?`)) return
     setBusy(true); setError(''); setSuccess('')
     const { data, error: e } = await supabase.rpc('create_delivery_order', {
-      p_batch_ids: Array.from(picked),
-      p_returns: returnCart.map(r => ({ lot_id: r.lotId, qty: r.qty, reason: r.reason })),
+      p_batch_ids: batchIds,
+      p_returns: facReturns.map(r => ({ lot_id: r.lotId, qty: r.qty, reason: r.reason })),
     })
     if (e) { setError(e.message); setBusy(false); return }
-    setSuccess(`Delivery order ${data} created — ${cartCount} item(s) sent to warehouse.`)
-    setPicked(new Set()); setReturnCart([]); setBusy(false); load()
+    setSuccess(`Delivery order ${data} created — ${count} item(s) sent to warehouse.`)
+    // Clear only this factory's items; keep the rest of the cart for its own DO.
+    setPicked(p => { const n = new Set(p); batchIds.forEach(id => n.delete(id)); return n })
+    setReturnCart(c => c.filter(r => r.factory !== fac))
+    setBusy(false); load()
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
@@ -254,36 +260,43 @@ export default function DispatchPage() {
           </form>
         )}
 
-        {/* ---- Consolidated delivery-order cart ---- */}
+        {/* ---- Delivery-order cart, grouped by factory (one DO per factory) ---- */}
         {canEdit && cartCount > 0 && (
-          <div className="bg-white border-2 border-teal-300 rounded-xl shadow-sm p-4 mb-8">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold">This delivery order <span className="text-gray-400 font-normal text-sm">· {cartCount} item(s)</span></h2>
-              <button onClick={createDO} disabled={busy || cartFactories.size > 1} className="bg-teal-600 text-white px-4 py-2 rounded-lg hover:bg-teal-700 disabled:opacity-50 text-sm font-medium">{busy ? 'Creating…' : 'Create delivery order'}</button>
-            </div>
-            <div className="text-sm divide-y">
-              {batches.filter(b => picked.has(b.id)).map(b => (
-                <div key={b.id} className="flex items-center gap-2 py-1.5">
-                  <span title="Finished goods">📦</span>
-                  <span className="font-mono">{b.item_code}</span>
-                  <span className="text-gray-400 flex-1 truncate">{b.description}{b.batch_no ? ` · ${b.batch_no}` : ''}</span>
-                  <span className="font-medium whitespace-nowrap">× {b.produced_qty}</span>
-                  {multiFac && <span className="text-gray-400 text-xs whitespace-nowrap">{factoryName(b.factory_code)}</span>}
-                  <button onClick={() => toggle(b.id)} className="text-red-500 text-xs hover:underline">remove</button>
+          <div className="space-y-4 mb-8">
+            <h2 className="text-lg font-semibold">This delivery order <span className="text-gray-400 font-normal text-sm">· {cartCount} item(s){cartFactories.size > 1 ? ` across ${cartFactories.size} factories` : ''}</span></h2>
+            {[...cartFactories].sort().map(fac => {
+              const facBatches = batches.filter(b => picked.has(b.id) && b.factory_code === fac)
+              const facReturns = returnCart.map((r, i) => ({ r, i })).filter(x => x.r.factory === fac)
+              const count = facBatches.length + facReturns.length
+              return (
+                <div key={fac} className="bg-white border-2 border-teal-300 rounded-xl shadow-sm p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-semibold">🏭 {factoryName(fac)} <span className="text-gray-400 font-normal text-sm">· {count} item(s)</span></h3>
+                    <button onClick={() => createDO(fac)} disabled={busy} className="bg-teal-600 text-white px-4 py-2 rounded-lg hover:bg-teal-700 disabled:opacity-50 text-sm font-medium">{busy ? 'Creating…' : 'Create delivery order'}</button>
+                  </div>
+                  <div className="text-sm divide-y">
+                    {facBatches.map(b => (
+                      <div key={b.id} className="flex items-center gap-2 py-1.5">
+                        <span title="Finished goods">📦</span>
+                        <span className="font-mono">{b.item_code}</span>
+                        <span className="text-gray-400 flex-1 truncate">{b.description}{b.batch_no ? ` · ${b.batch_no}` : ''}</span>
+                        <span className="font-medium whitespace-nowrap">× {b.produced_qty}</span>
+                        <button onClick={() => toggle(b.id)} className="text-red-500 text-xs hover:underline">remove</button>
+                      </div>
+                    ))}
+                    {facReturns.map(({ r, i }) => (
+                      <div key={i} className="flex items-center gap-2 py-1.5">
+                        <span title="Raw-material return" className="text-orange-600">↩</span>
+                        <span className="font-mono">{r.itemCode}</span>
+                        <span className="text-gray-400 flex-1 truncate">{r.description} · batch {r.batchNo || '—'}{r.reason ? ` · ${r.reason}` : ''}</span>
+                        <span className="font-medium whitespace-nowrap">× {r.qty} {r.unit}</span>
+                        <button onClick={() => setReturnCart(c => c.filter((_, j) => j !== i))} className="text-red-500 text-xs hover:underline">remove</button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
-              {returnCart.map((r, i) => (
-                <div key={i} className="flex items-center gap-2 py-1.5">
-                  <span title="Raw-material return" className="text-orange-600">↩</span>
-                  <span className="font-mono">{r.itemCode}</span>
-                  <span className="text-gray-400 flex-1 truncate">{r.description} · batch {r.batchNo || '—'}{r.reason ? ` · ${r.reason}` : ''}</span>
-                  <span className="font-medium whitespace-nowrap">× {r.qty} {r.unit}</span>
-                  {multiFac && <span className="text-gray-400 text-xs whitespace-nowrap">{r.factoryName}</span>}
-                  <button onClick={() => setReturnCart(c => c.filter((_, j) => j !== i))} className="text-red-500 text-xs hover:underline">remove</button>
-                </div>
-              ))}
-            </div>
-            {cartFactories.size > 1 && <p className="text-amber-600 text-xs mt-2">⚠ Items are from different factories. A delivery order must be for one factory — remove the others.</p>}
+              )
+            })}
           </div>
         )}
 
