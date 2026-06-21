@@ -406,6 +406,23 @@ export default function MaterialRequestsPage() {
     Object.entries(mats).forEach(([code, g]) => { (factoryItems.has(code) ? factory : warehouse)[code] = g })
     return { warehouse, factory }
   }
+  // Group released runs by how far along they are, for the warehouse list.
+  type RunB = { runNo: string; factory: string; released_at: string; mats: MatMap; reqs: MaterialRequest[] }
+  const runBucket = (run: RunB): 'new' | 'so' | 'partial' | 'done' => {
+    const rs = run.reqs
+    if (rs.length > 0 && rs.every(r => r.status === 'Fulfilled')) return 'done'
+    if (rs.some(r => r.status === 'Partially Received' || r.status === 'Fulfilled')) return 'partial'
+    if (rs[0]?.warehouse_so_no) return 'so'
+    return 'new'
+  }
+  const RUN_BUCKETS = ['new', 'so', 'partial', 'done'] as const
+  const BUCKET_LABEL: Record<string, string> = { new: '🆕 New — needs SO number', so: '🧾 SO entered — to pick', partial: '⏳ Partially received', done: '✅ Fully received' }
+  const visibleRuns = runList.filter(run => filter === 'Labels'
+    ? run.reqs.some(r => (r.material_request_items || []).some(it => factoryItems.has(it.item_code)))
+    : Object.keys(splitBySource(run.mats).warehouse).length > 0)
+  const orderedRuns = filter === 'Labels'
+    ? visibleRuns
+    : [...visibleRuns].sort((a, b) => RUN_BUCKETS.indexOf(runBucket(a)) - RUN_BUCKETS.indexOf(runBucket(b)) || b.released_at.localeCompare(a.released_at))
 
   // One material table; editable=true adds the Received/Remaining columns + receiving (released runs only)
   const renderMatTable = (mats: MatMap, prefix: string, editable: boolean) => {
@@ -560,14 +577,16 @@ export default function MaterialRequestsPage() {
                       : <>Pick each run's totals in one trip. Type the <strong>total received</strong> for a material — it is split back across the original requests automatically.</>}
                   </p>
                   <div className="space-y-4">
-                    {runList.map(run => {
+                    {orderedRuns.map((run, idx) => {
                       const rkey = run.runNo
                       const { warehouse } = splitBySource(run.mats)
                       const facReqs = run.reqs.filter(r => (r.material_request_items || []).some(it => factoryItems.has(it.item_code)))
-                      if (filter === 'Labels' && facReqs.length === 0) return null
-                      if (filter !== 'Labels' && Object.keys(warehouse).length === 0) return null
+                      const bucket = filter === 'Labels' ? null : runBucket(run)
+                      const showHeader = !!bucket && (idx === 0 || runBucket(orderedRuns[idx - 1]) !== bucket)
                       return (
-                        <div key={rkey} className="bg-white rounded-xl shadow-sm border p-5">
+                        <Fragment key={rkey}>
+                        {showHeader && <h3 className="text-sm font-semibold text-gray-600 mt-3 mb-1">{BUCKET_LABEL[bucket!]} <span className="text-gray-400 font-normal">· {orderedRuns.filter(rr => runBucket(rr) === bucket).length}</span></h3>}
+                        <div className="bg-white rounded-xl shadow-sm border p-5">
                           <div className="flex flex-wrap items-center gap-3 mb-4">
                             <span className="font-semibold">{isHO ? factoryName(run.factory) : run.factory}</span>
                             <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 font-mono">{run.runNo}</span>
@@ -694,6 +713,7 @@ export default function MaterialRequestsPage() {
                             </div>
                           ) })()}
                         </div>
+                        </Fragment>
                       )
                     })}
                   </div>
