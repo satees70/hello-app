@@ -79,6 +79,43 @@ export default function SalesOrdersPage() {
   const [dupImports, setDupImports] = useState<Record<string, string[]>>({}) // key -> import ids that contain it
   const [docSummary, setDocSummary] = useState<Record<string, { pending: number; dup: number; locations: string[]; locFactory: Record<string, string>; confirmed: string[] }>>({})
   const [docDelPending, setDocDelPending] = useState<Set<string>>(new Set())
+  const [lineStatuses, setLineStatuses] = useState<Record<string, string>>({}) // sales line id -> production lifecycle status
+
+  // Trace each confirmed line to its production batch and report where it is.
+  async function loadLineStatuses(ls: SalesLine[]) {
+    const sos = [...new Set(ls.map(l => l.so_number).filter(Boolean))]
+    if (sos.length === 0) { setLineStatuses({}); return }
+    const { data: bi } = await supabase.from('production_batch_items')
+      .select('so_number, production_batches!batch_id(item_code, factory_code, material_request_id, pack_date, produced_qty, total_quantity, dispatched_at)')
+      .in('so_number', sos)
+    type B = { item_code: string; factory_code: string; material_request_id: string | null; pack_date: string | null; produced_qty: number | null; total_quantity: number; dispatched_at: string | null }
+    const rows = (bi || []) as unknown as { so_number: string; production_batches: B | null }[]
+    const mrIds = [...new Set(rows.map(r => r.production_batches?.material_request_id).filter(Boolean) as string[])]
+    const mrStatus: Record<string, string> = {}
+    if (mrIds.length) { const { data: mrs } = await supabase.from('material_requests').select('id, status').in('id', mrIds); (mrs || []).forEach(m => { mrStatus[m.id] = m.status }) }
+    const statusOf = (b: B): string => {
+      if (b.dispatched_at) return 'Delivered to warehouse'
+      const prod = Number(b.produced_qty || 0), tot = Number(b.total_quantity || 0)
+      if (prod > 0 && prod >= tot) return 'Production completed'
+      if (prod > 0) return 'Production started'
+      if (!b.material_request_id) return 'Pending Material Request'
+      const ms = mrStatus[b.material_request_id]
+      if (ms === 'Fulfilled') return b.pack_date ? 'Pending Schedule' : 'Material Received Fully'
+      if (ms === 'Partially Received') return 'Material Received Partial'
+      return 'Pending Material Request'
+    }
+    const map: Record<string, string> = {}
+    rows.forEach(r => { const b = r.production_batches; if (b) map[`${b.factory_code}|${b.item_code}|${r.so_number}`] = statusOf(b) })
+    const out: Record<string, string> = {}
+    ls.forEach(l => { out[l.id] = map[`${l.factory_code}|${l.item_code}|${l.so_number}`] || 'Pending Material Request' })
+    setLineStatuses(out)
+  }
+  const LINE_STATUS_STYLE: Record<string, string> = {
+    'Pending Material Request': 'bg-gray-100 text-gray-600', 'Material Received Partial': 'bg-amber-100 text-amber-700',
+    'Material Received Fully': 'bg-lime-100 text-lime-700', 'Pending Schedule': 'bg-yellow-100 text-yellow-700',
+    'Production started': 'bg-blue-100 text-blue-700', 'Production completed': 'bg-teal-100 text-teal-700',
+    'Delivered to warehouse': 'bg-green-100 text-green-700',
+  }
 
   // Factory display + valid location codes (for the location dropdown)
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
@@ -245,6 +282,7 @@ export default function SalesOrdersPage() {
     setLines(lineData || [])
     setChangeReqs(crData || [])
     setConfirmations(confData || [])
+    loadLineStatuses((lineData as SalesLine[]) || [])
     // Flag SO number + item that appears across MORE THAN ONE document (a re-upload).
     // Repeats within the same document are legitimate separate order lines.
     const byKey: Record<string, Set<string>> = {}
@@ -299,6 +337,7 @@ export default function SalesOrdersPage() {
   const visibleLines = lines.filter(l => {
     if (onlyUnmapped && l.factory_code) return false
     for (const c of COLS) { const sel = colFilters[c.key]; if (sel && sel.size > 0 && !sel.has(c.get(l))) return false }
+    const ss = colFilters.status; if (ss && ss.size > 0 && !ss.has(lineStatuses[l.id] || '')) return false
     return true
   })
   const allSelected = visibleLines.length > 0 && visibleLines.every(l => selectedIds.has(l.id))
@@ -699,6 +738,7 @@ export default function SalesOrdersPage() {
                   <tr>
                     <th className="px-3 py-2 bg-gray-50"><input type="checkbox" checked={allSelected} onChange={toggleAll} className="h-4 w-4" /></th>
                     {COLS.map(c => (<th key={c.key} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{c.label}</th>))}
+                    <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">Status</th>
                     <th className="px-3 py-2"></th>
                   </tr>
                   <tr className="border-b">
@@ -708,13 +748,14 @@ export default function SalesOrdersPage() {
                         <MultiFilter values={colValues(c.key)} selected={colFilters[c.key] || new Set()} onChange={s => setColFilters(p => ({ ...p, [c.key]: s }))} />
                       </th>
                     ))}
+                    <th className="px-2 py-1 min-w-[110px]"><MultiFilter values={[...new Set(Object.values(lineStatuses))].sort()} selected={colFilters.status || new Set()} onChange={s => setColFilters(p => ({ ...p, status: s }))} /></th>
                     <th className="px-2 py-1"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {linesLoading && (<tr><td colSpan={11} className="text-center py-8 text-gray-400">Loading…</td></tr>)}
-                  {!linesLoading && lines.length === 0 && (<tr><td colSpan={11} className="text-center py-8 text-gray-400">No lines for this document.</td></tr>)}
-                  {!linesLoading && lines.length > 0 && visibleLines.length === 0 && (<tr><td colSpan={11} className="text-center py-8 text-gray-400">No lines match the filter.</td></tr>)}
+                  {linesLoading && (<tr><td colSpan={12} className="text-center py-8 text-gray-400">Loading…</td></tr>)}
+                  {!linesLoading && lines.length === 0 && (<tr><td colSpan={12} className="text-center py-8 text-gray-400">No lines for this document.</td></tr>)}
+                  {!linesLoading && lines.length > 0 && visibleLines.length === 0 && (<tr><td colSpan={12} className="text-center py-8 text-gray-400">No lines match the filter.</td></tr>)}
                   {visibleLines.map(line => {
                     const pend = pendingForLine(line.id)
                     return (
@@ -735,6 +776,9 @@ export default function SalesOrdersPage() {
                           {line.factory_code
                             ? <span className="inline-block bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{factoryName(line.factory_code)}</span>
                             : <span className="text-red-600">⚠ Unmapped</span>}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          {lineStatuses[line.id] ? <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${LINE_STATUS_STYLE[lineStatuses[line.id]] || 'bg-gray-100 text-gray-600'}`}>{lineStatuses[line.id]}</span> : <span className="text-gray-300 text-xs">—</span>}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">
                           {pend > 0
