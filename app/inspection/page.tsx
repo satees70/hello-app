@@ -27,6 +27,30 @@ const pauseMs = (t: Timer, nowMs: number) => {
 const fmtDur = (ms: number) => { const s = Math.max(0, Math.floor(ms / 1000)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}` }
 const fmtTime = (iso: string | null) => iso ? new Date(iso).toLocaleString() : '—'
 
+// Live timer displays own their own per-second tick, so the rest of the form
+// doesn't re-render every second (which was interrupting typing).
+function useTick(active: boolean) {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => { if (!active) return; const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id) }, [active])
+  return now
+}
+function TimerClock({ timer }: { timer: Timer }) {
+  const now = useTick(timer.status === 'running' || timer.status === 'paused')
+  return <span className="font-mono text-xl font-bold ml-1">{fmtDur(totalMs(timer, now))}</span>
+}
+function TimerStats({ timer }: { timer: Timer }) {
+  const now = useTick(timer.status === 'running' || timer.status === 'paused')
+  return (
+    <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-500">
+      <span>Started: {fmtTime(timer.segments[0]?.s || null)}</span>
+      <span>Ended: {fmtTime(timer.status === 'stopped' ? (timer.segments[timer.segments.length - 1]?.e || null) : null)}</span>
+      <span>Run time <span className="text-gray-400">(excl. breaks)</span>: <strong className="text-gray-700">{fmtDur(totalMs(timer, now))}</strong></span>
+      <span>Pause time: <strong className="text-amber-700">{fmtDur(pauseMs(timer, now))}</strong></span>
+      <span>Total: <strong className="text-gray-700">{fmtDur(totalMs(timer, now) + pauseMs(timer, now))}</strong></span>
+    </div>
+  )
+}
+
 const blankHour = (): Hourly => ({ time: '', weight: '', ink: '', qc_color: '', qc_odour: '', qc_phy: '', temp: '', speed: '', press: '', drop: '', alu: '', fe: '', nonfe: '', ss: '', remarks: '' })
 const EMPTY: Form = {
   date: '', area_machine: '', no: '', code: '', product: '',
@@ -64,14 +88,12 @@ export default function InspectionPage() {
   const [recordedQty, setRecordedQty] = useState(0)
   const [recording, setRecording] = useState(false)
   const [timer, setTimer] = useState<Timer>(EMPTY_TIMER)
-  const [now, setNow] = useState(Date.now())
   const [packLines, setPackLines] = useState<{ name: string; line_code: string | null; line_mode: string | null }[]>([])
   const [batchMode, setBatchMode] = useState('')   // batch run mode: auto | manual
   const [stockLots, setStockLots] = useState<Record<string, { batch_no: string; qty_remaining: number; exp_date: string | null }[]>>({})
 
   useEffect(() => { setBatchId(new URLSearchParams(window.location.search).get('batch') || '') }, [])
   useEffect(() => { if (profile && batchId) loadForBatch(batchId) }, [profile, batchId])
-  useEffect(() => { if (timer.status !== 'running' && timer.status !== 'paused') return; const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id) }, [timer.status])
   // Auto-fill No. once the scheduled line + date + packing lines are known (don't overwrite an existing one)
   useEffect(() => { if (f.area_machine && !f.no && packLines.length && f.date && factoryCode) genNo(String(f.area_machine), String(f.date)) }, [f.area_machine, f.date, packLines, factoryCode]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -80,31 +102,23 @@ export default function InspectionPage() {
     if (batch) { setFactoryCode(batch.factory_code); setBatchNo(batch.batch_no); setPlanned(Number(batch.total_quantity || 0)); setProduced(Number(batch.produced_qty || 0)); setBatchMode(batch.run_mode || 'auto')
       const { data: pl } = await supabase.from('packing_lines').select('name, line_code, line_mode').eq('factory_code', batch.factory_code).eq('active', true).order('name'); setPackLines(pl || [])
     }
-    const { data: rec } = await supabase.from('inspection_records').select('*').eq('production_batch_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle()
-    if (rec) {
-      setRecordId(rec.id)
-      const d = rec.data as Record<string, unknown>
-      setRecordedQty(Number(d.recorded_qty || 0))
-      setTimer((d.timer as Timer) || EMPTY_TIMER)
-      setF({ ...EMPTY, ...(d as Form) })
-      return
-    }
-    const { data: cons } = await supabase.from('production_consumption').select('batch_no').eq('production_batch_id', id)
-    const rmBatches = [...new Set((cons || []).map(c => c.batch_no).filter(Boolean))].join(', ')
-    const td = new Date(); const localToday = `${td.getFullYear()}-${String(td.getMonth() + 1).padStart(2, '0')}-${String(td.getDate()).padStart(2, '0')}`
     // Build the materials table from the product's BOM (planned = recipe qty × planned units)
     const total = Number(batch?.total_quantity || 0)
-    let mats: Mat[] = []
+    let bomMats: Mat[] = []
     if (batch?.item_code) {
       const { data: parent } = await supabase.from('items').select('id').eq('code', batch.item_code).maybeSingle()
       if (parent) {
         const { data: comps } = await supabase.from('bom_components')
           .select('quantity, main_ingredient, items:component_item_id(code, description, unit)').eq('parent_item_id', parent.id)
-        mats = (comps || []).map(c => { const it = c.items as unknown as { code: string; description: string; unit: string } | null
+        bomMats = (comps || []).map(c => { const it = c.items as unknown as { code: string; description: string; unit: string } | null
           return { code: it?.code || '', desc: it?.description || '', unit: it?.unit || '', planned: Number(c.quantity || 0) * total, main: !!c.main_ingredient, batch: '', used: '' } })
       }
     }
-    // Available stock batches per material (from GRN → stock), oldest expiry first
+    const { data: rec } = await supabase.from('inspection_records').select('*').eq('production_batch_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle()
+    const recData = rec ? (rec.data as Record<string, unknown>) : null
+    const savedMats = (recData?.materials as Mat[]) || []
+    const mats = savedMats.length ? savedMats : bomMats
+    // Available stock batches per material (from GRN → stock), oldest expiry first — for both new & saved records
     const codes = mats.map(m => m.code).filter(Boolean)
     const lotMap: Record<string, { batch_no: string; qty_remaining: number; exp_date: string | null }[]> = {}
     if (codes.length && batch?.factory_code) {
@@ -114,6 +128,16 @@ export default function InspectionPage() {
       ;(lots || []).forEach(l => { if (!l.batch_no) return; (lotMap[l.item_code] = lotMap[l.item_code] || []).push({ batch_no: l.batch_no, qty_remaining: Number(l.qty_remaining), exp_date: l.exp_date }) })
     }
     setStockLots(lotMap)
+    if (rec && recData) {
+      setRecordId(rec.id)
+      setRecordedQty(Number(recData.recorded_qty || 0))
+      setTimer((recData.timer as Timer) || EMPTY_TIMER)
+      setF({ ...EMPTY, ...(recData as Form), materials: mats })
+      return
+    }
+    const { data: cons } = await supabase.from('production_consumption').select('batch_no').eq('production_batch_id', id)
+    const rmBatches = [...new Set((cons || []).map(c => c.batch_no).filter(Boolean))].join(', ')
+    const td = new Date(); const localToday = `${td.getFullYear()}-${String(td.getMonth() + 1).padStart(2, '0')}-${String(td.getDate()).padStart(2, '0')}`
     setF({ ...EMPTY, date: localToday, area_machine: batch?.pack_line || '', code: batch?.item_code || '', product: batch?.description || '', bn_raw_material: rmBatches, exp_in: batch?.exp_date || '', exp_out: batch?.exp_date || '', materials: mats })
   }
   const setMat = (i: number, k: keyof Mat, v: string) => setF(prev => { const m = [...(prev.materials as Mat[])]; m[i] = { ...m[i], [k]: v }; return { ...prev, materials: m } })
@@ -146,7 +170,7 @@ export default function InspectionPage() {
   async function save() { if (!canEditHere()) { setError("You have view-only access at this factory."); return } setBusy(true); setError(''); setSuccess(''); const id = await persist(recordedQty); setBusy(false); if (id) setSuccess('Inspection record saved.') }
 
   // Production timer — Start / Pause / Resume / Stop. Net run time excludes pauses.
-  async function applyTimer(t: Timer, form: Form = f) { setTimer(t); setF(form); setNow(Date.now()); await persist(recordedQty, t, form) }
+  async function applyTimer(t: Timer, form: Form = f) { setTimer(t); setF(form); await persist(recordedQty, t, form) }
   const startTimer = () => { const iso = new Date().toISOString(); applyTimer({ status: 'running', segments: [{ s: iso, e: null }] }, { ...f, prod_start: iso }) }
   const pauseTimer = () => { const iso = new Date().toISOString(); const segs = timer.segments.map((sg, i) => i === timer.segments.length - 1 && !sg.e ? { ...sg, e: iso } : sg); applyTimer({ status: 'paused', segments: segs }) }
   const resumeTimer = () => { const iso = new Date().toISOString(); applyTimer({ status: 'running', segments: [...timer.segments, { s: iso, e: null }] }) }
@@ -244,20 +268,14 @@ export default function InspectionPage() {
                     <button onClick={stopTimer} className="bg-red-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium no-print">⏹ Stop</button>
                   </>}
                   {timer.status === 'stopped' && <button onClick={startTimer} className="border px-4 py-1.5 rounded-lg text-sm no-print">↻ Restart</button>}
-                  <span className="font-mono text-xl font-bold ml-1">{fmtDur(totalMs(timer, now))}</span>
+                  <TimerClock timer={timer} />
                   <span className={`text-xs px-2 py-0.5 rounded-full ${timer.status === 'running' ? 'bg-green-100 text-green-700' : timer.status === 'paused' ? 'bg-amber-100 text-amber-700' : timer.status === 'stopped' ? 'bg-gray-200 text-gray-700' : 'bg-gray-100 text-gray-500'}`}>{timer.status === 'idle' ? 'not started' : timer.status}</span>
                   {timer.status !== 'idle' && recordId && (
                     <button onClick={async () => { const res = await requestTimerCancel({ table: 'inspection_records', record_id: recordId, timer_key: 'inspection_production', label: `Inspection — production timer (batch ${batchNo})`, factory_code: factoryCode, requested_by_name: profile?.full_name }); if (res === null) return; if (res) setError(res); else alert('Cancellation request sent to Head Office for approval.') }}
                       className="text-orange-600 hover:underline text-xs no-print">Request to cancel</button>
                   )}
                 </div>
-                <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-500">
-                  <span>Started: {fmtTime(timer.segments[0]?.s || null)}</span>
-                  <span>Ended: {fmtTime(timer.status === 'stopped' ? (timer.segments[timer.segments.length - 1]?.e || null) : null)}</span>
-                  <span>Run time <span className="text-gray-400">(excl. breaks)</span>: <strong className="text-gray-700">{fmtDur(totalMs(timer, now))}</strong></span>
-                  <span>Pause time: <strong className="text-amber-700">{fmtDur(pauseMs(timer, now))}</strong></span>
-                  <span>Total: <strong className="text-gray-700">{fmtDur(totalMs(timer, now) + pauseMs(timer, now))}</strong></span>
-                </div>
+                <TimerStats timer={timer} />
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-2">
                 <Field label="Quantity produced"><In k="qty_produced" type="number" /></Field>
