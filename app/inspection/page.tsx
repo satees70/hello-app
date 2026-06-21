@@ -98,7 +98,7 @@ export default function InspectionPage() {
   useEffect(() => { if (f.area_machine && !f.no && packLines.length && f.date && factoryCode) genNo(String(f.area_machine), String(f.date)) }, [f.area_machine, f.date, packLines, factoryCode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadForBatch(id: string) {
-    const { data: batch } = await supabase.from('production_batches').select('batch_no, item_code, description, factory_code, exp_date, total_quantity, produced_qty, pack_line, run_mode').eq('id', id).single()
+    const { data: batch } = await supabase.from('production_batches').select('batch_no, item_code, description, factory_code, exp_date, total_quantity, produced_qty, pack_line, pack_date, run_mode').eq('id', id).single()
     if (batch) { setFactoryCode(batch.factory_code); setBatchNo(batch.batch_no); setPlanned(Number(batch.total_quantity || 0)); setProduced(Number(batch.produced_qty || 0)); setBatchMode(batch.run_mode || 'auto')
       const { data: pl } = await supabase.from('packing_lines').select('name, line_code, line_mode').eq('factory_code', batch.factory_code).eq('active', true).order('name'); setPackLines(pl || [])
     }
@@ -138,7 +138,7 @@ export default function InspectionPage() {
     const { data: cons } = await supabase.from('production_consumption').select('batch_no').eq('production_batch_id', id)
     const rmBatches = [...new Set((cons || []).map(c => c.batch_no).filter(Boolean))].join(', ')
     const td = new Date(); const localToday = `${td.getFullYear()}-${String(td.getMonth() + 1).padStart(2, '0')}-${String(td.getDate()).padStart(2, '0')}`
-    setF({ ...EMPTY, date: localToday, area_machine: batch?.pack_line || '', code: batch?.item_code || '', product: batch?.description || '', bn_raw_material: rmBatches, exp_in: batch?.exp_date || '', exp_out: batch?.exp_date || '', materials: mats })
+    setF({ ...EMPTY, date: batch?.pack_date || localToday, area_machine: batch?.pack_line || '', code: batch?.item_code || '', product: batch?.description || '', bn_raw_material: rmBatches, exp_in: batch?.exp_date || '', exp_out: batch?.exp_date || '', materials: mats })
   }
   const setMat = (i: number, k: keyof Mat, v: string) => setF(prev => { const m = [...(prev.materials as Mat[])]; m[i] = { ...m[i], [k]: v }; return { ...prev, materials: m } })
 
@@ -295,16 +295,11 @@ export default function InspectionPage() {
 
           {/* Header */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 border-t pt-3">
-            <Field label="Date"><In k="date" type="date" /></Field>
-            <Field label={`Area / Line${batchMode ? ` · ${batchMode} run` : ''}`}>{(() => { const elig = packLines.filter(p => !p.line_mode || p.line_mode === 'any' || p.line_mode === batchMode); return elig.length > 0
-              ? <select value={s('area_machine')} onChange={e => genNo(e.target.value, s('date'))} className="border rounded px-3 py-2 text-sm bg-white w-full">
-                  <option value="">Choose a line…</option>
-                  {elig.map(p => <option key={p.name} value={p.name}>{p.name}{p.line_code ? ` (${p.line_code})` : ''}</option>)}
-                </select>
-              : <In k="area_machine" /> })()}</Field>
-            <Field label="No. (auto)"><div className="border rounded px-2 py-1 text-sm bg-gray-50 text-gray-700 font-mono min-h-[2rem]">{s('no') || '—'}</div></Field>
-            <Field label="Code"><In k="code" /></Field>
-            <Field label="Product"><In k="product" /></Field>
+            <Field label="Date"><div className="border rounded px-3 py-2 text-sm bg-gray-50 text-gray-700 min-h-[2.5rem]">{s('date') ? s('date').split('-').reverse().join('/') : '—'}</div></Field>
+            <Field label={`Area / Line${batchMode ? ` · ${batchMode} run` : ''}`}><div className="border rounded px-3 py-2 text-sm bg-gray-50 text-gray-700 min-h-[2.5rem]">{s('area_machine') || '—'}</div></Field>
+            <Field label="No. (auto)"><div className="border rounded px-3 py-2 text-sm bg-gray-50 text-gray-700 font-mono min-h-[2.5rem]">{s('no') || '—'}</div></Field>
+            <Field label="Code"><div className="border rounded px-3 py-2 text-sm bg-gray-50 text-gray-700 min-h-[2.5rem]">{s('code') || '—'}</div></Field>
+            <Field label="Product"><div className="border rounded px-3 py-2 text-sm bg-gray-50 text-gray-700 min-h-[2.5rem]">{s('product') || '—'}</div></Field>
             <Field label="Plastic weight (g)"><In k="plastic" type="number" /></Field>
             <Field label="Type of waste"><In k="wastage" /></Field>
             <Field label="Weight of wastage (g)"><In k="food_loss_a" type="number" /></Field>
