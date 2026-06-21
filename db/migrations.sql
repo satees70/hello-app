@@ -1317,31 +1317,28 @@ begin
 end $$;
 grant execute on function public.create_dispatch_order(uuid[]) to authenticated;
 
--- Return raw material to the warehouse — reduces factory stock immediately (FEFO)
-create or replace function public.return_material(p_factory text, p_item_code text, p_qty numeric, p_reason text) returns void
+-- Return raw material to the warehouse — reduces a specific batch's stock immediately
+alter table public.material_returns add column if not exists batch_no text;
+drop function if exists public.return_material(text, text, numeric, text);
+create or replace function public.return_material(p_factory text, p_item_code text, p_lot_id uuid, p_qty numeric, p_reason text) returns void
 language plpgsql security definer set search_path = public as $$
-declare v_item public.items; v_need numeric; v_name text; r record;
+declare v_item public.items; v_lot public.stock_lots; v_name text;
 begin
   if not has_perm('dispatch', 'edit') then raise exception 'Not allowed to return materials'; end if;
   if my_factory_code() <> 'HEAD_OFFICE' and not (p_factory = any (my_factory_codes())) then raise exception 'Not allowed for this factory'; end if;
   if p_qty is null or p_qty <= 0 then raise exception 'Enter a quantity greater than zero'; end if;
   select * into v_item from public.items where code = p_item_code limit 1;
   if not found then raise exception 'Item % not found', p_item_code; end if;
-  v_need := p_qty;
-  for r in select id, qty_remaining from public.stock_lots
-           where item_code = p_item_code and factory_code = p_factory and qty_remaining > 0
-           order by exp_date asc nulls last, received_at asc loop
-    exit when v_need <= 0;
-    if r.qty_remaining <= v_need then update public.stock_lots set qty_remaining = 0 where id = r.id; v_need := v_need - r.qty_remaining;
-    else update public.stock_lots set qty_remaining = qty_remaining - v_need where id = r.id; v_need := 0; end if;
-  end loop;
-  if v_need > 0 then raise exception 'Not enough stock to return — short by %', v_need; end if;
+  select * into v_lot from public.stock_lots where id = p_lot_id and item_code = p_item_code and factory_code = p_factory;
+  if not found then raise exception 'Batch not found for this material at this factory'; end if;
+  if p_qty > v_lot.qty_remaining then raise exception 'Not enough in batch % — only % left', coalesce(v_lot.batch_no, '(no batch)'), v_lot.qty_remaining; end if;
+  update public.stock_lots set qty_remaining = qty_remaining - p_qty where id = p_lot_id;
   update public.item_stock set quantity = quantity - p_qty, updated_at = now() where item_id = v_item.id and factory_code = p_factory;
   select full_name into v_name from public.profiles where id = auth.uid();
-  insert into public.material_returns (factory_code, item_code, description, quantity, reason, created_by, created_by_name)
-  values (p_factory, p_item_code, v_item.description, p_qty, p_reason, auth.uid(), v_name);
+  insert into public.material_returns (factory_code, item_code, description, batch_no, quantity, reason, created_by, created_by_name)
+  values (p_factory, p_item_code, v_item.description, v_lot.batch_no, p_qty, p_reason, auth.uid(), v_name);
 end $$;
-grant execute on function public.return_material(text, text, numeric, text) to authenticated;
+grant execute on function public.return_material(text, text, uuid, numeric, text) to authenticated;
 
 
 -- ----------------------------------------------------------------------------

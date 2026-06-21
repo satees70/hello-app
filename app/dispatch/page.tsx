@@ -7,6 +7,7 @@ import { supabase, fetchAll } from '@/lib/supabase'
 import { can } from '@/lib/permissions'
 
 interface Item { id: string; code: string; description: string; unit: string }
+interface Lot { id: string; item_code: string; factory_code: string; batch_no: string | null; exp_date: string | null; qty_remaining: number }
 interface Batch {
   id: string; batch_no: string | null; item_code: string; description: string | null
   factory_code: string; total_quantity: number; produced_qty: number | null
@@ -19,13 +20,14 @@ interface DOrder {
 }
 interface MReturn {
   id: string; factory_code: string; item_code: string; description: string | null
-  quantity: number; reason: string | null; created_by_name: string | null; created_at: string
+  batch_no: string | null; quantity: number; reason: string | null; created_by_name: string | null; created_at: string
 }
 
 export default function DispatchPage() {
   const { profile, loading, error: profileError } = useProfile()
   useRequireView(profile, 'dispatch')
   const [items, setItems] = useState<Item[]>([])
+  const [lots, setLots] = useState<Lot[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [onHand, setOnHand] = useState<Record<string, number>>({})
   const [batches, setBatches] = useState<Batch[]>([])
@@ -44,6 +46,7 @@ export default function DispatchPage() {
   // return form
   const [factory, setFactory] = useState('')
   const [code, setCode] = useState('')
+  const [lotId, setLotId] = useState('')
   const [qty, setQty] = useState('')
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
@@ -59,6 +62,9 @@ export default function DispatchPage() {
     const { data: st } = await supabase.from('item_stock').select('item_id, factory_code, quantity')
     const m: Record<string, number> = {}; (st || []).forEach(r => { m[`${r.item_id}|${r.factory_code}`] = Number(r.quantity) })
     setOnHand(m)
+    const { data: lt } = await supabase.from('stock_lots').select('id, item_code, factory_code, batch_no, exp_date, qty_remaining')
+      .gt('qty_remaining', 0).order('exp_date', { ascending: true, nullsFirst: false }).order('received_at', { ascending: true })
+    setLots((lt as Lot[]) || [])
     const { data: b } = await supabase.from('production_batches')
       .select('id, batch_no, item_code, description, factory_code, total_quantity, produced_qty, dispatched_at, delivery_date')
       .is('dispatched_at', null).gt('produced_qty', 0).order('delivery_date')
@@ -76,8 +82,11 @@ export default function DispatchPage() {
   const status = (b: Batch) => (Number(b.produced_qty || 0) >= b.total_quantity && b.total_quantity > 0) ? 'Completed' : 'In Progress'
   const resolve = (c: string) => items.find(i => i.code.toLowerCase() === c.trim().toLowerCase())
   const item = resolve(code)
-  const onHandQty = item ? (onHand[`${item.id}|${factory}`] ?? 0) : null
   const inStock = items.filter(i => (onHand[`${i.id}|${factory}`] ?? 0) > 0)
+  const itemLots = item ? lots.filter(l => l.item_code === item.code && l.factory_code === factory) : []
+  const lot = itemLots.find(l => l.id === lotId)
+  const onHandQty = lot ? lot.qty_remaining : (item ? (onHand[`${item.id}|${factory}`] ?? 0) : null)
+  const fmtD = (d: string | null) => d ? d.split('-').reverse().join('/') : 'no expiry'
 
   const toggle = (id: string) => setPicked(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
 
@@ -98,15 +107,16 @@ export default function DispatchPage() {
     setError(''); setSuccess('')
     const it = resolve(code)
     if (!it) { setError('Pick a valid raw-material code from the list.'); return }
+    if (!lot) { setError('Pick the batch you are returning.'); return }
     const num = Number(qty)
     if (!(num > 0)) { setError('Enter a quantity greater than zero.'); return }
     if (!reason.trim()) { setError('Please give a reason for the return.'); return }
     setSaving(true)
-    const { error: rErr } = await supabase.rpc('return_material', { p_factory: factory, p_item_code: it.code, p_qty: num, p_reason: reason.trim() })
+    const { error: rErr } = await supabase.rpc('return_material', { p_factory: factory, p_item_code: it.code, p_lot_id: lot.id, p_qty: num, p_reason: reason.trim() })
     if (rErr) { setError(rErr.message); setSaving(false); return }
     setSaving(false)
-    setSuccess(`Returned ${num} ${it.unit} of ${it.code} — factory stock reduced.`)
-    setCode(''); setQty(''); setReason(''); load()
+    setSuccess(`Returned ${num} ${it.unit} of ${it.code} (batch ${lot.batch_no || '—'}) — factory stock reduced.`)
+    setCode(''); setLotId(''); setQty(''); setReason(''); load()
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
@@ -185,13 +195,13 @@ export default function DispatchPage() {
 
         {/* ---- Raw material return ---- */}
         <h2 className="text-lg font-semibold mb-2">Return raw material</h2>
-        <p className="text-gray-500 text-xs mb-3">Sending material back reduces factory stock immediately (oldest expiry first).</p>
+        <p className="text-gray-500 text-xs mb-3">Pick the batch being returned — its factory stock is reduced immediately.</p>
         {canEdit && (
           <form onSubmit={submitReturn} className="bg-white border rounded-xl shadow-sm p-4 mb-8">
             <div className="flex flex-wrap gap-4 items-end">
               {myFactories.length > 1 ? (
                 <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Factory (location)</span>
-                  <select value={factory} onChange={e => setFactory(e.target.value)} className="border rounded px-2 py-1.5 text-sm bg-white">
+                  <select value={factory} onChange={e => { setFactory(e.target.value); setCode(''); setLotId('') }} className="border rounded px-2 py-1.5 text-sm bg-white">
                     {myFactories.map(f => <option key={f.code} value={f.code}>{f.name}</option>)}
                   </select></div>
               ) : (
@@ -200,15 +210,23 @@ export default function DispatchPage() {
               )}
               <div className="flex flex-col gap-1 min-w-[220px] flex-1"><span className="text-xs font-medium text-gray-600">Material</span>
                 {inStock.length > 0 ? (
-                  <select value={code} onChange={e => setCode(e.target.value)} className="border rounded px-2 py-1.5 text-sm bg-white">
+                  <select value={code} onChange={e => { setCode(e.target.value); setLotId('') }} className="border rounded px-2 py-1.5 text-sm bg-white">
                     <option value="">Choose a material…</option>
                     {inStock.map(i => <option key={i.id} value={i.code}>{i.code} — {i.description} · {onHand[`${i.id}|${factory}`]} {i.unit}</option>)}
                   </select>
                 ) : (
                   <div className="border rounded px-2 py-1.5 text-sm bg-gray-50 text-gray-400">No materials in stock at {factoryName(factory)}.</div>
                 )}
-                {item ? <span className="text-xs text-gray-500">On hand: <strong>{onHandQty}</strong> {item.unit}</span> : null}
               </div>
+              {item && (
+                <div className="flex flex-col gap-1 min-w-[180px]"><span className="text-xs font-medium text-gray-600">Batch</span>
+                  <select value={lotId} onChange={e => setLotId(e.target.value)} className="border rounded px-2 py-1.5 text-sm bg-white">
+                    <option value="">Choose a batch…</option>
+                    {itemLots.map(l => <option key={l.id} value={l.id}>{l.batch_no || '(no batch)'} · {l.qty_remaining} {item.unit} · exp {fmtD(l.exp_date)}</option>)}
+                  </select>
+                  {lot ? <span className="text-xs text-gray-500">In this batch: <strong>{onHandQty}</strong> {item.unit}</span> : null}
+                </div>
+              )}
               <div className="flex flex-col gap-1 w-28"><span className="text-xs font-medium text-gray-600">Quantity {item ? `(${item.unit})` : ''}</span>
                 <input type="number" step="any" min="0" value={qty} onChange={e => setQty(e.target.value)} className="border rounded px-2 py-1.5 text-sm" /></div>
               <div className="flex flex-col gap-1 min-w-[220px] flex-1"><span className="text-xs font-medium text-gray-600">Reason</span>
@@ -242,13 +260,14 @@ export default function DispatchPage() {
         <h2 className="text-lg font-semibold mb-2">Recent material returns</h2>
         <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[20rem]">
           <table className="w-full text-xs">
-            <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{[...(multiFac ? ['Factory'] : []), 'Material', 'Qty', 'Reason', 'By', 'When'].map((h, i) => <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
+            <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{[...(multiFac ? ['Factory'] : []), 'Material', 'Batch', 'Qty', 'Reason', 'By', 'When'].map((h, i) => <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
             <tbody>
-              {returns.length === 0 && <tr><td colSpan={6} className="text-center py-8 text-gray-400">No returns yet.</td></tr>}
+              {returns.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-gray-400">No returns yet.</td></tr>}
               {returns.map(r => (
                 <tr key={r.id} className="border-b last:border-0 align-top hover:bg-gray-50">
                   {multiFac && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(r.factory_code)}</td>}
                   <td className="px-3 py-2"><span className="font-mono font-medium">{r.item_code}</span><span className="block text-gray-400">{r.description}</span></td>
+                  <td className="px-3 py-2 whitespace-nowrap">{r.batch_no || '—'}</td>
                   <td className="px-3 py-2 text-right font-semibold">{r.quantity}</td>
                   <td className="px-3 py-2 text-gray-600 min-w-[120px]">{r.reason}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-600">{r.created_by_name || '—'}</td>
