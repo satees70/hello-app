@@ -5,6 +5,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
 import { can } from '@/lib/permissions'
+import ItemPicker from '@/components/ItemPicker'
 
 interface MRItem {
   id: string; item_code: string; description: string; unit: string; requested_qty: number; received_qty: number
@@ -42,6 +43,13 @@ export default function LabelsPage() {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  // Manual label request
+  const [labelItems, setLabelItems] = useState<{ code: string; description: string; unit: string }[]>([])
+  const [showManual, setShowManual] = useState(false)
+  const [manFac, setManFac] = useState('')
+  const [manItem, setManItem] = useState<{ code: string; description: string; unit: string } | null>(null)
+  const [manQty, setManQty] = useState('')
+  const [manLines, setManLines] = useState<{ code: string; description: string; unit: string; qty: number }[]>([])
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
   const canEditFac = (fc: string) => can(profile, 'material_requests', 'edit', fc)
@@ -52,13 +60,14 @@ export default function LabelsPage() {
   async function load() {
     const [{ data: r }, { data: fi }, { data: dos }, { data: dls }, { data: f }] = await Promise.all([
       supabase.from('material_requests').select('id, request_no, factory_code, released_at, pick_run_no, production_batches!batch_id(batch_no, item_code, description, exp_date), material_request_items(*)').not('released_at', 'is', null).order('released_at', { ascending: false }),
-      supabase.from('items').select('code').eq('supplied_by_factory', true),
+      supabase.from('items').select('code, description, unit').eq('supplied_by_factory', true).order('code'),
       supabase.from('delivery_orders').select('id, factory_code'),
       supabase.from('delivery_order_lines').select('do_id, item_code'),
       supabase.from('factories').select('code, name').order('code'),
     ])
     setReqs((r as unknown as MReq[]) || [])
     setFactoryItems(new Set((fi || []).map(x => x.code)))
+    setLabelItems((fi as { code: string; description: string; unit: string }[]) || [])
     const fac: Record<string, string> = {}; (dos || []).forEach(d => { fac[d.id] = d.factory_code })
     const s = new Set<string>(); (dls || []).forEach(l => { const ff = fac[l.do_id]; if (!ff || !l.item_code) return; s.add(`${ff}|${l.item_code}`); s.add(`${ff}|${grnBase(l.item_code)}`) })
     setGrnSet(s)
@@ -107,6 +116,29 @@ export default function LabelsPage() {
     const { data } = await supabase.storage.from('delivery-orders').createSignedUrl(path, 120)
     if (data) window.open(data.signedUrl, '_blank')
   }
+  function addManualLine() {
+    if (!manItem) { setError('Pick a label.'); return }
+    const q = Number(manQty)
+    if (!(q > 0)) { setError('Enter a quantity greater than zero.'); return }
+    setError('')
+    setManLines(prev => { const i = prev.findIndex(l => l.code === manItem.code); if (i >= 0) { const n = [...prev]; n[i] = { ...n[i], qty: n[i].qty + q }; return n } return [...prev, { code: manItem.code, description: manItem.description, unit: manItem.unit, qty: q }] })
+    setManItem(null); setManQty('')
+  }
+  async function submitManualLabel(facOpts: string[]) {
+    const fac = facOpts.includes(manFac) ? manFac : (facOpts[0] || '')
+    if (!fac) { setError('You are not allowed to request for any location.'); return }
+    if (!canEditFac(fac)) { setError('You have view-only access at this factory.'); return }
+    const pending = manItem && Number(manQty) > 0 ? [{ code: manItem.code, description: manItem.description, unit: manItem.unit, qty: Number(manQty) }] : []
+    const lines = [...manLines, ...pending]
+    if (lines.length === 0) { setError('Add at least one label.'); return }
+    setBusy('manual'); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('raise_manual_label_request', { p_factory: fac, p_items: lines })
+    setBusy('')
+    if (e) { setError(e.message); return }
+    setSuccess(`Label request added (${lines.length}) — ready to print at ${factoryName(fac)}.`)
+    setManItem(null); setManQty(''); setManLines([]); setShowManual(false)
+    load()
+  }
   async function act(rpc: 'send_labels' | 'receive_labels', ids: string[], doneMsg: string) {
     if (ids.length === 0) { setError('Select at least one label.'); return }
     setBusy(rpc); setError(''); setSuccess('')
@@ -142,6 +174,59 @@ export default function LabelsPage() {
             </button>
           ))}
         </div>
+
+        {(() => {
+          const facOpts = (isHO ? factories.map(f => f.code) : (profile?.factory_codes?.length ? profile.factory_codes : [profile?.factory_code || ''])).filter(c => c && canEditFac(c))
+          if (facOpts.length === 0) return null
+          const fac = facOpts.includes(manFac) ? manFac : facOpts[0]
+          return (
+            <div className="mb-5">
+              <button onClick={() => { setShowManual(o => !o); setError(''); setSuccess('') }} className="text-blue-600 hover:underline text-sm font-medium">
+                {showManual ? '× Close label request' : '➕ Request a label manually'}
+              </button>
+              {showManual && (
+                <div className="mt-2 bg-white border rounded-xl shadow-sm p-4">
+                  <p className="text-gray-500 text-xs mb-3">Raise a factory-printed label by hand (no batch). It goes straight to <strong>Material received</strong> — ready to print, send, and receive into stock.</p>
+                  <div className="flex flex-wrap items-end gap-3">
+                    {facOpts.length > 1 && (
+                      <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Factory</span>
+                        <select value={fac} onChange={e => setManFac(e.target.value)} className="border rounded-lg px-3 py-2 text-sm bg-white">
+                          {facOpts.map(c => <option key={c} value={c}>{isHO ? factoryName(c) : c}</option>)}
+                        </select></div>
+                    )}
+                    <div className="flex flex-col gap-1 flex-1 min-w-[16rem]"><span className="text-xs font-medium text-gray-600">Label</span>
+                      <ItemPicker items={labelItems} value={manItem ? `${manItem.code} — ${manItem.description}` : ''} onPick={it => setManItem(it)} placeholder="Type a label code or name…" />
+                    </div>
+                    <div className="flex flex-col gap-1 w-28"><span className="text-xs font-medium text-gray-600">Qty{manItem ? ` (${manItem.unit})` : ''}</span>
+                      <input type="number" step="any" value={manQty} onChange={e => setManQty(e.target.value)} className="border rounded-lg px-3 py-2 text-sm text-right" /></div>
+                    <button onClick={addManualLine} className="border border-blue-600 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 text-sm font-medium">+ Add label</button>
+                  </div>
+                  {manLines.length > 0 && (
+                    <div className="mt-3 border rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 border-b"><tr>{['Label', 'Description', 'Qty', ''].map(h => <th key={h} className="text-left px-3 py-1.5 font-medium text-gray-600">{h}</th>)}</tr></thead>
+                        <tbody>
+                          {manLines.map((l, i) => (
+                            <tr key={l.code} className="border-b last:border-0">
+                              <td className="px-3 py-1.5 font-mono font-medium whitespace-nowrap">{l.code}</td>
+                              <td className="px-3 py-1.5 text-gray-600">{l.description}</td>
+                              <td className="px-3 py-1.5 whitespace-nowrap">{Number(Number(l.qty).toPrecision(12))} {l.unit}</td>
+                              <td className="px-3 py-1.5 text-right"><button onClick={() => setManLines(prev => prev.filter((_, x) => x !== i))} className="text-red-500 hover:underline text-xs">remove</button></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <div className="mt-3 flex items-center gap-3">
+                    <button onClick={() => submitManualLabel(facOpts)} disabled={busy === 'manual'} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{busy === 'manual' ? 'Submitting…' : `Submit request${manLines.length ? ` (${manLines.length})` : ''}`}</button>
+                    {manLines.length > 0 && <button onClick={() => setManLines([])} className="text-gray-500 hover:underline text-xs">Clear list</button>}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })()}
 
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
         {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}

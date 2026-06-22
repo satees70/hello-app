@@ -1878,3 +1878,40 @@ begin
   return v_req;
 end; $function$;
 grant execute on function public.raise_manual_material_request(text, jsonb) to authenticated;
+
+-- ============================================================================
+-- 2026-06 · Manual label requests
+-- Raise a factory-printed label by hand (no batch). Like a manual material
+-- request but released immediately with its own pick run, so it lands straight
+-- in the Labels pipeline at "material received" (ready to print).
+-- ============================================================================
+create or replace function public.raise_manual_label_request(p_factory text, p_items jsonb)
+ returns uuid language plpgsql security definer set search_path to 'public' as $function$
+declare v_req uuid; v_no text; v_run text; v_seq int; v_fac text; r jsonb; v_item public.items; v_qty numeric; v_count int := 0;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' and p_factory <> all(my_factory_codes()) then
+    raise exception 'Not allowed for this factory'; end if;
+  if not has_perm('material_requests', 'edit') then raise exception 'Not allowed'; end if;
+  v_no := 'MR-' || lpad(nextval('public.material_request_seq')::text, 5, '0');
+  v_fac := coalesce(nullif(regexp_replace(p_factory, '[^0-9]', '', 'g'), ''), p_factory);
+  select coalesce(max((split_part(pick_run_no, '/', 2))::int), 0) + 1 into v_seq
+    from public.material_requests
+   where factory_code = p_factory
+     and pick_run_no like 'PR' || v_fac || '-' || to_char((now() at time zone 'Asia/Kuala_Lumpur'), 'YYMM') || '/%';
+  v_run := 'PR' || v_fac || '-' || to_char((now() at time zone 'Asia/Kuala_Lumpur'), 'YYMM') || '/' || lpad(v_seq::text, 4, '0');
+  insert into public.material_requests (request_no, batch_id, factory_code, status, manual, released_at, pick_run_no)
+  values (v_no, null, p_factory, 'Open', true, now(), v_run) returning id into v_req;
+  for r in select * from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) loop
+    v_qty := coalesce((r->>'qty')::numeric, 0);
+    if v_qty <= 0 then continue; end if;
+    select * into v_item from public.items where code = r->>'code' limit 1;
+    insert into public.material_request_items
+      (request_id, item_id, item_code, description, unit, required_qty, stock_qty, shortfall_qty, requested_qty, received_qty, factory_code)
+    values (v_req, v_item.id, coalesce(v_item.code, r->>'code'), coalesce(v_item.description, r->>'description'),
+            coalesce(v_item.unit, r->>'unit'), v_qty, 0, v_qty, v_qty, 0, p_factory);
+    v_count := v_count + 1;
+  end loop;
+  if v_count = 0 then delete from public.material_requests where id = v_req; raise exception 'Add at least one label'; end if;
+  return v_req;
+end; $function$;
+grant execute on function public.raise_manual_label_request(text, jsonb) to authenticated;
