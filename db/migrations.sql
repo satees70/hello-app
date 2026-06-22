@@ -2054,3 +2054,43 @@ grant execute on function public.delete_unconfirmed_sales_line(uuid) to authenti
 -- Discussion messages can be linked to a specific sales order number.
 alter table public.discussions add column if not exists so_number text;
 create index if not exists discussions_so on public.discussions (so_number);
+
+-- Regular users may only change Location & Delivery Date directly; Head Office any field.
+create or replace function public.edit_unconfirmed_sales_line(
+  p_line_id uuid, p_customer text, p_so_number text, p_item_code text, p_description text,
+  p_quantity text, p_outstanding text, p_delivery_date text, p_location text)
+ returns void language plpgsql security definer set search_path to 'public' as $function$
+declare v_line public.sales_order_lines;
+begin
+  select * into v_line from public.sales_order_lines where id = p_line_id;
+  if not found then raise exception 'Line not found'; end if;
+  if not has_perm('sales', 'edit') then raise exception 'Not allowed'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and coalesce(v_line.factory_code, '') <> '' and v_line.factory_code <> all(my_factory_codes()) then
+    raise exception 'Not allowed for this factory'; end if;
+  if coalesce(v_line.factory_code, '') <> '' and exists (
+       select 1 from public.document_confirmations dc
+        where dc.import_id = v_line.import_id and dc.factory_code = v_line.factory_code)
+  then raise exception 'Already confirmed — changes need Head Office approval'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and (p_customer is not null or p_so_number is not null
+       or p_item_code is not null or p_description is not null or p_quantity is not null or p_outstanding is not null)
+  then raise exception 'Only Location and Delivery Date can be changed'; end if;
+
+  update public.sales_order_lines set
+    customer_name   = coalesce(p_customer, customer_name),
+    so_number       = coalesce(p_so_number, so_number),
+    item_code       = coalesce(p_item_code, item_code),
+    description     = coalesce(p_description, description),
+    quantity        = coalesce(p_quantity::numeric, quantity),
+    outstanding_qty = coalesce(p_outstanding::numeric, outstanding_qty),
+    delivery_date   = coalesce(nullif(p_delivery_date, ''), delivery_date),
+    location_code   = coalesce(p_location, location_code)
+  where id = p_line_id;
+
+  if p_location is not null then
+    update public.sales_order_lines sol set factory_code = lm.factory_code
+      from public.location_map lm
+     where sol.id = p_line_id
+       and btrim(upper(lm.location_code)) = btrim(upper(coalesce(sol.location_code, '')))
+       and coalesce(lm.factory_code, '') <> '';
+  end if;
+end; $function$;

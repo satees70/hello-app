@@ -278,6 +278,8 @@ export default function SalesOrdersPage() {
   }
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
+  // Regular users may only change Location & Delivery Date; Head Office may change any field.
+  const editableFields = isHO ? FIELDS : FIELDS.filter(f => f.value === 'location_code' || f.value === 'delivery_date')
   const factoryName = (code: string) => factories.find(f => f.code === code)?.name || code
 
   async function handleUpload(e: React.FormEvent) {
@@ -415,8 +417,10 @@ export default function SalesOrdersPage() {
   function openRequest(line: SalesLine) {
     setReqMode('edit')
     setReqLine(line)
-    setReqField('customer_name')
-    setReqValue(String(line.customer_name ?? ''))
+    const def = (isHO ? 'customer_name' : 'location_code') as keyof SalesLine
+    setReqField(def)
+    const cur = String(line[def] ?? '')
+    setReqValue(def === 'location_code' ? (locationCodes.includes(cur) ? cur : '') : cur)
     setReqReason('')
     setError('')
   }
@@ -754,7 +758,7 @@ export default function SalesOrdersPage() {
                       <label className="block text-xs font-medium mb-1">Field to change</label>
                       <select value={reqField} onChange={e => onReqFieldChange(e.target.value as keyof SalesLine)}
                         className="w-full border rounded-lg px-3 py-2 text-sm bg-white">
-                        {FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                        {editableFields.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
                       </select>
                     </div>
                     <div>
@@ -831,7 +835,7 @@ export default function SalesOrdersPage() {
                   <div>
                     <label className="block text-xs font-medium mb-1">Field to change</label>
                     <select value={bulkField} onChange={e => { setBulkField(e.target.value as keyof SalesLine); setBulkValue('') }} className="w-full border rounded-lg px-3 py-2 text-sm bg-white">
-                      {FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                      {editableFields.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
                     </select>
                   </div>
                   <div>
