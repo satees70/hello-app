@@ -187,6 +187,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     { header: 'Sales', items: [
       { href: '/sales-orders', label: 'Sales Orders', module: 'sales' },
       { href: '/dispatch', label: 'Delivery Orders', module: 'dispatch' as ModuleKey },
+      { href: '/supplier', label: 'Supplier (to order)', module: 'sales' },
     ] },
     { header: 'Receiving', items: [
       { href: '/material-requests', label: 'Material Requests', module: 'material_requests' },
