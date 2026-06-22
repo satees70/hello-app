@@ -24,7 +24,8 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [perms, setPerms] = useState<Permissions | null>(null)
   const [myFactories, setMyFactories] = useState<string[]>([])
-  interface Notif { id: string; factory_code: string; type: string; title: string; body: string | null; link: string | null; created_at: string }
+  interface Notif { id: string; factory_code: string; user_id: string | null; type: string; title: string; body: string | null; link: string | null; created_at: string }
+  const [me, setMe] = useState('')
   const [notifs, setNotifs] = useState<Notif[]>([])
   const [notifSeenAt, setNotifSeenAt] = useState<string>('')
   const [notifOpen, setNotifOpen] = useState(false)
@@ -35,6 +36,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data }) => {
       if (!data.session) return
+      setMe(data.session.user.id)
       const { data: p } = await supabase.from('profiles').select('permissions, factory_codes, notifications_seen_at').eq('id', data.session.user.id).single()
       setPerms((p?.permissions as Permissions) ?? {})
       setMyFactories((p?.factory_codes as string[]) ?? [])
@@ -45,12 +47,15 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   // Notifications for this user's location(s) — HO sees all
   const myFacs = myFactories.length ? myFactories : [factoryCode]
   const loadNotifs = useCallback(async () => {
+    if (!me) return
     let q = supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(40)
-    if (!isHO) q = q.in('factory_code', myFacs)
+    // Personal (mention) notifications always; location notifications by factory (HO = all)
+    if (isHO) q = q.or(`user_id.eq.${me},user_id.is.null`)
+    else q = q.or(`user_id.eq.${me},and(user_id.is.null,factory_code.in.(${myFacs.join(',')}))`)
     const { data } = await q
     setNotifs((data as Notif[]) || [])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isHO, myFacs.join(',')])
+  }, [isHO, me, myFacs.join(',')])
   useEffect(() => { loadNotifs(); const t = setInterval(loadNotifs, 30000); return () => clearInterval(t) }, [loadNotifs, pathname])
   const unseenCount = notifSeenAt ? notifs.filter(n => n.created_at > notifSeenAt).length : notifs.length
   async function openNotifs() {
@@ -136,15 +141,16 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       channel = supabase.channel('notif-feed')
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, payload => {
           const n = payload.new as Notif
-          if (!isHO && !myFacs.includes(n.factory_code)) return
+          const forMe = n.user_id ? n.user_id === me : (isHO || myFacs.includes(n.factory_code))
+          if (!forMe) return
           setNotifs(prev => prev.some(x => x.id === n.id) ? prev : [n, ...prev].slice(0, 40))
-          addToast('🔔 ' + n.title, n.body || '')
+          addToast(n.user_id ? '💬 ' + n.title : '🔔 ' + n.title, n.body || '')
         })
         .subscribe()
     })
     return () => { if (channel) supabase.removeChannel(channel) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isHO, myFacs.join(',')])
+  }, [isHO, me, myFacs.join(',')])
 
   // Office-only access guard. Factory staff may only use the app from an allowed
   // office IP; Head Office + Admins are exempt. Master switch (app_config) lets it

@@ -2309,3 +2309,43 @@ create policy supplier_orders_all on public.supplier_orders for all to authentic
 drop policy if exists supplier_order_items_all on public.supplier_order_items;
 create policy supplier_order_items_all on public.supplier_order_items for all to authenticated
   using (true) with check (true);
+
+-- ============================================================================
+-- 2026-06 · Tag users in discussion + personal notifications
+-- ============================================================================
+alter table public.discussions add column if not exists mention_ids uuid[] not null default '{}';
+alter table public.notifications add column if not exists user_id uuid;   -- personal (mention) notification when set
+
+-- List of users to @tag (id + name), readable by any signed-in user
+create or replace function public.list_users() returns table(id uuid, full_name text)
+ language sql security definer set search_path to 'public' as $$
+  select id, coalesce(full_name, '(no name)') from public.profiles order by full_name;
+$$;
+grant execute on function public.list_users() to authenticated;
+
+-- Discussion → notify the order's location(s) AND any tagged users personally
+create or replace function public.tg_notify_discussion() returns trigger
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_link text; uid uuid;
+begin
+  v_link := '/discussion' || case when NEW.so_number is not null then '?so=' || NEW.so_number else '' end;
+  if NEW.so_number is not null then
+    insert into public.notifications (factory_code, type, title, body, link, ref)
+    select distinct sol.factory_code, 'discussion', 'New message · SO ' || NEW.so_number,
+           coalesce(NEW.author_name, 'Someone') || ': ' || left(NEW.body, 80), v_link,
+           'disc:' || NEW.id::text || ':' || sol.factory_code
+    from public.sales_order_lines sol
+    where sol.so_number = NEW.so_number and coalesce(sol.factory_code, '') <> ''
+    on conflict (ref) do nothing;
+  end if;
+  -- personal mentions
+  if NEW.mention_ids is not null then
+    foreach uid in array NEW.mention_ids loop
+      insert into public.notifications (factory_code, user_id, type, title, body, link, ref)
+      values ('', uid, 'mention', coalesce(NEW.author_name, 'Someone') || ' mentioned you',
+              left(NEW.body, 100), v_link, 'mention:' || NEW.id::text || ':' || uid::text)
+      on conflict (ref) do nothing;
+    end loop;
+  end if;
+  return NEW;
+end; $function$;
