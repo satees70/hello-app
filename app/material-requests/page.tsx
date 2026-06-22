@@ -3,8 +3,9 @@ import { Fragment, useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
-import { supabase } from '@/lib/supabase'
+import { supabase, fetchAll } from '@/lib/supabase'
 import { can, hasCap } from '@/lib/permissions'
+import ItemPicker from '@/components/ItemPicker'
 
 interface MRItem {
   id: string
@@ -79,6 +80,12 @@ export default function MaterialRequestsPage() {
   const [movePending, setMovePending] = useState<Set<string>>(new Set())
   const [labelEdits, setLabelEdits] = useState<Record<string, { batch: string; exp: string; qty: string }>>({}) // item id -> label batch/exp/print-qty being typed
   const [selLabels, setSelLabels] = useState<Set<string>>(new Set())   // labels ticked to send
+  // Manual request (raise an item by hand while the system is new)
+  const [itemsMaster, setItemsMaster] = useState<{ code: string; description: string; unit: string }[]>([])
+  const [showManual, setShowManual] = useState(false)
+  const [manFac, setManFac] = useState('')
+  const [manItem, setManItem] = useState<{ code: string; description: string; unit: string } | null>(null)
+  const [manQty, setManQty] = useState('')
   const toggleLabel = (id: string) => setSelLabels(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -87,7 +94,26 @@ export default function MaterialRequestsPage() {
   useEffect(() => { if (profile?.warehouse_user) setFilter('Combined picking') }, [profile])
   const multiFac = isHO || (profile?.factory_codes?.length || 0) > 1   // sees more than one factory
 
-  useEffect(() => { if (profile) { load(); loadFactories(); loadFactoryItems(); loadRolls(); loadGrn(); loadNotReq() } }, [profile])
+  useEffect(() => { if (profile) { load(); loadFactories(); loadFactoryItems(); loadRolls(); loadGrn(); loadNotReq(); loadItemsMaster() } }, [profile])
+
+  async function loadItemsMaster() {
+    setItemsMaster(await fetchAll<{ code: string; description: string; unit: string }>('items', 'code, description, unit'))
+  }
+  async function addManualRequest() {
+    const fac = manFac || (profile && profile.factory_code !== 'HEAD_OFFICE' ? profile.factory_code : '')
+    if (!fac) { setError('Pick a factory for this request.'); return }
+    if (!canEditFac(fac)) { setError('You have view-only access at this factory.'); return }
+    if (!manItem) { setError('Pick an item.'); return }
+    const q = Number(manQty)
+    if (!(q > 0)) { setError('Enter a quantity greater than zero.'); return }
+    setBusy('manual'); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('raise_manual_material_request', { p_factory: fac, p_items: [{ code: manItem.code, description: manItem.description, unit: manItem.unit, qty: q }] })
+    setBusy('')
+    if (e) { setError(e.message); return }
+    setSuccess(`Manual request added for ${manItem.code} — it’s waiting to release for ${factoryName(fac)}.`)
+    setManItem(null); setManQty(''); setShowManual(false)
+    load()
+  }
 
   // Planned batches that have NOT had a material request raised yet
   async function loadNotReq() {
@@ -538,6 +564,37 @@ export default function MaterialRequestsPage() {
           </div>
         )}
         {isWarehouse && <p className="text-gray-500 text-sm bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mb-4">📦 Warehouse view — released pick runs only. Enter the SO number and record what you pick.</p>}
+
+        {!isWarehouse && canEdit && (() => {
+          const facOpts = isHO ? factories.map(f => f.code) : (profile?.factory_codes?.length ? profile.factory_codes : [profile?.factory_code || ''])
+          const fac = manFac || facOpts[0] || ''
+          return (
+            <div className="mb-5">
+              <button onClick={() => { setShowManual(o => !o); setError(''); setSuccess('') }} className="text-blue-600 hover:underline text-sm font-medium">
+                {showManual ? '× Close manual request' : '➕ Request a material manually'}
+              </button>
+              {showManual && (
+                <div className="mt-2 bg-white border rounded-xl shadow-sm p-4">
+                  <p className="text-gray-500 text-xs mb-3">Raise a material by hand (not from a batch recipe). It joins <strong>Waiting to release</strong> for that factory like any other request.</p>
+                  <div className="flex flex-wrap items-end gap-3">
+                    {facOpts.length > 1 && (
+                      <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Factory</span>
+                        <select value={fac} onChange={e => setManFac(e.target.value)} className="border rounded-lg px-3 py-2 text-sm bg-white">
+                          {facOpts.map(c => <option key={c} value={c}>{isHO ? factoryName(c) : c}</option>)}
+                        </select></div>
+                    )}
+                    <div className="flex flex-col gap-1 flex-1 min-w-[16rem]"><span className="text-xs font-medium text-gray-600">Item</span>
+                      <ItemPicker items={itemsMaster} value={manItem ? `${manItem.code} — ${manItem.description}` : ''} onPick={it => setManItem(it)} />
+                    </div>
+                    <div className="flex flex-col gap-1 w-28"><span className="text-xs font-medium text-gray-600">Qty{manItem ? ` (${manItem.unit})` : ''}</span>
+                      <input type="number" step="any" value={manQty} onChange={e => setManQty(e.target.value)} className="border rounded-lg px-3 py-2 text-sm text-right" /></div>
+                    <button onClick={addManualRequest} disabled={busy === 'manual'} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{busy === 'manual' ? 'Adding…' : 'Add request'}</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })()}
 
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
         {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}
