@@ -7,13 +7,16 @@ interface Msg { id: string; author_id: string | null; author_name: string | null
 // A lightweight message board so the warehouse and office can talk to each other.
 // Messages are shared by `channel` (default "warehouse") and can be linked to a
 // specific SO number — filter the thread by SO, or post against one.
-export default function DiscussionPanel({ channel = 'warehouse', me, meName, title = 'Discussion', soOptions = [] }: {
+export default function DiscussionPanel({ channel = 'warehouse', me, meName, title = 'Discussion', soOptions = [], filterSo: filterSoProp, onFilterChange, panelId, onPosted }: {
   channel?: string; me: string; meName?: string | null; title?: string; soOptions?: string[]
+  filterSo?: string; onFilterChange?: (so: string) => void; panelId?: string; onPosted?: () => void
 }) {
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [body, setBody] = useState('')
   const [tagSo, setTagSo] = useState('')      // SO to link the new message to
-  const [filterSo, setFilterSo] = useState('')// view filter ('' = all)
+  const [internalFilter, setInternalFilter] = useState('')
+  const filterSo = filterSoProp !== undefined ? filterSoProp : internalFilter   // controlled or internal
+  const setFilterSo = onFilterChange || setInternalFilter
   const [sending, setSending] = useState(false)
   const [open, setOpen] = useState(true)
   const endRef = useRef<HTMLDivElement>(null)
@@ -23,6 +26,8 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
     setMsgs((data as Msg[]) || [])
   }
   useEffect(() => { load(); const id = setInterval(load, 20000); return () => clearInterval(id) }, [channel]) // eslint-disable-line react-hooks/exhaustive-deps
+  // When the parent points us at an SO (e.g. clicked from a document), open and pre-link the reply
+  useEffect(() => { if (filterSoProp) { setOpen(true); setTagSo(filterSoProp) } }, [filterSoProp])
   const shown = filterSo ? msgs.filter(m => (m.so_number || '') === filterSo) : msgs
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'nearest' }) }, [shown.length])
 
@@ -32,14 +37,14 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
     setSending(true)
     const { error } = await supabase.from('discussions').insert({ channel, author_id: me, author_name: meName || null, body: text, so_number: tagSo.trim() || null })
     setSending(false)
-    if (!error) { setBody(''); load() }
+    if (!error) { setBody(''); load(); onPosted?.() }
   }
   const fmt = (iso: string) => new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
   // SO numbers to offer: the ones passed in plus any already used in messages
   const soList = [...new Set([...soOptions, ...msgs.map(m => m.so_number || '').filter(Boolean)])].sort()
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border mb-8">
+    <div id={panelId} className="bg-white rounded-xl shadow-sm border mb-8">
       <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between px-4 py-3 text-left">
         <span className="font-semibold">💬 {title} <span className="font-normal text-gray-400 text-sm">· {msgs.length} message{msgs.length === 1 ? '' : 's'}</span></span>
         <span className="text-gray-400 text-sm">{open ? '▾' : '▸'}</span>

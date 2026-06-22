@@ -92,6 +92,9 @@ export default function SalesOrdersPage() {
   const [docSearch, setDocSearch] = useState('')
   const [docLineText, setDocLineText] = useState<Record<string, string>>({})   // import -> item codes + descriptions inside it
   const [allSoNumbers, setAllSoNumbers] = useState<string[]>([])   // every SO number, for linking discussion messages
+  const [importSos, setImportSos] = useState<Record<string, string[]>>({})   // import -> its SO numbers
+  const [discSo, setDiscSo] = useState<Record<string, number>>({})   // SO number -> discussion message count
+  const [discFilterSo, setDiscFilterSo] = useState('')   // SO the discussion panel is focused on
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
@@ -161,7 +164,7 @@ export default function SalesOrdersPage() {
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
-    if (profile) { loadImports(); loadRefs(); loadSummary() }
+    if (profile) { loadImports(); loadRefs(); loadSummary(); loadDiscCounts() }
   }, [profile])
 
   async function loadImports() {
@@ -173,6 +176,16 @@ export default function SalesOrdersPage() {
   }
 
   // Per-document overview: open change requests + duplicate SO+item lines
+  async function loadDiscCounts() {
+    const { data } = await supabase.from('discussions').select('so_number').eq('channel', 'warehouse')
+    const m: Record<string, number> = {}; (data || []).forEach(d => { if (d.so_number) m[d.so_number] = (m[d.so_number] || 0) + 1 })
+    setDiscSo(m)
+  }
+  function openDisc(so: string) {
+    setDiscFilterSo(so)
+    setTimeout(() => document.getElementById('warehouse-discussion')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+  }
+
   async function loadSummary() {
     const [{ data: crs }, { data: confs }, allLines] = await Promise.all([
       supabase.from('change_requests').select('import_id, status'),
@@ -190,6 +203,9 @@ export default function SalesOrdersPage() {
     })
     setDocLineText(txt)
     setAllSoNumbers([...new Set(allLines.map(l => l.so_number).filter(Boolean) as string[])])
+    const isos: Record<string, Set<string>> = {}
+    allLines.forEach(l => { if (l.so_number) { (isos[l.import_id] = isos[l.import_id] || new Set()).add(l.so_number) } })
+    setImportSos(Object.fromEntries(Object.entries(isos).map(([k, v]) => [k, [...v].sort()])))
     const dup: Record<string, number> = {}
     const locs: Record<string, Set<string>> = {}
     const locFac: Record<string, Record<string, string>> = {}   // import -> location_code -> factory_code
@@ -671,7 +687,14 @@ export default function SalesOrdersPage() {
               {imports.length > 0 && shownImports.length === 0 && (<tr><td colSpan={6} className="text-center py-8 text-gray-400">No documents match the filter.</td></tr>)}
               {shownImports.map(doc => (
                 <tr key={doc.id} className={`border-b last:border-0 hover:bg-gray-50 ${doc.urgent ? 'bg-red-50' : linesFor?.id === doc.id ? 'bg-blue-50' : ''}`}>
-                  <td className="px-4 py-3 font-medium">{doc.urgent && <span className="inline-block mr-2 px-1.5 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold align-middle">🔴 URGENT</span>}{doc.file_name}</td>
+                  <td className="px-4 py-3 font-medium">
+                    {doc.urgent && <span className="inline-block mr-2 px-1.5 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold align-middle">🔴 URGENT</span>}{doc.file_name}
+                    {importSos[doc.id]?.length ? <span className="flex flex-wrap gap-1 mt-1">{importSos[doc.id].map(so => {
+                      const c = discSo[so] || 0
+                      return <button key={so} onClick={() => openDisc(so)} title={c ? `${c} message(s) — open discussion` : 'Open discussion for this SO'}
+                        className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${c ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{c ? `💬 ${c} ` : '💬 '}{so}</button>
+                    })}</span> : null}
+                  </td>
                   <td className="px-4 py-3 text-xs text-gray-600 max-w-[220px]">
                     {docSummary[doc.id]?.locations?.length
                       ? <span className="flex flex-wrap gap-x-2 gap-y-1">{docSummary[doc.id].locations.map(loc => {
@@ -869,7 +892,9 @@ export default function SalesOrdersPage() {
                         <td className="px-3 py-2"><input type="checkbox" checked={selectedIds.has(line.id)} onChange={() => toggleSel(line.id)} className="h-4 w-4" /></td>
                         <td className="px-3 py-2 text-gray-700 min-w-[160px]">{line.customer_name}</td>
                         <td className="px-3 py-2 font-mono whitespace-nowrap">
-                          {line.so_number}
+                          {line.so_number
+                            ? <button onClick={() => openDisc(line.so_number)} title={discSo[line.so_number] ? `${discSo[line.so_number]} message(s) — open discussion` : 'Open discussion for this SO'} className="text-blue-600 hover:underline">{line.so_number}{discSo[line.so_number] ? <span className="ml-1 text-indigo-600">💬{discSo[line.so_number]}</span> : null}</button>
+                            : line.so_number}
                           {isDuplicate(line) && <span className="ml-1.5 inline-block align-middle bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded text-[11px] font-bold" title={dupWhere(line)}>⚠ DUP</span>}
                         </td>
                         <td className="px-3 py-2 font-medium whitespace-nowrap">{line.item_code}</td>
@@ -940,7 +965,7 @@ export default function SalesOrdersPage() {
           </>
         )}
 
-        {profile && <DiscussionPanel channel="warehouse" me={profile.id} meName={profile.full_name} title="Warehouse discussion" soOptions={allSoNumbers} />}
+        {profile && <DiscussionPanel channel="warehouse" me={profile.id} meName={profile.full_name} title="Warehouse discussion" soOptions={allSoNumbers} filterSo={discFilterSo} onFilterChange={setDiscFilterSo} panelId="warehouse-discussion" onPosted={loadDiscCounts} />}
       </div>
     </div>
   )
