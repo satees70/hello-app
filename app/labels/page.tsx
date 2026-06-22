@@ -11,6 +11,7 @@ interface MRItem {
   id: string; item_code: string; description: string; unit: string; requested_qty: number; received_qty: number
   label_batch_no?: string | null; label_exp_date?: string | null; label_print_qty?: number | null
   label_photo_path?: string | null; label_sent_at?: string | null; label_received_at?: string | null
+  label_for_product?: string | null
 }
 interface MReq {
   id: string; request_no: string; factory_code: string; released_at: string | null; pick_run_no: string | null
@@ -49,7 +50,10 @@ export default function LabelsPage() {
   const [manFac, setManFac] = useState('')
   const [manItem, setManItem] = useState<{ code: string; description: string; unit: string } | null>(null)
   const [manQty, setManQty] = useState('')
-  const [manLines, setManLines] = useState<{ code: string; description: string; unit: string; qty: number }[]>([])
+  const [manFor, setManFor] = useState('')      // product the label is for
+  const [manBatch, setManBatch] = useState('')  // label batch no
+  const [manExp, setManExp] = useState('')      // label expiry
+  const [manLines, setManLines] = useState<{ code: string; description: string; unit: string; qty: number; forProduct: string; batch: string; exp: string }[]>([])
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
   const canEditFac = (fc: string) => can(profile, 'material_requests', 'edit', fc)
@@ -121,22 +125,24 @@ export default function LabelsPage() {
     const q = Number(manQty)
     if (!(q > 0)) { setError('Enter a quantity greater than zero.'); return }
     setError('')
-    setManLines(prev => { const i = prev.findIndex(l => l.code === manItem.code); if (i >= 0) { const n = [...prev]; n[i] = { ...n[i], qty: n[i].qty + q }; return n } return [...prev, { code: manItem.code, description: manItem.description, unit: manItem.unit, qty: q }] })
-    setManItem(null); setManQty('')
+    const line = { code: manItem.code, description: manItem.description, unit: manItem.unit, qty: q, forProduct: manFor.trim(), batch: manBatch.trim(), exp: manExp }
+    setManLines(prev => [...prev, line])
+    setManItem(null); setManQty(''); setManFor(''); setManBatch(''); setManExp('')
   }
   async function submitManualLabel(facOpts: string[]) {
     const fac = facOpts.includes(manFac) ? manFac : (facOpts[0] || '')
     if (!fac) { setError('You are not allowed to request for any location.'); return }
     if (!canEditFac(fac)) { setError('You have view-only access at this factory.'); return }
-    const pending = manItem && Number(manQty) > 0 ? [{ code: manItem.code, description: manItem.description, unit: manItem.unit, qty: Number(manQty) }] : []
+    const pending = manItem && Number(manQty) > 0 ? [{ code: manItem.code, description: manItem.description, unit: manItem.unit, qty: Number(manQty), forProduct: manFor.trim(), batch: manBatch.trim(), exp: manExp }] : []
     const lines = [...manLines, ...pending]
     if (lines.length === 0) { setError('Add at least one label.'); return }
+    const items = lines.map(l => ({ code: l.code, description: l.description, unit: l.unit, qty: l.qty, for_product: l.forProduct, batch: l.batch, exp: l.exp }))
     setBusy('manual'); setError(''); setSuccess('')
-    const { error: e } = await supabase.rpc('raise_manual_label_request', { p_factory: fac, p_items: lines })
+    const { error: e } = await supabase.rpc('raise_manual_label_request', { p_factory: fac, p_items: items })
     setBusy('')
     if (e) { setError(e.message); return }
     setSuccess(`Label request added (${lines.length}) — ready to print at ${factoryName(fac)}.`)
-    setManItem(null); setManQty(''); setManLines([]); setShowManual(false)
+    setManItem(null); setManQty(''); setManFor(''); setManBatch(''); setManExp(''); setManLines([]); setShowManual(false)
     load()
   }
   async function act(rpc: 'send_labels' | 'receive_labels', ids: string[], doneMsg: string) {
@@ -194,23 +200,32 @@ export default function LabelsPage() {
                           {facOpts.map(c => <option key={c} value={c}>{isHO ? factoryName(c) : c}</option>)}
                         </select></div>
                     )}
-                    <div className="flex flex-col gap-1 flex-1 min-w-[16rem]"><span className="text-xs font-medium text-gray-600">Label</span>
+                    <div className="flex flex-col gap-1 flex-1 min-w-[15rem]"><span className="text-xs font-medium text-gray-600">Label</span>
                       <ItemPicker items={labelItems} value={manItem ? `${manItem.code} — ${manItem.description}` : ''} onPick={it => setManItem(it)} placeholder="Type a label code or name…" />
                     </div>
-                    <div className="flex flex-col gap-1 w-28"><span className="text-xs font-medium text-gray-600">Qty{manItem ? ` (${manItem.unit})` : ''}</span>
+                    <div className="flex flex-col gap-1 flex-1 min-w-[12rem]"><span className="text-xs font-medium text-gray-600">For product</span>
+                      <input value={manFor} onChange={e => setManFor(e.target.value)} placeholder="e.g. E1041-10UN/BAG" className="border rounded-lg px-3 py-2 text-sm" /></div>
+                    <div className="flex flex-col gap-1 w-24"><span className="text-xs font-medium text-gray-600">Qty{manItem ? ` (${manItem.unit})` : ''}</span>
                       <input type="number" step="any" value={manQty} onChange={e => setManQty(e.target.value)} className="border rounded-lg px-3 py-2 text-sm text-right" /></div>
+                    <div className="flex flex-col gap-1 w-32"><span className="text-xs font-medium text-gray-600">Batch</span>
+                      <input value={manBatch} onChange={e => setManBatch(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" /></div>
+                    <div className="flex flex-col gap-1 w-40"><span className="text-xs font-medium text-gray-600">Expiry</span>
+                      <input type="date" value={manExp} onChange={e => setManExp(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" /></div>
                     <button onClick={addManualLine} className="border border-blue-600 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 text-sm font-medium">+ Add label</button>
                   </div>
                   {manLines.length > 0 && (
-                    <div className="mt-3 border rounded-lg overflow-hidden">
+                    <div className="mt-3 border rounded-lg overflow-x-auto">
                       <table className="w-full text-sm">
-                        <thead className="bg-gray-50 border-b"><tr>{['Label', 'Description', 'Qty', ''].map(h => <th key={h} className="text-left px-3 py-1.5 font-medium text-gray-600">{h}</th>)}</tr></thead>
+                        <thead className="bg-gray-50 border-b"><tr>{['Label', 'Description', 'For product', 'Qty', 'Batch', 'Expiry', ''].map(h => <th key={h} className="text-left px-3 py-1.5 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
                         <tbody>
                           {manLines.map((l, i) => (
-                            <tr key={l.code} className="border-b last:border-0">
+                            <tr key={i} className="border-b last:border-0">
                               <td className="px-3 py-1.5 font-mono font-medium whitespace-nowrap">{l.code}</td>
                               <td className="px-3 py-1.5 text-gray-600">{l.description}</td>
+                              <td className="px-3 py-1.5 whitespace-nowrap">{l.forProduct || '—'}</td>
                               <td className="px-3 py-1.5 whitespace-nowrap">{Number(Number(l.qty).toPrecision(12))} {l.unit}</td>
+                              <td className="px-3 py-1.5 whitespace-nowrap">{l.batch || '—'}</td>
+                              <td className="px-3 py-1.5 whitespace-nowrap">{l.exp ? fmtExp(l.exp) : '—'}</td>
                               <td className="px-3 py-1.5 text-right"><button onClick={() => setManLines(prev => prev.filter((_, x) => x !== i))} className="text-red-500 hover:underline text-xs">remove</button></td>
                             </tr>
                           ))}
@@ -259,7 +274,7 @@ export default function LabelsPage() {
                     <tr key={it.id} className="border-b last:border-0 align-top hover:bg-gray-50">
                       <td className="px-3 py-2">{selectable && <input type="checkbox" className="h-4 w-4" checked={sel.has(it.id)} onChange={() => toggleSel(it.id)} />}</td>
                       <td className="px-3 py-2"><span className="font-mono font-medium">{it.item_code}</span><span className="block text-gray-400">{it.description}</span></td>
-                      <td className="px-3 py-2 whitespace-nowrap"><span className="font-mono">{r.production_batches?.item_code}</span><span className="block text-gray-400 text-xs">{r.pick_run_no || r.request_no}</span></td>
+                      <td className="px-3 py-2 whitespace-nowrap"><span className="font-mono">{r.production_batches?.item_code || it.label_for_product || '—'}</span><span className="block text-gray-400 text-xs">{r.pick_run_no || r.request_no}</span></td>
                       {isHO && <td className="px-3 py-2 whitespace-nowrap text-gray-600">{factoryName(r.factory_code)}</td>}
                       <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STAGE_STYLE[stage]}`}>{STAGES.find(s => s.key === stage)?.label}</span></td>
                       <td className="px-3 py-2 text-right">{editable
