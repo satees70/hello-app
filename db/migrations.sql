@@ -2261,3 +2261,19 @@ end; $function$;
 drop trigger if exists notify_discussion on public.discussions;
 create trigger notify_discussion after insert on public.discussions
   for each row execute function public.tg_notify_discussion();
+
+-- Drop the "material request raised" notification — keep only "pick run released".
+create or replace function public.tg_notify_material_request() returns trigger
+ language plpgsql security definer set search_path to 'public' as $function$
+begin
+  if OLD.released_at is null and NEW.released_at is not null then
+    insert into public.notifications (factory_code, type, title, body, link, ref)
+    values (NEW.factory_code, 'mr', 'Pick run released ' || coalesce(NEW.pick_run_no, ''),
+            'Materials were released to the warehouse to pick.', '/material-requests', 'mrrel:' || NEW.id::text)
+    on conflict (ref) do nothing;
+  end if;
+  return NEW;
+end; $function$;
+drop trigger if exists notify_material_request on public.material_requests;
+create trigger notify_material_request after update of released_at on public.material_requests
+  for each row execute function public.tg_notify_material_request();
