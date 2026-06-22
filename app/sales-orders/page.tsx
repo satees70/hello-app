@@ -46,6 +46,22 @@ const STATUS_STYLES: Record<string, string> = {
   Error: 'bg-red-100 text-red-700',
 }
 
+// Where a line's production currently sits — shared by the per-line Status column
+// and the per-location done/total counts on the document list.
+type BatchLite = { item_code: string; factory_code: string; material_request_id: string | null; pack_date: string | null; produced_qty: number | null; total_quantity: number; dispatched_at: string | null }
+function lineStatusOf(b: BatchLite, mrStatus: Record<string, string>): string {
+  if (b.dispatched_at) return 'Delivered to warehouse'
+  const prod = Number(b.produced_qty || 0), tot = Number(b.total_quantity || 0)
+  if (prod > 0 && prod >= tot) return 'Production completed'
+  if (prod > 0) return 'Production started'
+  if (!b.material_request_id) return 'Pending Material Request'
+  const ms = mrStatus[b.material_request_id]
+  if (ms === 'Fulfilled') return b.pack_date ? 'Pending Schedule' : 'Material Received Fully'
+  if (ms === 'Partially Received') return 'Material Received Partial'
+  return 'Pending Material Request'
+}
+const LINE_DONE = 'Delivered to warehouse'   // a line counts as "completed" once delivered
+
 const FIELDS: { value: keyof SalesLine; label: string }[] = [
   { value: 'customer_name', label: 'Customer' },
   { value: 'so_number', label: 'SO No' },
@@ -78,7 +94,7 @@ export default function SalesOrdersPage() {
   const [confirmingFactory, setConfirmingFactory] = useState('')
   const [dupKeys, setDupKeys] = useState<Set<string>>(new Set()) // "so_number||item_code" that appear >1 across all lines
   const [dupImports, setDupImports] = useState<Record<string, string[]>>({}) // key -> import ids that contain it
-  const [docSummary, setDocSummary] = useState<Record<string, { pending: number; dup: number; locations: string[]; locFactory: Record<string, string>; confirmed: string[] }>>({})
+  const [docSummary, setDocSummary] = useState<Record<string, { pending: number; dup: number; locations: string[]; locFactory: Record<string, string>; confirmed: string[]; locStats: Record<string, { total: number; done: number }> }>>({})
   const [docDelPending, setDocDelPending] = useState<Set<string>>(new Set())
   const [lineStatuses, setLineStatuses] = useState<Record<string, string>>({}) // sales line id -> production lifecycle status
 
@@ -89,24 +105,12 @@ export default function SalesOrdersPage() {
     const { data: bi } = await supabase.from('production_batch_items')
       .select('so_number, production_batches!batch_id(item_code, factory_code, material_request_id, pack_date, produced_qty, total_quantity, dispatched_at)')
       .in('so_number', sos)
-    type B = { item_code: string; factory_code: string; material_request_id: string | null; pack_date: string | null; produced_qty: number | null; total_quantity: number; dispatched_at: string | null }
-    const rows = (bi || []) as unknown as { so_number: string; production_batches: B | null }[]
+    const rows = (bi || []) as unknown as { so_number: string; production_batches: BatchLite | null }[]
     const mrIds = [...new Set(rows.map(r => r.production_batches?.material_request_id).filter(Boolean) as string[])]
     const mrStatus: Record<string, string> = {}
     if (mrIds.length) { const { data: mrs } = await supabase.from('material_requests').select('id, status').in('id', mrIds); (mrs || []).forEach(m => { mrStatus[m.id] = m.status }) }
-    const statusOf = (b: B): string => {
-      if (b.dispatched_at) return 'Delivered to warehouse'
-      const prod = Number(b.produced_qty || 0), tot = Number(b.total_quantity || 0)
-      if (prod > 0 && prod >= tot) return 'Production completed'
-      if (prod > 0) return 'Production started'
-      if (!b.material_request_id) return 'Pending Material Request'
-      const ms = mrStatus[b.material_request_id]
-      if (ms === 'Fulfilled') return b.pack_date ? 'Pending Schedule' : 'Material Received Fully'
-      if (ms === 'Partially Received') return 'Material Received Partial'
-      return 'Pending Material Request'
-    }
     const map: Record<string, string> = {}
-    rows.forEach(r => { const b = r.production_batches; if (b) map[`${b.factory_code}|${b.item_code}|${r.so_number}`] = statusOf(b) })
+    rows.forEach(r => { const b = r.production_batches; if (b) map[`${b.factory_code}|${b.item_code}|${r.so_number}`] = lineStatusOf(b, mrStatus) })
     const out: Record<string, string> = {}
     ls.forEach(l => { out[l.id] = map[`${l.factory_code}|${l.item_code}|${l.so_number}`] || 'Pending Material Request' })
     setLineStatuses(out)
@@ -184,9 +188,34 @@ export default function SalesOrdersPage() {
     })
     const conf: Record<string, Set<string>> = {}   // import -> set of confirmed factory_codes
     ;(confs || []).forEach(c => { if (!conf[c.import_id]) conf[c.import_id] = new Set(); conf[c.import_id].add(c.factory_code) })
-    const summary: Record<string, { pending: number; dup: number; locations: string[]; locFactory: Record<string, string>; confirmed: string[] }> = {}
+    // Per-location completion (delivered lines / total lines) — trace each line to its batch
+    const sos = [...new Set(allLines.map(l => l.so_number).filter(Boolean))] as string[]
+    const biRows: { so_number: string; production_batches: BatchLite | null }[] = []
+    for (let i = 0; i < sos.length; i += 150) {
+      const { data } = await supabase.from('production_batch_items')
+        .select('so_number, production_batches!batch_id(item_code, factory_code, material_request_id, pack_date, produced_qty, total_quantity, dispatched_at)')
+        .in('so_number', sos.slice(i, i + 150))
+      biRows.push(...((data || []) as unknown as { so_number: string; production_batches: BatchLite | null }[]))
+    }
+    const mrIds2 = [...new Set(biRows.map(r => r.production_batches?.material_request_id).filter(Boolean) as string[])]
+    const mrStatus2: Record<string, string> = {}
+    for (let i = 0; i < mrIds2.length; i += 150) {
+      const { data: mrs } = await supabase.from('material_requests').select('id, status').in('id', mrIds2.slice(i, i + 150))
+      ;(mrs || []).forEach(m => { mrStatus2[m.id] = m.status })
+    }
+    const statusMap: Record<string, string> = {}
+    biRows.forEach(r => { const b = r.production_batches; if (b) statusMap[`${b.factory_code}|${b.item_code}|${r.so_number}`] = lineStatusOf(b, mrStatus2) })
+    const locStats: Record<string, Record<string, { total: number; done: number }>> = {}
+    allLines.forEach(l => {
+      if (!l.location_code) return
+      const m = (locStats[l.import_id] = locStats[l.import_id] || {})
+      const g = (m[l.location_code] = m[l.location_code] || { total: 0, done: 0 })
+      g.total++
+      if (statusMap[`${l.factory_code}|${l.item_code}|${l.so_number}`] === LINE_DONE) g.done++
+    })
+    const summary: Record<string, { pending: number; dup: number; locations: string[]; locFactory: Record<string, string>; confirmed: string[]; locStats: Record<string, { total: number; done: number }> }> = {}
     new Set([...Object.keys(pending), ...Object.keys(dup), ...Object.keys(locs), ...Object.keys(conf)]).forEach(id => {
-      summary[id] = { pending: pending[id] || 0, dup: dup[id] || 0, locations: locs[id] ? [...locs[id]].sort() : [], locFactory: locFac[id] || {}, confirmed: conf[id] ? [...conf[id]] : [] }
+      summary[id] = { pending: pending[id] || 0, dup: dup[id] || 0, locations: locs[id] ? [...locs[id]].sort() : [], locFactory: locFac[id] || {}, confirmed: conf[id] ? [...conf[id]] : [], locStats: locStats[id] || {} }
     })
     setDocSummary(summary)
     const { data: dels } = await supabase.from('doc_delete_requests').select('import_id').eq('status', 'Pending')
@@ -587,7 +616,8 @@ export default function SalesOrdersPage() {
                       ? <span className="flex flex-wrap gap-x-2 gap-y-1">{docSummary[doc.id].locations.map(loc => {
                           const fac = docSummary[doc.id].locFactory[loc]
                           const ok = fac && docSummary[doc.id].confirmed.includes(fac)
-                          return <span key={loc} className={`inline-flex items-center gap-0.5 ${ok ? 'text-green-700 font-medium' : ''}`} title={ok ? 'Approved by this location' : 'Not yet approved'}>{ok && <span>✓</span>}{loc}</span>
+                          const st = docSummary[doc.id].locStats[loc]
+                          return <span key={loc} className={`inline-flex items-center gap-0.5 ${ok ? 'text-green-700 font-medium' : ''}`} title={ok ? 'Approved by this location' : 'Not yet approved'}>{ok && <span>✓</span>}{loc}{st ? <span className="text-gray-400 font-normal"> ({st.done}/{st.total})</span> : null}</span>
                         })}</span>
                       : <span className="text-gray-300">—</span>}
                   </td>
