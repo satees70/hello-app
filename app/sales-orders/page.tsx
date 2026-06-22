@@ -91,6 +91,7 @@ export default function SalesOrdersPage() {
   const [docFilters, setDocFilters] = useState<Record<string, Set<string>>>({})
   const [docSearch, setDocSearch] = useState('')
   const [docLineText, setDocLineText] = useState<Record<string, string>>({})   // import -> item codes + descriptions inside it
+  const [allSoNumbers, setAllSoNumbers] = useState<string[]>([])   // every SO number, for linking discussion messages
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
@@ -188,6 +189,7 @@ export default function SalesOrdersPage() {
       txt[l.import_id] = (txt[l.import_id] || '') + ' ' + `${l.item_code || ''} ${l.description || ''}`.toLowerCase()
     })
     setDocLineText(txt)
+    setAllSoNumbers([...new Set(allLines.map(l => l.so_number).filter(Boolean) as string[])])
     const dup: Record<string, number> = {}
     const locs: Record<string, Set<string>> = {}
     const locFac: Record<string, Record<string, string>> = {}   // import -> location_code -> factory_code
@@ -938,7 +940,7 @@ export default function SalesOrdersPage() {
           </>
         )}
 
-        {profile && <DiscussionPanel channel="warehouse" me={profile.id} meName={profile.full_name} title="Warehouse discussion" />}
+        {profile && <DiscussionPanel channel="warehouse" me={profile.id} meName={profile.full_name} title="Warehouse discussion" soOptions={allSoNumbers} />}
       </div>
     </div>
   )

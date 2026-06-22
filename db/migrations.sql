@@ -2050,3 +2050,7 @@ begin
   delete from public.sales_order_lines where id = p_line_id;
 end; $function$;
 grant execute on function public.delete_unconfirmed_sales_line(uuid) to authenticated;
+
+-- Discussion messages can be linked to a specific sales order number.
+alter table public.discussions add column if not exists so_number text;
+create index if not exists discussions_so on public.discussions (so_number);
