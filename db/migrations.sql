@@ -2389,3 +2389,38 @@ begin
   end if;
   return NEW;
 end; $function$;
+
+-- ============================================================================
+-- 2026-06 · Web push to phones (PWA). A notification insert pings /api/push,
+-- which sends the push to the target users' subscribed devices.
+-- ============================================================================
+create table if not exists public.push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists push_subscriptions_user on public.push_subscriptions (user_id);
+grant select, insert, update, delete on public.push_subscriptions to authenticated;
+alter table public.push_subscriptions enable row level security;
+drop policy if exists push_sub_own on public.push_subscriptions;
+create policy push_sub_own on public.push_subscriptions for all to authenticated
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- Fire an HTTP call to the app when a notification is created (pg_net).
+create extension if not exists pg_net;
+create or replace function public.tg_push_notification() returns trigger
+ language plpgsql security definer set search_path to 'public, net' as $function$
+begin
+  perform net.http_post(
+    url := 'https://production.srrieaswari.com/api/push',
+    body := jsonb_build_object('id', NEW.id),
+    headers := jsonb_build_object('Content-Type', 'application/json', 'x-push-secret', 'd87b037136410885efffd99c2b8d781a4d23dd08cac062d6')
+  );
+  return NEW;
+end; $function$;
+drop trigger if exists push_notification on public.notifications;
+create trigger push_notification after insert on public.notifications
+  for each row execute function public.tg_push_notification();

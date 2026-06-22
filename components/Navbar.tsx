@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { can, type ModuleKey, type Permissions } from '@/lib/permissions'
+import { enablePush, pushAlreadyOn, pushSupported } from '@/lib/push'
 
 interface NavbarProps {
   factoryCode: string
@@ -29,6 +30,14 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const [notifs, setNotifs] = useState<Notif[]>([])
   const [notifSeenAt, setNotifSeenAt] = useState<string>('')
   const [notifOpen, setNotifOpen] = useState(false)
+  const [pushOn, setPushOn] = useState(false)
+  useEffect(() => { pushAlreadyOn().then(setPushOn) }, [])
+  async function enableThisDevice() {
+    if (!me) return
+    const r = await enablePush(me)
+    setPushOn(r.ok)
+    addToast(r.ok ? '✅ Phone notifications on' : 'Notifications', r.msg)
+  }
   // This user's permissions (for menu view-gating). Until loaded, can() treats an
   // unset grid as full access, so nothing is hidden by mistake.
   const profileLike = { role, permissions: perms }
@@ -283,7 +292,12 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setNotifOpen(false)} />
                 <div className="absolute right-0 mt-1 w-80 max-w-[90vw] bg-white text-gray-800 rounded-lg shadow-xl border z-50 max-h-96 overflow-y-auto">
-                  <div className="px-4 py-2 border-b font-semibold text-sm sticky top-0 bg-white">Notifications</div>
+                  <div className="px-4 py-2 border-b sticky top-0 bg-white flex items-center justify-between gap-2">
+                    <span className="font-semibold text-sm">Notifications</span>
+                    {pushSupported() && (pushOn
+                      ? <span className="text-green-600 text-xs">✓ On this device</span>
+                      : <button onClick={enableThisDevice} className="text-blue-600 hover:underline text-xs">Enable on this phone</button>)}
+                  </div>
                   {notifs.length === 0 && <p className="px-4 py-6 text-center text-gray-400 text-sm">Nothing yet.</p>}
                   {notifs.map(n => {
                     const unseen = !notifSeenAt || n.created_at > notifSeenAt

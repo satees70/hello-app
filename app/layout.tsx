@@ -15,6 +15,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "EASWARI Portal",
   description: "SRRI EASWARI MILLS — production & traceability portal",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, title: "EASWARI", statusBarStyle: "default" },
+  icons: { apple: "/icon.svg" },
 };
 
 export default function RootLayout({
