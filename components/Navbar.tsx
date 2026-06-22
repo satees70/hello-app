@@ -142,6 +142,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     { items: [
       { href: '/dashboard', label: 'Dashboard' },
       { href: '/sales-orders/changes', label: 'Pending Changes', module: 'changes' },
+      { href: '/discussion', label: 'Discussion' },
     ] },
     { header: 'Sales', items: [
       { href: '/sales-orders', label: 'Sales Orders', module: 'sales' },

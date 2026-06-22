@@ -1,12 +1,12 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can, hasCap } from '@/lib/permissions'
 import MultiFilter from '@/components/MultiFilter'
-import DiscussionPanel from '@/components/DiscussionPanel'
 
 interface SalesImport {
   id: string
@@ -86,15 +86,14 @@ const FIELDS: { value: keyof SalesLine; label: string }[] = [
 
 export default function SalesOrdersPage() {
   const { profile, loading, error: profileError } = useProfile()
+  const router = useRouter()
   useRequireView(profile, 'sales')
   const [imports, setImports] = useState<SalesImport[]>([])
   const [docFilters, setDocFilters] = useState<Record<string, Set<string>>>({})
   const [docSearch, setDocSearch] = useState('')
   const [docLineText, setDocLineText] = useState<Record<string, string>>({})   // import -> item codes + descriptions inside it
-  const [allSoNumbers, setAllSoNumbers] = useState<string[]>([])   // every SO number, for linking discussion messages
   const [importSos, setImportSos] = useState<Record<string, string[]>>({})   // import -> its SO numbers
   const [discSo, setDiscSo] = useState<Record<string, number>>({})   // SO number -> discussion message count
-  const [discFilterSo, setDiscFilterSo] = useState('')   // SO the discussion panel is focused on
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
@@ -181,10 +180,7 @@ export default function SalesOrdersPage() {
     const m: Record<string, number> = {}; (data || []).forEach(d => { if (d.so_number) m[d.so_number] = (m[d.so_number] || 0) + 1 })
     setDiscSo(m)
   }
-  function openDisc(so: string) {
-    setDiscFilterSo(so)
-    setTimeout(() => document.getElementById('warehouse-discussion')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
-  }
+  function openDisc(so: string) { router.push(`/discussion?so=${encodeURIComponent(so)}`) }
 
   async function loadSummary() {
     const [{ data: crs }, { data: confs }, allLines] = await Promise.all([
@@ -202,7 +198,6 @@ export default function SalesOrdersPage() {
       txt[l.import_id] = (txt[l.import_id] || '') + ' ' + `${l.item_code || ''} ${l.description || ''}`.toLowerCase()
     })
     setDocLineText(txt)
-    setAllSoNumbers([...new Set(allLines.map(l => l.so_number).filter(Boolean) as string[])])
     const isos: Record<string, Set<string>> = {}
     allLines.forEach(l => { if (l.so_number) { (isos[l.import_id] = isos[l.import_id] || new Set()).add(l.so_number) } })
     setImportSos(Object.fromEntries(Object.entries(isos).map(([k, v]) => [k, [...v].sort()])))
@@ -965,7 +960,6 @@ export default function SalesOrdersPage() {
           </>
         )}
 
-        {profile && <DiscussionPanel channel="warehouse" me={profile.id} meName={profile.full_name} title="Warehouse discussion" soOptions={allSoNumbers} filterSo={discFilterSo} onFilterChange={setDiscFilterSo} panelId="warehouse-discussion" onPosted={loadDiscCounts} />}
       </div>
     </div>
   )

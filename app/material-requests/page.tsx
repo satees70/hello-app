@@ -6,7 +6,6 @@ import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can, hasCap } from '@/lib/permissions'
 import ItemPicker from '@/components/ItemPicker'
-import DiscussionPanel from '@/components/DiscussionPanel'
 
 interface MRItem {
   id: string
@@ -634,8 +633,6 @@ export default function MaterialRequestsPage() {
 
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
         {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}
-
-        {profile && <DiscussionPanel channel="warehouse" me={profile.id} meName={profile.full_name} title="Warehouse discussion" soOptions={[...new Set(requests.map(r => r.warehouse_so_no).filter(Boolean) as string[])]} />}
 
         {filter === 'Not requested' ? (
           (() => {
