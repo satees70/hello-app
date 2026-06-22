@@ -88,7 +88,7 @@ export default function AllowedNetworksPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
-      <div className="max-w-3xl mx-auto px-6 py-8">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
         <h1 className="text-2xl font-bold mb-1">Allowed Networks</h1>
         <p className="text-gray-500 text-sm mb-6">
           When the office-only guard is on, factory staff can only use the app from one of the allowed office IPs below.
@@ -151,7 +151,7 @@ export default function AllowedNetworksPage() {
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-4">{error}</p>}
 
         {/* List */}
-        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>{['Label', 'IP address', 'Status', ''].map((h, i) => (

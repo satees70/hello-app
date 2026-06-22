@@ -59,7 +59,7 @@ export default function FactoriesPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
-      <div className="max-w-3xl mx-auto px-6 py-8">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
         <h1 className="text-2xl font-bold mb-1">Factories</h1>
         <p className="text-gray-500 text-sm mb-5">Add a new factory / location, or rename an existing one. After adding, assign users to it under <strong>Setup → Users</strong>.</p>
 

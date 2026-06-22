@@ -484,7 +484,7 @@ export default function PendingChangesPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
-      <div className="max-w-7xl mx-auto px-6 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
         <h1 className="text-2xl font-bold mb-1">Pending Changes</h1>
         <p className="text-gray-500 text-sm mb-5">
           {isHO ? 'Approve or reject change requests. Every decision is logged.' : 'Track the change requests you and your factory have raised.'}

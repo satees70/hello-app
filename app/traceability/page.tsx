@@ -204,7 +204,7 @@ export default function TraceabilityPage() {
     <div className="min-h-screen bg-gray-50">
       <style>{`@media print { nav, .no-print { display: none !important } body { background: white } .printable { box-shadow: none !important; border: none !important } .page-break { page-break-before: always } }`}</style>
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
-      <div className="max-w-5xl mx-auto px-6 py-8">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-1 no-print">
           <h1 className="text-2xl font-bold">Traceability / Recall report</h1>
           {selected && <button onClick={() => window.print()} className="border px-4 py-2 rounded-lg hover:bg-gray-50 text-sm font-medium">🖨 Print / PDF</button>}

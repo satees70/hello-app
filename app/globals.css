@@ -17,4 +17,19 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  -webkit-text-size-adjust: 100%;       /* don't let iOS auto-zoom text */
+}
+
+/* Mobile / tablet polish */
+@media (max-width: 640px) {
+  /* iOS zooms the page when you focus an input smaller than 16px — keep them 16px */
+  input, select, textarea { font-size: 16px !important; }
+}
+
+/* Any element that scrolls horizontally (wide tables) gets momentum scrolling on touch */
+.overflow-x-auto, .overflow-auto, .overflow-y-auto { -webkit-overflow-scrolling: touch; }
+
+/* Comfortable tap targets for buttons/links on touch devices */
+@media (hover: none) and (pointer: coarse) {
+  button, a, select, [role="button"], input[type="checkbox"], input[type="radio"] { touch-action: manipulation; }
 }

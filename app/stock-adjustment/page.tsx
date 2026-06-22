@@ -131,7 +131,7 @@ export default function StockAdjustmentPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
-      <div className="max-w-5xl mx-auto px-6 py-8">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         <h1 className="text-2xl font-bold mb-1">Stock Adjustment</h1>
         <p className="text-gray-500 text-sm mb-5">Manually add or remove stock when there is no document. {isHO ? 'Your entries apply immediately.' : 'Entries are submitted to Head Office for approval before stock changes.'}</p>
 

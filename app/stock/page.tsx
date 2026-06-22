@@ -86,7 +86,7 @@ export default function StockPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
-      <div className="max-w-6xl mx-auto px-6 py-8">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
         <h1 className="text-2xl font-bold mb-1">Stock on hand</h1>
         <p className="text-gray-500 text-sm mb-5">
           Current stock per item, broken down by received batch — used earliest-expiry first, or oldest batch first when there's no expiry (raw materials).

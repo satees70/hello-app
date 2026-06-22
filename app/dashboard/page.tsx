@@ -52,7 +52,7 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
-      <div className="max-w-4xl mx-auto px-6 py-10">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-10">
         <h1 className="text-2xl font-bold mb-1">Welcome, {profile.full_name || profile.email}</h1>
         <p className="text-gray-500 mb-8">
           {isHO ? 'Head Office — you can see all factories' : `Factory: ${profile.factory_code}`}

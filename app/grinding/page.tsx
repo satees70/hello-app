@@ -220,7 +220,7 @@ export default function GrindingPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
-      <div className="max-w-6xl mx-auto px-6 py-8">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
         <h1 className="text-2xl font-bold mb-1">Grinding &amp; Mixing</h1>
         <p className="text-gray-500 text-sm mb-4">
           {canRecipeView ? 'You can see recipes & the mixture quantities.' : 'Pick a product and number of lots — the formula is preset and hidden from your role.'}
