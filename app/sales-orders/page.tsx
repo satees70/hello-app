@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
-import { supabase } from '@/lib/supabase'
+import { supabase, fetchAll } from '@/lib/supabase'
 import { can, hasCap } from '@/lib/permissions'
 import MultiFilter from '@/components/MultiFilter'
 
@@ -62,6 +62,7 @@ export default function SalesOrdersPage() {
   const [imports, setImports] = useState<SalesImport[]>([])
   const [docFilters, setDocFilters] = useState<Record<string, Set<string>>>({})
   const [docSearch, setDocSearch] = useState('')
+  const [docLineText, setDocLineText] = useState<Record<string, string>>({})   // import -> item codes + descriptions inside it
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
@@ -156,19 +157,25 @@ export default function SalesOrdersPage() {
 
   // Per-document overview: open change requests + duplicate SO+item lines
   async function loadSummary() {
-    const [{ data: crs }, { data: allLines }, { data: confs }] = await Promise.all([
+    const [{ data: crs }, { data: confs }, allLines] = await Promise.all([
       supabase.from('change_requests').select('import_id, status'),
-      supabase.from('sales_order_lines').select('import_id, so_number, item_code, location_code, factory_code'),
       supabase.from('document_confirmations').select('import_id, factory_code'),
+      fetchAll<{ import_id: string; so_number: string | null; item_code: string | null; description: string | null; location_code: string | null; factory_code: string | null }>(
+        'sales_order_lines', 'import_id, so_number, item_code, description, location_code, factory_code'),
     ])
     const pending: Record<string, number> = {}
     ;(crs || []).forEach(c => { if (c.status === 'Pending') pending[c.import_id] = (pending[c.import_id] || 0) + 1 })
     const keyImports: Record<string, Set<string>> = {}
-    ;(allLines || []).forEach(l => { if (l.so_number) { const k = `${l.so_number}||${l.item_code}`; if (!keyImports[k]) keyImports[k] = new Set(); keyImports[k].add(l.import_id) } })
+    const txt: Record<string, string> = {}   // import -> its item codes + descriptions (for searching documents by content)
+    allLines.forEach(l => {
+      if (l.so_number) { const k = `${l.so_number}||${l.item_code}`; if (!keyImports[k]) keyImports[k] = new Set(); keyImports[k].add(l.import_id) }
+      txt[l.import_id] = (txt[l.import_id] || '') + ' ' + `${l.item_code || ''} ${l.description || ''}`.toLowerCase()
+    })
+    setDocLineText(txt)
     const dup: Record<string, number> = {}
     const locs: Record<string, Set<string>> = {}
     const locFac: Record<string, Record<string, string>> = {}   // import -> location_code -> factory_code
-    ;(allLines || []).forEach(l => {
+    allLines.forEach(l => {
       if (l.so_number && keyImports[`${l.so_number}||${l.item_code}`].size > 1) dup[l.import_id] = (dup[l.import_id] || 0) + 1
       if (l.location_code) {
         if (!locs[l.import_id]) locs[l.import_id] = new Set(); locs[l.import_id].add(l.location_code)
@@ -528,7 +535,7 @@ export default function SalesOrdersPage() {
   }
   const docPass = (sel: Set<string> | undefined, vals: string[]) => !sel || sel.size === 0 || vals.some(v => sel.has(v))
   const shownImports = imports.filter(d =>
-    (!docSearch || d.file_name.toLowerCase().includes(docSearch.toLowerCase())) &&
+    (!docSearch || d.file_name.toLowerCase().includes(docSearch.toLowerCase()) || (docLineText[d.id] || '').includes(docSearch.toLowerCase())) &&
     docPass(docFilters.status, [d.status]) &&
     docPass(docFilters.locations, docSummary[d.id]?.locations || []) &&
     docPass(docFilters.issues, docIssueTags(d)))
@@ -556,7 +563,7 @@ export default function SalesOrdersPage() {
 
         <h2 className="font-semibold text-lg mb-3">Uploaded Documents</h2>
         <div className="flex flex-wrap items-center gap-2 mb-2 text-sm relative z-20">
-          <input value={docSearch} onChange={e => setDocSearch(e.target.value)} placeholder="🔍 Search file…" className="border rounded-lg px-3 py-1.5 text-sm w-44" />
+          <input value={docSearch} onChange={e => setDocSearch(e.target.value)} placeholder="🔍 Search file or item…" className="border rounded-lg px-3 py-1.5 text-sm w-52" />
           <div className="w-44"><span className="text-xs text-gray-500">Location</span><MultiFilter values={docDistinct('locations')} selected={docFilters.locations || new Set()} onChange={s => setDocFilters(p => ({ ...p, locations: s }))} /></div>
           <div className="w-40"><span className="text-xs text-gray-500">Status</span><MultiFilter values={docDistinct('status')} selected={docFilters.status || new Set()} onChange={s => setDocFilters(p => ({ ...p, status: s }))} /></div>
           <div className="w-44"><span className="text-xs text-gray-500">Issues</span><MultiFilter values={docDistinct('issues')} selected={docFilters.issues || new Set()} onChange={s => setDocFilters(p => ({ ...p, issues: s }))} /></div>

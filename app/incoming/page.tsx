@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
-import { supabase } from '@/lib/supabase'
+import { supabase, fetchAll } from '@/lib/supabase'
 import { can } from '@/lib/permissions'
 
 interface DeliveryOrder {
@@ -71,6 +71,7 @@ export default function IncomingPage() {
   const [docFilters, setDocFilters] = useState({ file: '', do: '', factory: '', status: '', uploaded: '' })
   const [docQ, setDocQ] = useState('')   // single search box used on mobile
   const [lineCounts, setLineCounts] = useState<Record<string, { recv: number; total: number }>>({})
+  const [docLineText, setDocLineText] = useState<Record<string, string>>({})   // do_id -> its item codes + descriptions (for searching documents by content)
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
@@ -179,14 +180,19 @@ export default function IncomingPage() {
   async function loadDocs() {
     const { data } = await supabase.from('delivery_orders').select('*').order('created_at', { ascending: false })
     setDocs((data as DeliveryOrder[]) || [])
-    // Per-document progress: how many lines received out of the total
-    const { data: ls } = await supabase.from('delivery_order_lines').select('do_id, received_at')
+    // Per-document progress (lines received / total) + a per-document text blob of
+    // its item codes & descriptions, so the file search can match documents by content.
+    const ls = await fetchAll<{ do_id: string; received_at: string | null; item_code: string | null; description: string | null }>(
+      'delivery_order_lines', 'do_id, received_at, item_code, description')
     const c: Record<string, { recv: number; total: number }> = {}
-    ;(ls || []).forEach((r: { do_id: string; received_at: string | null }) => {
+    const t: Record<string, string> = {}
+    ls.forEach(r => {
       const e = c[r.do_id] || (c[r.do_id] = { recv: 0, total: 0 })
       e.total++; if (r.received_at) e.recv++
+      t[r.do_id] = (t[r.do_id] || '') + ' ' + `${r.item_code || ''} ${r.description || ''}`.toLowerCase()
     })
     setLineCounts(c)
+    setDocLineText(t)
   }
   async function loadItemsMaster() {
     const { data } = await supabase.from('items').select('code, description, unit').order('code').limit(10000)
@@ -200,10 +206,12 @@ export default function IncomingPage() {
 
   const docFacName = (d: DeliveryOrder) => isHO ? factoryName(d.factory_code) : d.factory_code
   const inc = (v: string | null | undefined, q: string) => !q || (v || '').toLowerCase().includes(q.toLowerCase())
+  // The File search also matches a document by the items inside it (codes + descriptions)
+  const fileMatch = (d: DeliveryOrder, q: string) => !q || inc(d.file_name, q) || inc(docLineText[d.id] || '', q)
   const colDocs = docs.filter(d =>
-    inc(d.file_name, docFilters.file) && inc(d.do_number, docFilters.do) && inc(docFacName(d), docFilters.factory) &&
+    fileMatch(d, docFilters.file) && inc(d.do_number, docFilters.do) && inc(docFacName(d), docFilters.factory) &&
     (!docFilters.status || d.status === docFilters.status) && inc(new Date(d.created_at).toLocaleString(), docFilters.uploaded))
-  const mobDocs = docs.filter(d => !docQ || [d.file_name, d.do_number, docFacName(d), d.status].some(v => inc(v, docQ)))
+  const mobDocs = docs.filter(d => !docQ || [d.file_name, d.do_number, docFacName(d), d.status, docLineText[d.id] || ''].some(v => inc(v, docQ)))
   const docStatuses = [...new Set(docs.map(d => d.status))].sort()
   const shownLines = lines.filter(l => !lineQ || inc(l.item_code, lineQ) || inc(l.description, lineQ))
 
@@ -519,7 +527,7 @@ export default function IncomingPage() {
 
         <h2 className="font-semibold text-lg mb-2">Uploaded Documents</h2>
         {/* Mobile: one card per document */}
-        <input value={docQ} onChange={e => setDocQ(e.target.value)} placeholder="Search file, DO no, factory, status…"
+        <input value={docQ} onChange={e => setDocQ(e.target.value)} placeholder="Search file, DO no, factory, item…"
           className="md:hidden w-full border rounded-lg px-3 py-2 text-sm mb-3" />
         <div className="md:hidden space-y-3 mb-8 max-h-[26rem] overflow-y-auto pr-1">
           {docs.length === 0 && <p className="text-center py-6 text-gray-400 border rounded-lg bg-white">No delivery orders uploaded yet</p>}
@@ -550,7 +558,7 @@ export default function IncomingPage() {
               <tr>{['File', 'DO No.', 'Factory', 'Status', 'Uploaded', 'Actions'].map(h => (
                 <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
               <tr className="border-b">
-                <th className="px-3 py-2"><input value={docFilters.file} onChange={e => setDocFilters({ ...docFilters, file: e.target.value })} placeholder="Filter…" className="w-full border rounded px-2 py-1 text-xs font-normal" /></th>
+                <th className="px-3 py-2"><input value={docFilters.file} onChange={e => setDocFilters({ ...docFilters, file: e.target.value })} placeholder="File or item…" className="w-full border rounded px-2 py-1 text-xs font-normal" /></th>
                 <th className="px-3 py-2"><input value={docFilters.do} onChange={e => setDocFilters({ ...docFilters, do: e.target.value })} placeholder="Filter…" className="w-full border rounded px-2 py-1 text-xs font-normal" /></th>
                 <th className="px-3 py-2"><input value={docFilters.factory} onChange={e => setDocFilters({ ...docFilters, factory: e.target.value })} placeholder="Filter…" className="w-full border rounded px-2 py-1 text-xs font-normal" /></th>
                 <th className="px-3 py-2"><select value={docFilters.status} onChange={e => setDocFilters({ ...docFilters, status: e.target.value })} className="w-full border rounded px-2 py-1 text-xs font-normal bg-white"><option value="">All</option>{docStatuses.map(s => <option key={s} value={s}>{s}</option>)}</select></th>
