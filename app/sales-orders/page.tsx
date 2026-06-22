@@ -64,6 +64,16 @@ function lineStatusOf(b: BatchLite, mrStatus: Record<string, string>): string {
 }
 const LINE_DONE = 'Delivered to warehouse'   // a line counts as "completed" once delivered
 
+// Map a line field to the matching edit_unconfirmed_sales_line() parameter
+const FIELD_PARAM: Record<string, string> = {
+  customer_name: 'p_customer', so_number: 'p_so_number', item_code: 'p_item_code', description: 'p_description',
+  quantity: 'p_quantity', outstanding_qty: 'p_outstanding', delivery_date: 'p_delivery_date', location_code: 'p_location',
+}
+const emptyEditArgs = (id: string): Record<string, string | null> => ({
+  p_line_id: id, p_customer: null, p_so_number: null, p_item_code: null, p_description: null,
+  p_quantity: null, p_outstanding: null, p_delivery_date: null, p_location: null,
+})
+
 const FIELDS: { value: keyof SalesLine; label: string }[] = [
   { value: 'customer_name', label: 'Customer' },
   { value: 'so_number', label: 'SO No' },
@@ -411,44 +421,62 @@ export default function SalesOrdersPage() {
   async function submitBulk() {
     if (!profile || !linesFor) return
     if (selectedIds.size === 0) { setError('Select at least one line.'); return }
-    if (!bulkReason.trim()) { setError('Please give a reason.'); return }
     if (!bulkValue.trim()) { setError('Enter the new value.'); return }
-    setBulkSubmitting(true); setError(''); setSuccess('')
     const sel = lines.filter(l => selectedIds.has(l.id) && pendingForLine(l.id) === 0)
     const skipped = selectedIds.size - sel.length
-    if (sel.length === 0) { setError('All selected lines already have a pending request — wait for those to be approved first.'); setBulkSubmitting(false); return }
-    const rows = sel.map(l => ({
-      line_id: l.id, import_id: linesFor.id, reason: bulkReason.trim(), status: 'Pending',
-      requested_by: profile.id, requested_by_email: profile.email, requested_by_name: profile.full_name || profile.email,
-      factory_code: l.factory_code || profile.factory_code,
-      request_type: 'edit', field: bulkField, old_value: String(l[bulkField] ?? ''), new_value: bulkValue.trim(),
-    }))
-    const { error: insErr } = await supabase.from('change_requests').insert(rows)
-    if (insErr) { setError(`Could not submit: ${insErr.message}`); setBulkSubmitting(false); return }
-    setSuccess(`Bulk change submitted for ${rows.length} line(s)${skipped ? ` (${skipped} skipped — already pending)` : ''} — awaiting Head Office approval.`)
+    if (sel.length === 0) { setError('All selected lines already have a pending request — wait for those to be approved first.'); return }
+    const direct = sel.filter(l => !isFactoryConfirmed(l.factory_code || ''))   // before confirm → apply now
+    const needAppr = sel.filter(l => isFactoryConfirmed(l.factory_code || ''))   // after confirm → approval
+    if (needAppr.length > 0 && !bulkReason.trim()) { setError('Some selected lines are already confirmed — please give a reason for those.'); return }
+    setBulkSubmitting(true); setError(''); setSuccess('')
+    const k = FIELD_PARAM[bulkField as string]
+    for (const l of direct) {
+      const args = emptyEditArgs(l.id); if (k) args[k] = bulkValue.trim()
+      const { error: e } = await supabase.rpc('edit_unconfirmed_sales_line', args)
+      if (e) { setError(`Could not update ${l.item_code}: ${e.message}`); setBulkSubmitting(false); return }
+    }
+    if (needAppr.length) {
+      const rows = needAppr.map(l => ({
+        line_id: l.id, import_id: linesFor.id, reason: bulkReason.trim(), status: 'Pending',
+        requested_by: profile.id, requested_by_email: profile.email, requested_by_name: profile.full_name || profile.email,
+        factory_code: l.factory_code || profile.factory_code,
+        request_type: 'edit', field: bulkField, old_value: String(l[bulkField] ?? ''), new_value: bulkValue.trim(),
+      }))
+      const { error: insErr } = await supabase.from('change_requests').insert(rows)
+      if (insErr) { setError(`Could not submit: ${insErr.message}`); setBulkSubmitting(false); return }
+    }
+    setSuccess(`${direct.length ? `${direct.length} line(s) updated` : ''}${direct.length && needAppr.length ? '; ' : ''}${needAppr.length ? `${needAppr.length} sent for Head Office approval` : ''}${skipped ? ` (${skipped} skipped — already pending)` : ''}.`)
     setBulkSubmitting(false); setBulkOpen(false); setSelectedIds(new Set())
-    loadChangeReqs(linesFor.id); loadSummary()
+    await viewLines(linesFor); loadSummary()
   }
   async function submitBulkDelete() {
     if (!profile || !linesFor || selectedIds.size === 0) return
-    const reason = window.prompt(`Request to DELETE ${selectedIds.size} selected line(s).\nReason (sent to Head Office):`)
-    if (reason === null) return
-    if (!reason.trim()) { setError('Please give a reason.'); return }
-    setBulkSubmitting(true); setError(''); setSuccess('')
     const sel = lines.filter(l => selectedIds.has(l.id) && pendingForLine(l.id) === 0)
     const skipped = selectedIds.size - sel.length
-    if (sel.length === 0) { setError('All selected lines already have a pending request — wait for those first.'); setBulkSubmitting(false); return }
-    const rows = sel.map(l => ({
-      line_id: l.id, import_id: linesFor.id, reason: reason.trim(), status: 'Pending',
-      requested_by: profile.id, requested_by_email: profile.email, requested_by_name: profile.full_name || profile.email,
-      factory_code: l.factory_code || profile.factory_code,
-      request_type: 'delete', field: '__line__', old_value: `${l.item_code} — ${l.description}`, new_value: '(delete line)',
-    }))
-    const { error: insErr } = await supabase.from('change_requests').insert(rows)
-    if (insErr) { setError(`Could not submit: ${insErr.message}`); setBulkSubmitting(false); return }
-    setSuccess(`Delete requested for ${rows.length} line(s)${skipped ? ` (${skipped} skipped — already pending)` : ''} — awaiting Head Office approval.`)
+    if (sel.length === 0) { setError('All selected lines already have a pending request — wait for those first.'); return }
+    const direct = sel.filter(l => !isFactoryConfirmed(l.factory_code || ''))
+    const needAppr = sel.filter(l => isFactoryConfirmed(l.factory_code || ''))
+    if (!confirm(`Delete ${direct.length} line(s) now${needAppr.length ? ` and request deletion of ${needAppr.length} confirmed line(s)` : ''}?`)) return
+    let reason = ''
+    if (needAppr.length) { const r = window.prompt(`${needAppr.length} selected line(s) are confirmed — deletion needs Head Office approval.\nReason:`); if (r === null) return; if (!r.trim()) { setError('Please give a reason.'); return } reason = r.trim() }
+    setBulkSubmitting(true); setError(''); setSuccess('')
+    for (const l of direct) {
+      const { error: e } = await supabase.rpc('delete_unconfirmed_sales_line', { p_line_id: l.id })
+      if (e) { setError(`Could not delete ${l.item_code}: ${e.message}`); setBulkSubmitting(false); return }
+    }
+    if (needAppr.length) {
+      const rows = needAppr.map(l => ({
+        line_id: l.id, import_id: linesFor.id, reason, status: 'Pending',
+        requested_by: profile.id, requested_by_email: profile.email, requested_by_name: profile.full_name || profile.email,
+        factory_code: l.factory_code || profile.factory_code,
+        request_type: 'delete', field: '__line__', old_value: `${l.item_code} — ${l.description}`, new_value: '(delete line)',
+      }))
+      const { error: insErr } = await supabase.from('change_requests').insert(rows)
+      if (insErr) { setError(`Could not submit: ${insErr.message}`); setBulkSubmitting(false); return }
+    }
+    setSuccess(`${direct.length ? `${direct.length} line(s) deleted` : ''}${direct.length && needAppr.length ? '; ' : ''}${needAppr.length ? `${needAppr.length} deletion(s) sent for approval` : ''}${skipped ? ` (${skipped} skipped — already pending)` : ''}.`)
     setBulkSubmitting(false); setBulkOpen(false); setSelectedIds(new Set())
-    loadChangeReqs(linesFor.id); loadSummary()
+    await viewLines(linesFor); loadSummary()
   }
 
   function onReqFieldChange(field: keyof SalesLine) {
@@ -463,11 +491,31 @@ export default function SalesOrdersPage() {
 
   async function submitRequest() {
     if (!reqLine || !profile || !linesFor) return
-    if (!reqReason.trim()) { setError('Please give a reason.'); return }
-    if (reqMode === 'edit' && !reqValue.trim()) { setError('Enter the proposed new value.'); return }
+    if (reqMode === 'edit' && !reqValue.trim()) { setError('Enter the new value.'); return }
     // Item code must come from the Items master; its description follows automatically.
     const pickedItem = reqMode === 'edit' && reqField === 'item_code' ? itemByCode(reqValue) : null
     if (reqMode === 'edit' && reqField === 'item_code' && !pickedItem) { setError('Pick a valid item code from the Items master.'); return }
+
+    // Before this line's factory confirms: apply the change directly, no approval.
+    if (!isFactoryConfirmed(reqLine.factory_code || '')) {
+      setSubmitting(true); setError(''); setSuccess('')
+      if (reqMode === 'delete') {
+        const { error: e } = await supabase.rpc('delete_unconfirmed_sales_line', { p_line_id: reqLine.id })
+        if (e) { setError(e.message); setSubmitting(false); return }
+      } else {
+        const args = emptyEditArgs(reqLine.id)
+        if (pickedItem) { args.p_item_code = pickedItem.code; args.p_description = pickedItem.description }
+        else { const k = FIELD_PARAM[reqField as string]; if (k) args[k] = reqValue.trim() }
+        const { error: e } = await supabase.rpc('edit_unconfirmed_sales_line', args)
+        if (e) { setError(e.message); setSubmitting(false); return }
+      }
+      setSuccess(reqMode === 'delete' ? 'Line deleted.' : 'Line updated.')
+      setSubmitting(false); setReqLine(null)
+      await viewLines(linesFor); loadSummary()
+      return
+    }
+
+    if (!reqReason.trim()) { setError('Please give a reason.'); return }
     setSubmitting(true); setError(''); setSuccess('')
 
     const base = {
@@ -661,7 +709,7 @@ export default function SalesOrdersPage() {
               <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[currentDoc.status] || 'bg-gray-100 text-gray-700'}`}>{currentDoc.status}</span>
               {pendingForDoc > 0 && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{pendingForDoc} pending change(s)</span>}
             </div>
-            <p className="text-gray-500 text-sm mb-3">Lines are read-only. Use <strong>Request change</strong> to propose a correction — Head Office approves it. A document can&apos;t be confirmed while changes are pending.</p>
+            <p className="text-gray-500 text-sm mb-3"><strong>Before a location confirms</strong>, its lines can be edited directly (no approval). <strong>After it confirms</strong>, changes go to Head Office as a request. A document can&apos;t be confirmed while changes are pending.</p>
 
             {lines.filter(isDuplicate).length > 0 && (
               <div className="text-amber-700 text-sm bg-amber-50 border border-amber-200 p-3 rounded mb-3">
@@ -676,10 +724,10 @@ export default function SalesOrdersPage() {
 
             {reqLine && (
               <div className="bg-white rounded-xl shadow-sm border p-5 mb-4">
-                <h3 className="font-semibold mb-1">{reqMode === 'delete' ? 'Request to delete this line' : 'Request a change'}</h3>
-                <p className="text-gray-500 text-xs mb-4">Line: <span className="font-mono">{reqLine.item_code}</span> — {reqLine.description}</p>
+                <h3 className="font-semibold mb-1">{isFactoryConfirmed(reqLine.factory_code || '') ? (reqMode === 'delete' ? 'Request to delete this line' : 'Request a change') : (reqMode === 'delete' ? 'Delete this line' : 'Edit this line')}</h3>
+                <p className="text-gray-500 text-xs mb-4">Line: <span className="font-mono">{reqLine.item_code}</span> — {reqLine.description}{!isFactoryConfirmed(reqLine.factory_code || '') && <span className="text-green-600"> · not yet confirmed — applies immediately</span>}</p>
                 {reqMode === 'delete' ? (
-                  <p className="text-red-600 text-sm bg-red-50 p-2 rounded mb-4">This asks Head Office to remove this line from the document. Give a reason below.</p>
+                  <p className="text-red-600 text-sm bg-red-50 p-2 rounded mb-4">{isFactoryConfirmed(reqLine.factory_code || '') ? 'This asks Head Office to remove this line from the document. Give a reason below.' : 'This removes the line from the document immediately.'}</p>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
                     <div>
@@ -715,14 +763,16 @@ export default function SalesOrdersPage() {
                     </div>
                   </div>
                 )}
-                <label className="block text-xs font-medium mb-1">Reason</label>
-                <textarea value={reqReason} onChange={e => setReqReason(e.target.value)} rows={2}
-                  className="w-full border rounded-lg px-3 py-2 text-sm bg-white mb-4" placeholder={reqMode === 'delete' ? 'Why should this line be deleted?' : 'Why does this need to change?'} />
+                {isFactoryConfirmed(reqLine.factory_code || '') && <>
+                  <label className="block text-xs font-medium mb-1">Reason</label>
+                  <textarea value={reqReason} onChange={e => setReqReason(e.target.value)} rows={2}
+                    className="w-full border rounded-lg px-3 py-2 text-sm bg-white mb-4" placeholder={reqMode === 'delete' ? 'Why should this line be deleted?' : 'Why does this need to change?'} />
+                </>}
                 {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
                 <div className="flex gap-3">
                   <button onClick={submitRequest} disabled={submitting}
                     className={`text-white px-5 py-2 rounded-lg disabled:opacity-50 text-sm font-medium ${reqMode === 'delete' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
-                    {submitting ? 'Submitting…' : (reqMode === 'delete' ? 'Submit delete request' : 'Submit request')}
+                    {submitting ? 'Saving…' : isFactoryConfirmed(reqLine.factory_code || '') ? (reqMode === 'delete' ? 'Submit delete request' : 'Submit request') : (reqMode === 'delete' ? 'Delete line' : 'Save change')}
                   </button>
                   <button onClick={() => setReqLine(null)} className="border px-5 py-2 rounded-lg hover:bg-gray-50 text-sm">Cancel</button>
                 </div>
@@ -747,16 +797,16 @@ export default function SalesOrdersPage() {
             {selectedIds.size > 0 && (
               <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
                 <span className="font-medium text-blue-800">{selectedIds.size} line(s) selected</span>
-                <button onClick={openBulk} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 text-sm font-medium">Request bulk change</button>
-                <button onClick={submitBulkDelete} disabled={bulkSubmitting} className="bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50 text-sm font-medium">Request delete</button>
+                <button onClick={openBulk} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 text-sm font-medium">Bulk edit</button>
+                <button onClick={submitBulkDelete} disabled={bulkSubmitting} className="bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50 text-sm font-medium">Delete selected</button>
                 <button onClick={() => setSelectedIds(new Set())} className="text-gray-500 hover:underline">Clear</button>
               </div>
             )}
 
             {bulkOpen && (
               <div className="bg-white rounded-xl shadow-sm border p-5 mb-4">
-                <h3 className="font-semibold mb-1">Request a change for {selectedIds.size} line(s)</h3>
-                <p className="text-gray-500 text-xs mb-4">The same change is proposed for every selected line; Head Office approves it.</p>
+                <h3 className="font-semibold mb-1">Bulk edit {selectedIds.size} line(s)</h3>
+                <p className="text-gray-500 text-xs mb-4">The same change is applied to every selected line. Unconfirmed lines change immediately; already-confirmed lines go to Head Office for approval (reason required for those).</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                   <div>
                     <label className="block text-xs font-medium mb-1">Field to change</label>
@@ -776,11 +826,11 @@ export default function SalesOrdersPage() {
                     )}
                   </div>
                 </div>
-                <label className="block text-xs font-medium mb-1">Reason</label>
+                <label className="block text-xs font-medium mb-1">Reason <span className="text-gray-400 font-normal">(only needed for already-confirmed lines)</span></label>
                 <textarea value={bulkReason} onChange={e => setBulkReason(e.target.value)} rows={2} className="w-full border rounded-lg px-3 py-2 text-sm bg-white mb-4" placeholder="Why does this need to change?" />
                 {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
                 <div className="flex gap-3">
-                  <button onClick={submitBulk} disabled={bulkSubmitting} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{bulkSubmitting ? 'Submitting…' : `Submit for ${selectedIds.size} line(s)`}</button>
+                  <button onClick={submitBulk} disabled={bulkSubmitting} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{bulkSubmitting ? 'Saving…' : `Apply to ${selectedIds.size} line(s)`}</button>
                   <button onClick={() => setBulkOpen(false)} className="border px-5 py-2 rounded-lg hover:bg-gray-50 text-sm">Cancel</button>
                 </div>
               </div>
@@ -840,8 +890,8 @@ export default function SalesOrdersPage() {
                             : !can(profile, 'sales', 'edit', line.factory_code)
                               ? <span className="text-gray-400" title="You have view-only access for this factory">view only</span>
                               : <>
-                                <button onClick={() => openRequest(line)} className="text-blue-600 hover:underline">Request change</button>
-                                <button onClick={() => openDelete(line)} className="text-red-600 hover:underline ml-3">Request delete</button>
+                                <button onClick={() => openRequest(line)} className="text-blue-600 hover:underline">{isFactoryConfirmed(line.factory_code || '') ? 'Request change' : 'Edit'}</button>
+                                <button onClick={() => openDelete(line)} className="text-red-600 hover:underline ml-3">{isFactoryConfirmed(line.factory_code || '') ? 'Request delete' : 'Delete'}</button>
                               </>}
                         </td>
                       </tr>
