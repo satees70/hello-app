@@ -24,6 +24,10 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [perms, setPerms] = useState<Permissions | null>(null)
   const [myFactories, setMyFactories] = useState<string[]>([])
+  interface Notif { id: string; factory_code: string; type: string; title: string; body: string | null; link: string | null; created_at: string }
+  const [notifs, setNotifs] = useState<Notif[]>([])
+  const [notifSeenAt, setNotifSeenAt] = useState<string>('')
+  const [notifOpen, setNotifOpen] = useState(false)
   // This user's permissions (for menu view-gating). Until loaded, can() treats an
   // unset grid as full access, so nothing is hidden by mistake.
   const profileLike = { role, permissions: perms }
@@ -31,11 +35,28 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data }) => {
       if (!data.session) return
-      const { data: p } = await supabase.from('profiles').select('permissions, factory_codes').eq('id', data.session.user.id).single()
+      const { data: p } = await supabase.from('profiles').select('permissions, factory_codes, notifications_seen_at').eq('id', data.session.user.id).single()
       setPerms((p?.permissions as Permissions) ?? {})
       setMyFactories((p?.factory_codes as string[]) ?? [])
+      setNotifSeenAt((p?.notifications_seen_at as string) ?? '')
     })
   }, [])
+
+  // Notifications for this user's location(s) — HO sees all
+  const myFacs = myFactories.length ? myFactories : [factoryCode]
+  const loadNotifs = useCallback(async () => {
+    let q = supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(40)
+    if (!isHO) q = q.in('factory_code', myFacs)
+    const { data } = await q
+    setNotifs((data as Notif[]) || [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHO, myFacs.join(',')])
+  useEffect(() => { loadNotifs(); const t = setInterval(loadNotifs, 30000); return () => clearInterval(t) }, [loadNotifs, pathname])
+  const unseenCount = notifSeenAt ? notifs.filter(n => n.created_at > notifSeenAt).length : notifs.length
+  async function openNotifs() {
+    setNotifOpen(o => !o)
+    if (!notifOpen) { await supabase.rpc('mark_notifications_seen'); setNotifSeenAt(new Date().toISOString()) }
+  }
 
   // Top-bar label: Head Office, "Multi-site (N)", or the single factory code.
   const factoryLabel = isHO ? 'Head Office'
@@ -105,6 +126,25 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     return () => { if (channel) supabase.removeChannel(channel) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHO, refreshPending])
+
+  // Live location notifications → toast + prepend to the bell list
+  useEffect(() => {
+    let channel: ReturnType<typeof supabase.channel> | null = null
+    supabase.auth.getSession().then(({ data }) => {
+      if (!data.session) return
+      supabase.realtime.setAuth(data.session.access_token)
+      channel = supabase.channel('notif-feed')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, payload => {
+          const n = payload.new as Notif
+          if (!isHO && !myFacs.includes(n.factory_code)) return
+          setNotifs(prev => prev.some(x => x.id === n.id) ? prev : [n, ...prev].slice(0, 40))
+          addToast('🔔 ' + n.title, n.body || '')
+        })
+        .subscribe()
+    })
+    return () => { if (channel) supabase.removeChannel(channel) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHO, myFacs.join(',')])
 
   // Office-only access guard. Factory staff may only use the app from an allowed
   // office IP; Head Office + Admins are exempt. Master switch (app_config) lets it
@@ -226,6 +266,38 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
           </div>
         </div>
         <div className="flex items-center gap-2 sm:gap-4 text-sm shrink-0">
+          {/* Notification bell */}
+          <div className="relative">
+            <button onClick={openNotifs} className="relative inline-flex items-center justify-center w-9 h-9 rounded hover:bg-blue-800" aria-label="Notifications" title="Notifications">
+              <span className="text-lg leading-none">🔔</span>
+              {unseenCount > 0 && <span className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[16px] h-4 px-1 flex items-center justify-center">{unseenCount > 99 ? '99+' : unseenCount}</span>}
+            </button>
+            {notifOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setNotifOpen(false)} />
+                <div className="absolute right-0 mt-1 w-80 max-w-[90vw] bg-white text-gray-800 rounded-lg shadow-xl border z-50 max-h-96 overflow-y-auto">
+                  <div className="px-4 py-2 border-b font-semibold text-sm sticky top-0 bg-white">Notifications</div>
+                  {notifs.length === 0 && <p className="px-4 py-6 text-center text-gray-400 text-sm">Nothing yet.</p>}
+                  {notifs.map(n => {
+                    const unseen = !notifSeenAt || n.created_at > notifSeenAt
+                    const go = () => { setNotifOpen(false); if (n.link) router.push(n.link) }
+                    return (
+                      <button key={n.id} onClick={go} className={`block w-full text-left px-4 py-2 border-b last:border-0 hover:bg-gray-50 ${unseen ? 'bg-blue-50/60' : ''}`}>
+                        <div className="flex items-start gap-2">
+                          {unseen && <span className="mt-1 w-2 h-2 rounded-full bg-blue-500 shrink-0" />}
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium truncate">{n.title}</div>
+                            {n.body && <div className="text-xs text-gray-500">{n.body}</div>}
+                            <div className="text-[10px] text-gray-400 mt-0.5">{isHO ? `${n.factory_code} · ` : ''}{new Date(n.created_at).toLocaleString()}</div>
+                          </div>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+          </div>
           <span className="bg-blue-800 px-2 sm:px-3 py-1 rounded-full text-xs whitespace-nowrap">
             {factoryLabel}
           </span>

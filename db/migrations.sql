@@ -2094,3 +2094,75 @@ begin
        and coalesce(lm.factory_code, '') <> '';
   end if;
 end; $function$;
+
+-- ============================================================================
+-- 2026-06 · Location notifications + bell
+-- Staff see updates tied to their assigned location(s). One row per event,
+-- targeted at a factory_code; "unseen" = created after the user's seen stamp.
+-- ============================================================================
+create table if not exists public.notifications (
+  id uuid primary key default gen_random_uuid(),
+  factory_code text not null,
+  type text not null default 'info',
+  title text not null,
+  body text,
+  link text,
+  ref text,                       -- dedupe key so the same event isn't repeated
+  created_at timestamptz not null default now()
+);
+create index if not exists notifications_fac on public.notifications (factory_code, created_at desc);
+create unique index if not exists notifications_ref on public.notifications (ref);
+grant select, insert on public.notifications to authenticated, anon, service_role;
+alter table public.notifications enable row level security;
+drop policy if exists notifications_read on public.notifications;
+create policy notifications_read on public.notifications for select to authenticated using (true);
+drop policy if exists notifications_insert on public.notifications;
+create policy notifications_insert on public.notifications for insert to authenticated with check (true);
+
+alter table public.profiles add column if not exists notifications_seen_at timestamptz not null default now();
+
+create or replace function public.mark_notifications_seen() returns void
+ language plpgsql security definer set search_path to 'public' as $function$
+begin update public.profiles set notifications_seen_at = now() where id = auth.uid(); end; $function$;
+grant execute on function public.mark_notifications_seen() to authenticated;
+
+-- New order for a location → one notification per (document, factory)
+create or replace function public.tg_notify_sales_line() returns trigger
+ language plpgsql security definer set search_path to 'public' as $function$
+begin
+  if coalesce(NEW.factory_code, '') <> '' then
+    insert into public.notifications (factory_code, type, title, body, link, ref)
+    values (NEW.factory_code, 'order',
+            'New order ' || coalesce(NEW.so_number, ''),
+            'A sales order for your location was added.', '/sales-orders',
+            'neworder:' || NEW.import_id::text || ':' || NEW.factory_code)
+    on conflict (ref) do nothing;
+  end if;
+  return NEW;
+end; $function$;
+drop trigger if exists notify_sales_line on public.sales_order_lines;
+create trigger notify_sales_line after insert or update of factory_code on public.sales_order_lines
+  for each row execute function public.tg_notify_sales_line();
+
+-- Urgent flag → notify every affected location
+create or replace function public.set_order_urgent(p_import_id uuid, p_urgent boolean) returns void
+ language plpgsql security definer set search_path to 'public' as $function$
+begin
+  update public.sales_imports set urgent = p_urgent where id = p_import_id;
+  update public.production_batches set urgent = p_urgent
+   where id in (
+     select pbi.batch_id from public.production_batch_items pbi
+     where pbi.so_number in (
+       select distinct so_number from public.sales_order_lines
+        where import_id = p_import_id and so_number is not null));
+  if p_urgent then
+    insert into public.notifications (factory_code, type, title, body, link, ref)
+    select distinct sol.factory_code, 'urgent', '🔴 Urgent order',
+           'An order for your location was marked urgent.', '/sales-orders',
+           'urgent:' || p_import_id::text || ':' || sol.factory_code
+    from public.sales_order_lines sol
+    where sol.import_id = p_import_id and coalesce(sol.factory_code, '') <> ''
+    on conflict (ref) do nothing;
+  end if;
+end; $function$;
+grant execute on function public.set_order_urgent(uuid, boolean) to authenticated;
