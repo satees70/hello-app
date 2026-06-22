@@ -18,6 +18,7 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
   const filterSo = filterSoProp !== undefined ? filterSoProp : internalFilter   // controlled or internal
   const setFilterSo = onFilterChange || setInternalFilter
   const [sending, setSending] = useState(false)
+  const [err, setErr] = useState('')
   const [open, setOpen] = useState(true)
   const [users, setUsers] = useState<{ id: string; full_name: string }[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
@@ -43,10 +44,16 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
   async function send() {
     const text = body.trim()
     if (!text) return
-    setSending(true)
-    const { error } = await supabase.from('discussions').insert({ channel, author_id: me, author_name: meName || null, body: text, so_number: tagSo.trim() || null, mention_ids: mentions, mention_factories: facMentions })
+    setSending(true); setErr('')
+    let { error } = await supabase.from('discussions').insert({ channel, author_id: me, author_name: meName || null, body: text, so_number: tagSo.trim() || null, mention_ids: mentions, mention_factories: facMentions })
+    // If the tagging columns aren't in the database yet, still send a plain message
+    if (error && /column|schema cache|mention_|so_number/i.test(error.message)) {
+      const res = await supabase.from('discussions').insert({ channel, author_id: me, author_name: meName || null, body: text })
+      error = res.error
+    }
     setSending(false)
-    if (!error) { setBody(''); setMentions([]); setFacMentions([]); load(); onPosted?.() }
+    if (error) { setErr(error.message); return }
+    setBody(''); setMentions([]); setFacMentions([]); load(); onPosted?.()
   }
   const fmt = (iso: string) => new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
   // SO numbers to offer: the ones passed in plus any already used in messages
@@ -116,6 +123,7 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
               placeholder={tagSo ? `Message about SO ${tagSo}…` : 'Type a message…'} className="flex-1 min-w-[12rem] border rounded-lg px-3 py-2 text-sm" />
             <button onClick={send} disabled={sending || !body.trim()} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{sending ? 'Sending…' : 'Send'}</button>
           </div>
+          {err && <p className="text-red-500 text-xs mt-2">Couldn’t send: {err}</p>}
         </div>
       )}
     </div>
