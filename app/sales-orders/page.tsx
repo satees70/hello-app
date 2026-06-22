@@ -139,9 +139,12 @@ export default function SalesOrdersPage() {
 
   // Factory display + valid location codes (for the location dropdown)
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
-  const [locationCodes, setLocationCodes] = useState<string[]>([])
+  const [locationCodes, setLocationCodes] = useState<string[]>([])   // mapped locations (Setup → Location Map)
+  const [lineLocs, setLineLocs] = useState<string[]>([])             // every location seen on sales lines
   const [locationMap, setLocationMap] = useState<Record<string, string>>({}) // location_code -> factory_code
   const [items, setItems] = useState<{ code: string; description: string }[]>([]) // Items master for item-code lookups
+  // Locations offered in the edit dropdown: mapped ones + any that appear on lines
+  const locOptions = [...new Set([...locationCodes, ...lineLocs])].sort()
   const itemByCode = (c: string) => items.find(i => i.code.toLowerCase() === c.trim().toLowerCase())
   const [remapping, setRemapping] = useState(false)
 
@@ -201,6 +204,7 @@ export default function SalesOrdersPage() {
     const isos: Record<string, Set<string>> = {}
     allLines.forEach(l => { if (l.so_number) { (isos[l.import_id] = isos[l.import_id] || new Set()).add(l.so_number) } })
     setImportSos(Object.fromEntries(Object.entries(isos).map(([k, v]) => [k, [...v].sort()])))
+    setLineLocs([...new Set(allLines.map(l => l.location_code).filter(Boolean) as string[])])
     const dup: Record<string, number> = {}
     const locs: Record<string, Set<string>> = {}
     const locFac: Record<string, Record<string, string>> = {}   // import -> location_code -> factory_code
@@ -420,7 +424,7 @@ export default function SalesOrdersPage() {
     const def = (isHO ? 'customer_name' : 'location_code') as keyof SalesLine
     setReqField(def)
     const cur = String(line[def] ?? '')
-    setReqValue(def === 'location_code' ? (locationCodes.includes(cur) ? cur : '') : cur)
+    setReqValue(def === 'location_code' ? (locOptions.includes(cur) ? cur : '') : cur)
     setReqReason('')
     setError('')
   }
@@ -502,7 +506,7 @@ export default function SalesOrdersPage() {
     const current = String(reqLine[field] ?? '')
     // For location, only allow a valid mapped code — blank it if the current
     // value isn't in the list (e.g. a mistyped code) so the user must pick one.
-    if (field === 'location_code') setReqValue(locationCodes.includes(current) ? current : '')
+    if (field === 'location_code') setReqValue(locOptions.includes(current) ? current : '')
     else setReqValue(current)
   }
 
@@ -771,7 +775,7 @@ export default function SalesOrdersPage() {
                         <select value={reqValue} onChange={e => setReqValue(e.target.value)}
                           className="w-full border rounded-lg px-3 py-2 text-sm bg-white">
                           <option value="">Select location…</option>
-                          {locationCodes.map(c => <option key={c} value={c}>{c}</option>)}
+                          {locOptions.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                       ) : reqField === 'item_code' ? (
                         <>
@@ -843,7 +847,7 @@ export default function SalesOrdersPage() {
                     {bulkField === 'location_code' ? (
                       <select value={bulkValue} onChange={e => setBulkValue(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-white">
                         <option value="">Select location…</option>
-                        {locationCodes.map(c => <option key={c} value={c}>{c}</option>)}
+                        {locOptions.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
                     ) : (
                       <input value={bulkValue} onChange={e => setBulkValue(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-white" />
