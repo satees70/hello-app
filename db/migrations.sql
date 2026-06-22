@@ -2277,3 +2277,35 @@ end; $function$;
 drop trigger if exists notify_material_request on public.material_requests;
 create trigger notify_material_request after update of released_at on public.material_requests
   for each row execute function public.tg_notify_material_request();
+
+-- ============================================================================
+-- 2026-06 · Supplier purchase orders (manual procurement reference)
+-- ============================================================================
+create table if not exists public.supplier_orders (
+  id uuid primary key default gen_random_uuid(),
+  supplier_name text not null,
+  note text,
+  status text not null default 'Open',     -- Open | Received
+  created_by uuid,
+  created_by_name text,
+  created_at timestamptz not null default now(),
+  received_at timestamptz
+);
+create table if not exists public.supplier_order_items (
+  id uuid primary key default gen_random_uuid(),
+  supplier_order_id uuid not null references public.supplier_orders(id) on delete cascade,
+  item_code text not null,
+  description text,
+  qty numeric not null
+);
+create index if not exists supplier_order_items_oid on public.supplier_order_items (supplier_order_id);
+grant select, insert, update, delete on public.supplier_orders to authenticated;
+grant select, insert, update, delete on public.supplier_order_items to authenticated;
+alter table public.supplier_orders enable row level security;
+alter table public.supplier_order_items enable row level security;
+drop policy if exists supplier_orders_all on public.supplier_orders;
+create policy supplier_orders_all on public.supplier_orders for all to authenticated
+  using (true) with check (true);
+drop policy if exists supplier_order_items_all on public.supplier_order_items;
+create policy supplier_order_items_all on public.supplier_order_items for all to authenticated
+  using (true) with check (true);
