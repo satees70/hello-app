@@ -109,8 +109,9 @@ export default function MaterialRequestsPage() {
     setManItem(null); setManQty('')
   }
   async function submitManualRequest() {
-    const fac = manFac || (profile && profile.factory_code !== 'HEAD_OFFICE' ? profile.factory_code : '')
-    if (!fac) { setError('Pick a factory for this request.'); return }
+    const facOpts = (isHO ? factories.map(f => f.code) : (profile?.factory_codes?.length ? profile.factory_codes : [profile?.factory_code || ''])).filter(c => c && canEditFac(c))
+    const fac = facOpts.includes(manFac) ? manFac : (facOpts[0] || '')
+    if (!fac) { setError('You are not allowed to request for any location.'); return }
     if (!canEditFac(fac)) { setError('You have view-only access at this factory.'); return }
     // Include a line still being typed but not yet added
     const pending = manItem && Number(manQty) > 0 ? [{ code: manItem.code, description: manItem.description, unit: manItem.unit, qty: Number(manQty) }] : []
@@ -576,8 +577,11 @@ export default function MaterialRequestsPage() {
         {isWarehouse && <p className="text-gray-500 text-sm bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mb-4">📦 Warehouse view — released pick runs only. Enter the SO number and record what you pick.</p>}
 
         {!isWarehouse && canEdit && (() => {
-          const facOpts = isHO ? factories.map(f => f.code) : (profile?.factory_codes?.length ? profile.factory_codes : [profile?.factory_code || ''])
-          const fac = manFac || facOpts[0] || ''
+          // Only locations this user is allowed to edit can be requested for
+          const facOpts = (isHO ? factories.map(f => f.code) : (profile?.factory_codes?.length ? profile.factory_codes : [profile?.factory_code || '']))
+            .filter(c => c && canEditFac(c))
+          if (facOpts.length === 0) return null
+          const fac = facOpts.includes(manFac) ? manFac : facOpts[0]
           return (
             <div className="mb-5">
               <button onClick={() => { setShowManual(o => !o); setError(''); setSuccess('') }} className="text-blue-600 hover:underline text-sm font-medium">
