@@ -2349,3 +2349,43 @@ begin
   end if;
   return NEW;
 end; $function$;
+
+-- ============================================================================
+-- 2026-06 · Group tagging in discussion (e.g. @AVINA102 → all users there)
+-- ============================================================================
+alter table public.discussions add column if not exists mention_factories text[] not null default '{}';
+
+create or replace function public.tg_notify_discussion() returns trigger
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_link text; uid uuid; fac text;
+begin
+  v_link := '/discussion' || case when NEW.so_number is not null then '?so=' || NEW.so_number else '' end;
+  if NEW.so_number is not null then
+    insert into public.notifications (factory_code, type, title, body, link, ref)
+    select distinct sol.factory_code, 'discussion', 'New message · SO ' || NEW.so_number,
+           coalesce(NEW.author_name, 'Someone') || ': ' || left(NEW.body, 80), v_link,
+           'disc:' || NEW.id::text || ':' || sol.factory_code
+    from public.sales_order_lines sol
+    where sol.so_number = NEW.so_number and coalesce(sol.factory_code, '') <> ''
+    on conflict (ref) do nothing;
+  end if;
+  -- personal mentions
+  if NEW.mention_ids is not null then
+    foreach uid in array NEW.mention_ids loop
+      insert into public.notifications (factory_code, user_id, type, title, body, link, ref)
+      values ('', uid, 'mention', coalesce(NEW.author_name, 'Someone') || ' mentioned you',
+              left(NEW.body, 100), v_link, 'mention:' || NEW.id::text || ':' || uid::text)
+      on conflict (ref) do nothing;
+    end loop;
+  end if;
+  -- group (location) mentions → everyone at that location
+  if NEW.mention_factories is not null then
+    foreach fac in array NEW.mention_factories loop
+      insert into public.notifications (factory_code, type, title, body, link, ref)
+      values (fac, 'mention', coalesce(NEW.author_name, 'Someone') || ' tagged @' || fac,
+              left(NEW.body, 100), v_link, 'mentionfac:' || NEW.id::text || ':' || fac)
+      on conflict (ref) do nothing;
+    end loop;
+  end if;
+  return NEW;
+end; $function$;

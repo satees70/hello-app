@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
-interface Msg { id: string; author_id: string | null; author_name: string | null; body: string; created_at: string; so_number: string | null; mention_ids: string[] | null }
+interface Msg { id: string; author_id: string | null; author_name: string | null; body: string; created_at: string; so_number: string | null; mention_ids: string[] | null; mention_factories: string[] | null }
 
 // A lightweight message board so the warehouse and office can talk to each other.
 // Messages are shared by `channel` (default "warehouse") and can be linked to a
@@ -20,7 +20,9 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
   const [sending, setSending] = useState(false)
   const [open, setOpen] = useState(true)
   const [users, setUsers] = useState<{ id: string; full_name: string }[]>([])
-  const [mentions, setMentions] = useState<string[]>([])   // tagged user ids on the new message
+  const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
+  const [mentions, setMentions] = useState<string[]>([])      // tagged user ids
+  const [facMentions, setFacMentions] = useState<string[]>([])// tagged location codes
   const endRef = useRef<HTMLDivElement>(null)
   const nameOf = (id: string) => users.find(u => u.id === id)?.full_name || 'someone'
 
@@ -29,7 +31,10 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
     setMsgs((data as Msg[]) || [])
   }
   useEffect(() => { load(); const id = setInterval(load, 20000); return () => clearInterval(id) }, [channel]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { supabase.rpc('list_users').then(({ data }) => setUsers((data as { id: string; full_name: string }[]) || [])) }, [])
+  useEffect(() => {
+    supabase.rpc('list_users').then(({ data }) => setUsers((data as { id: string; full_name: string }[]) || []))
+    supabase.from('factories').select('code, name').order('code').then(({ data }) => setFactories((data as { code: string; name: string }[]) || []))
+  }, [])
   // When the parent points us at an SO (e.g. clicked from a document), open and pre-link the reply
   useEffect(() => { if (filterSoProp) { setOpen(true); setTagSo(filterSoProp) } }, [filterSoProp])
   const shown = filterSo ? msgs.filter(m => (m.so_number || '') === filterSo) : msgs
@@ -39,9 +44,9 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
     const text = body.trim()
     if (!text) return
     setSending(true)
-    const { error } = await supabase.from('discussions').insert({ channel, author_id: me, author_name: meName || null, body: text, so_number: tagSo.trim() || null, mention_ids: mentions })
+    const { error } = await supabase.from('discussions').insert({ channel, author_id: me, author_name: meName || null, body: text, so_number: tagSo.trim() || null, mention_ids: mentions, mention_factories: facMentions })
     setSending(false)
-    if (!error) { setBody(''); setMentions([]); load(); onPosted?.() }
+    if (!error) { setBody(''); setMentions([]); setFacMentions([]); load(); onPosted?.() }
   }
   const fmt = (iso: string) => new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
   // SO numbers to offer: the ones passed in plus any already used in messages
@@ -74,7 +79,10 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
                   <div className={`max-w-[80%] rounded-lg px-3 py-1.5 text-sm ${mine ? 'bg-blue-600 text-white' : 'bg-white border'}`}>
                     {!mine && <div className="text-xs font-medium text-gray-500">{m.author_name || 'Someone'}</div>}
                     {m.so_number && <button onClick={() => setFilterSo(m.so_number!)} className={`inline-block mb-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold ${mine ? 'bg-blue-500 text-white' : 'bg-indigo-100 text-indigo-700'}`}>SO {m.so_number}</button>}
-                    {m.mention_ids && m.mention_ids.length > 0 && <div className="mb-0.5 flex flex-wrap gap-1">{m.mention_ids.map(id => <span key={id} className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${mine ? 'bg-blue-500 text-white' : 'bg-amber-100 text-amber-800'}`}>@{nameOf(id)}</span>)}</div>}
+                    {((m.mention_ids && m.mention_ids.length > 0) || (m.mention_factories && m.mention_factories.length > 0)) && <div className="mb-0.5 flex flex-wrap gap-1">
+                      {(m.mention_ids || []).map(id => <span key={id} className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${mine ? 'bg-blue-500 text-white' : 'bg-amber-100 text-amber-800'}`}>@{nameOf(id)}</span>)}
+                      {(m.mention_factories || []).map(fc => <span key={fc} className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${mine ? 'bg-blue-500 text-white' : 'bg-teal-100 text-teal-800'}`}>@{fc} (all)</span>)}
+                    </div>}
                     <div className="whitespace-pre-wrap break-words">{m.body}</div>
                     <div className={`text-[10px] mt-0.5 ${mine ? 'text-blue-100' : 'text-gray-400'}`}>{fmt(m.created_at)}</div>
                   </div>
@@ -83,19 +91,25 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
             })}
             <div ref={endRef} />
           </div>
-          {mentions.length > 0 && (
+          {(mentions.length > 0 || facMentions.length > 0) && (
             <div className="flex flex-wrap items-center gap-1 mb-2 text-xs">
               <span className="text-gray-500">Tagging:</span>
               {mentions.map(id => <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-medium">@{nameOf(id)}<button onClick={() => setMentions(m => m.filter(x => x !== id))} className="text-amber-600">✕</button></span>)}
+              {facMentions.map(fc => <span key={fc} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-teal-100 text-teal-800 font-medium">@{fc} (all)<button onClick={() => setFacMentions(f => f.filter(x => x !== fc))} className="text-teal-600">✕</button></span>)}
             </div>
           )}
           <div className="flex flex-wrap gap-2">
             <input list="disc-so-list" value={tagSo} onChange={e => setTagSo(e.target.value)} placeholder="Link SO# (optional)" className="w-36 border rounded-lg px-3 py-2 text-sm" />
             <datalist id="disc-so-list">{soList.map(so => <option key={so} value={so} />)}</datalist>
-            {users.length > 0 && (
-              <select value="" onChange={e => { if (e.target.value) setMentions(m => m.includes(e.target.value) ? m : [...m, e.target.value]) }} className="w-36 border rounded-lg px-2 py-2 text-sm bg-white" title="Tag a person">
+            {(users.length > 0 || factories.length > 0) && (
+              <select value="" onChange={e => { const v = e.target.value; if (!v) return; if (v.startsWith('fac:')) { const c = v.slice(4); setFacMentions(f => f.includes(c) ? f : [...f, c]) } else { setMentions(m => m.includes(v) ? m : [...m, v]) } }} className="w-40 border rounded-lg px-2 py-2 text-sm bg-white" title="Tag a person or location">
                 <option value="">＠ Tag…</option>
-                {users.filter(u => u.id !== me && !mentions.includes(u.id)).map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+                {factories.length > 0 && <optgroup label="Locations (all users)">
+                  {factories.filter(f => f.code !== 'HEAD_OFFICE' && !facMentions.includes(f.code)).map(f => <option key={f.code} value={`fac:${f.code}`}>{f.code}{f.name && f.name !== f.code ? ` — ${f.name}` : ''}</option>)}
+                </optgroup>}
+                {users.length > 0 && <optgroup label="People">
+                  {users.filter(u => u.id !== me && !mentions.includes(u.id)).map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+                </optgroup>}
               </select>
             )}
             <input value={body} onChange={e => setBody(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
