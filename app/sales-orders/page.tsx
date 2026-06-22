@@ -134,6 +134,7 @@ export default function SalesOrdersPage() {
   const [bulkReason, setBulkReason] = useState('')
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
   const [colFilters, setColFilters] = useState<Record<string, Set<string>>>({})
+  const [lineSearch, setLineSearch] = useState('')   // quick item-code / description search
   const [onlyUnmapped, setOnlyUnmapped] = useState(false)
   const [reqField, setReqField] = useState<keyof SalesLine>('customer_name')
   const [reqValue, setReqValue] = useState('')
@@ -334,8 +335,10 @@ export default function SalesOrdersPage() {
   ]
   const anyFilter = onlyUnmapped || COLS.some(c => (colFilters[c.key]?.size || 0) > 0)
   const colValues = (key: string) => { const g = COLS.find(c => c.key === key)!.get; return [...new Set(lines.map(g))].filter(Boolean).sort() }
+  const lq = lineSearch.trim().toLowerCase()
   const visibleLines = lines.filter(l => {
     if (onlyUnmapped && l.factory_code) return false
+    if (lq && !(l.item_code || '').toLowerCase().includes(lq) && !(l.description || '').toLowerCase().includes(lq)) return false
     for (const c of COLS) { const sel = colFilters[c.key]; if (sel && sel.size > 0 && !sel.has(c.get(l))) return false }
     const ss = colFilters.status; if (ss && ss.size > 0 && !ss.has(lineStatuses[l.id] || '')) return false
     return true
@@ -677,11 +680,12 @@ export default function SalesOrdersPage() {
             )}
 
             <div className="flex flex-wrap items-center gap-3 mb-3 text-sm">
-              <span className="text-gray-500">Filter each column below.</span>
+              <input value={lineSearch} onChange={e => setLineSearch(e.target.value)} placeholder="Search item code or description…" className="w-full sm:w-72 border rounded-lg px-3 py-2 text-sm" />
+              <span className="text-gray-500">or filter each column below.</span>
               {hasUnmapped && <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={onlyUnmapped} onChange={e => setOnlyUnmapped(e.target.checked)} className="h-4 w-4" /> ⚠ Unmapped only</label>}
               {hasUnmapped && <button onClick={remapUnmapped} disabled={remapping} className="bg-amber-500 text-white px-3 py-1 rounded-lg hover:bg-amber-600 disabled:opacity-50 text-xs font-medium">{remapping ? 'Re-mapping…' : '🔄 Re-map unmapped lines'}</button>}
               <span className="text-gray-400 text-xs">{visibleLines.length} of {lines.length} line(s)</span>
-              {anyFilter && <button onClick={() => { setColFilters({}); setOnlyUnmapped(false) }} className="text-blue-600 hover:underline text-xs">Clear filters</button>}
+              {(anyFilter || lineSearch) && <button onClick={() => { setColFilters({}); setOnlyUnmapped(false); setLineSearch('') }} className="text-blue-600 hover:underline text-xs">Clear filters</button>}
             </div>
 
             {hasUnmapped && (

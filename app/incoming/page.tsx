@@ -80,6 +80,7 @@ export default function IncomingPage() {
   // Lines / review state for the currently opened document
   const [linesFor, setLinesFor] = useState<DeliveryOrder | null>(null)
   const [lines, setLines] = useState<DoLine[]>([])
+  const [lineQ, setLineQ] = useState('')   // item-code / description search within the opened document
   const [requests, setRequests] = useState<MatReq[]>([])
   const [kgPerBag, setKgPerBag] = useState<Record<string, number>>({})
   const [pcsPerRoll, setPcsPerRoll] = useState<Record<string, number>>({})
@@ -204,6 +205,7 @@ export default function IncomingPage() {
     (!docFilters.status || d.status === docFilters.status) && inc(new Date(d.created_at).toLocaleString(), docFilters.uploaded))
   const mobDocs = docs.filter(d => !docQ || [d.file_name, d.do_number, docFacName(d), d.status].some(v => inc(v, docQ)))
   const docStatuses = [...new Set(docs.map(d => d.status))].sort()
+  const shownLines = lines.filter(l => !lineQ || inc(l.item_code, lineQ) || inc(l.description, lineQ))
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -236,7 +238,7 @@ export default function IncomingPage() {
   }
 
   async function viewLines(doc: DeliveryOrder) {
-    setLinesFor(doc); setError(''); setSuccess('')
+    setLinesFor(doc); setError(''); setSuccess(''); setLineQ('')
     const { data: ls } = await supabase.from('delivery_order_lines').select('*').eq('do_id', doc.id).order('item_code')
     const dl = (ls as DoLine[]) || []
     setLines(dl)
@@ -597,6 +599,10 @@ export default function IncomingPage() {
               )
             })()}
             <p className="text-gray-500 text-sm mb-3">For each line: QC <strong>ticks</strong>{photoReq ? <> and adds a <strong>photo</strong></> : <> (photo optional for Head Office)</>}, then <strong>Receive</strong> that item. You can receive some now and the rest later (partial). Matched items go against their order; known items with no order go into stock flagged <em>unplanned</em>; unknown codes are skipped. Bag/carton quantities convert to KG.</p>
+            <div className="flex items-center gap-2 mb-3">
+              <input value={lineQ} onChange={e => setLineQ(e.target.value)} placeholder="Search item code or description…" className="w-full sm:w-80 border rounded-lg px-3 py-2 text-sm" />
+              {lineQ && <span className="text-xs text-gray-500 whitespace-nowrap">{shownLines.length} of {lines.length}</span>}
+            </div>
             {(() => {
               const probs = lines.filter(l => !l.received_at).map(l => ({ l, c: lineCalc(l) })).filter(x => !x.c.known || x.c.factor === null)
               if (probs.length === 0) return null
@@ -618,7 +624,8 @@ export default function IncomingPage() {
             {/* Mobile: one card per line (no side-scrolling) */}
             <div className="md:hidden space-y-3">
               {lines.length === 0 && <p className="text-center py-6 text-gray-400 border rounded-lg">No lines read from this document.</p>}
-              {lines.map(l => {
+              {lines.length > 0 && shownLines.length === 0 && <p className="text-center py-6 text-gray-400 border rounded-lg">No lines match your search.</p>}
+              {shownLines.map(l => {
                 const c = lineCalc(l)
                 const editable = !l.received_at && canEditFac(linesFor.factory_code)
                 return (
@@ -653,7 +660,8 @@ export default function IncomingPage() {
                 </thead>
                 <tbody>
                   {lines.length === 0 && <tr><td colSpan={9} className="text-center py-6 text-gray-400">No lines read from this document.</td></tr>}
-                  {lines.map(l => {
+                  {lines.length > 0 && shownLines.length === 0 && <tr><td colSpan={9} className="text-center py-6 text-gray-400">No lines match your search.</td></tr>}
+                  {shownLines.map(l => {
                     const c = lineCalc(l)
                     const editable = !l.received_at && canEditFac(linesFor.factory_code)
                     return (
