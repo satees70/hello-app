@@ -86,6 +86,7 @@ export default function MaterialRequestsPage() {
   const [manFac, setManFac] = useState('')
   const [manItem, setManItem] = useState<{ code: string; description: string; unit: string } | null>(null)
   const [manQty, setManQty] = useState('')
+  const [manLines, setManLines] = useState<{ code: string; description: string; unit: string; qty: number }[]>([])   // items staged for one manual request
   const toggleLabel = (id: string) => setSelLabels(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -99,19 +100,28 @@ export default function MaterialRequestsPage() {
   async function loadItemsMaster() {
     setItemsMaster(await fetchAll<{ code: string; description: string; unit: string }>('items', 'code, description, unit'))
   }
-  async function addManualRequest() {
-    const fac = manFac || (profile && profile.factory_code !== 'HEAD_OFFICE' ? profile.factory_code : '')
-    if (!fac) { setError('Pick a factory for this request.'); return }
-    if (!canEditFac(fac)) { setError('You have view-only access at this factory.'); return }
+  function addManualLine() {
     if (!manItem) { setError('Pick an item.'); return }
     const q = Number(manQty)
     if (!(q > 0)) { setError('Enter a quantity greater than zero.'); return }
+    setError('')
+    setManLines(prev => { const i = prev.findIndex(l => l.code === manItem.code); if (i >= 0) { const n = [...prev]; n[i] = { ...n[i], qty: n[i].qty + q }; return n } return [...prev, { code: manItem.code, description: manItem.description, unit: manItem.unit, qty: q }] })
+    setManItem(null); setManQty('')
+  }
+  async function submitManualRequest() {
+    const fac = manFac || (profile && profile.factory_code !== 'HEAD_OFFICE' ? profile.factory_code : '')
+    if (!fac) { setError('Pick a factory for this request.'); return }
+    if (!canEditFac(fac)) { setError('You have view-only access at this factory.'); return }
+    // Include a line still being typed but not yet added
+    const pending = manItem && Number(manQty) > 0 ? [{ code: manItem.code, description: manItem.description, unit: manItem.unit, qty: Number(manQty) }] : []
+    const lines = [...manLines, ...pending]
+    if (lines.length === 0) { setError('Add at least one item.'); return }
     setBusy('manual'); setError(''); setSuccess('')
-    const { error: e } = await supabase.rpc('raise_manual_material_request', { p_factory: fac, p_items: [{ code: manItem.code, description: manItem.description, unit: manItem.unit, qty: q }] })
+    const { error: e } = await supabase.rpc('raise_manual_material_request', { p_factory: fac, p_items: lines })
     setBusy('')
     if (e) { setError(e.message); return }
-    setSuccess(`Manual request added for ${manItem.code} — it’s waiting to release for ${factoryName(fac)}.`)
-    setManItem(null); setManQty(''); setShowManual(false)
+    setSuccess(`Manual request added (${lines.length} item${lines.length > 1 ? 's' : ''}) — waiting to release for ${factoryName(fac)}.`)
+    setManItem(null); setManQty(''); setManLines([]); setShowManual(false)
     load()
   }
 
@@ -575,7 +585,7 @@ export default function MaterialRequestsPage() {
               </button>
               {showManual && (
                 <div className="mt-2 bg-white border rounded-xl shadow-sm p-4">
-                  <p className="text-gray-500 text-xs mb-3">Raise a material by hand (not from a batch recipe). It joins <strong>Waiting to release</strong> for that factory like any other request.</p>
+                  <p className="text-gray-500 text-xs mb-3">Raise materials by hand (not from a batch recipe). Add one or more items, then <strong>Submit request</strong> — they join <strong>Waiting to release</strong> for that factory.</p>
                   <div className="flex flex-wrap items-end gap-3">
                     {facOpts.length > 1 && (
                       <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Factory</span>
@@ -588,7 +598,28 @@ export default function MaterialRequestsPage() {
                     </div>
                     <div className="flex flex-col gap-1 w-28"><span className="text-xs font-medium text-gray-600">Qty{manItem ? ` (${manItem.unit})` : ''}</span>
                       <input type="number" step="any" value={manQty} onChange={e => setManQty(e.target.value)} className="border rounded-lg px-3 py-2 text-sm text-right" /></div>
-                    <button onClick={addManualRequest} disabled={busy === 'manual'} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{busy === 'manual' ? 'Adding…' : 'Add request'}</button>
+                    <button onClick={addManualLine} className="border border-blue-600 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 text-sm font-medium">+ Add item</button>
+                  </div>
+                  {manLines.length > 0 && (
+                    <div className="mt-3 border rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 border-b"><tr>{['Item', 'Description', 'Qty', ''].map(h => <th key={h} className="text-left px-3 py-1.5 font-medium text-gray-600">{h}</th>)}</tr></thead>
+                        <tbody>
+                          {manLines.map((l, i) => (
+                            <tr key={l.code} className="border-b last:border-0">
+                              <td className="px-3 py-1.5 font-mono font-medium whitespace-nowrap">{l.code}</td>
+                              <td className="px-3 py-1.5 text-gray-600">{l.description}</td>
+                              <td className="px-3 py-1.5 whitespace-nowrap">{Number(Number(l.qty).toPrecision(12))} {l.unit}</td>
+                              <td className="px-3 py-1.5 text-right"><button onClick={() => setManLines(prev => prev.filter((_, x) => x !== i))} className="text-red-500 hover:underline text-xs">remove</button></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <div className="mt-3 flex items-center gap-3">
+                    <button onClick={submitManualRequest} disabled={busy === 'manual'} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{busy === 'manual' ? 'Submitting…' : `Submit request${manLines.length ? ` (${manLines.length} item${manLines.length > 1 ? 's' : ''})` : ''}`}</button>
+                    {manLines.length > 0 && <button onClick={() => setManLines([])} className="text-gray-500 hover:underline text-xs">Clear list</button>}
                   </div>
                 </div>
               )}
