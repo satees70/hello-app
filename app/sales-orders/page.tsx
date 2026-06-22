@@ -6,6 +6,7 @@ import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can, hasCap } from '@/lib/permissions'
 import MultiFilter from '@/components/MultiFilter'
+import DiscussionPanel from '@/components/DiscussionPanel'
 
 interface SalesImport {
   id: string
@@ -14,6 +15,7 @@ interface SalesImport {
   status: string
   factory_code: string
   created_at: string
+  urgent?: boolean
 }
 
 interface SalesLine {
@@ -545,6 +547,15 @@ export default function SalesOrdersPage() {
     setSuccess(`Delete request for "${doc.file_name}" sent to Head Office.`)
   }
 
+  async function toggleUrgent(doc: SalesImport) {
+    const next = !doc.urgent
+    setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('set_order_urgent', { p_import_id: doc.id, p_urgent: next })
+    if (e) { setError(e.message); return }
+    setImports(prev => prev.map(d => (d.id === doc.id ? { ...d, urgent: next } : d)))
+    setSuccess(next ? `🔴 "${doc.file_name}" flagged URGENT — highlighted through the whole journey.` : `Urgent flag cleared for "${doc.file_name}".`)
+  }
+
   function formatDate(iso: string) { return new Date(iso).toLocaleString() }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
@@ -609,8 +620,8 @@ export default function SalesOrdersPage() {
               {imports.length === 0 && (<tr><td colSpan={6} className="text-center py-8 text-gray-400">No documents uploaded yet</td></tr>)}
               {imports.length > 0 && shownImports.length === 0 && (<tr><td colSpan={6} className="text-center py-8 text-gray-400">No documents match the filter.</td></tr>)}
               {shownImports.map(doc => (
-                <tr key={doc.id} className={`border-b last:border-0 hover:bg-gray-50 ${linesFor?.id === doc.id ? 'bg-blue-50' : ''}`}>
-                  <td className="px-4 py-3 font-medium">{doc.file_name}</td>
+                <tr key={doc.id} className={`border-b last:border-0 hover:bg-gray-50 ${doc.urgent ? 'bg-red-50' : linesFor?.id === doc.id ? 'bg-blue-50' : ''}`}>
+                  <td className="px-4 py-3 font-medium">{doc.urgent && <span className="inline-block mr-2 px-1.5 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold align-middle">🔴 URGENT</span>}{doc.file_name}</td>
                   <td className="px-4 py-3 text-xs text-gray-600 max-w-[220px]">
                     {docSummary[doc.id]?.locations?.length
                       ? <span className="flex flex-wrap gap-x-2 gap-y-1">{docSummary[doc.id].locations.map(loc => {
@@ -631,6 +642,7 @@ export default function SalesOrdersPage() {
                   <td className="px-4 py-3 space-x-3 whitespace-nowrap">
                     <button onClick={() => viewLines(doc)} className="text-blue-600 hover:underline text-xs">View Lines</button>
                     <button onClick={() => handleDownload(doc.file_path)} className="text-blue-600 hover:underline text-xs">View PDF</button>
+                    <button onClick={() => toggleUrgent(doc)} className={`hover:underline text-xs ${doc.urgent ? 'text-gray-500' : 'text-red-600 font-medium'}`}>{doc.urgent ? 'Clear urgent' : '🔴 Mark urgent'}</button>
                     {isHO ? <button onClick={() => handleDelete(doc)} className="text-red-600 hover:underline text-xs">Delete</button>
                       : docDelPending.has(doc.id) ? <span className="text-amber-600 text-xs">⏳ Delete requested</span>
                         : hasCap(profile, 'request_doc_delete') ? <button onClick={() => requestDocDelete(doc)} className="text-red-600 hover:underline text-xs">Request delete</button> : null}
@@ -645,6 +657,7 @@ export default function SalesOrdersPage() {
           <>
             <div className="flex items-center gap-3 mb-2">
               <h2 className="font-semibold text-lg">Lines — <span className="text-gray-500 font-normal">{currentDoc.file_name}</span></h2>
+              {currentDoc.urgent && <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-red-600 text-white">🔴 URGENT</span>}
               <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[currentDoc.status] || 'bg-gray-100 text-gray-700'}`}>{currentDoc.status}</span>
               {pendingForDoc > 0 && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{pendingForDoc} pending change(s)</span>}
             </div>
@@ -874,6 +887,8 @@ export default function SalesOrdersPage() {
             )}
           </>
         )}
+
+        {profile && <DiscussionPanel channel="warehouse" me={profile.id} meName={profile.full_name} title="Warehouse discussion" />}
       </div>
     </div>
   )

@@ -1954,3 +1954,41 @@ begin
   return v_req;
 end; $function$;
 grant execute on function public.raise_manual_label_request(text, jsonb) to authenticated;
+
+-- ============================================================================
+-- 2026-06 · Urgent orders + warehouse discussion
+-- ============================================================================
+-- Mark a sales document urgent; the flag flows to its production batches so the
+-- highlight follows the order through the whole journey.
+alter table public.sales_imports add column if not exists urgent boolean not null default false;
+alter table public.production_batches add column if not exists urgent boolean not null default false;
+
+create or replace function public.set_order_urgent(p_import_id uuid, p_urgent boolean) returns void
+ language plpgsql security definer set search_path to 'public' as $function$
+begin
+  update public.sales_imports set urgent = p_urgent where id = p_import_id;
+  update public.production_batches set urgent = p_urgent
+   where id in (
+     select pbi.batch_id from public.production_batch_items pbi
+     where pbi.so_number in (
+       select distinct so_number from public.sales_order_lines
+        where import_id = p_import_id and so_number is not null));
+end; $function$;
+grant execute on function public.set_order_urgent(uuid, boolean) to authenticated;
+
+-- Simple discussion board (e.g. warehouse <-> office). One row per message.
+create table if not exists public.discussions (
+  id uuid primary key default gen_random_uuid(),
+  channel text not null default 'warehouse',
+  author_id uuid,
+  author_name text,
+  body text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists discussions_channel on public.discussions (channel, created_at);
+grant select, insert on public.discussions to authenticated;
+alter table public.discussions enable row level security;
+drop policy if exists discussions_read on public.discussions;
+create policy discussions_read on public.discussions for select to authenticated using (true);
+drop policy if exists discussions_insert on public.discussions;
+create policy discussions_insert on public.discussions for insert to authenticated with check (author_id = auth.uid());

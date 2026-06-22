@@ -20,6 +20,7 @@ interface Batch {
   pack_date: string | null
   run_mode: string | null
   delivery_date: string | null
+  urgent?: boolean
   production_batch_items: PBItem[]
 }
 interface PackLine { factory_code: string; name: string; active: boolean; line_mode: string | null }
@@ -66,7 +67,7 @@ export default function PackingPage() {
 
   async function load() {
     const { data } = await supabase.from('production_batches')
-      .select('id, batch_no, item_code, description, factory_code, total_quantity, produced_qty, material_request_id, pack_line, pack_date, run_mode, delivery_date, production_batch_items(customer_name, quantity)')
+      .select('id, batch_no, item_code, description, factory_code, total_quantity, produced_qty, material_request_id, pack_line, pack_date, run_mode, delivery_date, urgent, production_batch_items(customer_name, quantity)')
       .order('delivery_date')
     setBatches((data as Batch[]) || [])
     const { data: pl } = await supabase.from('packing_lines').select('factory_code, name, active, line_mode').order('name')
@@ -294,8 +295,8 @@ export default function PackingPage() {
                             {byFactory[fc][line].map(b => {
                               const backorder = Math.max(0, b.total_quantity - (b.produced_qty || 0))
                               return (
-                                <tr key={b.id} className="border-b last:border-0">
-                                  <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}</td>
+                                <tr key={b.id} className={`border-b last:border-0 ${b.urgent ? 'bg-red-50' : ''}`}>
+                                  <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.urgent && <span className="inline-block mr-1 px-1 py-0.5 rounded bg-red-600 text-white text-[9px] font-bold align-middle">🔴</span>}{b.batch_no}</td>
                                   <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span></td>
                                   <td className="px-3 py-2 text-right font-semibold">{b.total_quantity}</td>
                                   <td className="px-3 py-2 text-right text-green-700">{b.produced_qty || 0}</td>
@@ -326,7 +327,7 @@ export default function PackingPage() {
           {readyToPack.map(b => (
             <div key={`mr|${b.id}`} className="bg-white rounded-xl shadow-sm border p-3">
               <div className="flex items-center justify-between gap-2">
-                <span className="font-mono font-semibold">{b.batch_no}{partial(b) && <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700">make {availability(b).units} now</span>}</span>
+                <span className="font-mono font-semibold">{b.urgent && <span className="mr-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-600 text-white">🔴 URGENT</span>}{b.batch_no}{partial(b) && <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700">make {availability(b).units} now</span>}</span>
                 {isHO && <span className="text-xs text-gray-500">{factoryName(b.factory_code)}</span>}
               </div>
               <div className="mt-1"><span className="font-medium">{b.item_code}</span> <span className="text-gray-500 text-sm">×{b.total_quantity}</span><span className="block text-gray-500 text-xs">{b.description}</span></div>

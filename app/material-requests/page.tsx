@@ -6,6 +6,7 @@ import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can, hasCap } from '@/lib/permissions'
 import ItemPicker from '@/components/ItemPicker'
+import DiscussionPanel from '@/components/DiscussionPanel'
 
 interface MRItem {
   id: string
@@ -35,7 +36,7 @@ interface MaterialRequest {
   so_set_by_name: string | null
   so_set_at: string | null
   batch_id: string
-  production_batches: { batch_no: string; item_code: string; description: string; exp_date: string | null } | null
+  production_batches: { batch_no: string; item_code: string; description: string; exp_date: string | null; urgent?: boolean } | null
   material_request_items: MRItem[]
 }
 
@@ -147,7 +148,7 @@ export default function MaterialRequestsPage() {
   async function load() {
     const { data } = await supabase
       .from('material_requests')
-      .select('*, production_batches!batch_id(batch_no, item_code, description, exp_date), material_request_items(*)')
+      .select('*, production_batches!batch_id(batch_no, item_code, description, exp_date, urgent), material_request_items(*)')
       .order('created_at', { ascending: false })
     setRequests((data as MaterialRequest[]) || [])
     const { data: mv } = await supabase.from('mr_qty_move_requests').select('from_item_id').eq('status', 'Pending')
@@ -634,6 +635,8 @@ export default function MaterialRequestsPage() {
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
         {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}
 
+        {profile && <DiscussionPanel channel="warehouse" me={profile.id} meName={profile.full_name} title="Warehouse discussion" />}
+
         {filter === 'Not requested' ? (
           (() => {
             const list = notReq.filter(b => isHO || (profile.factory_codes?.length ? profile.factory_codes.includes(b.factory_code) : b.factory_code === profile.factory_code))
@@ -886,7 +889,8 @@ export default function MaterialRequestsPage() {
                 <div className="text-sm font-semibold text-gray-700 pt-1">🏭 {isHO ? factoryName(r.factory_code) : r.factory_code} <span className="text-gray-400 font-normal">· {arr.filter(x => x.factory_code === r.factory_code).length} request(s)</span></div>
               )}
               <div className="bg-white rounded-xl shadow-sm border p-5">
-                <div className="flex flex-wrap items-center gap-3 mb-3">
+                <div className={`flex flex-wrap items-center gap-3 mb-3 ${r.production_batches?.urgent ? '-mx-5 -mt-5 mb-3 px-5 pt-3 pb-2 bg-red-50 rounded-t-xl' : ''}`}>
+                  {r.production_batches?.urgent && <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-red-600 text-white">🔴 URGENT</span>}
                   <span className="font-mono font-semibold">{r.request_no}</span>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[r.status] || 'bg-gray-100 text-gray-700'}`}>{r.status}</span>
                   <span className="text-sm text-gray-500">
