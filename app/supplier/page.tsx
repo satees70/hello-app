@@ -5,6 +5,7 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
+import ItemPicker from '@/components/ItemPicker'
 
 interface Line {
   id: string; customer_name: string; so_number: string; item_code: string; description: string
@@ -26,6 +27,10 @@ export default function SupplierPage() {
   // Place-order basket
   const [sel, setSel] = useState<Set<string>>(new Set())       // item codes selected to order
   const [orderQty, setOrderQty] = useState<Record<string, string>>({})
+  const [manualDesc, setManualDesc] = useState<Record<string, string>>({})   // descriptions for items added by hand
+  const [itemsMaster, setItemsMaster] = useState<{ code: string; description: string; unit: string }[]>([])
+  const [addItem, setAddItem] = useState<{ code: string; description: string; unit: string } | null>(null)
+  const [addQty, setAddQty] = useState('')
   const [supplierName, setSupplierName] = useState('')
   const [note, setNote] = useState('')
   const [placing, setPlacing] = useState(false)
@@ -35,14 +40,26 @@ export default function SupplierPage() {
 
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
-    const [rows, { data: pos }] = await Promise.all([
+    const [rows, { data: pos }, master] = await Promise.all([
       fetchAll<Line>('sales_order_lines',
         'id, customer_name, so_number, item_code, description, quantity, outstanding_qty, delivery_date, location_code, factory_code',
         qb => qb.or('location_code.eq.SUPPLIER,factory_code.eq.SUPPLIER')),
       supabase.from('supplier_orders').select('*, supplier_order_items(*)').order('created_at', { ascending: false }),
+      fetchAll<{ code: string; description: string; unit: string }>('items', 'code, description, unit'),
     ])
     setLines(rows)
     setOrders((pos as PO[]) || [])
+    setItemsMaster(master)
+  }
+  function addManualItem() {
+    if (!addItem) { setError('Pick an item to add.'); return }
+    const qy = Number(addQty)
+    if (!(qy > 0)) { setError('Enter a quantity for the item.'); return }
+    setError('')
+    setSel(p => new Set(p).add(addItem.code))
+    setOrderQty(o => ({ ...o, [addItem.code]: String(qy) }))
+    setManualDesc(m => ({ ...m, [addItem.code]: addItem.description }))
+    setAddItem(null); setAddQty('')
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
@@ -81,7 +98,7 @@ export default function SupplierPage() {
   async function placeOrder() {
     if (!profile) return
     if (!supplierName.trim()) { setError('Type the supplier name.'); return }
-    const items = [...sel].map(code => ({ code, qty: Number(orderQty[code] || 0), description: groups[code]?.description || lines.find(l => l.item_code === code)?.description || '' }))
+    const items = [...sel].map(code => ({ code, qty: Number(orderQty[code] || 0), description: groups[code]?.description || manualDesc[code] || lines.find(l => l.item_code === code)?.description || '' }))
       .filter(i => i.qty > 0)
     if (items.length === 0) { setError('Select at least one item with a quantity.'); return }
     setPlacing(true); setError(''); setSuccess('')
@@ -140,8 +157,8 @@ export default function SupplierPage() {
                   <tbody>
                     {[...sel].map(code => (
                       <tr key={code} className="border-b last:border-0">
-                        <td className="px-3 py-1.5 font-mono font-medium whitespace-nowrap">{code}</td>
-                        <td className="px-3 py-1.5 text-gray-600">{groups[code]?.description}</td>
+                        <td className="px-3 py-1.5 font-mono font-medium whitespace-nowrap">{code}{!groups[code] && <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-purple-100 text-purple-700 align-middle">manual</span>}</td>
+                        <td className="px-3 py-1.5 text-gray-600">{groups[code]?.description || manualDesc[code]}</td>
                         <td className="px-3 py-1.5"><input type="number" step="any" value={orderQty[code] ?? ''} onChange={e => setOrderQty(o => ({ ...o, [code]: e.target.value }))} className="border rounded px-2 py-1 text-sm w-28 text-right" /></td>
                         <td className="px-3 py-1.5 text-right"><button onClick={() => toggleSel(code, 0)} className="text-red-500 hover:underline text-xs">remove</button></td>
                       </tr>
@@ -155,6 +172,17 @@ export default function SupplierPage() {
               </div>
             </div>
           )}
+
+          {/* Add any item by hand (e.g. a low-stock item to top up) */}
+          <div className="bg-white rounded-xl shadow-sm border p-3 mb-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="flex flex-col gap-1 flex-1 min-w-[16rem]"><span className="text-xs font-medium text-gray-600">Add an item to order (not from a sales order)</span>
+                <ItemPicker items={itemsMaster} value={addItem ? `${addItem.code} — ${addItem.description}` : ''} onPick={it => setAddItem(it)} placeholder="Type an item code or name…" /></div>
+              <div className="flex flex-col gap-1 w-28"><span className="text-xs font-medium text-gray-600">Qty{addItem ? ` (${addItem.unit})` : ''}</span>
+                <input type="number" step="any" value={addQty} onChange={e => setAddQty(e.target.value)} className="border rounded-lg px-3 py-2 text-sm text-right" /></div>
+              <button onClick={addManualItem} className="border border-blue-600 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 text-sm font-medium">+ Add to order</button>
+            </div>
+          </div>
 
           <div className="flex flex-wrap items-center gap-3 mb-4 text-sm">
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search item code or description…" className="w-full sm:w-72 border rounded-lg px-3 py-2 text-sm" />
