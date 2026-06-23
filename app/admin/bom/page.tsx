@@ -50,6 +50,7 @@ export default function BomPage() {
   const router = useRouter()
   const [items, setItems] = useState<Item[]>([])
   const [parentId, setParentId] = useState('')
+  const [showDone, setShowDone] = useState(false)   // BOM-status panel: reveal items that already have a recipe
   const [components, setComponents] = useState<BomComponent[]>([])
   const [addComponentId, setAddComponentId] = useState('')
   const [addUseMode, setAddUseMode] = useState('any')
@@ -100,6 +101,8 @@ export default function BomPage() {
 
   const itemById = (id: string) => items.find(i => i.id === id)
   const manufactured = items.filter(i => i.type === 'Manufactured')
+  const withBom = manufactured.filter(i => bomParents.has(i.id))
+  const withoutBom = manufactured.filter(i => !bomParents.has(i.id))
   const parent = itemById(parentId)
 
   function downloadBomTemplate() {
@@ -282,6 +285,36 @@ export default function BomPage() {
           </div>
           {manufactured.length === 0 && (
             <p className="text-gray-400 text-sm mt-2">No items are flagged &quot;Manufactured&quot; yet. Set an item&apos;s type to Manufactured in Items Master first.</p>
+          )}
+          {manufactured.length > 0 && (
+            <div className="mt-4 border-t pt-3">
+              <div className="flex flex-wrap items-center gap-2 mb-1">
+                <span className="font-semibold text-sm">Recipe status</span>
+                <span className="text-gray-400 text-xs">{withBom.length} of {manufactured.length} manufactured items have a recipe</span>
+              </div>
+              {withoutBom.length > 0 ? (
+                <>
+                  <p className="text-xs text-amber-700 mb-1">⚠ {withoutBom.length} still need a recipe — tap one to set it up:</p>
+                  <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
+                    {withoutBom.map(i => (
+                      <button key={i.id} onClick={() => { setParentId(i.id); setError(''); setSuccess('') }} title={i.description}
+                        className="px-2 py-1 rounded bg-amber-50 border border-amber-200 text-amber-800 text-xs font-mono hover:bg-amber-100">{i.code}</button>
+                    ))}
+                  </div>
+                </>
+              ) : <p className="text-xs text-green-600">✓ Every manufactured item has a recipe.</p>}
+              {withBom.length > 0 && (
+                <button onClick={() => setShowDone(s => !s)} className="text-blue-600 hover:underline text-xs mt-2">{showDone ? 'Hide' : 'Show'} items with a recipe ({withBom.length})</button>
+              )}
+              {showDone && (
+                <div className="flex flex-wrap gap-1.5 mt-2 max-h-40 overflow-y-auto">
+                  {withBom.map(i => (
+                    <button key={i.id} onClick={() => { setParentId(i.id); setError(''); setSuccess('') }} title={i.description}
+                      className="px-2 py-1 rounded bg-green-50 border border-green-200 text-green-800 text-xs font-mono hover:bg-green-100">✓ {i.code}</button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
 
