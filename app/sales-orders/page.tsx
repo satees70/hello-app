@@ -143,8 +143,10 @@ export default function SalesOrdersPage() {
   const [lineLocs, setLineLocs] = useState<string[]>([])             // every location seen on sales lines
   const [locationMap, setLocationMap] = useState<Record<string, string>>({}) // location_code -> factory_code
   const [items, setItems] = useState<{ code: string; description: string }[]>([]) // Items master for item-code lookups
-  // Locations offered in the edit dropdown: mapped ones + any that appear on lines
-  const locOptions = [...new Set([...locationCodes, ...lineLocs])].sort()
+  // Locations offered in the edit dropdown: mapped ones + every factory/location +
+  // any seen on lines. (Factory staff only see their own lines via RLS, so include
+  // the full factory list so they can transfer an order to another location.)
+  const locOptions = [...new Set([...locationCodes, ...lineLocs, ...factories.map(f => f.code).filter(c => c && c !== 'HEAD_OFFICE')])].sort()
   const itemByCode = (c: string) => items.find(i => i.code.toLowerCase() === c.trim().toLowerCase())
   const [remapping, setRemapping] = useState(false)
 
