@@ -7,7 +7,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can } from '@/lib/permissions'
 
-interface Item { id: string; code: string; description: string; unit: string; type: string }
+interface Item { id: string; code: string; description: string; unit: string; type: string; stock_group?: string | null }
 interface BomComponent { id: string; parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean; use_mode: string; main_ingredient?: boolean }
 
 // Type-to-search item picker (replaces a huge native dropdown)
@@ -51,6 +51,7 @@ export default function BomPage() {
   const [items, setItems] = useState<Item[]>([])
   const [parentId, setParentId] = useState('')
   const [showDone, setShowDone] = useState(false)   // BOM-status panel: reveal items that already have a recipe
+  const [groupFilter, setGroupFilter] = useState('')   // BOM-status panel: filter chips by stock group
   const [components, setComponents] = useState<BomComponent[]>([])
   const [addComponentId, setAddComponentId] = useState('')
   const [addUseMode, setAddUseMode] = useState('any')
@@ -90,7 +91,7 @@ export default function BomPage() {
   }, [items])
 
   async function loadItems() {
-    setItems(await fetchAll<Item>('items', 'id, code, description, unit, type', 'code'))
+    setItems(await fetchAll<Item>('items', 'id, code, description, unit, type, stock_group', 'code'))
   }
 
   async function loadComponents() {
@@ -103,6 +104,10 @@ export default function BomPage() {
   const manufactured = items.filter(i => i.type === 'Manufactured')
   const withBom = manufactured.filter(i => bomParents.has(i.id))
   const withoutBom = manufactured.filter(i => !bomParents.has(i.id))
+  const mgGroups = [...new Set(manufactured.map(i => i.stock_group || '').filter(Boolean))].sort()
+  const inGroup = (i: Item) => groupFilter === '__none__' ? !i.stock_group : (i.stock_group || '') === groupFilter
+  const gWithout = groupFilter ? withoutBom.filter(inGroup) : []
+  const gWith = groupFilter ? withBom.filter(inGroup) : []
   const parent = itemById(parentId)
 
   function downloadBomTemplate() {
@@ -288,27 +293,38 @@ export default function BomPage() {
           )}
           {manufactured.length > 0 && (
             <div className="mt-4 border-t pt-3">
-              <div className="flex flex-wrap items-center gap-2 mb-1">
+              <div className="flex flex-wrap items-center gap-2 mb-2">
                 <span className="font-semibold text-sm">Recipe status</span>
                 <span className="text-gray-400 text-xs">{withBom.length} of {manufactured.length} manufactured items have a recipe</span>
               </div>
-              {withoutBom.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2 mb-2 text-sm">
+                <span className="text-gray-600 text-xs">Stock group:</span>
+                <select value={groupFilter} onChange={e => setGroupFilter(e.target.value)} className="border rounded-lg px-2 py-1 text-sm bg-white">
+                  <option value="">Choose a group…</option>
+                  {mgGroups.map(g => <option key={g} value={g}>{g}</option>)}
+                  <option value="__none__">(no group)</option>
+                </select>
+                {groupFilter && <span className="text-gray-400 text-xs">{gWithout.length} without · {gWith.length} with recipe</span>}
+              </div>
+              {!groupFilter ? (
+                <p className="text-gray-400 text-xs">Pick a stock group to list its items (or use the search box above to find one item).</p>
+              ) : gWithout.length > 0 ? (
                 <>
-                  <p className="text-xs text-amber-700 mb-1">⚠ {withoutBom.length} still need a recipe — tap one to set it up:</p>
-                  <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
-                    {withoutBom.map(i => (
+                  <p className="text-xs text-amber-700 mb-1">⚠ {gWithout.length} still need a recipe — tap one to set it up:</p>
+                  <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
+                    {gWithout.map(i => (
                       <button key={i.id} onClick={() => { setParentId(i.id); setError(''); setSuccess('') }} title={i.description}
                         className="px-2 py-1 rounded bg-amber-50 border border-amber-200 text-amber-800 text-xs font-mono hover:bg-amber-100">{i.code}</button>
                     ))}
                   </div>
                 </>
-              ) : <p className="text-xs text-green-600">✓ Every manufactured item has a recipe.</p>}
-              {withBom.length > 0 && (
-                <button onClick={() => setShowDone(s => !s)} className="text-blue-600 hover:underline text-xs mt-2">{showDone ? 'Hide' : 'Show'} items with a recipe ({withBom.length})</button>
+              ) : <p className="text-xs text-green-600">✓ Every item in this group has a recipe.</p>}
+              {groupFilter && gWith.length > 0 && (
+                <button onClick={() => setShowDone(s => !s)} className="text-blue-600 hover:underline text-xs mt-2">{showDone ? 'Hide' : 'Show'} items with a recipe ({gWith.length})</button>
               )}
-              {showDone && (
-                <div className="flex flex-wrap gap-1.5 mt-2 max-h-40 overflow-y-auto">
-                  {withBom.map(i => (
+              {groupFilter && showDone && (
+                <div className="flex flex-wrap gap-1.5 mt-2 max-h-48 overflow-y-auto">
+                  {gWith.map(i => (
                     <button key={i.id} onClick={() => { setParentId(i.id); setError(''); setSuccess('') }} title={i.description}
                       className="px-2 py-1 rounded bg-green-50 border border-green-200 text-green-800 text-xs font-mono hover:bg-green-100">✓ {i.code}</button>
                   ))}
