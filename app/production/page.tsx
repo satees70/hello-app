@@ -577,6 +577,7 @@ export default function ProductionPage() {
                     </button>
                   </div>
                 </div>
+                {error && <p className="text-red-500 text-sm bg-red-50 border border-red-200 rounded p-2 mt-3">Couldn’t raise: {error}</p>}
                 <p className="text-gray-400 text-xs mt-2">Tip: the request captures the current shortfall and adds a safety margin (rounded up). The product expiry &amp; batch number are entered later on the label, after the materials are received. Stock comes from the system — adjust it under Stock Adjustment if it’s wrong.</p>
               </>
             )}
