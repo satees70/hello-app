@@ -64,6 +64,8 @@ export default function MaterialRequestsPage() {
   const [requests, setRequests] = useState<MaterialRequest[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [filter, setFilter] = useState<Filter>('Open')
+  const [runFac, setRunFac] = useState('')   // released-runs: filter by location
+  const [runBkt, setRunBkt] = useState('')   // released-runs: filter by status bucket
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -489,9 +491,12 @@ export default function MaterialRequestsPage() {
   }
   const RUN_BUCKETS = ['new', 'so', 'partial', 'done'] as const
   const BUCKET_LABEL: Record<string, string> = { new: '🆕 New — needs SO number', so: '🧾 SO entered — to pick', partial: '⏳ Partially received', done: '✅ Fully received' }
-  const visibleRuns = runList.filter(run => filter === 'Labels'
+  const visibleRuns = runList.filter(run => (filter === 'Labels'
     ? run.reqs.some(r => (r.material_request_items || []).some(it => factoryItems.has(it.item_code)))
     : Object.keys(splitBySource(run.mats).warehouse).length > 0)
+    && (!runFac || run.factory === runFac)
+    && (!runBkt || runBucket(run) === runBkt))
+  const runFacs = [...new Set(runList.map(r => r.factory))].sort()
   const orderedRuns = filter === 'Labels'
     ? visibleRuns
     : [...visibleRuns].sort((a, b) => RUN_BUCKETS.indexOf(runBucket(a)) - RUN_BUCKETS.indexOf(runBucket(b)) || b.released_at.localeCompare(a.released_at))
@@ -703,6 +708,22 @@ export default function MaterialRequestsPage() {
                       ? <>Each card is a <strong>product</strong> — print its labels once its raw materials arrive. Enter batch / expiry and the quantity to print.</>
                       : <>Pick each run's totals in one trip. Type the <strong>total received</strong> for a material — it is split back across the original requests automatically.</>}
                   </p>
+                  {filter !== 'Labels' && (
+                    <div className="flex flex-wrap items-end gap-3 mb-3 text-sm">
+                      <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Location</span>
+                        <select value={runFac} onChange={e => setRunFac(e.target.value)} className="border rounded-lg px-3 py-2 text-sm bg-white">
+                          <option value="">All locations</option>
+                          {runFacs.map(c => <option key={c} value={c}>{isHO ? factoryName(c) : c}</option>)}
+                        </select></div>
+                      <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Status</span>
+                        <select value={runBkt} onChange={e => setRunBkt(e.target.value)} className="border rounded-lg px-3 py-2 text-sm bg-white">
+                          <option value="">All statuses</option>
+                          {RUN_BUCKETS.map(b => <option key={b} value={b}>{BUCKET_LABEL[b]}</option>)}
+                        </select></div>
+                      <span className="text-gray-400 text-xs">{orderedRuns.length} run(s)</span>
+                      {(runFac || runBkt) && <button onClick={() => { setRunFac(''); setRunBkt('') }} className="text-blue-600 hover:underline text-xs">Clear</button>}
+                    </div>
+                  )}
                   <div className="space-y-4">
                     {orderedRuns.map((run, idx) => {
                       const rkey = run.runNo
