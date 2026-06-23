@@ -3,7 +3,15 @@ import { createClient } from '@supabase/supabase-js'
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
-export const supabase = createClient(supabaseUrl, supabaseKey)
+// Keep the login persistent (esp. iOS Home-Screen app): store the session and
+// keep refreshing the token so the app doesn't log itself out.
+export const supabase = createClient(supabaseUrl, supabaseKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+})
 
 // Fetch ALL rows from a table, paging past Supabase's 1000-row default limit.
 // `orderByOrModify` may be a column name to order by, or a function that adds
