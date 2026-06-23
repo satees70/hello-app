@@ -122,7 +122,7 @@ export default function BomPage() {
         }
         const valid: { parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean }[] = []
         const unknown = new Set<string>()
-        let selfRef = 0, badQty = 0
+        let badQty = 0
         res.data.forEach(r => {
           const pc = pick(r, 'parent_code', 'parent', 'manufactured_code', 'manufactured item code')
           const cc = pick(r, 'component_code', 'component', 'material_code')
@@ -130,7 +130,6 @@ export default function BomPage() {
           const p = byCode.get(pc); const c = byCode.get(cc)
           if (!p) { unknown.add(pc); return }
           if (!c) { unknown.add(cc); return }
-          if (p.id === c.id) { selfRef++; return }
           const qty = Number(pick(r, 'quantity', 'qty', 'qty per unit'))
           if (!qty || qty <= 0) { badQty++; return }
           const a = pick(r, 'allowance', 'apply_allowance').toLowerCase()
@@ -155,7 +154,6 @@ export default function BomPage() {
         setBulkBusy(false); if (bulkRef.current) bulkRef.current.value = ''
         const notes = [
           unknown.size ? `${unknown.size} unknown item code(s) skipped: ${[...unknown].slice(0, 8).join(', ')}${unknown.size > 8 ? '…' : ''}` : '',
-          selfRef ? `${selfRef} row(s) skipped (item listed as its own component)` : '',
           badQty ? `${badQty} row(s) skipped (missing/invalid quantity)` : '',
           dups.size ? `${dups.size} duplicate recipe line(s) merged` : '',
         ].filter(Boolean).join('. ')
@@ -169,7 +167,8 @@ export default function BomPage() {
 
   // Items that can still be added (not the parent, not already a component)
   const usedIds = new Set(components.map(c => c.component_item_id))
-  const available = items.filter(i => i.id !== parentId && !usedIds.has(i.id))
+  // Allow any item not already used — including the product itself (e.g. repack from own bulk)
+  const available = items.filter(i => !usedIds.has(i.id))
 
   async function addComponent() {
     setError(''); setSuccess('')

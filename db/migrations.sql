@@ -2474,3 +2474,20 @@ end; $function$;
 
 -- Reply to a specific discussion message
 alter table public.discussions add column if not exists reply_to uuid;
+
+-- ============================================================================
+-- 2026-06 · BOM may use the product itself as a component (e.g. repack from own
+-- bulk). Drop any check constraint that forbids parent = component.
+-- ============================================================================
+do $$
+declare r record;
+begin
+  for r in
+    select conname from pg_constraint
+    where conrelid = 'public.bom_components'::regclass and contype = 'c'
+      and pg_get_constraintdef(oid) ilike '%parent_item_id%'
+      and pg_get_constraintdef(oid) ilike '%component_item_id%'
+  loop
+    execute format('alter table public.bom_components drop constraint %I', r.conname);
+  end loop;
+end $$;
