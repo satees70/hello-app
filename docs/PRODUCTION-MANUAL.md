@@ -1,171 +1,212 @@
 # EASWARI / AVINA — Production Team Manual
 
-A step-by-step guide for the daily workflow, from a customer order to finished
-goods in the warehouse. Follow the stages in order.
+**Full process, step by step.** Read the stages in order. Each `📷 [Screenshot]`
+marker is where a picture will be added later.
 
 ---
 
-## The flow in one line
+## 0. Getting started (everyone)
 
-**Sales Order → Confirm to production → Order Board (raise materials) → Warehouse releases & you receive → Pack & record production → Print & receive labels → Delivered to warehouse.**
+**Logging in**
+1. Open **production.srrieaswari.com** in your browser (on phone, use Safari).
+2. Enter your **username** and **password** → **Login**.
+3. You land on the **Dashboard**. The blue bar at the top is the menu:
+   **Dashboard · Pending Changes · Discussion · Sales · Receiving · Production · Reports · Setup**, with the **🔔 bell** and your name on the right.
+4. The chip near your name shows your access: a **factory code** (e.g. AVINA 101) or **Head Office** (sees everything).
+📷 [Screenshot: Dashboard after login]
 
-Every stage updates the next one automatically, and the people for each location
-get a **🔔 notification** when something needs them.
+**What you can see/do**
+- You only see and edit work for **your own location(s)**.
+- Head Office can see all factories and approves changes.
 
----
-
-## Before you start (everyone)
-
-1. Open **production.srrieaswari.com** and **log in** with your username and password.
-2. Top menu bar groups the work: **Sales · Receiving · Production · Reports · Setup**, plus **Discussion** and the **🔔 bell**.
-3. The chip near your name shows your **location** (e.g. AVINA 101) or **Head Office**.
-4. **Office phone:** open the site in Safari → Share → **Add to Home Screen**, open that app, then tap **🔔 → Enable on this phone → Allow**. You'll then get alerts even when the app is closed.
-5. You only see and edit work for **your own location(s)**. Head Office sees everything.
-
----
-
-## Stage 1 — Sales Orders (Office)
-
-**Menu: Sales → Sales Orders**
-
-1. Click **Choose File** and upload the customer's **Sales Order PDF**, then **Upload**. The system reads the lines automatically.
-2. In **Uploaded Documents**, click **View Lines** to check what was read. Use the search box to find an item, or the column filters.
-3. **Correcting a line:**
-   - **Before a location confirms** — staff can fix **Location** and **Delivery Date** directly (no approval). Head Office can change any field.
-   - **After a location confirms** — use **Request change**; Head Office approves it.
-4. If an order is rush, click **Mark urgent** (it turns red and stays flagged through the whole journey, and notifies the location).
-5. **Confirm to production:** at the bottom, each location clicks **Confirm <factory> lines**. This pushes those lines to that factory's **Order Board**.
-   - A document can't be confirmed while it has pending changes.
-6. Need to discuss a line? Click the **SO number** to jump to its **Discussion** thread.
+**Phone notifications (office phone)**
+1. Open the site in **Safari** → **Share** → **Add to Home Screen**.
+2. Open the app from the **Home-Screen icon** (not a Safari tab).
+3. Tap **🔔 → Enable on this phone → Allow**.
+4. You'll now get alerts even when the app is closed.
 
 ---
 
-## Stage 2 — Order Board / plan production (Factory)
+## 1. Sales Orders (Office)
 
-**Menu: Production → Order Board**
+**Where:** Sales → Sales Orders. **Who:** Office. **When:** a customer order arrives.
 
-1. Confirmed orders appear here as **batches**. Use the tabs: **not requested yet / requested / in progress / done**, and the Factory / date / sort filters.
+**A. Upload the order**
+1. Click **Choose File**, pick the customer's **Sales Order PDF**, click **Upload**.
+2. The system reads the order and lists it under **Uploaded Documents** with a status (usually **Review**).
+📷 [Screenshot: Sales Orders upload + uploaded documents list]
+
+**B. Check the lines**
+1. Find the document (use **Search file or item**, or the **Location / Status / Issues** filters).
+2. Click **View Lines** to see each item, quantity, delivery date, location and status.
+3. Use the line **Search** box or the per-column filters to find an item.
+📷 [Screenshot: Lines view of a document]
+
+**C. Fix a line if needed**
+- **Before that location has confirmed:** staff can change **Location** and **Delivery Date** directly (no approval). Click **Edit** on the line. Head Office can change any field.
+- **After it's confirmed:** click **Request change** — Head Office approves it.
+- To move an order to another site, change the **Location** (the factory updates automatically).
+📷 [Screenshot: Edit this line panel]
+
+**D. Urgent orders**
+- Click **Mark urgent** on the document. It turns red and stays flagged through the whole journey, and the location is notified.
+
+**E. Confirm to production**
+1. Scroll to **Confirm to production**.
+2. Each location clicks **Confirm <factory> lines**. Those lines are pushed to that factory's **Order Board**.
+3. A document can't be confirmed while it has pending changes.
+📷 [Screenshot: Confirm to production section]
+
+---
+
+## 2. Order Board — plan production (Factory)
+
+**Where:** Production → Order Board. **Who:** Factory planner. **When:** after lines are confirmed.
+
+1. Confirmed orders appear as **batches**. Tabs at the top: **not requested yet / requested / in progress / done**. Filter by **Factory**, delivery date, or **Sort**.
 2. Tick **Combine same item to run together** to group identical items into one run.
-3. Click **Materials** on a batch (or combined group):
-   - Choose the **Run mode** (Auto machine = roll, Manual = pieces) — this decides which packaging is needed.
-   - Review the **shortfall** (what's missing vs system stock).
-   - **Standard order:** click **Raise Material Request**.
-   - **Ad-hoc order (different packaging, e.g. 1kg vs 5kg plastic):** tick **✎ Customise materials (ad-hoc)**, edit the quantities, **remove** a line, or **add** a material (e.g. the 5kg plastic), then **Raise ad-hoc request**. This does **not** change the product's saved recipe.
-4. If an item shows **⚠ No BOM set**, set up its recipe first (Reports → BOM).
+📷 [Screenshot: Order Board with batches]
+
+**Raise the materials**
+3. Click **Materials** on a batch (or a combined group).
+4. Set the **Run mode**: *Auto machine* (roll) or *Manual* (pieces) — this decides which packaging is needed.
+5. The table shows **Required vs Stock vs Shortfall**.
+6. **Standard order:** click **Raise Material Request**.
+7. **Ad-hoc order (different packaging, e.g. 1kg vs 5kg plastic):** tick **✎ Customise materials (ad-hoc)** → edit quantities, **remove** a line, or **add** a material (e.g. the 5kg plastic) → **Raise ad-hoc request**. This does **not** change the saved recipe.
+📷 [Screenshot: Material requirements modal + ad-hoc toggle]
+
+**If you see ⚠ No BOM set:** the recipe is missing — set it up in Reports → BOM first.
 
 ---
 
-## Stage 3 — Material Requests & the warehouse
+## 3. Material Requests & the warehouse
 
-**Menu: Receiving → Material Requests**
+**Where:** Receiving → Material Requests.
 
-**Factory / Head Office:**
+**Factory / Head Office — release to the warehouse**
 1. New requests collect under **⏳ Waiting to release** for each factory.
-2. When ready, click **Release to warehouse →**. This sends one fixed **pick run**; anything raised afterwards waits for the next release.
-3. **Manual / ad-hoc request:** click **➕ Request a material manually** → optionally **Load from a product's recipe** (pick product + units), tweak the materials, then **Submit request**.
+2. When ready, click **Release to warehouse →**. This sends one fixed **pick run**; anything raised later waits for the next release.
+📷 [Screenshot: Waiting to release + Release button]
 
-**Warehouse:**
+**Raise materials by hand (ad-hoc / not from a batch)**
+1. Click **➕ Request a material manually**.
+2. (Optional) **Load from a product's recipe** — pick the product + units to pre-fill its recipe, then swap the plastic / edit quantities.
+3. Or add items one by one (search the item, enter qty, **+ Add item**).
+4. **Submit request** — it joins Waiting to release.
+📷 [Screenshot: Manual request form]
+
+**Warehouse — pick and record**
 1. Use the **Location** and **Status** dropdowns to find runs (New / SO entered / Partially received / Fully received).
-2. For each released run: enter the **SO number** and **Save**.
-3. Pick the whole run in one trip; type the **total received** for each material — it's split back across the original requests automatically.
-4. To receive a **whole Delivery Order** at once instead, use the **Goods Received** tab.
+2. For each released run: type the **SO number**, click **Save**.
+3. Pick the whole run in one trip; type the **total received** for each material — it splits back across the original requests automatically.
+📷 [Screenshot: Released pick run, warehouse view]
 
 ---
 
-## Stage 4 — Goods Received (Factory / Warehouse)
+## 4. Goods Received (Factory / Warehouse)
 
-**Menu: Receiving → Goods Received**
+**Where:** Receiving → Goods Received. **When:** a delivery arrives.
 
-1. Upload the **Delivery Order (DO) PDF** → the system reads the lines.
-2. Click **View Lines**. Search by item if the list is long.
-3. For each line: **tick QC**, add a **photo** (optional for Head Office), then **Receive**. You can receive some now and the rest later (partial). Received items **book into stock**.
-4. Bag/carton quantities convert to KG automatically (set **KG per bag** on the item if prompted).
-5. If a quantity was wrong, use **Correct received quantity**. To fix a code, use **Request edit**.
-
----
-
-## Stage 5 — Labels (Factory)
-
-**Menu: Receiving → Labels**
-
-1. A label appears here once its order's raw materials are received (stage **Material received**).
-2. Enter the **batch number / expiry** and the **quantity to print**, attach a **photo** of the printed label → it moves to **Printed**.
-3. Tick the labels and click **Send** → then **Receive → stock** when they arrive (books label stock).
-4. Need a one-off label? Use **➕ Request a label manually** (choose the label, product, qty, batch, expiry).
+1. Click **Choose File**, upload the **Delivery Order (DO) PDF**, **Upload**. The system reads the lines.
+2. Click **View Lines** (use the item **Search** if the list is long).
+3. For each line: **tick QC**, add a **photo** (optional for Head Office), then **Receive**. Partial is fine — receive some now, the rest later. Received items **book into stock**.
+4. Bag/carton quantities convert to KG automatically. If asked, set **KG per bag** on the item.
+5. Wrong quantity? Use **Correct received quantity**. Wrong code? Use **Request edit**.
+📷 [Screenshot: Goods Received lines with QC/photo/Receive]
 
 ---
 
-## Stage 6 — Packing Schedule (Factory)
+## 5. Labels (Factory)
 
-**Menu: Production → Packing Schedule**
+**Where:** Receiving → Labels.
 
-1. Sections: **Scheduled to pack → Ready to pack → Waiting for materials.**
-2. Set each batch's **pack line**, **date**, and **run mode** (Auto/Manual).
+1. A label appears once its order's raw materials are received (stage **Material received**).
+2. Enter the **batch number / expiry** and the **quantity to print**, attach a **photo** of the printed label → stage becomes **Printed**.
+3. Tick the labels → **Send** → then **Receive → stock** when they arrive (books label stock).
+4. One-off label? **➕ Request a label manually** (choose label, product, qty, batch, expiry).
+📷 [Screenshot: Labels pipeline]
+
+---
+
+## 6. Packing Schedule (Factory)
+
+**Where:** Production → Packing Schedule.
+
+1. Sections: **Scheduled to pack → Ready to pack → Waiting for materials**.
+2. Set each batch's **pack line**, **date**, and **run mode**.
 3. Click **▸ show materials** to see, per material, the **stock batches to use** (oldest expiry first). Batches reserved for that run are marked **★ — use these first**.
+📷 [Screenshot: Packing Schedule + show materials]
 
 ---
 
-## Stage 7 — Record production (Line / QC)
+## 7. Record production (Line / QC)
 
-**Open the batch's Packing & Finished Goods Inspection Record**
+**Where:** open the batch's **Packing & Finished Goods Inspection Record**.
 
-1. **Date, Area/Line, Code, Product** are filled from the Packing Schedule and **locked** — if any is wrong, amend it in **Packing Schedule**. (The date shows red if it isn't today.)
-2. **Production run timer:** **Start** when you begin, **Pause** for breaks, **Stop** at the end.
-3. **Materials used:** the **batches and quantities are pre-filled** from what was allocated to this order. Adjust the **Qty used**, and use **+ add batch** if one batch wasn't enough.
+1. **Date, Area/Line, Code, Product** come from the Packing Schedule and are **locked**. If any is wrong, fix it in **Packing Schedule** (the date shows red if it isn't today).
+2. **Production timer:** **Start** at the beginning, **Pause** for breaks, **Stop** at the end.
+3. **Materials used:** the **batches & quantities are pre-filled** from what was allocated. Adjust **Qty used**; use **+ add batch** if one batch wasn't enough.
 4. Fill the quality checks (sealing samples, CCP2, metal detector, etc.).
-5. Enter **Quantity produced** → click **Record production**. This **consumes the raw materials from stock** (earliest expiry first).
-6. If **food loss is over 5%**, it's flagged to Head Office automatically.
+5. Enter **Quantity produced** → **Record production**. This **consumes the raw materials from stock** (earliest expiry first).
+6. If **food loss > 5%**, it's flagged to Head Office automatically.
+📷 [Screenshot: Inspection record — header, timer, materials used]
 
 ---
 
-## Stage 8 — Delivered to warehouse / Delivery Orders
+## 8. Delivered to warehouse / Delivery Orders
 
-**Menu: Sales → Delivery Orders**
+**Where:** Sales → Delivery Orders.
 
-1. Finished goods are dispatched to the warehouse here. When a batch is delivered, its location is notified and the order line moves to **Delivered to warehouse**.
+1. Finished goods are dispatched to the warehouse here. When delivered, the location is notified and the order line moves to **Delivered to warehouse**.
+📷 [Screenshot: Delivery Orders]
 
 ---
 
-## Buying from suppliers (Office)
+## 9. Buying from suppliers (Office)
 
-**Menu: Sales → Supplier (to order)**
+**Where:** Sales → Supplier (to order).
 
 1. **To order** tab: items routed to SUPPLIER, grouped by item, with **Outstanding** (what to buy) and the next delivery date.
-2. Tick items (or **Select all**), or **add an item manually** (e.g. a low-stock top-up).
+2. Tick items (or **Select all**), or **add an item manually** (low-stock top-up).
 3. Type the **Supplier name**, adjust quantities, **Place order** (one consolidated order).
 4. **Placed orders** tab: **Mark received** when goods arrive.
+📷 [Screenshot: Supplier to-order + place order]
 
 ---
 
-## Talking to each other — Discussion
+## 10. Discussion (talk to each other)
 
-**Menu: Discussion**
+**Where:** Discussion (top menu).
 
 - Post a message; **link it to an SO** so it's filed under that order.
 - **@tag a person** or **@tag a whole location** (everyone there is notified).
 - **Reply** to a message to quote it and notify the author.
 - A **💬 badge** on a Sales Order means there's discussion on it — click to open the thread.
+📷 [Screenshot: Discussion board]
 
 ---
 
-## Notifications — the 🔔 bell
+## 11. The 🔔 bell (notifications)
 
-- The bell shows a count of new things for **your location**. Click it to read them; clicking a notification opens the right page.
-- You're alerted for: new orders, urgent orders, pick run released, order confirmed, goods received, finished goods delivered, and when someone **@mentions you or your location** in Discussion.
+- Shows a count of new things for **your location**. Click to read; clicking one opens the right page.
+- You're alerted for: new orders, urgent orders, pick run released, order confirmed, goods received, finished goods delivered, and **@mentions** in Discussion.
 
 ---
 
-## For Head Office — Approvals
+## 12. Head Office — Approvals
 
-**Menu: Pending Changes** (badge shows how many are waiting)
+**Where:** Pending Changes (the badge shows how many are waiting).
 
-Approve or reject: sales-order changes, document deletes, item/SO changes, batch splits, stock adjustments, received-qty moves, run-mode changes, material-request cancellations, return edits, and food-loss alerts.
+Approve/reject: sales-order changes, document deletes, item/SO changes, batch splits, stock adjustments, received-qty moves, run-mode changes, material-request cancellations, return edits, food-loss alerts.
 
 ---
 
 ## Quick daily checklist
 
-- **Office:** upload new SOs → confirm to production → mark urgent ones → place supplier orders → clear Pending Changes (HO).
-- **Factory:** Order Board → raise materials → receive goods (GRN) → print/send labels → schedule packing → record production.
-- **Warehouse:** release pick runs → enter SO numbers → record what you pick.
-- **Everyone:** check the **🔔 bell** and **Discussion**.
+| Role | Do this |
+|---|---|
+| **Office** | Upload SOs → confirm to production → mark urgent ones → place supplier orders |
+| **Factory** | Order Board → raise materials → receive goods → print/send labels → schedule packing → record production |
+| **Warehouse** | Release pick runs → enter SO numbers → record what you pick |
+| **Head Office** | Clear Pending Changes |
+| **Everyone** | Check the 🔔 bell and Discussion |
