@@ -2424,3 +2424,50 @@ end; $function$;
 drop trigger if exists push_notification on public.notifications;
 create trigger push_notification after insert on public.notifications
   for each row execute function public.tg_push_notification();
+
+-- ============================================================================
+-- 2026-06 · Relax combined material request — allow multiple batches of the
+-- same item/factory even if the literal status column is stale. Block only on
+-- different item/factory or a batch that's already been requested (matches the
+-- single-batch rule). Run mode is forced uniform by the app before calling.
+-- ============================================================================
+create or replace function public.raise_combined_material_request(p_batch_ids uuid[])
+ returns uuid language plpgsql security definer set search_path to 'public' as $function$
+declare v_item text; v_factory text; v_mode text; v_total numeric; v_parent uuid; v_req uuid; v_no text; v_count int := 0; c record; v_short numeric; v_reqd numeric;
+begin
+  select item_code, factory_code, run_mode into v_item, v_factory, v_mode from public.production_batches where id = p_batch_ids[1];
+  if v_item is null then raise exception 'Batch not found'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and v_factory <> all(my_factory_codes()) then raise exception 'Not allowed for this factory'; end if;
+  if exists (select 1 from public.production_batches where id = any(p_batch_ids)
+             and (item_code <> v_item or factory_code <> v_factory or material_request_id is not null)) then
+    raise exception 'All batches must be the same item & factory and not already requested';
+  end if;
+  select coalesce(sum(total_quantity), 0) into v_total from public.production_batches where id = any(p_batch_ids);
+  select id into v_parent from public.items where code = v_item limit 1;
+  if v_parent is null then raise exception 'Item % not found in Items Master', v_item; end if;
+  if not exists (select 1 from public.bom_components where parent_item_id = v_parent) then
+    raise exception 'No BOM defined for %', v_item; end if;
+  v_no := 'MR-' || lpad(nextval('public.material_request_seq')::text, 5, '0');
+  insert into public.material_requests (request_no, batch_id, factory_code, status)
+  values (v_no, p_batch_ids[1], v_factory, 'Open') returning id into v_req;
+  for c in
+    select bc.component_item_id as item_id, it.code, it.description, it.unit, bc.apply_allowance,
+           bc.quantity * v_total as required_qty, coalesce(s.quantity, 0) as stock_qty
+    from public.bom_components bc join public.items it on it.id = bc.component_item_id
+    left join public.item_stock s on s.item_id = bc.component_item_id and s.factory_code = v_factory
+    where bc.parent_item_id = v_parent
+      and (bc.use_mode = 'any' or bc.use_mode = coalesce(v_mode, 'auto'))
+  loop
+    v_short := c.required_qty - c.stock_qty;
+    if v_short > 0 then
+      v_reqd := case when c.apply_allowance then ceil(v_short * 1.1) else v_short end;
+      insert into public.material_request_items
+        (request_id, item_id, item_code, description, unit, required_qty, stock_qty, shortfall_qty, requested_qty, received_qty, factory_code)
+      values (v_req, c.item_id, c.code, c.description, c.unit, c.required_qty, c.stock_qty, v_short, v_reqd, 0, v_factory);
+      v_count := v_count + 1;
+    end if;
+  end loop;
+  if v_count = 0 then delete from public.material_requests where id = v_req; raise exception 'No shortfall — enough stock on hand for all materials'; end if;
+  update public.production_batches set status = 'Requested', material_request_id = v_req where id = any(p_batch_ids);
+  return v_req;
+end; $function$;
