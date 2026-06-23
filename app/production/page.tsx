@@ -57,6 +57,16 @@ export default function ProductionPage() {
   const [success, setSuccess] = useState('')
 
   const [selected, setSelected] = useState<MatTarget | null>(null)
+  const [reqCreator, setReqCreator] = useState('')   // who raised the open request for the selected batch
+  useEffect(() => {
+    setReqCreator('')
+    if (!selected) return
+    const b = batches.find(x => selected.batchIds.includes(x.id) && x.material_request_id)
+    if (!b?.material_request_id) return
+    supabase.from('material_requests').select('created_by_name').eq('id', b.material_request_id).maybeSingle()
+      .then(({ data }) => setReqCreator((data?.created_by_name as string) || ''))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected])
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [collapsedFacs, setCollapsedFacs] = useState<Set<string>>(new Set())
   const toggleFac = (fc: string) => setCollapsedFacs(p => { const n = new Set(p); n.has(fc) ? n.delete(fc) : n.add(fc); return n })
@@ -565,7 +575,7 @@ export default function ProductionPage() {
                 <div className="flex flex-wrap items-end justify-between gap-3 mt-4">
                   <div className="text-sm">
                     {hasRequest
-                      ? <span className="text-purple-700">A material request is already open — see Material Requests.</span>
+                      ? <span className="text-purple-700">A material request is already open{reqCreator ? ` (raised by ${reqCreator})` : ''} — see Material Requests.</span>
                       : totalShortfall > 0
                         ? <span className="text-red-600">Total shortfall across {exploded.rows.filter(r => r.shortfall > 0).length} material(s).</span>
                         : <span className="text-green-600">Enough stock on hand — no shortfall.</span>}

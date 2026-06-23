@@ -29,6 +29,7 @@ interface MaterialRequest {
   factory_code: string
   status: string
   created_at: string
+  created_by_name: string | null
   released_at: string | null
   pick_run_no: string | null
   warehouse_so_no: string | null
@@ -738,7 +739,7 @@ export default function MaterialRequestsPage() {
                           <div className="flex flex-wrap items-center gap-3 mb-4">
                             <span className="font-semibold">{isHO ? factoryName(run.factory) : run.factory}</span>
                             <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 font-mono">{run.runNo}</span>
-                            <span className="text-sm text-gray-400">released {new Date(run.released_at).toLocaleString()}</span>
+                            <span className="text-sm text-gray-400">released {new Date(run.released_at).toLocaleString()}{run.reqs[0]?.created_by_name ? ` · raised by ${run.reqs[0].created_by_name}` : ''}</span>
                             {filter !== 'Labels' && <>
                             <span className="flex items-center gap-2 ml-auto shrink-0">
                               <span className="text-xs font-medium text-gray-600">SO No.</span>
@@ -915,7 +916,7 @@ export default function MaterialRequestsPage() {
                     Batch <span className="font-mono">{r.production_batches?.batch_no}</span> · {r.production_batches?.item_code}
                   </span>
                   <span className="text-sm text-gray-500">· {isHO ? factoryName(r.factory_code) : r.factory_code}</span>
-                  <span className="text-sm text-gray-400 ml-auto">{new Date(r.created_at).toLocaleString()}</span>
+                  <span className="text-sm text-gray-400 ml-auto">{new Date(r.created_at).toLocaleString()}{r.created_by_name ? ` · by ${r.created_by_name}` : ''}</span>
                   {r.status === 'Open' && hasCap(profile, 'request_mr_cancel') && (r.released_at ? (
                     <button onClick={() => requestMrCancel(r)} disabled={busy === `reqcancel|${r.id}`}
                       className="border border-red-300 text-red-600 px-3 py-1 rounded-lg hover:bg-red-50 text-xs font-medium disabled:opacity-50">

@@ -2491,3 +2491,50 @@ begin
     execute format('alter table public.bom_components drop constraint %I', r.conname);
   end loop;
 end $$;
+
+-- ============================================================================
+-- 2026-06 · Ad-hoc materials on a material request (this order only).
+-- Add an extra material to an already-open request without touching the BOM
+-- (e.g. same product code packed 1kg vs 5kg needs a different plastic).
+-- ============================================================================
+create or replace function public.add_request_item(p_batch_id uuid, p_code text, p_qty numeric)
+ returns void language plpgsql security definer set search_path to 'public' as $function$
+declare v_batch public.production_batches; v_req uuid; v_item public.items;
+begin
+  select * into v_batch from public.production_batches where id = p_batch_id;
+  if not found then raise exception 'Batch not found'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and v_batch.factory_code <> all(my_factory_codes()) then
+    raise exception 'Not allowed for this factory'; end if;
+  if not has_perm('order_board', 'edit') and not has_perm('material_requests', 'edit') then
+    raise exception 'Not allowed'; end if;
+  v_req := v_batch.material_request_id;
+  if v_req is null then raise exception 'Raise the material request first, then add ad-hoc materials'; end if;
+  if exists (select 1 from public.material_request_items where request_id = v_req and received_qty > 0) then
+    raise exception 'This request is already being received — cannot add materials'; end if;
+  if p_qty is null or p_qty <= 0 then raise exception 'Enter a quantity greater than zero'; end if;
+  select * into v_item from public.items where code = p_code limit 1;
+  insert into public.material_request_items
+    (request_id, item_id, item_code, description, unit, required_qty, stock_qty, shortfall_qty, requested_qty, received_qty, factory_code)
+  values (v_req, v_item.id, coalesce(v_item.code, p_code), coalesce(v_item.description, p_code),
+          coalesce(v_item.unit, 'Unit'), p_qty, 0, p_qty, p_qty, 0, v_batch.factory_code);
+end; $function$;
+grant execute on function public.add_request_item(uuid, text, numeric) to authenticated;
+
+-- ============================================================================
+-- 2026-06 · Record who raised each material request (all raise paths)
+-- ============================================================================
+alter table public.material_requests add column if not exists created_by uuid;
+alter table public.material_requests add column if not exists created_by_name text;
+
+create or replace function public.tg_mr_creator() returns trigger
+ language plpgsql security definer set search_path to 'public' as $function$
+begin
+  if NEW.created_by is null then NEW.created_by := auth.uid(); end if;
+  if NEW.created_by_name is null and NEW.created_by is not null then
+    select full_name into NEW.created_by_name from public.profiles where id = NEW.created_by;
+  end if;
+  return NEW;
+end; $function$;
+drop trigger if exists mr_creator on public.material_requests;
+create trigger mr_creator before insert on public.material_requests
+  for each row execute function public.tg_mr_creator();
