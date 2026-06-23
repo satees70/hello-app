@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
-interface Msg { id: string; author_id: string | null; author_name: string | null; body: string; created_at: string; so_number: string | null; mention_ids: string[] | null; mention_factories: string[] | null }
+interface Msg { id: string; author_id: string | null; author_name: string | null; body: string; created_at: string; so_number: string | null; mention_ids: string[] | null; mention_factories: string[] | null; reply_to: string | null }
 
 // A lightweight message board so the warehouse and office can talk to each other.
 // Messages are shared by `channel` (default "warehouse") and can be linked to a
@@ -24,7 +24,14 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [mentions, setMentions] = useState<string[]>([])      // tagged user ids
   const [facMentions, setFacMentions] = useState<string[]>([])// tagged location codes
+  const [replyTo, setReplyTo] = useState<Msg | null>(null)    // message being replied to
   const endRef = useRef<HTMLDivElement>(null)
+  const msgById = (id: string | null) => id ? msgs.find(m => m.id === id) : undefined
+  function startReply(m: Msg) {
+    setReplyTo(m)
+    if (m.so_number) setTagSo(m.so_number)
+    if (m.author_id && m.author_id !== me) setMentions(x => x.includes(m.author_id!) ? x : [...x, m.author_id!])
+  }
   const nameOf = (id: string) => users.find(u => u.id === id)?.full_name || 'someone'
 
   async function load() {
@@ -45,15 +52,15 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
     const text = body.trim()
     if (!text) return
     setSending(true); setErr('')
-    let { error } = await supabase.from('discussions').insert({ channel, author_id: me, author_name: meName || null, body: text, so_number: tagSo.trim() || null, mention_ids: mentions, mention_factories: facMentions })
+    let { error } = await supabase.from('discussions').insert({ channel, author_id: me, author_name: meName || null, body: text, so_number: tagSo.trim() || null, mention_ids: mentions, mention_factories: facMentions, reply_to: replyTo?.id || null })
     // If the tagging columns aren't in the database yet, still send a plain message
-    if (error && /column|schema cache|mention_|so_number/i.test(error.message)) {
+    if (error && /column|schema cache|mention_|so_number|reply_to/i.test(error.message)) {
       const res = await supabase.from('discussions').insert({ channel, author_id: me, author_name: meName || null, body: text })
       error = res.error
     }
     setSending(false)
     if (error) { setErr(error.message); return }
-    setBody(''); setMentions([]); setFacMentions([]); load(); onPosted?.()
+    setBody(''); setMentions([]); setFacMentions([]); setReplyTo(null); load(); onPosted?.()
   }
   const fmt = (iso: string) => new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
   // SO numbers to offer: the ones passed in plus any already used in messages
@@ -85,19 +92,29 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
                 <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-[80%] rounded-lg px-3 py-1.5 text-sm ${mine ? 'bg-blue-600 text-white' : 'bg-white border'}`}>
                     {!mine && <div className="text-xs font-medium text-gray-500">{m.author_name || 'Someone'}</div>}
+                    {m.reply_to && (() => { const p = msgById(m.reply_to); return <div className={`mb-1 px-2 py-1 rounded border-l-2 text-[11px] ${mine ? 'bg-blue-500/40 border-blue-200' : 'bg-gray-100 border-gray-300 text-gray-600'}`}>↩ {p ? <><span className="font-medium">{p.author_name || 'Someone'}</span>: {p.body.slice(0, 60)}{p.body.length > 60 ? '…' : ''}</> : 'replied message'}</div> })()}
                     {m.so_number && <button onClick={() => setFilterSo(m.so_number!)} className={`inline-block mb-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold ${mine ? 'bg-blue-500 text-white' : 'bg-indigo-100 text-indigo-700'}`}>SO {m.so_number}</button>}
                     {((m.mention_ids && m.mention_ids.length > 0) || (m.mention_factories && m.mention_factories.length > 0)) && <div className="mb-0.5 flex flex-wrap gap-1">
                       {(m.mention_ids || []).map(id => <span key={id} className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${mine ? 'bg-blue-500 text-white' : 'bg-amber-100 text-amber-800'}`}>@{nameOf(id)}</span>)}
                       {(m.mention_factories || []).map(fc => <span key={fc} className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${mine ? 'bg-blue-500 text-white' : 'bg-teal-100 text-teal-800'}`}>@{fc} (all)</span>)}
                     </div>}
                     <div className="whitespace-pre-wrap break-words">{m.body}</div>
-                    <div className={`text-[10px] mt-0.5 ${mine ? 'text-blue-100' : 'text-gray-400'}`}>{fmt(m.created_at)}</div>
+                    <div className={`flex items-center gap-2 text-[10px] mt-0.5 ${mine ? 'text-blue-100' : 'text-gray-400'}`}>
+                      <span>{fmt(m.created_at)}</span>
+                      <button onClick={() => startReply(m)} className={`hover:underline font-medium ${mine ? 'text-blue-100' : 'text-blue-600'}`}>Reply</button>
+                    </div>
                   </div>
                 </div>
               )
             })}
             <div ref={endRef} />
           </div>
+          {replyTo && (
+            <div className="flex items-center gap-2 mb-2 text-xs bg-gray-100 border-l-2 border-blue-400 rounded px-2 py-1">
+              <span className="text-gray-500">↩ Replying to <span className="font-medium">{replyTo.author_name || 'Someone'}</span>: {replyTo.body.slice(0, 50)}{replyTo.body.length > 50 ? '…' : ''}</span>
+              <button onClick={() => setReplyTo(null)} className="text-gray-400 ml-auto">✕</button>
+            </div>
+          )}
           {(mentions.length > 0 || facMentions.length > 0) && (
             <div className="flex flex-wrap items-center gap-1 mb-2 text-xs">
               <span className="text-gray-500">Tagging:</span>

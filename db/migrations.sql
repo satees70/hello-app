@@ -2471,3 +2471,6 @@ begin
   update public.production_batches set status = 'Requested', material_request_id = v_req where id = any(p_batch_ids);
   return v_req;
 end; $function$;
+
+-- Reply to a specific discussion message
+alter table public.discussions add column if not exists reply_to uuid;
