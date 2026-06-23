@@ -5,6 +5,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can, hasCap } from '@/lib/permissions'
+import ItemPicker from '@/components/ItemPicker'
 
 interface BatchItem { id: string; customer_name: string; so_number: string; quantity: number }
 interface Batch {
@@ -74,6 +75,11 @@ export default function ProductionPage() {
   const [dateTo, setDateTo] = useState('')
   const [factoryFilter, setFactoryFilter] = useState('')
   const [raising, setRaising] = useState(false)
+  // Ad-hoc material editing in the modal (same code can need different packaging per order)
+  const [adhoc, setAdhoc] = useState(false)
+  const [customRows, setCustomRows] = useState<{ code: string; description: string; unit: string; qty: string }[]>([])
+  const [addMat, setAddMat] = useState<{ code: string; description: string; unit: string } | null>(null)
+  const [addMatQty, setAddMatQty] = useState('')
   const [combineOn, setCombineOn] = useState(true)
   const [sortBy, setSortBy] = useState<'due_asc' | 'due_desc' | 'batch'>('due_asc')
   const [consumption, setConsumption] = useState<Record<string, ConsRow[]>>({}) // batch id -> consumed lots
@@ -178,6 +184,31 @@ export default function ProductionPage() {
     setSuccess(`Material request raised for ${t.label} — sent ${t.batchIds.length} batch(es): ${sentBatches} (total ${t.total}).`)
     setRaising(false)
     setSelected(null)
+    await loadAll()
+  }
+
+  function closeMatModal() { setSelected(null); setAdhoc(false); setCustomRows([]); setAddMat(null); setAddMatQty('') }
+  function addCustomRow() {
+    if (!addMat) { setError('Pick a material to add.'); return }
+    const q = Number(addMatQty)
+    if (!(q > 0)) { setError('Enter a quantity for the material.'); return }
+    setError('')
+    setCustomRows(prev => { const i = prev.findIndex(r => r.code === addMat.code); if (i >= 0) { const n = [...prev]; n[i] = { ...n[i], qty: String(q) }; return n } return [...prev, { code: addMat.code, description: addMat.description, unit: addMat.unit, qty: String(q) }] })
+    setAddMat(null); setAddMatQty('')
+  }
+  // Raise with the (possibly edited) ad-hoc material lines for this order
+  async function raiseCustom(t: MatTarget) {
+    if (!canEditFac(t.factory_code)) { setError("You have view-only access at this factory."); return }
+    const items = customRows.map(r => ({ code: r.code, description: r.description, unit: r.unit, qty: Number(r.qty || 0) })).filter(i => i.code && i.qty > 0)
+    if (items.length === 0) { setError('Add at least one material with a quantity.'); return }
+    setRaising(true); setError(''); setSuccess('')
+    const { error: expErr } = await supabase.from('production_batches').update({ run_mode: t.mode }).in('id', t.batchIds)
+    if (expErr) { setError(expErr.message); setRaising(false); return }
+    const { error: rpcErr } = await supabase.rpc('raise_material_request_custom', { p_batch_ids: t.batchIds, p_items: items })
+    if (rpcErr) { setError(rpcErr.message); setRaising(false); return }
+    const sentBatches = t.batchIds.map(id => batches.find(b => b.id === id)?.batch_no || id).join(' + ')
+    setSuccess(`Ad-hoc material request raised for ${t.label} — ${items.length} material(s); batch(es): ${sentBatches}.`)
+    setRaising(false); setSelected(null); setAdhoc(false); setCustomRows([])
     await loadAll()
   }
 
@@ -516,11 +547,11 @@ export default function ProductionPage() {
         )}
 
         {selected && exploded && (
-          <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setSelected(null)}>
+          <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => closeMatModal()}>
           <div className="bg-white rounded-xl shadow-xl border w-full max-w-4xl my-8 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-1">
               <h2 className="font-semibold text-lg">Material requirements — <span className="font-mono">{selected.label}</span></h2>
-              <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600 text-sm">Close</button>
+              <button onClick={() => closeMatModal()} className="text-gray-400 hover:text-gray-600 text-sm">Close</button>
             </div>
             <p className="text-gray-500 text-sm mb-2">
               To make <strong>{selected.total}</strong> of {selected.item_code} at {isHO ? factoryName(selected.factory_code) : (selected.factory_code || 'this factory')}.
@@ -550,40 +581,82 @@ export default function ProductionPage() {
               <p className="text-amber-600 text-sm bg-amber-50 p-3 rounded">{exploded.note}</p>
             ) : (
               <>
+                {!hasRequest && (
+                  <label className="inline-flex items-center gap-2 text-sm mb-2">
+                    <input type="checkbox" checked={adhoc} onChange={e => {
+                      const on = e.target.checked; setAdhoc(on)
+                      if (on) setCustomRows(exploded.rows.map(r => ({ code: r.code, description: r.description, unit: r.unit, qty: String(r.shortfall > 0 ? r.requested : clean(r.required)) })))
+                    }} className="h-4 w-4" />
+                    ✎ Customise materials (ad-hoc) — change packaging / quantities for this order
+                  </label>
+                )}
                 <div className="overflow-x-auto border rounded-lg">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 border-b">
-                      <tr>{['Material', 'Description', 'Unit', 'Required', 'Stock (system)', 'Shortfall', 'Requested'].map(h => (
-                        <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
-                    </thead>
-                    <tbody>
-                      {exploded.rows.map(r => (
-                        <tr key={r.key} className={`border-b last:border-0 ${r.shortfall > 0 ? '' : 'bg-green-50/40'}`}>
-                          <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{r.code}</td>
-                          <td className="px-3 py-2 text-gray-600">{r.description}</td>
-                          <td className="px-3 py-2 text-gray-500">{r.unit}</td>
-                          <td className="px-3 py-2 text-right">{clean(r.required)}</td>
-                          <td className="px-3 py-2 text-right font-medium">{clean(r.stock)}</td>
-                          <td className={`px-3 py-2 text-right font-semibold ${r.shortfall > 0 ? 'text-red-600' : 'text-green-600'}`}>{clean(r.shortfall)}</td>
-                          <td className="px-3 py-2 text-right font-semibold text-blue-700">{r.shortfall > 0 ? r.requested : 0}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  {adhoc ? (
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 border-b">
+                        <tr>{['Material', 'Description', 'Unit', 'Request qty', ''].map(h => (
+                          <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+                      </thead>
+                      <tbody>
+                        {customRows.length === 0 && <tr><td colSpan={5} className="text-center py-4 text-gray-400">No materials — add one below.</td></tr>}
+                        {customRows.map((r, i) => (
+                          <tr key={i} className="border-b last:border-0">
+                            <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{r.code}</td>
+                            <td className="px-3 py-2 text-gray-600">{r.description}</td>
+                            <td className="px-3 py-2 text-gray-500">{r.unit}</td>
+                            <td className="px-3 py-2"><input type="number" step="any" value={r.qty} onChange={e => setCustomRows(prev => prev.map((x, j) => j === i ? { ...x, qty: e.target.value } : x))} className="border rounded px-2 py-1 text-sm w-28 text-right" /></td>
+                            <td className="px-3 py-2 text-right"><button onClick={() => setCustomRows(prev => prev.filter((_, j) => j !== i))} className="text-red-500 hover:underline text-xs">remove</button></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 border-b">
+                        <tr>{['Material', 'Description', 'Unit', 'Required', 'Stock (system)', 'Shortfall', 'Requested'].map(h => (
+                          <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+                      </thead>
+                      <tbody>
+                        {exploded.rows.map(r => (
+                          <tr key={r.key} className={`border-b last:border-0 ${r.shortfall > 0 ? '' : 'bg-green-50/40'}`}>
+                            <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{r.code}</td>
+                            <td className="px-3 py-2 text-gray-600">{r.description}</td>
+                            <td className="px-3 py-2 text-gray-500">{r.unit}</td>
+                            <td className="px-3 py-2 text-right">{clean(r.required)}</td>
+                            <td className="px-3 py-2 text-right font-medium">{clean(r.stock)}</td>
+                            <td className={`px-3 py-2 text-right font-semibold ${r.shortfall > 0 ? 'text-red-600' : 'text-green-600'}`}>{clean(r.shortfall)}</td>
+                            <td className="px-3 py-2 text-right font-semibold text-blue-700">{r.shortfall > 0 ? r.requested : 0}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
+
+                {adhoc && (
+                  <div className="flex flex-wrap items-end gap-3 mt-2">
+                    <div className="flex flex-col gap-1 flex-1 min-w-[16rem]"><span className="text-xs font-medium text-gray-600">Add a material</span>
+                      <ItemPicker items={items} value={addMat ? `${addMat.code} — ${addMat.description}` : ''} onPick={it => setAddMat(it)} placeholder="Type a material code or name…" /></div>
+                    <div className="flex flex-col gap-1 w-28"><span className="text-xs font-medium text-gray-600">Qty{addMat ? ` (${addMat.unit})` : ''}</span>
+                      <input type="number" step="any" value={addMatQty} onChange={e => setAddMatQty(e.target.value)} className="border rounded-lg px-3 py-2 text-sm text-right" /></div>
+                    <button onClick={addCustomRow} className="border border-blue-600 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 text-sm font-medium">+ Add</button>
+                  </div>
+                )}
 
                 <div className="flex flex-wrap items-end justify-between gap-3 mt-4">
                   <div className="text-sm">
                     {hasRequest
                       ? <span className="text-purple-700">A material request is already open{reqCreator ? ` (raised by ${reqCreator})` : ''} — see Material Requests.</span>
-                      : totalShortfall > 0
-                        ? <span className="text-red-600">Total shortfall across {exploded.rows.filter(r => r.shortfall > 0).length} material(s).</span>
-                        : <span className="text-green-600">Enough stock on hand — no shortfall.</span>}
+                      : adhoc
+                        ? <span className="text-gray-600">Ad-hoc: requesting exactly the materials & quantities listed above.</span>
+                        : totalShortfall > 0
+                          ? <span className="text-red-600">Total shortfall across {exploded.rows.filter(r => r.shortfall > 0).length} material(s).</span>
+                          : <span className="text-green-600">Enough stock on hand — no shortfall.</span>}
                   </div>
                   <div className="flex items-end gap-3">
-                    <button onClick={() => raiseTarget(selected)} disabled={raising || hasRequest || totalShortfall <= 0}
+                    <button onClick={() => adhoc ? raiseCustom(selected) : raiseTarget(selected)} disabled={raising || hasRequest || (adhoc ? customRows.filter(r => Number(r.qty) > 0).length === 0 : totalShortfall <= 0)}
                       className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
-                      {raising ? 'Raising…' : 'Raise Material Request'}
+                      {raising ? 'Raising…' : adhoc ? 'Raise ad-hoc request' : 'Raise Material Request'}
                     </button>
                   </div>
                 </div>
