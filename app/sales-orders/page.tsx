@@ -160,6 +160,7 @@ export default function SalesOrdersPage() {
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
   const [colFilters, setColFilters] = useState<Record<string, Set<string>>>({})
   const [lineSearch, setLineSearch] = useState('')   // quick item-code / description search
+  const [locTab, setLocTab] = useState('')   // Lines view: show only this location ('' = all)
   const [onlyUnmapped, setOnlyUnmapped] = useState(false)
   const [reqField, setReqField] = useState<keyof SalesLine>('customer_name')
   const [reqValue, setReqValue] = useState('')
@@ -342,6 +343,7 @@ export default function SalesOrdersPage() {
     setLinesFor(doc)
     setLinesLoading(true)
     setLines([])
+    setLocTab('')
     setReqLine(null)
     const [{ data: lineData }, { data: crData }, { data: allLines }, { data: confData }] = await Promise.all([
       supabase.from('sales_order_lines').select('*').eq('import_id', doc.id).order('customer_name'),
@@ -407,11 +409,16 @@ export default function SalesOrdersPage() {
   const lq = lineSearch.trim().toLowerCase()
   const visibleLines = lines.filter(l => {
     if (onlyUnmapped && l.factory_code) return false
+    if (locTab && (l.location_code || '') !== locTab) return false
     if (lq && !(l.item_code || '').toLowerCase().includes(lq) && !(l.description || '').toLowerCase().includes(lq)) return false
     for (const c of COLS) { const sel = colFilters[c.key]; if (sel && sel.size > 0 && !sel.has(c.get(l))) return false }
     const ss = colFilters.status; if (ss && ss.size > 0 && !ss.has(lineStatuses[l.id] || '')) return false
     return true
   })
+  // Distinct locations in this document, for the per-location tabs
+  const docLocations = [...new Set(lines.map(l => l.location_code || '').filter(Boolean))].sort()
+  const locFactory = (loc: string) => lines.find(l => (l.location_code || '') === loc)?.factory_code || ''
+  const locEditable = (loc: string) => { const f = locFactory(loc); return !!f && can(profile, 'sales', 'edit', f) && !isFactoryConfirmed(f) }
   const allSelected = visibleLines.length > 0 && visibleLines.every(l => selectedIds.has(l.id))
   const toggleAll = () => setSelectedIds(allSelected ? new Set() : new Set(visibleLines.map(l => l.id)))
   const factoryOfLine = (lineId: string) => lines.find(l => l.id === lineId)?.factory_code
@@ -809,6 +816,17 @@ export default function SalesOrdersPage() {
               </div>
             )}
 
+            {docLocations.length > 1 && (
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                <span className="text-xs text-gray-500">By location:</span>
+                <button onClick={() => setLocTab('')} className={`px-3 py-1 rounded-lg text-sm font-medium border ${locTab === '' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>All ({lines.length})</button>
+                {docLocations.map(loc => { const ed = locEditable(loc); const cnt = lines.filter(l => (l.location_code || '') === loc).length; return (
+                  <button key={loc} onClick={() => setLocTab(loc)} className={`px-3 py-1 rounded-lg text-sm font-medium border ${locTab === loc ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                    {loc} ({cnt}){!ed && <span className={`ml-1 text-xs ${locTab === loc ? 'text-blue-100' : 'text-gray-400'}`}>· view only</span>}
+                  </button>
+                ) })}
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-3 mb-3 text-sm">
               <input value={lineSearch} onChange={e => setLineSearch(e.target.value)} placeholder="Search item code or description…" className="w-full sm:w-72 border rounded-lg px-3 py-2 text-sm" />
               <span className="text-gray-500">or filter each column below.</span>
