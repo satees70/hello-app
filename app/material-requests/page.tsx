@@ -90,6 +90,8 @@ export default function MaterialRequestsPage() {
   const [manItem, setManItem] = useState<{ code: string; description: string; unit: string } | null>(null)
   const [manQty, setManQty] = useState('')
   const [manLines, setManLines] = useState<{ code: string; description: string; unit: string; qty: number }[]>([])   // items staged for one manual request
+  const [recipeProduct, setRecipeProduct] = useState<{ code: string; description: string; unit: string } | null>(null)
+  const [recipeUnits, setRecipeUnits] = useState('1')
   const toggleLabel = (id: string) => setSelLabels(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -102,6 +104,21 @@ export default function MaterialRequestsPage() {
 
   async function loadItemsMaster() {
     setItemsMaster(await fetchAll<{ code: string; description: string; unit: string }>('items', 'code, description, unit'))
+  }
+  async function loadRecipeIntoManual() {
+    if (!recipeProduct) { setError('Pick a product to load its recipe.'); return }
+    const units = Number(recipeUnits) || 1
+    setError('')
+    const { data: parent } = await supabase.from('items').select('id').eq('code', recipeProduct.code).maybeSingle()
+    if (!parent) { setError('Product not found in the Items master.'); return }
+    const { data: comps } = await supabase.from('bom_components')
+      .select('quantity, items:component_item_id(code, description, unit)').eq('parent_item_id', parent.id)
+    if (!comps || comps.length === 0) { setError(`${recipeProduct.code} has no recipe (BOM) set.`); return }
+    const lines = comps.map(c => { const it = c.items as unknown as { code: string; description: string; unit: string } | null
+      return { code: it?.code || '', description: it?.description || '', unit: it?.unit || '', qty: Number(c.quantity || 0) * units } }).filter(l => l.code && l.qty > 0)
+    // Merge into the basket: recipe quantity wins for matching codes
+    setManLines(prev => { const m = new Map(prev.map(l => [l.code, l])); lines.forEach(r => m.set(r.code, r)); return [...m.values()] })
+    setSuccess(`Loaded ${lines.length} material(s) from ${recipeProduct.code} × ${units}. Swap the plastic / edit quantities, then submit.`)
   }
   function addManualLine() {
     if (!manItem) { setError('Pick an item.'); return }
@@ -125,7 +142,7 @@ export default function MaterialRequestsPage() {
     setBusy('')
     if (e) { setError(e.message); return }
     setSuccess(`Manual request added (${lines.length} item${lines.length > 1 ? 's' : ''}) — waiting to release for ${factoryName(fac)}.`)
-    setManItem(null); setManQty(''); setManLines([]); setShowManual(false)
+    setManItem(null); setManQty(''); setManLines([]); setRecipeProduct(null); setRecipeUnits('1'); setShowManual(false)
     load()
   }
 
@@ -595,7 +612,14 @@ export default function MaterialRequestsPage() {
               </button>
               {showManual && (
                 <div className="mt-2 bg-white border rounded-xl shadow-sm p-4">
-                  <p className="text-gray-500 text-xs mb-3">Raise materials by hand (not from a batch recipe). Add one or more items, then <strong>Submit request</strong> — they join <strong>Waiting to release</strong> for that factory.</p>
+                  <p className="text-gray-500 text-xs mb-3">Raise materials by hand (not from a batch recipe). Load a product&apos;s recipe and tweak it, or add items one by one, then <strong>Submit request</strong> — they join <strong>Waiting to release</strong> for that factory.</p>
+                  <div className="flex flex-wrap items-end gap-3 mb-3 bg-blue-50/50 border border-blue-100 rounded-lg p-3">
+                    <div className="flex flex-col gap-1 flex-1 min-w-[16rem]"><span className="text-xs font-medium text-gray-600">Load from a product&apos;s recipe (optional)</span>
+                      <ItemPicker items={itemsMaster} value={recipeProduct ? `${recipeProduct.code} — ${recipeProduct.description}` : ''} onPick={it => setRecipeProduct(it)} placeholder="Pick the product to copy its BOM…" /></div>
+                    <div className="flex flex-col gap-1 w-28"><span className="text-xs font-medium text-gray-600">Units to make</span>
+                      <input type="number" step="any" value={recipeUnits} onChange={e => setRecipeUnits(e.target.value)} className="border rounded-lg px-3 py-2 text-sm text-right" /></div>
+                    <button onClick={loadRecipeIntoManual} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">Load recipe</button>
+                  </div>
                   <div className="flex flex-wrap items-end gap-3">
                     {facOpts.length > 1 && (
                       <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Factory</span>
