@@ -339,6 +339,23 @@ export default function SalesOrdersPage() {
     loadSummary()
   }
 
+  // Retry reading a document that got stuck on Processing or ended in Error
+  async function reExtract(doc: SalesImport) {
+    setError(''); setSuccess(`Re-reading "${doc.file_name}"…`)
+    await supabase.from('sales_imports').update({ status: 'Processing' }).eq('id', doc.id)
+    loadImports()
+    try {
+      const res = await fetch('/api/extract-sales-order', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ importId: doc.id, filePath: doc.file_path }),
+      })
+      const result = await res.json()
+      if (!res.ok) { setError(`Extraction failed: ${result.error || 'Unknown error'}`); setSuccess('') }
+      else setSuccess(`Extracted ${result.count} line(s) from "${doc.file_name}".`)
+    } catch { setError('Could not reach the extraction service.'); setSuccess('') }
+    loadImports(); loadSummary()
+  }
+
   async function viewLines(doc: SalesImport) {
     setLinesFor(doc)
     setLinesLoading(true)
@@ -726,6 +743,7 @@ export default function SalesOrdersPage() {
                   <td className="px-4 py-3 text-gray-600">{formatDate(doc.created_at)}</td>
                   <td className="px-4 py-3 space-x-3 whitespace-nowrap">
                     <button onClick={() => viewLines(doc)} className="text-blue-600 hover:underline text-xs">View Lines</button>
+                    {(doc.status === 'Processing' || doc.status === 'Error') && <button onClick={() => reExtract(doc)} className="text-blue-600 hover:underline text-xs">Re-read</button>}
                     <button onClick={() => handleDownload(doc.file_path)} className="text-blue-600 hover:underline text-xs">View PDF</button>
                     <button onClick={() => toggleUrgent(doc)} className={`hover:underline text-xs ${doc.urgent ? 'text-gray-500' : 'text-red-600 font-medium'}`}>{doc.urgent ? 'Clear urgent' : '🔴 Mark urgent'}</button>
                     {isHO ? <button onClick={() => handleDelete(doc)} className="text-red-600 hover:underline text-xs">Delete</button>

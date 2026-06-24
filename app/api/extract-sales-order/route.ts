@@ -13,9 +13,10 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 // limit, which would leave the document stuck on "Processing". Allow up to 60s.
 export const maxDuration = 60
 
-// Most capable model for messy multi-column document extraction.
-// Switch to 'claude-sonnet-4-6' if you want lower cost per document.
-const MODEL = 'claude-opus-4-8'
+// Sonnet is much faster (and cheaper) than Opus for this extraction, which
+// avoids documents getting stuck on "Processing" when Opus runs long.
+// Switch to 'claude-opus-4-8' if you ever need maximum accuracy on a messy doc.
+const MODEL = 'claude-sonnet-4-6'
 
 // Structured-output tool: forces Claude to return clean rows instead of prose.
 const EXTRACTION_TOOL: Anthropic.Tool = {
