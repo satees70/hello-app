@@ -200,7 +200,20 @@ export default function GrindingPage() {
   }
   async function deleteRecipe(r: Recipe) {
     if (!canRecipeEditFac(r.factory_code)) { setError("You have view-only access to recipes at this factory."); return }
+    setError('')
+    // A recipe that has been used in production can't be deleted (its records
+    // must stay for traceability) — deactivate it instead so it's hidden from
+    // new production but the history is preserved.
+    const { count } = await supabase.from('grinding_records').select('id', { count: 'exact', head: true }).eq('recipe_id', r.id)
+    if (count && count > 0) {
+      if (r.active === false) { setError(`This recipe is already inactive. It can't be deleted because it has been used in ${count} production record(s).`); return }
+      if (!confirm(`This recipe has been used in ${count} production record(s), so it can't be deleted (the history has to stay).\n\nDeactivate it instead? It will be hidden from new production.`)) return
+      const { error } = await supabase.from('grinding_recipes').update({ active: false }).eq('id', r.id)
+      if (error) { setError(error.message); return }
+      load(); return
+    }
     if (!confirm(`Delete recipe for ${r.product}?`)) return
+    await supabase.from('grinding_recipe_components').delete().eq('recipe_id', r.id)
     const { error } = await supabase.from('grinding_recipes').delete().eq('id', r.id)
     if (error) { setError(error.message); return }
     load()
