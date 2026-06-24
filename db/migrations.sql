@@ -52,7 +52,6 @@ alter table public.profiles add column if not exists capabilities jsonb not null
 -- Per-location permission overrides: { "AVINA101": { sales:{view,edit,delete}, ... } }; empty = use the default grid
 alter table public.profiles add column if not exists location_perms jsonb not null default '{}'::jsonb;
 
-
 -- ============================================================================
 -- Factory labels · printer attaches a photo & sends; sending receives into stock
 -- ============================================================================
@@ -126,7 +125,6 @@ alter table public.delivery_order_lines add column if not exists stock_lot_id uu
 alter table public.delivery_orders add column if not exists so_number text;
 alter table public.delivery_orders add column if not exists pick_run_no text;
 
-
 -- ============================================================================
 -- Sales Orders · staff can request to delete a whole document; HO approves
 -- ============================================================================
@@ -172,7 +170,6 @@ begin
   update public.doc_delete_requests set status = 'Rejected', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id and status = 'Pending';
 end $$;
 grant execute on function public.reject_doc_delete(uuid) to authenticated;
-
 
 -- ============================================================================
 -- Delivery Orders · ONE consolidated DO holding finished goods + raw returns
@@ -242,7 +239,6 @@ begin
 end $$;
 grant execute on function public.create_delivery_order(uuid[], jsonb) to authenticated;
 
-
 -- ============================================================================
 -- Material requests · move received qty from one request to another (HO approval)
 -- (same material; e.g. when received stock was booked against the wrong request)
@@ -304,7 +300,6 @@ begin
 end $$;
 grant execute on function public.reject_mr_qty_move(uuid) to authenticated;
 
-
 -- ============================================================================
 -- Pick run SO number · lock after set; record who/when; change needs HO approval
 -- ============================================================================
@@ -351,7 +346,6 @@ begin
   update public.so_change_requests set status = 'Rejected', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id and status = 'Pending';
 end $$;
 grant execute on function public.reject_so_change(uuid) to authenticated;
-
 
 -- ============================================================================
 -- Items master · staff request field edits (single or bulk); Head Office approves
@@ -403,7 +397,6 @@ begin
   update public.item_change_requests set status = 'Rejected', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id and status = 'Pending';
 end $$;
 grant execute on function public.reject_item_change(uuid) to authenticated;
-
 
 -- ============================================================================
 -- Material returns · edit quantity/reason with Head Office approval
@@ -465,7 +458,6 @@ begin
 end $$;
 grant execute on function public.reject_return_edit(uuid) to authenticated;
 
-
 -- ============================================================================
 -- 2026-06 · Pick-run release & cut-off (Material Requests → Combined picking)
 -- ============================================================================
@@ -500,7 +492,6 @@ begin
 end $$;
 grant execute on function public.release_pick_run(text) to authenticated;
 
-
 -- ============================================================================
 -- 2026-06 · Factory-supplied items (labels) & product expiry date
 -- ============================================================================
@@ -513,7 +504,6 @@ alter table items add column if not exists supplied_by_factory boolean not null 
 -- Raw materials never carry an expiry; only the packed product does.
 alter table production_batches add column if not exists exp_date date;
 
-
 -- ============================================================================
 -- 2026-06 · Delivery Order bag/carton → KG conversion
 -- ============================================================================
@@ -521,7 +511,6 @@ alter table production_batches add column if not exists exp_date date;
 -- Optional per-item override for "KG per bag/carton" when the item code doesn't
 -- show the pack size (e.g. a typo). Normally read from the code (e.g. 3KG/BAG).
 alter table items add column if not exists kg_per_bag numeric;
-
 
 -- ============================================================================
 -- 2026-06 · Receiving moves stock, with batch + expiry lot tracking (FEFO)
@@ -644,7 +633,6 @@ begin
 end $$;
 grant execute on function public.receive_stock_direct(text, text, numeric, text, date, text) to authenticated;
 
-
 -- ============================================================================
 -- 2026-06 · Delivery Orders as stored documents (like Sales Orders)
 -- ============================================================================
@@ -699,14 +687,12 @@ create policy dol_write on public.delivery_order_lines for all
   using (exists (select 1 from public.delivery_orders d where d.id = do_id and (my_factory_code() = 'HEAD_OFFICE' or d.factory_code = any (my_factory_codes()))))
   with check (exists (select 1 from public.delivery_orders d where d.id = do_id and (my_factory_code() = 'HEAD_OFFICE' or d.factory_code = any (my_factory_codes()))));
 
-
 -- ============================================================================
 -- 2026-06 · Delivery Order: QC tick, per-line photo, partial receiving
 -- ============================================================================
 alter table delivery_order_lines add column if not exists qc_checked boolean not null default false;
 alter table delivery_order_lines add column if not exists photo_path text;   -- one photo per line in the delivery-orders bucket
 alter table delivery_order_lines add column if not exists received_at timestamptz; -- set when that line is received (partial receiving)
-
 
 -- ============================================================================
 -- 2026-06 · Production recording + raw-material consumption (FEFO)
@@ -740,7 +726,6 @@ create policy pc_write on public.production_consumption for all
 -- production_consumption, bump produced_qty, set status; returns jsonb
 -- {consumed[], shortfalls[]}. (Full body in the SQL Editor snippet / git commit.)
 
-
 -- ============================================================================
 -- 2026-06 · Packing & Finished Good Inspection Record (P07-F01)
 -- ============================================================================
@@ -767,13 +752,11 @@ create policy ir_write on public.inspection_records for all
   using (my_factory_code()='HEAD_OFFICE' or factory_code = my_factory_code())
   with check (my_factory_code()='HEAD_OFFICE' or factory_code = my_factory_code());
 
-
 -- ============================================================================
 -- 2026-06 · Order Board pack planning (which line packs each order & when)
 -- ============================================================================
 alter table production_batches add column if not exists pack_line text;
 alter table production_batches add column if not exists pack_date date;
-
 
 -- ============================================================================
 -- 2026-06 · Per-section user permissions (view / edit / delete)
@@ -785,7 +768,6 @@ alter table production_batches add column if not exists pack_date date;
 -- so existing users keep working until Head Office sets their grid. Admins always
 -- have full access regardless. Enforcement helper (has_perm) + RLS come in step 2.
 alter table profiles add column if not exists permissions jsonb not null default '{}'::jsonb;
-
 
 -- ============================================================================
 -- 2026-06 · Office-only access (IP allow-list per factory)
@@ -826,7 +808,6 @@ drop policy if exists ac_write on public.app_config;
 create policy ac_write on public.app_config for all
   using (my_factory_code() = 'HEAD_OFFICE') with check (my_factory_code() = 'HEAD_OFFICE');
 
-
 -- ============================================================================
 -- 2026-06 · Grinding & Mixing Record (P07-F10) — restricted process screen
 -- ============================================================================
@@ -864,7 +845,6 @@ drop policy if exists gr_write on public.grinding_records;
 create policy gr_write on public.grinding_records for all
   using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()))
   with check (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()));
-
 
 -- ============================================================================
 -- 2026-06 · Grinding recipe locked away from QC (DB-enforced field separation)
@@ -923,7 +903,6 @@ drop policy if exists gr_write on public.grinding_records;
 create policy gr_write on public.grinding_records for all
   using ((my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes())) and has_perm('grinding', 'edit'))
   with check ((my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes())) and has_perm('grinding', 'edit'));
-
 
 -- ============================================================================
 -- 2026-06 · Grinding recipes (preset formula) + lot-multiplier production
@@ -1004,7 +983,6 @@ begin
 end $$;
 grant execute on function public.produce_grinding(uuid, numeric) to authenticated;
 
-
 -- ============================================================================
 -- 2026-06 · Grinding mixing details: per-material batch + added tick, mix times
 -- ============================================================================
@@ -1014,7 +992,6 @@ alter table public.grinding_materials add column if not exists batch_no text;
 alter table public.grinding_materials add column if not exists added boolean not null default false;
 alter table public.grinding_records add column if not exists mix_start text;   -- HH:MM
 alter table public.grinding_records add column if not exists mix_end text;     -- HH:MM
-
 
 -- ============================================================================
 -- 2026-06 · Process inspection forms: Drying/Roasting (P07-F05), Moisture
@@ -1066,7 +1043,6 @@ begin
     execute format('create policy %I on public.%I for all using (my_factory_code() = ''HEAD_OFFICE'' or factory_code = any (my_factory_codes())) with check (my_factory_code() = ''HEAD_OFFICE'' or factory_code = any (my_factory_codes()))', t || '_write', t);
   end loop;
 end $$;
-
 
 -- ============================================================================
 -- 2026-06 · Timer cancellation requests (accidental Start/Stop → HO approval)
@@ -1126,7 +1102,6 @@ begin
 end $$;
 grant execute on function public.reject_correction(uuid) to authenticated;
 
-
 -- ============================================================================
 -- 2026-06 · Drying/Roasting moves stock: same item, new batch (e.g. 260606AH)
 -- ============================================================================
@@ -1173,7 +1148,6 @@ begin
   update public.drying_roasting_records set stock_applied = true where id = p_id;
 end $$;
 grant execute on function public.process_drying_stock(uuid) to authenticated;
-
 
 -- ============================================================================
 -- 2026-06 · Goods Received line edit/delete with Head Office approval
@@ -1293,7 +1267,6 @@ begin
   update public.do_change_requests set status = 'Rejected', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id and status = 'Pending';
 end $$;
 grant execute on function public.reject_do_change(uuid) to authenticated;
-
 
 -- ============================================================================
 -- 2026-06 · BOM alternate component by run mode (auto = roll, manual = pc)
@@ -1420,14 +1393,12 @@ begin
   return v_req;
 end; $function$;
 
-
 -- ============================================================================
 -- 2026-06 · Roll items: pieces-per-roll conversion (stock in pc, show/pick rolls)
 -- ============================================================================
 -- An item with pcs_per_roll set is stocked/used in PIECES (recipe in pc), but
 -- received in rolls (roll x pcs_per_roll = pc) and shown / requested in rolls.
 alter table public.items add column if not exists pcs_per_roll numeric;
-
 
 -- ============================================================================
 -- 2026-06 · Split a customer/order line out of a merged batch (HO approval)
@@ -1501,7 +1472,6 @@ begin
 end $$;
 grant execute on function public.reject_split(uuid) to authenticated;
 
-
 -- ============================================================================
 -- 2026-06 · Packing lines master (per factory) — dropdown on the Order Board
 -- ============================================================================
@@ -1519,7 +1489,6 @@ drop policy if exists pl_all on public.packing_lines;
 create policy pl_all on public.packing_lines for all
   using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()))
   with check (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()));
-
 
 -- ============================================================================
 -- 2026-06 · Manual stock adjustments (no document) — HOD approval
@@ -1594,7 +1563,6 @@ begin
 end $$;
 grant execute on function public.reject_stock_adjustment(uuid) to authenticated;
 
-
 -- ============================================================================
 -- 2026-06 · Run-mode change requests (HOD approval) from the Packing Schedule
 -- ============================================================================
@@ -1645,7 +1613,6 @@ begin
 end $$;
 grant execute on function public.reject_run_mode(uuid) to authenticated;
 
-
 -- ============================================================================
 -- 2026-06 · Cancel an OPEN material request (frees the batches to re-raise)
 -- ============================================================================
@@ -1666,7 +1633,6 @@ begin
   delete from public.material_requests where id = p_id;
 end $$;
 grant execute on function public.cancel_material_request(uuid) to authenticated;
-
 
 -- ============================================================================
 -- 2026-06 · Cancel a RELEASED material request — needs HO approval
@@ -1711,10 +1677,8 @@ begin
 end $$;
 grant execute on function public.reject_mr_cancel(uuid) to authenticated;
 
-
 -- 2026-06 · Partial label printing — how many labels to print this run
 alter table public.material_request_items add column if not exists label_print_qty numeric;
-
 
 -- 2026-06 · Re-map unmapped sales order lines from the current Location Map
 -- (case/space-insensitive; runs server-side so RLS doesn't block the update)
@@ -1734,7 +1698,6 @@ begin
 end $$;
 grant execute on function public.remap_unmapped_lines(uuid) to authenticated;
 
-
 -- 2026-06 · BOM editable by anyone with the 'bom' edit permission (was HEAD_OFFICE only)
 alter table public.bom_components enable row level security;
 drop policy if exists bom_components_edit on public.bom_components;
@@ -1742,11 +1705,9 @@ create policy bom_components_edit on public.bom_components for all to authentica
   using (public.has_perm('bom','edit'))
   with check (public.has_perm('bom','edit'));
 
-
 -- 2026-06 · Per-factory view-only — a user can see records for these factories but
 -- not edit/delete them (enforced in the app via can(module, action, factory_code)).
 alter table public.profiles add column if not exists readonly_factories text[] not null default '{}';
-
 
 -- ============================================================================
 -- 2026-06 · Delivery Orders (finished goods factory → warehouse) + raw returns
@@ -1828,7 +1789,6 @@ begin
   values (p_factory, p_item_code, v_item.description, v_lot.batch_no, p_qty, p_reason, auth.uid(), v_name);
 end $$;
 grant execute on function public.return_material(text, text, uuid, numeric, text) to authenticated;
-
 
 -- ----------------------------------------------------------------------------
 -- One-off data fixes applied (kept for the record):
