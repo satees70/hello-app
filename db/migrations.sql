@@ -2636,3 +2636,53 @@ alter table public.material_request_items add column if not exists label_printed
 -- matches that material request.
 -- ============================================================================
 alter table public.items add column if not exists stock_code text;
+
+-- ============================================================================
+-- 2026-06 · Repacking — warehouse keys items + qty manually (no PDF upload).
+-- A repack order is just a manually-created sales document. It flows through
+-- the SAME pipeline as a sales order: confirm -> production batches -> material
+-- request -> CCP/inspection -> Delivery Order. Marked is_repack so the two
+-- entry points stay separate in their lists.
+-- ============================================================================
+alter table public.sales_imports add column if not exists is_repack boolean not null default false;
+create sequence if not exists public.repack_seq;
+
+create or replace function public.create_repack_order(
+  p_factory text, p_customer text, p_delivery_date text, p_items jsonb)
+ returns uuid language plpgsql security definer set search_path to 'public' as $function$
+declare
+  v_import uuid; v_no text; r jsonb; v_qty numeric; v_item public.items; v_count int := 0;
+  v_cust text := nullif(btrim(coalesce(p_customer, '')), '');
+begin
+  if coalesce(btrim(p_factory), '') = '' then raise exception 'Pick a factory'; end if;
+  -- Only the factories this user is allowed to (Head Office may pick any).
+  if my_factory_code() <> 'HEAD_OFFICE' and p_factory <> all(my_factory_codes()) then
+    raise exception 'You are not allowed to repack at this factory'; end if;
+
+  v_no := 'RP-' || to_char(now(), 'YYMMDD') || '-' || lpad(nextval('public.repack_seq')::text, 4, '0');
+
+  insert into public.sales_imports (file_name, file_path, status, factory_code, uploaded_by, is_repack)
+  values ('Repack ' || v_no, '', 'Review', p_factory, auth.uid(), true)
+  returning id into v_import;
+
+  for r in select * from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) loop
+    v_qty := coalesce((r->>'qty')::numeric, 0);
+    if v_qty <= 0 then continue; end if;
+    select * into v_item from public.items where code = r->>'code' limit 1;
+    insert into public.sales_order_lines
+      (import_id, customer_name, so_number, item_code, description, quantity, outstanding_qty,
+       delivery_date, location_code, factory_code)
+    values (v_import, coalesce(v_cust, 'REPACK (stock)'), v_no,
+            coalesce(v_item.code, r->>'code'), coalesce(v_item.description, r->>'description'),
+            v_qty, v_qty, nullif(p_delivery_date, '')::date, p_factory, p_factory);
+    v_count := v_count + 1;
+  end loop;
+
+  if v_count = 0 then
+    delete from public.sales_imports where id = v_import;
+    raise exception 'Add at least one item with a quantity';
+  end if;
+
+  return v_import;
+end; $function$;
+grant execute on function public.create_repack_order(text, text, text, jsonb) to authenticated;

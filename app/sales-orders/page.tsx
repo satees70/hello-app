@@ -16,6 +16,7 @@ interface SalesImport {
   factory_code: string
   created_at: string
   urgent?: boolean
+  is_repack?: boolean
 }
 
 interface SalesLine {
@@ -177,7 +178,8 @@ export default function SalesOrdersPage() {
       .from('sales_imports')
       .select('*')
       .order('created_at', { ascending: false })
-    setImports(data || [])
+    // Repack orders are keyed in on the Repacking page — keep them out of here.
+    setImports((data || []).filter(d => !d.is_repack))
   }
 
   // Per-document overview: open change requests + duplicate SO+item lines
