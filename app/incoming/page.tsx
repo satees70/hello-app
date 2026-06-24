@@ -102,9 +102,15 @@ export default function IncomingPage() {
     setEditReq(l); setError(''); setSuccess('')
     setEditForm({ item_code: l.item_code || '', description: l.description || '', quantity: String(l.quantity ?? ''), unit: l.unit || '', batch_no: l.batch_no || '' })
   }
+  // Only one open amendment per line — avoids duplicate pending requests
+  async function hasPendingChange(lineId: string) {
+    const { data } = await supabase.from('do_change_requests').select('id').eq('line_id', lineId).eq('status', 'Pending').limit(1)
+    return !!(data && data.length)
+  }
   async function submitEditReq() {
     if (!canEditFac(linesFor?.factory_code)) { setError("You have view-only access at this factory."); return }
     if (!editReq || !linesFor) return
+    if (await hasPendingChange(editReq.id)) { setError('An amendment for this line is already waiting for Head Office — wait for it to be approved or rejected first.'); return }
     const orig: Record<string, string> = { item_code: editReq.item_code || '', description: editReq.description || '', quantity: String(editReq.quantity ?? ''), unit: editReq.unit || '', batch_no: editReq.batch_no || '' }
     if (editForm.item_code && !itemByCode(editForm.item_code) && !itemByCode(baseCode(editForm.item_code))) { setError('Pick a valid item code from the Items master.'); return }
     const changed = EDIT_FIELDS.filter(f => (editForm[f.key] || '') !== orig[f.key])
@@ -125,6 +131,7 @@ export default function IncomingPage() {
   async function requestDeleteLine(l: DoLine) {
     if (!canEditFac(linesFor?.factory_code)) { setError("You have view-only access at this factory."); return }
     if (!linesFor) return
+    if (await hasPendingChange(l.id)) { setError('An amendment for this line is already waiting for Head Office — wait for it to be approved or rejected first.'); return }
     const reason = window.prompt(`Request to DELETE line "${l.item_code}".\nReason (sent to Head Office):`)
     if (reason === null) return
     const { data: sess } = await supabase.auth.getSession()
@@ -140,6 +147,7 @@ export default function IncomingPage() {
   async function requestCorrectQty(l: DoLine) {
     if (!canEditFac(linesFor?.factory_code)) { setError("You have view-only access at this factory."); return }
     if (!linesFor) return
+    if (await hasPendingChange(l.id)) { setError('An amendment for this line is already waiting for Head Office — wait for it to be approved or rejected first.'); return }
     const cur = l.received_qty ?? 0
     const val = window.prompt(`Correct the quantity received into stock for ${l.item_code} (now ${cur}).\nEnter the correct total quantity received:`, String(cur))
     if (val === null) return
