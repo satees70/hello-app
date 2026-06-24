@@ -1970,8 +1970,13 @@ begin
   select * into v_line from public.sales_order_lines where id = p_line_id;
   if not found then raise exception 'Line not found'; end if;
   if not has_perm('sales', 'edit') then raise exception 'Not allowed'; end if;
-  if my_factory_code() <> 'HEAD_OFFICE' and coalesce(v_line.factory_code, '') <> '' and v_line.factory_code <> all(my_factory_codes()) then
-    raise exception 'Not allowed for this factory'; end if;
+  -- Sales orders are shared across locations: any sales-edit user may change
+  -- Location & Delivery Date on an unconfirmed line, regardless of its current
+  -- factory. Non-Head-Office users are restricted to JUST those two fields.
+  if my_factory_code() <> 'HEAD_OFFICE' then
+    p_customer := null; p_so_number := null; p_item_code := null; p_description := null;
+    p_quantity := null; p_outstanding := null;
+  end if;
   if coalesce(v_line.factory_code, '') <> '' and exists (
        select 1 from public.document_confirmations dc
         where dc.import_id = v_line.import_id and dc.factory_code = v_line.factory_code)
@@ -2029,8 +2034,13 @@ begin
   select * into v_line from public.sales_order_lines where id = p_line_id;
   if not found then raise exception 'Line not found'; end if;
   if not has_perm('sales', 'edit') then raise exception 'Not allowed'; end if;
-  if my_factory_code() <> 'HEAD_OFFICE' and coalesce(v_line.factory_code, '') <> '' and v_line.factory_code <> all(my_factory_codes()) then
-    raise exception 'Not allowed for this factory'; end if;
+  -- Sales orders are shared across locations: any sales-edit user may change
+  -- Location & Delivery Date on an unconfirmed line, regardless of its current
+  -- factory. Non-Head-Office users are restricted to JUST those two fields.
+  if my_factory_code() <> 'HEAD_OFFICE' then
+    p_customer := null; p_so_number := null; p_item_code := null; p_description := null;
+    p_quantity := null; p_outstanding := null;
+  end if;
   if coalesce(v_line.factory_code, '') <> '' and exists (
        select 1 from public.document_confirmations dc
         where dc.import_id = v_line.import_id and dc.factory_code = v_line.factory_code)
