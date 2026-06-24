@@ -2663,3 +2663,8 @@ create policy si_customer_restrict on public.sales_imports as restrictive for se
   using (public.my_customer_filter() is null or uploaded_by = auth.uid() or exists (
     select 1 from public.sales_order_lines l where l.import_id = sales_imports.id
       and coalesce(l.customer_name, '') ilike public.my_customer_filter() || '%'));
+
+-- Label details (batch/expiry/qty) are saved once and locked; record who/when.
+alter table public.material_request_items add column if not exists label_printed_by uuid;
+alter table public.material_request_items add column if not exists label_printed_by_name text;
+alter table public.material_request_items add column if not exists label_printed_at timestamptz;

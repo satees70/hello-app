@@ -12,6 +12,7 @@ interface MRItem {
   label_batch_no?: string | null; label_exp_date?: string | null; label_print_qty?: number | null
   label_photo_path?: string | null; label_sent_at?: string | null; label_received_at?: string | null
   label_for_product?: string | null
+  label_printed_by_name?: string | null; label_printed_at?: string | null
 }
 interface MReq {
   id: string; request_no: string; factory_code: string; released_at: string | null; pick_run_no: string | null
@@ -98,11 +99,15 @@ export default function LabelsPage() {
 
   async function saveLabel(it: MRItem, r: MReq) {
     if (!canEditFac(r.factory_code)) { setError('You have view-only access at this factory.'); return }
+    if (it.label_printed_at) { setError('Already saved — label details are locked.'); return }
     const e = edits[it.id] ?? { batch: it.label_batch_no ?? '', exp: it.label_exp_date ?? '', qty: '' }
     if (!e.batch.trim() && !e.exp) { setError('Enter a batch number or an expiry date for the label.'); return }
     const qty = Number(it.requested_qty)   // print qty is calculated by the system, not typed
     setBusy(`save|${it.id}`); setError(''); setSuccess('')
-    const { error: er } = await supabase.from('material_request_items').update({ label_batch_no: e.batch.trim() || null, label_exp_date: e.exp || null, label_print_qty: qty }).eq('id', it.id)
+    const { error: er } = await supabase.from('material_request_items').update({
+      label_batch_no: e.batch.trim() || null, label_exp_date: e.exp || null, label_print_qty: qty,
+      label_printed_by: profile?.id || null, label_printed_by_name: profile?.full_name || null, label_printed_at: new Date().toISOString(),
+    }).eq('id', it.id)
     if (er) { setError(er.message); setBusy(''); return }
     setBusy(''); setSuccess(`Saved ${it.item_code}.`); setEdits(p => { const n = { ...p }; delete n[it.id]; return n }); load()
   }
@@ -267,7 +272,9 @@ export default function LabelsPage() {
                 {shown.map(({ it, r, stage }) => {
                   const e = edits[it.id] ?? { batch: it.label_batch_no ?? '', exp: it.label_exp_date ?? '', qty: String(it.label_print_qty ?? it.requested_qty) }
                   const setE = (patch: Partial<{ batch: string; exp: string; qty: string }>) => setEdits(p => ({ ...p, [it.id]: { batch: p[it.id]?.batch ?? it.label_batch_no ?? '', exp: p[it.id]?.exp ?? it.label_exp_date ?? '', qty: p[it.id]?.qty ?? String(it.label_print_qty ?? it.requested_qty), ...patch } }))
-                  const editable = canEditFac(r.factory_code) && (stage === 'material' || stage === 'printed')
+                  const locked = !!it.label_printed_at   // details saved → no more editing
+                  const editDetails = canEditFac(r.factory_code) && !locked && (stage === 'material' || stage === 'printed')
+                  const canPhoto = canEditFac(r.factory_code) && !it.label_photo_path && (stage === 'material' || stage === 'printed')
                   const selectable = canEditFac(r.factory_code) && (stage === 'printed' || stage === 'sent')
                   return (
                     <tr key={it.id} className="border-b last:border-0 align-top hover:bg-gray-50">
@@ -277,22 +284,23 @@ export default function LabelsPage() {
                       {isHO && <td className="px-3 py-2 whitespace-nowrap text-gray-600">{factoryName(r.factory_code)}</td>}
                       <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STAGE_STYLE[stage]}`}>{STAGES.find(s => s.key === stage)?.label}</span></td>
                       <td className="px-3 py-2 text-right"><span className="font-semibold" title="Calculated by the system from the order">{Number(Number(it.requested_qty).toFixed(3))}</span></td>
-                      <td className="px-3 py-2">{editable ? (
+                      <td className="px-3 py-2">{editDetails ? (
                         <div className="flex flex-col gap-1">
                           <input value={e.batch} onChange={ev => setE({ batch: ev.target.value })} placeholder="batch no." className="border rounded px-2 py-1 text-xs w-28" />
                           <input type="date" value={e.exp} onChange={ev => setE({ exp: ev.target.value })} className="border rounded px-2 py-1 text-xs" />
                         </div>
-                      ) : <span className="text-gray-600 text-xs">{it.label_batch_no || '—'}{it.label_exp_date ? ` · exp ${fmtExp(it.label_exp_date)}` : ''}</span>}</td>
+                      ) : <><span className="text-gray-600 text-xs">{it.label_batch_no || '—'}{it.label_exp_date ? ` · exp ${fmtExp(it.label_exp_date)}` : ''}</span>{it.label_printed_by_name && <span className="block text-gray-400 text-[10px]">🔒 saved by {it.label_printed_by_name}{it.label_printed_at ? ` · ${new Date(it.label_printed_at).toLocaleDateString()}` : ''}</span>}</>}</td>
                       <td className="px-3 py-2 whitespace-nowrap">
                         {it.label_photo_path
                           ? <button onClick={() => viewPhoto(it.label_photo_path!)} className="text-green-600 hover:underline text-xs">✓ View</button>
-                          : editable ? <label className="text-blue-600 hover:underline text-xs cursor-pointer">{busy === `photo|${it.id}` ? '…' : '📷 Photo'}<input type="file" accept="image/*" capture="environment" className="hidden" onChange={ev => { const f = ev.target.files?.[0]; if (f) uploadPhoto(it, r, f); ev.target.value = '' }} /></label>
+                          : canPhoto ? <label className="text-blue-600 hover:underline text-xs cursor-pointer">{busy === `photo|${it.id}` ? '…' : '📷 Photo'}<input type="file" accept="image/*" capture="environment" className="hidden" onChange={ev => { const f = ev.target.files?.[0]; if (f) uploadPhoto(it, r, f); ev.target.value = '' }} /></label>
                             : <span className="text-gray-300 text-xs">—</span>}
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap text-xs">
                         {stage === 'requested' && <span className="text-amber-600">🔒 waiting for materials</span>}
-                        {stage === 'material' && <button onClick={() => saveLabel(it, r)} disabled={busy === `save|${it.id}`} className="text-blue-600 hover:underline disabled:opacity-50">{busy === `save|${it.id}` ? 'Saving…' : 'Save details'}</button>}
-                        {stage === 'printed' && canEditFac(r.factory_code) && <div className="flex gap-2 items-center"><button onClick={() => saveLabel(it, r)} className="text-blue-600 hover:underline">Edit</button><span className="text-gray-300">·</span><button onClick={() => act('send_labels', [it.id], 'Label sent.')} disabled={busy === 'send_labels'} className="bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700 disabled:opacity-50">Send</button></div>}
+                        {stage === 'material' && !locked && <button onClick={() => saveLabel(it, r)} disabled={busy === `save|${it.id}`} className="text-blue-600 hover:underline disabled:opacity-50">{busy === `save|${it.id}` ? 'Saving…' : 'Save details'}</button>}
+                        {stage === 'material' && locked && <span className="text-amber-600">Saved — attach photo to send</span>}
+                        {stage === 'printed' && canEditFac(r.factory_code) && <button onClick={() => act('send_labels', [it.id], 'Label sent.')} disabled={busy === 'send_labels'} className="bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700 disabled:opacity-50">Send</button>}
                         {stage === 'sent' && canEditFac(r.factory_code) && <button onClick={() => act('receive_labels', [it.id], 'Label received into stock.')} disabled={busy === 'receive_labels'} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">Receive → stock</button>}
                         {stage === 'completed' && <span className="text-green-600 font-medium">✓ Completed</span>}
                       </td>
