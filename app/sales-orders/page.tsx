@@ -144,6 +144,7 @@ export default function SalesOrdersPage() {
   const [lineLocs, setLineLocs] = useState<string[]>([])             // every location seen on sales lines
   const [locationMap, setLocationMap] = useState<Record<string, string>>({}) // location_code -> factory_code
   const [prodFacByItem, setProdFacByItem] = useState<Record<string, Set<string>>>({}) // item_code -> factories with active production
+  const [assignedFacByItem, setAssignedFacByItem] = useState<Record<string, Set<string>>>({}) // item_code -> factories assigned on any sales order
   const [items, setItems] = useState<{ code: string; description: string }[]>([]) // Items master for item-code lookups
   // Locations offered in the edit dropdown: mapped ones + every factory/location +
   // any seen on lines. (Factory staff only see their own lines via RLS, so include
@@ -208,6 +209,11 @@ export default function SalesOrdersPage() {
       txt[l.import_id] = (txt[l.import_id] || '') + ' ' + `${l.item_code || ''} ${l.description || ''}`.toLowerCase()
     })
     setDocLineText(txt)
+    // Which factories this item has already been assigned to on ANY sales order —
+    // so an open line can show "already packed at X" from previous orders.
+    const assigned: Record<string, Set<string>> = {}
+    allLines.forEach(l => { if (l.item_code && l.factory_code) (assigned[l.item_code] = assigned[l.item_code] || new Set()).add(l.factory_code) })
+    setAssignedFacByItem(assigned)
     const isos: Record<string, Set<string>> = {}
     allLines.forEach(l => { if (l.so_number) { (isos[l.import_id] = isos[l.import_id] || new Set()).add(l.so_number) } })
     setImportSos(Object.fromEntries(Object.entries(isos).map(([k, v]) => [k, [...v].sort()])))
@@ -976,12 +982,16 @@ export default function SalesOrdersPage() {
                                   <option value="">⚠ Open — choose packer…</option>
                                   {factories.filter(f => f.code && f.code !== 'HEAD_OFFICE').map(f => {
                                     const producing = prodFacByItem[line.item_code]?.has(f.code)
-                                    return <option key={f.code} value={f.code}>{factoryName(f.code)}{producing ? ' • producing' : ''}</option>
+                                    const usedBefore = assignedFacByItem[line.item_code]?.has(f.code)
+                                    return <option key={f.code} value={f.code}>{factoryName(f.code)}{producing ? ' • producing' : usedBefore ? ' • used before' : ''}</option>
                                   })}
                                 </select>
                               : <span className="text-red-600">⚠ Open</span>}
                           {!line.factory_code && prodFacByItem[line.item_code]?.size ? (
                             <div className="text-[11px] text-green-700 mt-0.5">In production at: {[...prodFacByItem[line.item_code]].map(factoryName).join(', ')}</div>
+                          ) : null}
+                          {!line.factory_code && [...(assignedFacByItem[line.item_code] || [])].filter(c => !prodFacByItem[line.item_code]?.has(c)).length ? (
+                            <div className="text-[11px] text-gray-500 mt-0.5">Packed before at: {[...(assignedFacByItem[line.item_code] || [])].filter(c => !prodFacByItem[line.item_code]?.has(c)).map(factoryName).join(', ')}</div>
                           ) : null}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">
