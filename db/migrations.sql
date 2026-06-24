@@ -2541,11 +2541,17 @@ grant execute on function public.raise_material_request_custom(uuid[], jsonb) to
 alter table public.material_requests add column if not exists extra_qty numeric not null default 0;
 alter table public.material_requests add column if not exists note text;
 
+-- Standard "+extra for stock" requests compute the BOM here for (order + extra)
+-- so the extra ALWAYS scales the materials, no matter what the screen sends.
+-- Ad-hoc requests (note starts with 'Ad-hoc') still use the exact lines listed.
 create or replace function public.raise_material_request_ext(p_batch_ids uuid[], p_items jsonb, p_extra numeric, p_note text)
  returns uuid language plpgsql security definer set search_path to 'public' as $function$
-declare v_item text; v_factory text; v_req uuid; v_no text; r jsonb; v_it public.items; v_qty numeric; v_count int := 0;
+declare
+  v_item text; v_factory text; v_mode text; v_req uuid; v_no text; v_count int := 0;
+  v_total numeric; r jsonb; v_it public.items; v_qty numeric; v_parent uuid; c record; v_short numeric; v_reqd numeric;
 begin
-  select item_code, factory_code into v_item, v_factory from public.production_batches where id = p_batch_ids[1];
+  select item_code, factory_code, coalesce(run_mode, 'auto') into v_item, v_factory, v_mode
+    from public.production_batches where id = p_batch_ids[1];
   if v_item is null then raise exception 'Batch not found'; end if;
   if my_factory_code() <> 'HEAD_OFFICE' and v_factory <> all(my_factory_codes()) then raise exception 'Not allowed for this factory'; end if;
   if exists (select 1 from public.production_batches where id = any(p_batch_ids)
@@ -2555,18 +2561,46 @@ begin
   v_no := 'MR-' || lpad(nextval('public.material_request_seq')::text, 5, '0');
   insert into public.material_requests (request_no, batch_id, factory_code, status, extra_qty, note)
   values (v_no, p_batch_ids[1], v_factory, 'Open', coalesce(p_extra, 0), p_note) returning id into v_req;
-  for r in select * from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) loop
-    v_qty := coalesce((r->>'qty')::numeric, 0);
-    if v_qty <= 0 then continue; end if;
-    select * into v_it from public.items where code = r->>'code' limit 1;
-    insert into public.material_request_items
-      (request_id, item_id, item_code, description, unit, required_qty, stock_qty, shortfall_qty, requested_qty, received_qty, factory_code)
-    values (v_req, v_it.id, coalesce(v_it.code, r->>'code'), coalesce(v_it.description, r->>'description'),
-            coalesce(v_it.unit, r->>'unit'), v_qty, 0, v_qty, v_qty, 0, v_factory);
-    v_count := v_count + 1;
-  end loop;
-  if v_count = 0 then delete from public.material_requests where id = v_req; raise exception 'Add at least one material with a quantity'; end if;
-  update public.production_batches set status = 'Requested', material_request_id = v_req where id = any(p_batch_ids);
+
+  if coalesce(p_note, '') like 'Ad-hoc%' then
+    -- Ad-hoc: request exactly the lines the user listed.
+    for r in select * from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) loop
+      v_qty := coalesce((r->>'qty')::numeric, 0);
+      if v_qty <= 0 then continue; end if;
+      select * into v_it from public.items where code = r->>'code' limit 1;
+      insert into public.material_request_items
+        (request_id, item_id, item_code, description, unit, required_qty, stock_qty, shortfall_qty, requested_qty, received_qty, factory_code)
+      values (v_req, v_it.id, coalesce(v_it.code, r->>'code'), coalesce(v_it.description, r->>'description'),
+              coalesce(v_it.unit, r->>'unit'), v_qty, 0, v_qty, v_qty, 0, v_factory);
+      v_count := v_count + 1;
+    end loop;
+  else
+    -- Standard: explode the BOM for the FULL quantity = all batches' order + extra.
+    select coalesce(sum(total_quantity), 0) into v_total from public.production_batches where id = any(p_batch_ids);
+    v_total := v_total + coalesce(p_extra, 0);
+    select id into v_parent from public.items where code = v_item limit 1;
+    if v_parent is null then raise exception 'Item % not found in Items Master', v_item; end if;
+    for c in
+      select bc.component_item_id as item_id, it.code, it.description, it.unit, bc.apply_allowance,
+             bc.quantity * v_total as required_qty, coalesce(s.quantity, 0) as stock_qty
+      from public.bom_components bc join public.items it on it.id = bc.component_item_id
+      left join public.item_stock s on s.item_id = bc.component_item_id and s.factory_code = v_factory
+      where bc.parent_item_id = v_parent
+        and (bc.use_mode = 'any' or bc.use_mode = v_mode)
+    loop
+      v_short := c.required_qty - c.stock_qty;
+      if v_short > 0 then
+        v_reqd := case when c.apply_allowance then ceil(v_short * 1.1) else v_short end;
+        insert into public.material_request_items
+          (request_id, item_id, item_code, description, unit, required_qty, stock_qty, shortfall_qty, requested_qty, received_qty, factory_code)
+        values (v_req, c.item_id, c.code, c.description, c.unit, c.required_qty, c.stock_qty, v_short, v_reqd, 0, v_factory);
+        v_count := v_count + 1;
+      end if;
+    end loop;
+  end if;
+
+  if v_count = 0 then delete from public.material_requests where id = v_req; raise exception 'Nothing to request — enough stock on hand, or no materials.'; end if;
+  update public.production_batches set status = case when status = 'Planned' then 'Requested' else status end, material_request_id = v_req where id = any(p_batch_ids);
   return v_req;
 end; $function$;
 grant execute on function public.raise_material_request_ext(uuid[], jsonb, numeric, text) to authenticated;
