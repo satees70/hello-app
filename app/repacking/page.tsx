@@ -4,7 +4,6 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
-import { can } from '@/lib/permissions'
 import ItemPicker from '@/components/ItemPicker'
 
 type Item = { code: string; description: string; unit: string }
@@ -35,9 +34,9 @@ export default function RepackingPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
-  const isHO = profile?.factory_code === 'HEAD_OFFICE'
-  const canEditFac = (fc: string) => can(profile, 'sales', 'edit', fc)
-  const facOpts = (isHO ? factories.map(f => f.code) : (profile?.factory_codes?.length ? profile.factory_codes : [profile?.factory_code || ''])).filter(c => c && canEditFac(c))
+  // List every factory/location to pick from — the create RPC is the authority
+  // on what this user may actually repack at.
+  const facOpts = factories.map(f => f.code)
   const factoryName = (c: string) => factories.find(f => f.code === c)?.name || c
 
   useEffect(() => { if (profile) load() }, [profile])
@@ -82,7 +81,6 @@ export default function RepackingPage() {
 
   async function submit() {
     if (!fac) { setError('Pick a factory to repack at.'); return }
-    if (!canEditFac(fac)) { setError('You have view-only access at this factory.'); return }
     // include a half-typed line if it's valid
     const pending = pickItem && Number(qty) > 0 ? [{ ...pickItem, qty: Number(qty) }] : []
     const all = [...lines, ...pending]
@@ -223,12 +221,10 @@ export default function RepackingPage() {
                     ? <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700">Sent to production</span>
                     : <>
                         <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700">Not sent yet</span>
-                        {canEditFac(o.factory_code) && (
-                          <button onClick={() => sendToProduction(o)} disabled={busy === o.id}
-                            className="text-xs px-3 py-1 rounded-lg bg-blue-700 text-white hover:bg-blue-800 disabled:opacity-50">
-                            {busy === o.id ? 'Sending…' : 'Send to production'}
-                          </button>
-                        )}
+                        <button onClick={() => sendToProduction(o)} disabled={busy === o.id}
+                          className="text-xs px-3 py-1 rounded-lg bg-blue-700 text-white hover:bg-blue-800 disabled:opacity-50">
+                          {busy === o.id ? 'Sending…' : 'Send to production'}
+                        </button>
                       </>}
                 </div>
               </div>
