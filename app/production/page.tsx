@@ -505,7 +505,7 @@ export default function ProductionPage() {
                                         <span className="flex-shrink-0 flex items-baseline gap-2">
                                           {it.so_number && <span className="text-gray-400 font-mono text-xs">{it.so_number}</span>}
                                           <span className="font-medium">{it.quantity}</span>
-                                          {b.status === 'Planned' && !b.material_request_id && (b.production_batch_items?.length || 0) > 1 && hasCap(profile, 'request_split') && (
+                                          {derivedStatus(b) === 'Planned' && !b.material_request_id && (b.production_batch_items?.length || 0) > 1 && hasCap(profile, 'request_split') && (
                                             <button onClick={() => requestSplit(b, it)} title="Request to split this order into its own batch — Head Office must approve"
                                               className="text-red-600 hover:underline text-xs font-medium whitespace-nowrap">✕ Split (needs approval)</button>
                                           )}
