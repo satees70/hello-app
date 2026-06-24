@@ -51,7 +51,7 @@ export default function StockPage() {
   }
   const factoryName = (c: string) => factories.find(f => f.code === c)?.name || c || '—'
   const fmt = (d: string | null) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ''); return m ? `${m[3]}/${m[2]}/${m[1]}` : '—' }
-  const num = (n: number) => Number(Number(n).toPrecision(12))
+  const num = (n: number) => Number(Number(n).toFixed(3))
   // Batch numbers usually encode a date: YYMMDD (e.g. 260606 = 6 Jun 2026) or YYMM (e.g. 2602 = Feb 2026).
   // Read it (from the first 4–6 digit run) so stock can age by batch date and show it.
   const batchInfo = (batch: string | null): { date: string | null; label: string } => {

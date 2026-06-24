@@ -102,7 +102,7 @@ export default function PackingPage() {
     if (b.material_request_id) return 'Requested'
     return 'Planned'
   }
-  const n = (x: number) => Number(Number(x).toPrecision(12))
+  const n = (x: number) => Number(Number(x).toFixed(3))
   const itemOf = (id: string) => items.find(i => i.id === id)
   // How many units we can make from current system stock, plus the per-material breakdown.
   const availability = (b: Batch): { hasBom: boolean; units: number; comps: { code: string; description: string; unit: string; required: number; avail: number; shortfall: number }[] } => {

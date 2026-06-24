@@ -161,7 +161,7 @@ export default function MaterialRequestsPage() {
   const pickDisplay = (code: string, pcQty: number, unit: string) => {
     const per = pcsPerRoll[code]
     if (per) return { qty: Math.ceil(pcQty / per), unit: 'roll' }
-    return { qty: Number(Number(pcQty).toPrecision(12)), unit }
+    return { qty: Number(Number(pcQty).toFixed(3)), unit }
   }
 
   async function load() {
@@ -523,7 +523,7 @@ export default function MaterialRequestsPage() {
   const renderMatTable = (mats: MatMap, prefix: string, editable: boolean) => {
     const list = Object.values(mats).sort((a, b) => a.code.localeCompare(b.code))
     const heads = ['Material', 'Description', 'Unit', 'To pick', ...(editable ? ['Received', 'Remaining'] : [])]
-    const r = (n: number) => Number(Number(n).toPrecision(12))
+    const r = (n: number) => Number(Number(n).toFixed(3))
     return (
       <>
       {/* Mobile: cards */}
@@ -552,7 +552,7 @@ export default function MaterialRequestsPage() {
               const remaining = Math.max(0, g.requested - g.received)
               const done = g.received >= g.requested
               const per = pcsPerRoll[g.code]
-              const r = (n: number) => Number(Number(n).toPrecision(12))
+              const r = (n: number) => Number(Number(n).toFixed(3))
               const toPick = per ? Math.ceil(g.requested / per) : r(g.requested)
               const recv = per ? r(g.received / per) : r(g.received)
               const rem = per ? r(remaining / per) : r(remaining)
@@ -643,7 +643,7 @@ export default function MaterialRequestsPage() {
                             <tr key={l.code} className="border-b last:border-0">
                               <td className="px-3 py-1.5 font-mono font-medium whitespace-nowrap">{l.code}</td>
                               <td className="px-3 py-1.5 text-gray-600">{l.description}</td>
-                              <td className="px-3 py-1.5 whitespace-nowrap">{Number(Number(l.qty).toPrecision(12))} {l.unit}</td>
+                              <td className="px-3 py-1.5 whitespace-nowrap">{Number(Number(l.qty).toFixed(3))} {l.unit}</td>
                               <td className="px-3 py-1.5 text-right"><button onClick={() => setManLines(prev => prev.filter((_, x) => x !== i))} className="text-red-500 hover:underline text-xs">remove</button></td>
                             </tr>
                           ))}

@@ -385,7 +385,7 @@ export default function IncomingPage() {
   }
   // The unit the stock lands in: KG when a pack was converted, else the item's own unit (or the DO unit)
   const intoUnit = (factor: number, fallback: string | undefined) => factor === 1 ? (fallback || '') : 'KG'
-  const num = (n: number) => Number(Number(n).toPrecision(12))
+  const num = (n: number) => Number(Number(n).toFixed(3))
 
   // Roll plastics: a roll converts to N pieces (× pcs_per_roll). Takes precedence over bag→kg.
   const rollFactor = (code: string): number | null => pcsPerRoll[code] ?? pcsPerRoll[baseCode(code)] ?? null

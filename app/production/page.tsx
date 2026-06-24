@@ -113,7 +113,7 @@ export default function ProductionPage() {
   }
 
   const factoryName = (code: string) => factories.find(f => f.code === code)?.name || code || '—'
-  const clean = (n: number) => Number(n.toPrecision(12))
+  const clean = (n: number) => Number(n.toFixed(3))
   const BUFFER = 1.1
 
   async function makeManufactured(it: Item) {

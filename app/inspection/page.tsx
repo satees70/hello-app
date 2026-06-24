@@ -254,7 +254,7 @@ export default function InspectionPage() {
 
   const s = (k: string) => (f[k] as string) || ''
 
-  const n = (x: number) => Number(Number(x).toPrecision(6))
+  const n = (x: number) => Number(Number(x).toFixed(3))
   // Food loss % = ((main ingredient used − main planned) + wastage) ÷ main used × 100. Alert HO when > 5%.
   const loss = (() => {
     const mats = (f.materials as Mat[]) || []

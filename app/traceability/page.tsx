@@ -81,7 +81,7 @@ export default function TraceabilityPage() {
 
   const factoryName = (c: string) => factories.find(f => f.code === c)?.name || c || '—'
   const fmt = (d: string | null) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ''); return m ? `${m[3]}/${m[2]}/${m[1]}` : '—' }
-  const num = (n: number | null | undefined) => (n == null ? '—' : Number(Number(n).toPrecision(12)).toString())
+  const num = (n: number | null | undefined) => (n == null ? '—' : Number(Number(n).toFixed(3)).toString())
   const val = (v: unknown) => { const s = (v == null ? '' : String(v)).trim(); return s === '' ? '—' : s }
 
   async function buildReport(id: string) {

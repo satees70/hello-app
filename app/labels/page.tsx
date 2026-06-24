@@ -223,7 +223,7 @@ export default function LabelsPage() {
                               <td className="px-3 py-1.5 font-mono font-medium whitespace-nowrap">{l.code}</td>
                               <td className="px-3 py-1.5 text-gray-600">{l.description}</td>
                               <td className="px-3 py-1.5 whitespace-nowrap">{l.forProduct || '—'}</td>
-                              <td className="px-3 py-1.5 whitespace-nowrap">{Number(Number(l.qty).toPrecision(12))} {l.unit}</td>
+                              <td className="px-3 py-1.5 whitespace-nowrap">{Number(Number(l.qty).toFixed(3))} {l.unit}</td>
                               <td className="px-3 py-1.5 whitespace-nowrap">{l.batch || '—'}</td>
                               <td className="px-3 py-1.5 whitespace-nowrap">{l.exp ? fmtExp(l.exp) : '—'}</td>
                               <td className="px-3 py-1.5 text-right"><button onClick={() => setManLines(prev => prev.filter((_, x) => x !== i))} className="text-red-500 hover:underline text-xs">remove</button></td>
@@ -274,7 +274,7 @@ export default function LabelsPage() {
                     <tr key={it.id} className="border-b last:border-0 align-top hover:bg-gray-50">
                       <td className="px-3 py-2">{selectable && <input type="checkbox" className="h-4 w-4" checked={sel.has(it.id)} onChange={() => toggleSel(it.id)} />}</td>
                       <td className="px-3 py-2"><span className="font-mono font-medium">{it.item_code}</span><span className="block text-gray-400">{it.description}</span></td>
-                      <td className="px-3 py-2 whitespace-nowrap"><span className="font-mono">{r.production_batches?.item_code || it.label_for_product || '—'}</span><span className="block text-gray-400 text-xs">{r.pick_run_no || r.request_no}</span></td>
+                      <td className="px-3 py-2"><span className="font-mono">{r.production_batches?.item_code || it.label_for_product || '—'}</span>{r.production_batches?.description && <span className="block text-gray-700 text-xs max-w-[16rem]">{r.production_batches.description}</span>}<span className="block text-gray-400 text-xs">{r.pick_run_no || r.request_no}</span></td>
                       {isHO && <td className="px-3 py-2 whitespace-nowrap text-gray-600">{factoryName(r.factory_code)}</td>}
                       <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STAGE_STYLE[stage]}`}>{STAGES.find(s => s.key === stage)?.label}</span></td>
                       <td className="px-3 py-2 text-right">{editable
