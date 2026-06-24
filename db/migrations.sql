@@ -2745,3 +2745,30 @@ create policy si_gch_view on public.sales_imports for select to authenticated
   using (exists (select 1 from public.sales_order_lines l
                  where l.import_id = sales_imports.id
                    and (coalesce(l.location_code, '') ilike 'GCH%' or coalesce(l.customer_name, '') ilike 'GCH%')));
+
+-- ============================================================================
+-- 2026-06 · Assign the packing factory directly on an OPEN sales line (used for
+-- GCH orders that stay general until someone picks who packs). Sets factory_code
+-- WITHOUT touching the delivery location. Allowed while the line's current
+-- factory hasn't confirmed the document; HO can always do it.
+-- ============================================================================
+create or replace function public.assign_packing_factory(p_line_id uuid, p_factory text)
+ returns void language plpgsql security definer set search_path to 'public' as $function$
+declare v_line public.sales_order_lines;
+begin
+  select * into v_line from public.sales_order_lines where id = p_line_id;
+  if not found then raise exception 'Line not found'; end if;
+  if not has_perm('sales', 'edit') then raise exception 'Not allowed'; end if;
+  -- May change while open, or when the line already belongs to one of my factories.
+  if my_factory_code() <> 'HEAD_OFFICE'
+     and coalesce(v_line.factory_code, '') <> ''
+     and v_line.factory_code <> all(my_factory_codes())
+  then raise exception 'Not allowed for this factory'; end if;
+  -- Once the current factory has confirmed the document, it must go through approval.
+  if coalesce(v_line.factory_code, '') <> '' and exists (
+       select 1 from public.document_confirmations dc
+        where dc.import_id = v_line.import_id and dc.factory_code = v_line.factory_code)
+  then raise exception 'Already confirmed — change needs Head Office approval'; end if;
+  update public.sales_order_lines set factory_code = nullif(btrim(p_factory), '') where id = p_line_id;
+end; $function$;
+grant execute on function public.assign_packing_factory(uuid, text) to authenticated;

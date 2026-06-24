@@ -143,6 +143,7 @@ export default function SalesOrdersPage() {
   const [locationCodes, setLocationCodes] = useState<string[]>([])   // mapped locations (Setup → Location Map)
   const [lineLocs, setLineLocs] = useState<string[]>([])             // every location seen on sales lines
   const [locationMap, setLocationMap] = useState<Record<string, string>>({}) // location_code -> factory_code
+  const [prodFacByItem, setProdFacByItem] = useState<Record<string, Set<string>>>({}) // item_code -> factories with active production
   const [items, setItems] = useState<{ code: string; description: string }[]>([]) // Items master for item-code lookups
   // Locations offered in the edit dropdown: mapped ones + every factory/location +
   // any seen on lines. (Factory staff only see their own lines via RLS, so include
@@ -258,15 +259,26 @@ export default function SalesOrdersPage() {
   }
 
   async function loadRefs() {
-    const [{ data: f }, { data: lm }, { data: it }] = await Promise.all([
+    const [{ data: f }, { data: lm }, { data: it }, { data: mri }] = await Promise.all([
       supabase.from('factories').select('code, name').order('code'),
       supabase.from('location_map').select('location_code, factory_code').order('location_code'),
       supabase.from('items').select('code, description').order('code'),
+      // Which factories already have an ACTIVE material request for each item — so
+      // when choosing the packing factory we can flag "this factory has production".
+      supabase.from('material_request_items').select('item_code, factory_code, material_requests(status)'),
     ])
     setFactories(f || [])
     setLocationCodes((lm || []).map(r => r.location_code))
     const m: Record<string, string> = {}; (lm || []).forEach(r => { if (r.factory_code) m[r.location_code] = r.factory_code }); setLocationMap(m)
     setItems((it as { code: string; description: string }[]) || [])
+    const prod: Record<string, Set<string>> = {}
+    ;((mri as unknown as { item_code: string | null; factory_code: string | null; material_requests: { status: string } | null }[]) || []).forEach(r => {
+      const st = r.material_requests?.status || ''
+      if (['Completed', 'Cancelled', 'Rejected'].includes(st)) return   // only active production
+      if (!r.item_code || !r.factory_code) return
+      ;(prod[r.item_code] = prod[r.item_code] || new Set()).add(r.factory_code)
+    })
+    setProdFacByItem(prod)
   }
 
   // Re-apply the current Location Map to lines still showing Unmapped (after a new
@@ -497,6 +509,15 @@ export default function SalesOrdersPage() {
     }
     setSuccess(`${direct.length ? `${direct.length} line(s) updated` : ''}${direct.length && needAppr.length ? '; ' : ''}${needAppr.length ? `${needAppr.length} sent for Head Office approval` : ''}${skipped ? ` (${skipped} skipped — already pending)` : ''}.`)
     setBulkSubmitting(false); setBulkOpen(false); setSelectedIds(new Set())
+    await viewLines(linesFor); loadSummary()
+  }
+  // Assign the packing factory directly on an open line (GCH workflow).
+  async function assignFactory(line: SalesLine, fac: string) {
+    if (!linesFor) return
+    setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('assign_packing_factory', { p_line_id: line.id, p_factory: fac || null })
+    if (e) { setError(e.message); return }
+    setSuccess(fac ? `${line.item_code} assigned to ${factoryName(fac)} for packing.` : `${line.item_code} set back to open.`)
     await viewLines(linesFor); loadSummary()
   }
   async function submitBulkDelete() {
@@ -947,10 +968,21 @@ export default function SalesOrdersPage() {
                         <td className="px-3 py-2 text-right">{line.outstanding_qty}</td>
                         <td className="px-3 py-2 whitespace-nowrap">{line.delivery_date}</td>
                         <td className="px-3 py-2"><span className="font-mono">{line.location_code}</span></td>
-                        <td className="px-3 py-2">
+                        <td className="px-3 py-2 min-w-[170px]">
                           {line.factory_code
                             ? <span className="inline-block bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{factoryName(line.factory_code)}</span>
-                            : <span className="text-red-600">⚠ Unmapped</span>}
+                            : can(profile, 'sales', 'edit')
+                              ? <select value="" onChange={e => assignFactory(line, e.target.value)} className="border rounded px-2 py-1 text-xs bg-white">
+                                  <option value="">⚠ Open — choose packer…</option>
+                                  {factories.filter(f => f.code && f.code !== 'HEAD_OFFICE').map(f => {
+                                    const producing = prodFacByItem[line.item_code]?.has(f.code)
+                                    return <option key={f.code} value={f.code}>{factoryName(f.code)}{producing ? ' • producing' : ''}</option>
+                                  })}
+                                </select>
+                              : <span className="text-red-600">⚠ Open</span>}
+                          {!line.factory_code && prodFacByItem[line.item_code]?.size ? (
+                            <div className="text-[11px] text-green-700 mt-0.5">In production at: {[...prodFacByItem[line.item_code]].map(factoryName).join(', ')}</div>
+                          ) : null}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">
                           {lineStatuses[line.id] ? <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${LINE_STATUS_STYLE[lineStatuses[line.id]] || 'bg-gray-100 text-gray-600'}`}>{lineStatuses[line.id]}</span> : <span className="text-gray-300 text-xs">—</span>}
