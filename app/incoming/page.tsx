@@ -166,7 +166,7 @@ export default function IncomingPage() {
   )
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
-  const photoReq = false   // photo optional for now (phone camera issues) — can still attach one
+  const photoReq = !isHO   // Goods Received needs a photo (Head Office exempt)
 
   // Tick QC on every not-yet-received line at once
   async function tickAllQc() {
