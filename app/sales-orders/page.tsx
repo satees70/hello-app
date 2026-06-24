@@ -178,8 +178,9 @@ export default function SalesOrdersPage() {
       .from('sales_imports')
       .select('*')
       .order('created_at', { ascending: false })
-    // Repack orders are keyed in on the Repacking page — keep them out of here.
-    setImports((data || []).filter(d => !d.is_repack))
+    // Repack orders (keyed in on the Repacking page) appear here too — both
+    // entry points feed the same combined order list and processing.
+    setImports(data || [])
   }
 
   // Per-document overview: open change requests + duplicate SO+item lines
