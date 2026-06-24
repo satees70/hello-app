@@ -56,6 +56,10 @@ export default function LabelsPage() {
   const [manExp, setManExp] = useState('')      // label expiry
   const [manLines, setManLines] = useState<{ code: string; description: string; unit: string; qty: number; forProduct: string; batch: string; exp: string }[]>([])
 
+  const [openMat, setOpenMat] = useState<Set<string>>(new Set())   // label rows showing their material details
+  const toggleMat = (id: string) => setOpenMat(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const [lotsByItem, setLotsByItem] = useState<Record<string, { batch_no: string; qty: number; exp: string | null }[]>>({})  // request_item_id -> received batches
+
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
   const canEditFac = (fc: string) => can(profile, 'material_requests', 'edit', fc)
   const toggleSel = (id: string) => setSel(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
@@ -71,6 +75,14 @@ export default function LabelsPage() {
       supabase.from('factories').select('code, name').order('code'),
     ])
     setReqs((r as unknown as MReq[]) || [])
+    // Received batches per request item — so the printer can see what came in and pick a batch
+    const reqItemIds = ((r as unknown as MReq[]) || []).flatMap(req => (req.material_request_items || []).map(it => it.id))
+    const lotMap: Record<string, { batch_no: string; qty: number; exp: string | null }[]> = {}
+    for (let i = 0; i < reqItemIds.length; i += 200) {
+      const { data: lots } = await supabase.from('stock_lots').select('request_item_id, batch_no, qty_received, exp_date').in('request_item_id', reqItemIds.slice(i, i + 200))
+      ;(lots || []).forEach(l => { if (!l.request_item_id || !l.batch_no) return; (lotMap[l.request_item_id] = lotMap[l.request_item_id] || []).push({ batch_no: l.batch_no, qty: Number(l.qty_received || 0), exp: l.exp_date }) })
+    }
+    setLotsByItem(lotMap)
     setFactoryItems(new Set((fi || []).map(x => x.code)))
     setLabelItems((fi as { code: string; description: string; unit: string }[]) || [])
     const fac: Record<string, string> = {}; (dos || []).forEach(d => { fac[d.id] = d.factory_code })
@@ -276,11 +288,13 @@ export default function LabelsPage() {
                   const editDetails = canEditFac(r.factory_code) && !locked && (stage === 'material' || stage === 'printed')
                   const canPhoto = canEditFac(r.factory_code) && !it.label_photo_path && (stage === 'material' || stage === 'printed')
                   const selectable = canEditFac(r.factory_code) && (stage === 'printed' || stage === 'sent')
+                  const rawMats = (r.material_request_items || []).filter(m => !factoryItems.has(m.item_code))
                   return (
-                    <tr key={it.id} className="border-b last:border-0 align-top hover:bg-gray-50">
+                    <Fragment key={it.id}>
+                    <tr className="border-b last:border-0 align-top hover:bg-gray-50">
                       <td className="px-3 py-2">{selectable && <input type="checkbox" className="h-4 w-4" checked={sel.has(it.id)} onChange={() => toggleSel(it.id)} />}</td>
                       <td className="px-3 py-2"><span className="font-mono font-medium">{it.item_code}</span><span className="block text-gray-400">{it.description}</span></td>
-                      <td className="px-3 py-2"><span className="font-mono">{r.production_batches?.item_code || it.label_for_product || '—'}</span>{r.production_batches?.description && <span className="block text-gray-700 text-xs max-w-[16rem]">{r.production_batches.description}</span>}<span className="block text-gray-400 text-xs">{r.pick_run_no || r.request_no}</span></td>
+                      <td className="px-3 py-2"><span className="font-mono">{r.production_batches?.item_code || it.label_for_product || '—'}</span>{r.production_batches?.description && <span className="block text-gray-700 text-xs max-w-[16rem]">{r.production_batches.description}</span>}<span className="block text-gray-400 text-xs">{r.pick_run_no || r.request_no}</span>{rawMats.length > 0 && <button onClick={() => toggleMat(it.id)} className="block text-blue-600 hover:underline text-xs mt-0.5">{openMat.has(it.id) ? '▾ hide materials' : '▸ show materials'}</button>}</td>
                       {isHO && <td className="px-3 py-2 whitespace-nowrap text-gray-600">{factoryName(r.factory_code)}</td>}
                       <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STAGE_STYLE[stage]}`}>{STAGES.find(s => s.key === stage)?.label}</span></td>
                       <td className="px-3 py-2 text-right"><span className="font-semibold" title="Calculated by the system from the order">{Number(Number(it.requested_qty).toFixed(3))}</span></td>
@@ -305,6 +319,29 @@ export default function LabelsPage() {
                         {stage === 'completed' && <span className="text-green-600 font-medium">✓ Completed</span>}
                       </td>
                     </tr>
+                    {openMat.has(it.id) && (
+                      <tr className="bg-gray-50/60">
+                        <td colSpan={isHO ? 9 : 8} className="px-6 py-2">
+                          <div className="text-xs font-medium text-gray-600 mb-1">Materials for this product — ordered vs received (use a received batch on the label):</div>
+                          <table className="w-full text-xs">
+                            <thead><tr className="text-gray-500">{['Material', 'Requested', 'Received', 'Batch(es) received'].map(h => <th key={h} className="text-left px-2 py-1 font-medium">{h}</th>)}</tr></thead>
+                            <tbody>
+                              {rawMats.map(m => (
+                                <tr key={m.id} className="border-t">
+                                  <td className="px-2 py-1"><span className="font-mono font-medium">{m.item_code}</span></td>
+                                  <td className="px-2 py-1">{Number(Number(m.requested_qty).toFixed(3))} {m.unit}</td>
+                                  <td className="px-2 py-1">{Number(Number(m.received_qty).toFixed(3))} {m.unit}</td>
+                                  <td className="px-2 py-1">{(lotsByItem[m.id] || []).length
+                                    ? (lotsByItem[m.id]).map(x => `${x.batch_no} (${Number(Number(x.qty).toFixed(3))}${x.exp ? ', exp ' + fmtExp(x.exp) : ''})`).join('  ·  ')
+                                    : <span className="text-gray-400">— none received yet</span>}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   )
                 })}
               </tbody>
