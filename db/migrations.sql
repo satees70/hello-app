@@ -2692,3 +2692,33 @@ grant execute on function public.create_repack_order(text, text, text, jsonb) to
 -- (vs the recipe-expected qty), so the mixer can log what really went in.
 -- ============================================================================
 alter table public.grinding_materials add column if not exists actual_qty numeric;
+
+-- ============================================================================
+-- 2026-06 · Grinding/mixing record rebuilt: drop the old crusher/rework/etc.
+-- inputs from the UI; capture the machine, who ground it, and the OUTPUT
+-- products (item + batch + expiry + qty, many per record) for an internal
+-- yield record. Old columns are left in place (history) but no longer edited.
+-- ============================================================================
+alter table public.grinding_records add column if not exists machine_id text;
+alter table public.grinding_records add column if not exists grind_by text;
+
+create table if not exists public.grinding_outputs (
+  id uuid primary key default gen_random_uuid(),
+  grinding_record_id uuid not null references public.grinding_records(id) on delete cascade,
+  factory_code text,
+  item text,
+  batch_no text,
+  exp_date date,
+  qty numeric,
+  created_at timestamptz not null default now()
+);
+create index if not exists grinding_outputs_record on public.grinding_outputs (grinding_record_id);
+grant select, insert, update, delete on public.grinding_outputs to authenticated;
+alter table public.grinding_outputs enable row level security;
+drop policy if exists go_read on public.grinding_outputs;
+create policy go_read on public.grinding_outputs for select
+  using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()));
+drop policy if exists go_write on public.grinding_outputs;
+create policy go_write on public.grinding_outputs for all
+  using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()))
+  with check (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()));

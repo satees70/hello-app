@@ -11,6 +11,7 @@ import { requestTimerCancel } from '@/lib/corrections'
 interface Recipe { id: string; factory_code: string; product: string; recipe_type: string; active: boolean }
 interface Component { item: string; qty_per_lot: string }
 interface Material { id?: string; item: string; qty: string; actual_qty: string; batch_no: string; added: boolean }
+interface Output { id?: string; item: string; batch_no: string; exp_date: string; qty: string }
 interface Seg { s: string; e: string | null }
 interface Timer { status: 'idle' | 'running' | 'paused' | 'stopped'; segments: Seg[] }
 const EMPTY_TIMER: Timer = { status: 'idle', segments: [] }
@@ -29,6 +30,7 @@ interface GrindingRecord {
   mix_start: string | null; mix_end: string | null; mix_timer: Timer | null
   crusher_before: string | null; crusher_after: string | null; qty_rework: number | null; qty_rejection: number | null
   correction_action: string | null; prepared_by: string | null; verified_by: string | null; remark: string | null
+  machine_id: string | null; grind_by: string | null
 }
 
 const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
@@ -45,6 +47,7 @@ export default function GrindingPage() {
   const [collapsedFacs, setCollapsedFacs] = useState<Set<string>>(new Set())
   const toggleFac = (fc: string) => setCollapsedFacs(p => { const n = new Set(p); n.has(fc) ? n.delete(fc) : n.add(fc); return n })
   const [matsByRecord, setMatsByRecord] = useState<Record<string, Material[]>>({})
+  const [outputsByRecord, setOutputsByRecord] = useState<Record<string, Output[]>>({})
   const [stockMap, setStockMap] = useState<Record<string, number>>({})   // `${code}|${factory}` -> qty in stock
   const [error, setError] = useState('')
 
@@ -75,7 +78,7 @@ export default function GrindingPage() {
 
   useEffect(() => { if (profile) { loadFactories(); load() } }, [profile])
   // Items master for the recipe pick-lists (only the mixer needs it)
-  useEffect(() => { if (profile && canRecipeEdit && items.length === 0) fetchAll<{ code: string; description: string | null }>('items', 'code, description', 'code').then(setItems) }, [profile, canRecipeEdit])
+  useEffect(() => { if (profile && (canRecipeEdit || canEdit) && items.length === 0) fetchAll<{ code: string; description: string | null }>('items', 'code, description', 'code').then(setItems) }, [profile, canRecipeEdit, canEdit])
 
   async function loadFactories() {
     const { data } = await supabase.from('factories').select('code, name').order('code'); setFactories(data || [])
@@ -94,7 +97,12 @@ export default function GrindingPage() {
       const map: Record<string, Material[]> = {}
       ;(mats || []).forEach(m => { (map[m.grinding_record_id] = map[m.grinding_record_id] || []).push({ id: m.id, item: m.item || '', qty: m.qty || '', actual_qty: m.actual_qty != null ? String(m.actual_qty) : '', batch_no: m.batch_no || '', added: !!m.added }) })
       setMatsByRecord(map)
-    } else setMatsByRecord({})
+      // Output products recorded per grinding record (item + batch + exp + qty)
+      const { data: outs } = await supabase.from('grinding_outputs').select('id, grinding_record_id, item, batch_no, exp_date, qty').in('grinding_record_id', ids)
+      const omap: Record<string, Output[]> = {}
+      ;(outs || []).forEach(o => { (omap[o.grinding_record_id] = omap[o.grinding_record_id] || []).push({ id: o.id, item: o.item || '', batch_no: o.batch_no || '', exp_date: o.exp_date || '', qty: o.qty != null ? String(o.qty) : '' }) })
+      setOutputsByRecord(omap)
+    } else { setMatsByRecord({}); setOutputsByRecord({}) }
     // Stock on hand per item code per factory — to flag shortages in the modal.
     const [{ data: itRows }, { data: stRows }] = await Promise.all([
       supabase.from('items').select('id, code'),
@@ -133,12 +141,14 @@ export default function GrindingPage() {
   // ---- inspection modal ----
   const [insp, setInsp] = useState<Record<string, string>>({})
   const [mixMats, setMixMats] = useState<Material[]>([])
+  const [outputs, setOutputs] = useState<Output[]>([])
   const [mixTimer, setMixTimer] = useState<Timer>(EMPTY_TIMER); const [now, setNow] = useState(Date.now())
   useEffect(() => { if (mixTimer.status !== 'running' && mixTimer.status !== 'paused') return; const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id) }, [mixTimer.status])
   function openRecord(r: GrindingRecord) {
     setOpenRec(r); setError('')
-    setInsp({ crusher_before: r.crusher_before || '', crusher_after: r.crusher_after || '', qty_rework: r.qty_rework?.toString() ?? '', qty_rejection: r.qty_rejection?.toString() ?? '', correction_action: r.correction_action || '', prepared_by: r.prepared_by || '', verified_by: r.verified_by || '', remark: r.remark || '' })
+    setInsp({ machine_id: r.machine_id || '', grind_by: r.grind_by || '' })
     setMixMats((matsByRecord[r.id] || []).map(m => ({ ...m })))
+    setOutputs((outputsByRecord[r.id] || []).map(o => ({ ...o })))
     setMixTimer((r.mix_timer as Timer) || EMPTY_TIMER)
   }
   // Mix timer (recipe-edit). Persists immediately so it survives closing the modal.
@@ -177,6 +187,15 @@ export default function GrindingPage() {
     if (error) { setError(error.message); return }
     alert('Material request raised. Track it under Material Requests.')
   }
+  // ---- output products (what came out of the grinder/mixer) ----
+  const addOutput = () => setOutputs(p => [...p, { item: '', batch_no: '', exp_date: '', qty: '' }])
+  const removeOutput = (i: number) => setOutputs(p => p.filter((_, j) => j !== i))
+  const setOutput = (i: number, k: keyof Output, v: string) => setOutputs(p => { const o = [...p]; o[i] = { ...o[i], [k]: v }; return o })
+  // Totals for the internal record: input = actual (or needed) raw material; output = sum of output qty
+  const totalInput = mixMats.reduce((s, m) => s + (Number(m.actual_qty) || Number(m.qty) || 0), 0)
+  const totalOutput = outputs.reduce((s, o) => s + (Number(o.qty) || 0), 0)
+  const yieldPct = totalInput > 0 ? (totalOutput / totalInput) * 100 : null
+
   async function saveRecord() {
     if (!openRec) return
     const recEdit = canEditFac(openRec.factory_code), recRecipeEdit = canRecipeEditFac(openRec.factory_code)
@@ -185,11 +204,7 @@ export default function GrindingPage() {
     try {
       const payload: Record<string, unknown> = {}
       if (recEdit) Object.assign(payload, {
-        crusher_before: insp.crusher_before || null, crusher_after: insp.crusher_after || null,
-        qty_rework: insp.qty_rework === '' ? null : Number(insp.qty_rework),
-        qty_rejection: insp.qty_rejection === '' ? null : Number(insp.qty_rejection),
-        correction_action: insp.correction_action || null, prepared_by: insp.prepared_by || null,
-        verified_by: insp.verified_by || null, remark: insp.remark || null,
+        machine_id: insp.machine_id || null, grind_by: insp.grind_by || null,
       })
       if (Object.keys(payload).length) { const { error } = await supabase.from('grinding_records').update(payload).eq('id', openRec.id); if (error) throw error }
       if (recRecipeEdit) {
@@ -198,6 +213,15 @@ export default function GrindingPage() {
           const { error } = await supabase.from('grinding_materials').update({ batch_no: m.batch_no || null, actual_qty: m.actual_qty === '' ? null : Number(m.actual_qty), added: m.added }).eq('id', m.id)
           if (error) throw error
         }
+      }
+      if (recEdit) {  // replace the output products for this record
+        const { error: delErr } = await supabase.from('grinding_outputs').delete().eq('grinding_record_id', openRec.id)
+        if (delErr) throw delErr
+        const rows = outputs.filter(o => o.item.trim()).map(o => ({
+          grinding_record_id: openRec.id, factory_code: openRec.factory_code, item: o.item.trim(),
+          batch_no: o.batch_no.trim() || null, exp_date: o.exp_date || null, qty: o.qty === '' ? null : Number(o.qty),
+        }))
+        if (rows.length) { const { error: insErr } = await supabase.from('grinding_outputs').insert(rows); if (insErr) throw insErr }
       }
       setOpenRec(null); load()
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not save') } finally { setSaving(false) }
@@ -256,8 +280,9 @@ export default function GrindingPage() {
   // Records table column filters (Excel-style multi-select)
   const grPass = (sel: Set<string> | undefined, v: string) => !sel || !sel.size || sel.has(v)
   const grDist = (get: (r: GrindingRecord) => string) => [...new Set(records.map(get))].filter(Boolean).sort()
-  const grVal = { factory: (r: GrindingRecord) => factoryName(r.factory_code), product: (r: GrindingRecord) => r.product || '—', type: (r: GrindingRecord) => r.recipe_type || '—', verified: (r: GrindingRecord) => r.verified_by || '—' }
-  const visibleRecords = records.filter(r => grPass(grF.factory, grVal.factory(r)) && grPass(grF.product, grVal.product(r)) && grPass(grF.type, grVal.type(r)) && grPass(grF.verified, grVal.verified(r)))
+  const grVal = { factory: (r: GrindingRecord) => factoryName(r.factory_code), product: (r: GrindingRecord) => r.product || '—', type: (r: GrindingRecord) => r.recipe_type || '—', grindby: (r: GrindingRecord) => r.grind_by || '—' }
+  const visibleRecords = records.filter(r => grPass(grF.factory, grVal.factory(r)) && grPass(grF.product, grVal.product(r)) && grPass(grF.type, grVal.type(r)) && grPass(grF.grindby, grVal.grindby(r)))
+  const outQty = (id: string) => (outputsByRecord[id] || []).reduce((s, o) => s + (Number(o.qty) || 0), 0)
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -299,15 +324,16 @@ export default function GrindingPage() {
             <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem]">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b sticky top-0 z-10">
-                  <tr>{['Date', ...(isHO ? ['Factory'] : []), 'Product', 'Type', 'Lots', 'Crusher B/A', 'Rework', 'Reject', 'Verified', ''].map(h => (
+                  <tr>{['Date', ...(isHO ? ['Factory'] : []), 'Product', 'Type', 'Lots', 'Machine', 'Grind by', 'Output', ''].map(h => (
                     <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
                   <tr className="border-b">
                     <th className="px-2 py-1"></th>
                     {isHO && <th className="px-2 py-1 min-w-[110px]"><MultiFilter values={grDist(grVal.factory)} selected={grF.factory || new Set()} onChange={s => setGrF(p => ({ ...p, factory: s }))} /></th>}
                     <th className="px-2 py-1 min-w-[110px]"><MultiFilter values={grDist(grVal.product)} selected={grF.product || new Set()} onChange={s => setGrF(p => ({ ...p, product: s }))} /></th>
                     <th className="px-2 py-1 min-w-[90px]"><MultiFilter values={grDist(grVal.type)} selected={grF.type || new Set()} onChange={s => setGrF(p => ({ ...p, type: s }))} /></th>
-                    <th className="px-2 py-1"></th><th className="px-2 py-1"></th><th className="px-2 py-1"></th><th className="px-2 py-1"></th>
-                    <th className="px-2 py-1 min-w-[100px]"><MultiFilter values={grDist(grVal.verified)} selected={grF.verified || new Set()} onChange={s => setGrF(p => ({ ...p, verified: s }))} /></th>
+                    <th className="px-2 py-1"></th><th className="px-2 py-1"></th>
+                    <th className="px-2 py-1 min-w-[100px]"><MultiFilter values={grDist(grVal.grindby)} selected={grF.grindby || new Set()} onChange={s => setGrF(p => ({ ...p, grindby: s }))} /></th>
+                    <th className="px-2 py-1"></th>
                     <th className="px-2 py-1"></th>
                   </tr>
                 </thead>
@@ -320,10 +346,9 @@ export default function GrindingPage() {
                       <td className="px-3 py-2">{r.product || '—'}</td>
                       <td className="px-3 py-2 capitalize">{r.recipe_type || '—'}</td>
                       <td className="px-3 py-2 text-right">{r.lots ?? '—'}</td>
-                      <td className="px-3 py-2 whitespace-nowrap">{(r.crusher_before || '—')} / {(r.crusher_after || '—')}</td>
-                      <td className="px-3 py-2 text-right">{r.qty_rework ?? '—'}</td>
-                      <td className="px-3 py-2 text-right">{r.qty_rejection ?? '—'}</td>
-                      <td className="px-3 py-2">{r.verified_by || '—'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{r.machine_id || '—'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{r.grind_by || '—'}</td>
+                      <td className="px-3 py-2 text-right">{outQty(r.id) ? Number(outQty(r.id).toFixed(3)) : '—'}</td>
                       <td className="px-3 py-2 text-right"><button onClick={() => openRecord(r)} className="text-blue-600 hover:underline">Open</button></td>
                     </tr>
                   ))}
@@ -342,10 +367,9 @@ export default function GrindingPage() {
                             <td className="px-3 py-2">{r.product || '—'}</td>
                             <td className="px-3 py-2 capitalize">{r.recipe_type || '—'}</td>
                             <td className="px-3 py-2 text-right">{r.lots ?? '—'}</td>
-                            <td className="px-3 py-2 whitespace-nowrap">{(r.crusher_before || '—')} / {(r.crusher_after || '—')}</td>
-                            <td className="px-3 py-2 text-right">{r.qty_rework ?? '—'}</td>
-                            <td className="px-3 py-2 text-right">{r.qty_rejection ?? '—'}</td>
-                            <td className="px-3 py-2">{r.verified_by || '—'}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">{r.machine_id || '—'}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">{r.grind_by || '—'}</td>
+                            <td className="px-3 py-2 text-right">{outQty(r.id) ? Number(outQty(r.id).toFixed(3)) : '—'}</td>
                             <td className="px-3 py-2 text-right"><button onClick={() => openRecord(r)} className="text-blue-600 hover:underline">Open</button></td>
                           </tr>
                         ))}
@@ -464,12 +488,49 @@ export default function GrindingPage() {
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-              {([['crusher_before', 'Crusher — before'], ['crusher_after', 'Crusher — after'], ['qty_rework', 'Qty Rework'], ['qty_rejection', 'Qty Rejection'], ['correction_action', 'Correction action'], ['prepared_by', 'Prepared by'], ['verified_by', 'Verified by'], ['remark', 'Remark']] as [string, string][]).map(([k, label]) => (
-                <div key={k}><label className="block text-sm font-medium mb-1">{label}</label>
-                  <input value={insp[k] || ''} onChange={e => setInsp(s => ({ ...s, [k]: e.target.value }))} disabled={!recEdit} className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100" /></div>
-              ))}
+            <datalist id="grind-out-items">
+              {items.map(it => <option key={it.code} value={`${it.code}${it.description ? ' — ' + it.description : ''}`} />)}
+            </datalist>
+
+            {/* Machine + who ground it */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+              <div><label className="block text-sm font-medium mb-1">Grinding machine ID</label>
+                <input value={insp.machine_id || ''} onChange={e => setInsp(s => ({ ...s, machine_id: e.target.value }))} disabled={!recEdit} placeholder="e.g. GR-01" className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100" /></div>
+              <div><label className="block text-sm font-medium mb-1">Grind by</label>
+                <input value={insp.grind_by || ''} onChange={e => setInsp(s => ({ ...s, grind_by: e.target.value }))} disabled={!recEdit} placeholder="Name" className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100" /></div>
             </div>
+
+            {/* Output products: lookup item, then batch / expiry / qty */}
+            <div className="mb-4 border rounded-lg p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-sm font-semibold">Output products</div>
+                {recEdit && <button type="button" onClick={addOutput} className="text-blue-600 hover:underline text-xs">+ Add output</button>}
+              </div>
+              {outputs.length === 0 && <p className="text-sm text-gray-400">No output added yet.</p>}
+              {outputs.length > 0 && (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-12 gap-2 text-xs text-gray-500 font-medium px-1">
+                    <div className="col-span-5">Item</div><div className="col-span-3">Batch no</div><div className="col-span-2">Expiry</div><div className="col-span-2 text-right">Qty</div>
+                  </div>
+                  {outputs.map((o, i) => (
+                    <div key={o.id || i} className="grid grid-cols-12 gap-2 items-center">
+                      <div className="col-span-5"><input list="grind-out-items" value={o.item} onChange={e => setOutput(i, 'item', e.target.value)} disabled={!recEdit} placeholder="Search code or name…" className="w-full border rounded px-2 py-1 text-sm disabled:bg-gray-100" /></div>
+                      <div className="col-span-3"><input value={o.batch_no} onChange={e => setOutput(i, 'batch_no', e.target.value)} disabled={!recEdit} placeholder="Batch no" className="w-full border rounded px-2 py-1 text-sm disabled:bg-gray-100" /></div>
+                      <div className="col-span-2"><input type="date" value={o.exp_date} onChange={e => setOutput(i, 'exp_date', e.target.value)} disabled={!recEdit} className="w-full border rounded px-2 py-1 text-sm disabled:bg-gray-100" /></div>
+                      <div className="col-span-2 flex items-center gap-1"><input type="number" value={o.qty} onChange={e => setOutput(i, 'qty', e.target.value)} disabled={!recEdit} placeholder="Qty" className="w-full border rounded px-2 py-1 text-sm text-right disabled:bg-gray-100" />
+                        {recEdit && <button type="button" onClick={() => removeOutput(i)} className="text-red-500 text-sm px-1">✕</button>}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* Internal record totals */}
+              <div className="mt-3 border-t pt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+                <span className="text-gray-500">Total input: <strong className="text-gray-800">{Number(totalInput.toFixed(3))}</strong></span>
+                <span className="text-gray-500">Total output: <strong className="text-gray-800">{Number(totalOutput.toFixed(3))}</strong></span>
+                <span className="text-gray-500">Yield: <strong className={yieldPct == null ? 'text-gray-400' : yieldPct >= 100 ? 'text-green-700' : 'text-amber-700'}>{yieldPct == null ? '—' : `${yieldPct.toFixed(1)}%`}</strong></span>
+              </div>
+            </div>
+
             <div className="flex gap-2">
               {(recEdit || recRecipeEdit) && <button onClick={saveRecord} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{saving ? 'Saving…' : 'Save'}</button>}
               <button onClick={() => setOpenRec(null)} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Close</button>
