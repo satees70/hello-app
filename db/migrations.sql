@@ -2544,6 +2544,15 @@ alter table public.material_requests add column if not exists note text;
 -- Standard "+extra for stock" requests compute the BOM here for (order + extra)
 -- so the extra ALWAYS scales the materials, no matter what the screen sends.
 -- Ad-hoc requests (note starts with 'Ad-hoc') still use the exact lines listed.
+-- Drop EVERY existing overload first (older copies declared with integer/numeric
+-- extra shadowed the fix and kept running the old logic), then create one.
+do $$
+declare r record;
+begin
+  for r in select oid::regprocedure as sig from pg_proc where proname = 'raise_material_request_ext'
+  loop execute 'drop function ' || r.sig; end loop;
+end $$;
+
 create or replace function public.raise_material_request_ext(p_batch_ids uuid[], p_items jsonb, p_extra numeric, p_note text)
  returns uuid language plpgsql security definer set search_path to 'public' as $function$
 declare
