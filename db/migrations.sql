@@ -1327,6 +1327,8 @@ begin
   -- combined total: sum of EVERY batch that shares this request (not just the linked one)
   select coalesce(sum(total_quantity), 0) into v_total from public.production_batches where material_request_id = p_request_id;
   if v_total = 0 then v_total := v_batch.total_quantity; end if;
+  -- keep any extra-for-stock the request was raised with, so a refresh doesn't wipe it
+  v_total := v_total + coalesce(v_req.extra_qty, 0);
   select id into v_parent from public.items where code = v_batch.item_code limit 1;
   delete from public.material_request_items where request_id = p_request_id;
   if v_parent is not null then
