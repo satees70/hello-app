@@ -33,6 +33,7 @@ export default function RepackingPage() {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'sent' | 'pending'>('all')
 
   // List every factory/location to pick from — the create RPC is the authority
   // on what this user may actually repack at.
@@ -206,10 +207,25 @@ export default function RepackingPage() {
         </div>
 
         {/* Existing repack orders */}
-        <h2 className="font-semibold mb-3">Repack orders</h2>
-        {orders.length === 0 && <p className="text-gray-400 text-sm">No repack orders yet.</p>}
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+          <h2 className="font-semibold">Repack orders</h2>
+          <label className="flex items-center gap-2 text-sm text-gray-500">
+            Status
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as typeof statusFilter)}
+              className="border rounded-lg px-3 py-1.5 text-sm text-gray-700">
+              <option value="all">All</option>
+              <option value="sent">Sent to production</option>
+              <option value="pending">Not sent yet</option>
+            </select>
+          </label>
+        </div>
+        {(() => {
+          const shown = orders.filter(o => statusFilter === 'all' || (statusFilter === 'sent' ? o.confirmed : !o.confirmed))
+          if (orders.length === 0) return <p className="text-gray-400 text-sm">No repack orders yet.</p>
+          if (shown.length === 0) return <p className="text-gray-400 text-sm">No orders match this status.</p>
+          return (
         <div className="space-y-3">
-          {orders.map(o => (
+          {shown.map(o => (
             <div key={o.id} className="border rounded-xl p-4 bg-white shadow-sm">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div>
@@ -238,6 +254,8 @@ export default function RepackingPage() {
             </div>
           ))}
         </div>
+          )
+        })()}
       </div>
     </>
   )
