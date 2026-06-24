@@ -153,6 +153,11 @@ export default function SalesOrdersPage() {
   const itemByCode = (c: string) => items.find(i => i.code.toLowerCase() === c.trim().toLowerCase())
   const [remapping, setRemapping] = useState(false)
 
+  // Move a confirmed line to another factory (Head Office approval)
+  const [moveLine, setMoveLine] = useState<SalesLine | null>(null)
+  const [moveTo, setMoveTo] = useState('')
+  const [moveReason, setMoveReason] = useState('')
+
   // Change-request form
   const [reqLine, setReqLine] = useState<SalesLine | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -520,6 +525,18 @@ export default function SalesOrdersPage() {
     setBulkSubmitting(false); setBulkOpen(false); setSelectedIds(new Set())
     await viewLines(linesFor); loadSummary()
   }
+  // Request to move a CONFIRMED line to another factory (Head Office approves).
+  async function submitMove() {
+    if (!moveLine || !linesFor) return
+    if (!moveTo) { setError('Pick a factory to move to.'); return }
+    if (!moveReason.trim()) { setError('Please give a reason.'); return }
+    setSubmitting(true); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('request_factory_change', { p_line_id: moveLine.id, p_to_factory: moveTo, p_reason: moveReason.trim() })
+    setSubmitting(false)
+    if (e) { setError(e.message); return }
+    setSuccess('Factory-change request sent to Head Office for approval.')
+    setMoveLine(null); setMoveTo(''); setMoveReason('')
+  }
   // Assign the packing factory directly on an open line (GCH workflow).
   async function assignFactory(line: SalesLine, fac: string) {
     if (!linesFor) return
@@ -815,6 +832,30 @@ export default function SalesOrdersPage() {
               </div>
             )}
 
+            {moveLine && (
+              <div className="bg-white rounded-xl shadow-sm border p-5 mb-4">
+                <h3 className="font-semibold mb-1">Move to another factory</h3>
+                <p className="text-gray-500 text-xs mb-4">Line: <span className="font-mono">{moveLine.item_code}</span> — {moveLine.description} · currently at <strong>{factoryName(moveLine.factory_code)}</strong>. This line is confirmed, so the move needs Head Office approval; the batch &amp; material request move with it.</p>
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Move to factory</label>
+                    <select value={moveTo} onChange={e => setMoveTo(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm">
+                      <option value="">Pick a factory…</option>
+                      {factories.filter(f => f.code && f.code !== 'HEAD_OFFICE' && f.code !== moveLine.factory_code).map(f => <option key={f.code} value={f.code}>{factoryName(f.code)}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Reason (for Head Office)</label>
+                    <input value={moveReason} onChange={e => setMoveReason(e.target.value)} placeholder="Why move it?" className="w-full border rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <button onClick={submitMove} disabled={submitting} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{submitting ? 'Sending…' : 'Send request'}</button>
+                  <button onClick={() => setMoveLine(null)} className="border px-5 py-2 rounded-lg hover:bg-gray-50 text-sm font-medium">Cancel</button>
+                </div>
+              </div>
+            )}
+
             {reqLine && (
               <div className="bg-white rounded-xl shadow-sm border p-5 mb-4">
                 <h3 className="font-semibold mb-1">{isFactoryConfirmed(reqLine.factory_code || '') ? (reqMode === 'delete' ? 'Request to delete this line' : 'Request a change') : (reqMode === 'delete' ? 'Delete this line' : 'Edit this line')}</h3>
@@ -984,7 +1025,10 @@ export default function SalesOrdersPage() {
                         <td className="px-3 py-2"><span className="font-mono">{line.location_code}</span></td>
                         <td className="px-3 py-2 min-w-[170px]">
                           {isFactoryConfirmed(line.factory_code || '')
-                            ? <span className="inline-block bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{factoryName(line.factory_code)} 🔒</span>
+                            ? <div>
+                                <span className="inline-block bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{factoryName(line.factory_code)} 🔒</span>
+                                {can(profile, 'sales', 'edit') && <button onClick={() => { setMoveLine(line); setMoveTo(''); setMoveReason(''); setError(''); setSuccess('') }} className="block text-[11px] text-blue-600 hover:underline mt-1">change factory…</button>}
+                              </div>
                             : can(profile, 'sales', 'edit')
                               ? <select value={line.factory_code || ''} onChange={e => assignFactory(line, e.target.value)} className={`border rounded px-2 py-1 text-xs bg-white ${line.factory_code ? '' : 'text-red-600 border-red-300'}`}>
                                   <option value="">⚠ choose factory…</option>

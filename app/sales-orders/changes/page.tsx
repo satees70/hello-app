@@ -86,6 +86,11 @@ interface QtyMoveReq {
   requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
 }
 
+interface FactoryChangeReq {
+  id: string; from_factory: string | null; to_factory: string; reason: string | null; status: string
+  requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
+}
+
 interface FoodLossAlert {
   id: string; factory_code: string | null; batch_no: string | null; item_code: string | null; pct: number | null; status: string
   created_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
@@ -141,6 +146,7 @@ export default function PendingChangesPage() {
   const [retEdits, setRetEdits] = useState<RetEditReq[]>([])
   const [itemChanges, setItemChanges] = useState<ItemChangeReq[]>([])
   const [soChanges, setSoChanges] = useState<SoChangeReq[]>([])
+  const [factoryChanges, setFactoryChanges] = useState<FactoryChangeReq[]>([])
   const [qtyMoves, setQtyMoves] = useState<QtyMoveReq[]>([])
   const [foodLoss, setFoodLoss] = useState<FoodLossAlert[]>([])
 
@@ -155,7 +161,7 @@ export default function PendingChangesPage() {
 
   useEffect(() => {
     if (!profile) return
-    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFoodLoss()
+    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadFoodLoss()
     // Live refresh on any change-request activity, with a poll fallback
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) supabase.realtime.setAuth(data.session.access_token)
@@ -176,7 +182,7 @@ export default function PendingChangesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mr_qty_move_requests' }, () => loadQtyMoves())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'food_loss_alerts' }, () => loadFoodLoss())
       .subscribe()
-    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves() }, 20000)
+    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges() }, 20000)
     return () => { supabase.removeChannel(channel); clearInterval(timer) }
   }, [profile])
 
@@ -338,6 +344,23 @@ export default function PendingChangesPage() {
     const { data } = await supabase.from('mr_qty_move_requests').select('*').order('created_at', { ascending: false })
     setQtyMoves((data as QtyMoveReq[]) || [])
   }
+  async function loadFactoryChanges() {
+    const { data } = await supabase.from('factory_change_requests').select('*').order('created_at', { ascending: false })
+    setFactoryChanges((data as FactoryChangeReq[]) || [])
+  }
+  async function approveFC(id: string) {
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('approve_factory_change', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Factory change approved — the order, batch and material request all moved.'); setBusyId(''); loadFactoryChanges()
+  }
+  async function rejectFC(id: string) {
+    if (!confirm('Reject this factory change? The line stays where it is.')) return
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('reject_factory_change', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Factory change rejected.'); setBusyId(''); loadFactoryChanges()
+  }
   async function approveQM(id: string) {
     setBusyId(id); setError(''); setSuccess('')
     const { error: e } = await supabase.rpc('approve_mr_qty_move', { p_id: id })
@@ -478,6 +501,7 @@ export default function PendingChangesPage() {
   const shownIC = filter === 'All' ? itemChanges : itemChanges.filter(a => a.status === filter)
   const shownSO = filter === 'All' ? soChanges : soChanges.filter(a => a.status === filter)
   const shownQM = filter === 'All' ? qtyMoves : qtyMoves.filter(a => a.status === filter)
+  const shownFC = filter === 'All' ? factoryChanges : factoryChanges.filter(a => a.status === filter)
   const shownFL = filter === 'All' ? foodLoss : foodLoss.filter(a => filter === 'Pending' ? a.status === 'Pending' : a.status !== 'Pending')
   const counts: Record<string, number> = { Pending: 0, Approved: 0, Rejected: 0 }
   requests.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1 })
@@ -1079,6 +1103,40 @@ export default function PendingChangesPage() {
                         <div className="flex gap-2">
                           <button onClick={() => approveQM(a.id)} disabled={busyId === a.id} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">Approve</button>
                           <button onClick={() => rejectQM(a.id)} disabled={busyId === a.id} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>
+                        </div>
+                      ) : <span className="text-gray-400">done</span>}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Factory changes on confirmed lines */}
+        <h2 className="text-lg font-semibold mt-8 mb-2">Factory changes</h2>
+        <p className="text-gray-500 text-sm mb-3">{isHO ? 'Approve to move a confirmed order to another factory — the batch & material request move with it.' : 'Track your requests to move a confirmed order to another factory.'}</p>
+        <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem] mb-10">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 border-b sticky top-0 z-10">
+              <tr>{['Move', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
+                <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+            </thead>
+            <tbody>
+              {shownFC.length === 0 && (<tr><td colSpan={6} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} factory changes.</td></tr>)}
+              {shownFC.map(a => (
+                <tr key={a.id} className="border-b last:border-0 align-top hover:bg-gray-50">
+                  <td className="px-3 py-2 whitespace-nowrap"><span className="text-gray-400 line-through">{a.from_factory || '—'}</span> → <strong>{a.to_factory}</strong></td>
+                  <td className="px-3 py-2 text-gray-600 min-w-[120px]">{a.reason || '—'}</td>
+                  <td className="px-3 py-2 whitespace-nowrap"><span className="block">{a.requested_by_name || '—'}</span><span className="block text-gray-400">{fmt(a.created_at)}</span></td>
+                  <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full font-medium ${STATUS_STYLES[a.status] || 'bg-gray-100 text-gray-700'}`}>{a.status}</span></td>
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-600">{a.status === 'Pending' ? '—' : (<><span className="block">{a.reviewed_by_name}</span><span className="block text-gray-400">{fmt(a.reviewed_at)}</span></>)}</td>
+                  {isHO && (
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {a.status === 'Pending' ? (
+                        <div className="flex gap-2">
+                          <button onClick={() => approveFC(a.id)} disabled={busyId === a.id} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">Approve</button>
+                          <button onClick={() => rejectFC(a.id)} disabled={busyId === a.id} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>
                         </div>
                       ) : <span className="text-gray-400">done</span>}
                     </td>

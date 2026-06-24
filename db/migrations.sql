@@ -2839,3 +2839,114 @@ create policy sol_all_view on public.sales_order_lines for select to authenticat
 
 drop policy if exists si_all_view on public.sales_imports;
 create policy si_all_view on public.sales_imports for select to authenticated using (true);
+
+-- ============================================================================
+-- 2026-06 · Change a CONFIRMED line's factory, via Head Office approval.
+-- A confirmed line is locked (its batch/material request already exist). To move
+-- it, a sales-edit user raises a request; Head Office approves, and the move is
+-- done safely as one unit: batch + material request + its lines + the sales line
+-- + the document confirmation all shift to the new factory. Refused when the
+-- batch already has received materials, or is combined with other orders.
+-- ============================================================================
+create table if not exists public.factory_change_requests (
+  id uuid primary key default gen_random_uuid(),
+  line_id uuid not null,
+  import_id uuid,
+  from_factory text,
+  to_factory text not null,
+  reason text,
+  status text not null default 'Pending',
+  requested_by uuid,
+  requested_by_name text,
+  reviewed_by uuid,
+  reviewed_by_name text,
+  reviewed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists fcr_status on public.factory_change_requests (status, created_at);
+grant select, insert on public.factory_change_requests to authenticated;
+grant all on public.factory_change_requests to service_role;
+alter table public.factory_change_requests enable row level security;
+drop policy if exists fcr_read on public.factory_change_requests;
+create policy fcr_read on public.factory_change_requests for select
+  using (my_factory_code() = 'HEAD_OFFICE' or from_factory = any (my_factory_codes()) or to_factory = any (my_factory_codes()) or requested_by = auth.uid());
+drop policy if exists fcr_insert on public.factory_change_requests;
+create policy fcr_insert on public.factory_change_requests for insert
+  with check (requested_by = auth.uid() and has_perm('sales', 'edit'));
+
+create or replace function public.request_factory_change(p_line_id uuid, p_to_factory text, p_reason text)
+ returns uuid language plpgsql security definer set search_path to 'public' as $function$
+declare v_line public.sales_order_lines; v_id uuid; v_name text;
+begin
+  if not has_perm('sales', 'edit') then raise exception 'Not allowed'; end if;
+  if coalesce(btrim(p_to_factory), '') = '' then raise exception 'Pick a factory to move to'; end if;
+  select * into v_line from public.sales_order_lines where id = p_line_id;
+  if not found then raise exception 'Line not found'; end if;
+  if p_to_factory = coalesce(v_line.factory_code, '') then raise exception 'That is already the line''s factory'; end if;
+  if exists (select 1 from public.factory_change_requests where line_id = p_line_id and status = 'Pending') then
+    raise exception 'A factory-change request for this line is already waiting for Head Office'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  insert into public.factory_change_requests (line_id, import_id, from_factory, to_factory, reason, requested_by, requested_by_name)
+  values (p_line_id, v_line.import_id, v_line.factory_code, p_to_factory, nullif(btrim(p_reason), ''), auth.uid(), v_name)
+  returning id into v_id;
+  return v_id;
+end; $function$;
+grant execute on function public.request_factory_change(uuid, text, text) to authenticated;
+
+create or replace function public.approve_factory_change(p_id uuid)
+ returns void language plpgsql security definer set search_path to 'public' as $function$
+declare v_req public.factory_change_requests; v_line public.sales_order_lines; v_to text; v_name text; b record; v_recv numeric; v_cnt int;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can approve'; end if;
+  select * into v_req from public.factory_change_requests where id = p_id and status = 'Pending';
+  if not found then raise exception 'Not a pending request'; end if;
+  select * into v_line from public.sales_order_lines where id = v_req.line_id;
+  if not found then raise exception 'That line no longer exists'; end if;
+  v_to := v_req.to_factory;
+
+  -- Move every batch that holds this line (so + item) to the new factory.
+  for b in
+    select pb.* from public.production_batches pb
+     where pb.item_code = v_line.item_code
+       and exists (select 1 from public.production_batch_items pbi where pbi.batch_id = pb.id and pbi.so_number = v_line.so_number)
+  loop
+    select count(*) into v_cnt from public.production_batch_items where batch_id = b.id;
+    if v_cnt > 1 then raise exception 'Batch % is combined with other orders — un-combine it first, then approve', b.batch_no; end if;
+    if b.material_request_id is not null then
+      select coalesce(sum(received_qty), 0) into v_recv from public.material_request_items where request_id = b.material_request_id;
+      if v_recv > 0 then raise exception 'Batch % already has received materials — move it manually', b.batch_no; end if;
+      update public.material_requests set factory_code = v_to where id = b.material_request_id;
+      update public.material_request_items set factory_code = v_to where request_id = b.material_request_id;
+    end if;
+    update public.production_batches set factory_code = v_to where id = b.id;
+    if b.material_request_id is not null then perform public.refresh_one_open_request(b.material_request_id); end if;
+  end loop;
+
+  -- Move the sales line itself.
+  update public.sales_order_lines set factory_code = v_to where id = v_req.line_id;
+
+  -- Mark the destination confirmed for this document (so it isn't offered for re-confirm = duplicate batch).
+  select full_name into v_name from public.profiles where id = auth.uid();
+  insert into public.document_confirmations (import_id, factory_code, confirmed_by, confirmed_by_name, confirmed_at)
+  select v_line.import_id, v_to, auth.uid(), v_name, now()
+   where not exists (select 1 from public.document_confirmations dc where dc.import_id = v_line.import_id and dc.factory_code = v_to);
+
+  -- Drop the old factory's confirmation if no other line in this document still uses it.
+  if coalesce(v_req.from_factory, '') <> '' and not exists (
+       select 1 from public.sales_order_lines sol where sol.import_id = v_line.import_id and sol.factory_code = v_req.from_factory) then
+    delete from public.document_confirmations where import_id = v_line.import_id and factory_code = v_req.from_factory;
+  end if;
+
+  update public.factory_change_requests set status = 'Approved', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id;
+end; $function$;
+grant execute on function public.approve_factory_change(uuid) to authenticated;
+
+create or replace function public.reject_factory_change(p_id uuid)
+ returns void language plpgsql security definer set search_path to 'public' as $function$
+declare v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can reject'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.factory_change_requests set status = 'Rejected', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id and status = 'Pending';
+end; $function$;
+grant execute on function public.reject_factory_change(uuid) to authenticated;
