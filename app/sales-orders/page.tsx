@@ -306,6 +306,8 @@ export default function SalesOrdersPage() {
   }
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
+  // The user's own factories — used to float their own location's orders to the top.
+  const myFacs = new Set(isHO ? [] : (profile?.factory_codes?.length ? profile.factory_codes : (profile?.factory_code ? [profile.factory_code] : [])))
   // Regular users may only change Location & Delivery Date; Head Office may change any field.
   const editableFields = isHO ? FIELDS : FIELDS.filter(f => f.value === 'location_code' || f.value === 'delivery_date')
   const factoryName = (code: string) => factories.find(f => f.code === code)?.name || code
@@ -452,7 +454,7 @@ export default function SalesOrdersPage() {
     for (const c of COLS) { const sel = colFilters[c.key]; if (sel && sel.size > 0 && !sel.has(c.get(l))) return false }
     const ss = colFilters.status; if (ss && ss.size > 0 && !ss.has(lineStatuses[l.id] || '')) return false
     return true
-  })
+  }).sort((a, b) => (myFacs.has(a.factory_code) ? 0 : 1) - (myFacs.has(b.factory_code) ? 0 : 1))  // own location first
   // Distinct locations in this document, for the per-location tabs
   const docLocations = [...new Set(lines.map(l => l.location_code || '').filter(Boolean))].sort()
   const locFactory = (loc: string) => lines.find(l => (l.location_code || '') === loc)?.factory_code || ''
@@ -699,11 +701,16 @@ export default function SalesOrdersPage() {
     return []
   }
   const docPass = (sel: Set<string> | undefined, vals: string[]) => !sel || sel.size === 0 || vals.some(v => sel.has(v))
+  // A document is "mine" if its upload factory or any of its lines' factories is one of mine.
+  const docMine = (d: SalesImport) => myFacs.size > 0 && (
+    (!!d.factory_code && myFacs.has(d.factory_code)) ||
+    Object.values(docSummary[d.id]?.locFactory || {}).some(f => myFacs.has(f)))
   const shownImports = imports.filter(d =>
     (!docSearch || d.file_name.toLowerCase().includes(docSearch.toLowerCase()) || (docLineText[d.id] || '').includes(docSearch.toLowerCase())) &&
     docPass(docFilters.status, [d.status]) &&
     docPass(docFilters.locations, docSummary[d.id]?.locations || []) &&
     docPass(docFilters.issues, docIssueTags(d)))
+    .sort((a, b) => (docMine(a) ? 0 : 1) - (docMine(b) ? 0 : 1))  // my location's documents first
   const anyDocFilter = ['status', 'locations', 'issues'].some(k => docFilters[k]?.size)
 
   return (

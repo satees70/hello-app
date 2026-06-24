@@ -2819,3 +2819,16 @@ begin
   update public.sales_order_lines set factory_code = nullif(btrim(p_factory), '') where id = p_line_id;
 end; $function$;
 grant execute on function public.assign_packing_factory(uuid, text) to authenticated;
+
+-- ============================================================================
+-- 2026-06 · Sales orders are viewable by EVERYONE (all locations), regardless
+-- of factory access. Factory access still controls EDIT and the other modules;
+-- it just no longer hides sales orders. Customer-restricted users (e.g. sem118
+-- = GCH only) are unaffected — the restrictive customer policy still limits them.
+-- (Supersedes the GCH-only view policies, which become redundant but harmless.)
+-- ============================================================================
+drop policy if exists sol_all_view on public.sales_order_lines;
+create policy sol_all_view on public.sales_order_lines for select to authenticated using (true);
+
+drop policy if exists si_all_view on public.sales_imports;
+create policy si_all_view on public.sales_imports for select to authenticated using (true);
