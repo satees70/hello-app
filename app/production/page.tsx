@@ -297,7 +297,7 @@ export default function ProductionPage() {
   const factoriesInView = [...new Set(shown.map(b => b.factory_code))].sort()
   // Show the 🏭 location grouping whenever the user is looking at more than one factory
   const showFacHeaders = isHO || factoriesInView.length > 1
-  const singleTarget = (b: Batch): MatTarget => ({ label: b.batch_no, item_code: b.item_code, factory_code: b.factory_code, total: b.total_quantity, batchIds: [b.id], mode: b.run_mode || 'auto' })
+  const singleTarget = (b: Batch): MatTarget => ({ label: b.batch_no, item_code: b.item_code, factory_code: b.factory_code, total: b.total_quantity, batchIds: [b.id], mode: b.run_mode || 'manual' })
 
   // Build display units for a factory's batches when Combine is on
   function buildUnits(fb: Batch[]) {
@@ -409,7 +409,7 @@ export default function ProductionPage() {
                           const total = members.reduce((s, m) => s + m.total_quantity, 0)
                           const dates = [...new Set(members.map(m => m.delivery_date))]
                           const dateLabel = dates.length === 1 ? dates[0] : 'Multiple'
-                          const target: MatTarget = { label: `${item} (combined ${members.length})`, item_code: item, factory_code: fc, total, batchIds: members.map(m => m.id), mode: members[0].run_mode || 'auto' }
+                          const target: MatTarget = { label: `${item} (combined ${members.length})`, item_code: item, factory_code: fc, total, batchIds: members.map(m => m.id), mode: members[0].run_mode || 'manual' }
                           return (
                             <Fragment key={key}>
                               <tr className={`border-b last:border-0 hover:bg-amber-50/40 cursor-pointer ${expanded.has(key) ? 'bg-amber-50/60' : 'bg-amber-50/20'}`} onClick={() => toggleRow(key)}>
