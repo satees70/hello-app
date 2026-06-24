@@ -308,8 +308,9 @@ export default function SalesOrdersPage() {
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
   // The user's own factories — used to float their own location's orders to the top.
   const myFacs = new Set(isHO ? [] : (profile?.factory_codes?.length ? profile.factory_codes : (profile?.factory_code ? [profile.factory_code] : [])))
-  // Regular users may only change Location & Delivery Date; Head Office may change any field.
-  const editableFields = isHO ? FIELDS : FIELDS.filter(f => f.value === 'location_code' || f.value === 'delivery_date')
+  // Regular users set the Factory directly on the line (dropdown in the table) and
+  // may change only the Delivery Date here; Head Office may change any field.
+  const editableFields = isHO ? FIELDS : FIELDS.filter(f => f.value === 'delivery_date')
   const factoryName = (code: string) => factories.find(f => f.code === code)?.name || code
 
   async function handleUpload(e: React.FormEvent) {
@@ -982,22 +983,22 @@ export default function SalesOrdersPage() {
                         <td className="px-3 py-2 whitespace-nowrap">{line.delivery_date}</td>
                         <td className="px-3 py-2"><span className="font-mono">{line.location_code}</span></td>
                         <td className="px-3 py-2 min-w-[170px]">
-                          {line.factory_code
-                            ? <span className="inline-block bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{factoryName(line.factory_code)}</span>
+                          {isFactoryConfirmed(line.factory_code || '')
+                            ? <span className="inline-block bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{factoryName(line.factory_code)} 🔒</span>
                             : can(profile, 'sales', 'edit')
-                              ? <select value="" onChange={e => assignFactory(line, e.target.value)} className="border rounded px-2 py-1 text-xs bg-white">
-                                  <option value="">⚠ Open — choose packer…</option>
+                              ? <select value={line.factory_code || ''} onChange={e => assignFactory(line, e.target.value)} className={`border rounded px-2 py-1 text-xs bg-white ${line.factory_code ? '' : 'text-red-600 border-red-300'}`}>
+                                  <option value="">⚠ choose factory…</option>
                                   {factories.filter(f => f.code && f.code !== 'HEAD_OFFICE').map(f => {
                                     const producing = prodFacByItem[line.item_code]?.has(f.code)
                                     const usedBefore = assignedFacByItem[line.item_code]?.has(f.code)
                                     return <option key={f.code} value={f.code}>{factoryName(f.code)}{producing ? ' • producing' : usedBefore ? ' • used before' : ''}</option>
                                   })}
                                 </select>
-                              : <span className="text-red-600">⚠ Open</span>}
-                          {!line.factory_code && prodFacByItem[line.item_code]?.size ? (
+                              : (line.factory_code ? <span className="inline-block bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{factoryName(line.factory_code)}</span> : <span className="text-red-600">⚠ not set</span>)}
+                          {!isFactoryConfirmed(line.factory_code || '') && prodFacByItem[line.item_code]?.size ? (
                             <div className="text-[11px] text-green-700 mt-0.5">In production at: {[...prodFacByItem[line.item_code]].map(factoryName).join(', ')}</div>
                           ) : null}
-                          {!line.factory_code && [...(assignedFacByItem[line.item_code] || [])].filter(c => !prodFacByItem[line.item_code]?.has(c)).length ? (
+                          {!isFactoryConfirmed(line.factory_code || '') && [...(assignedFacByItem[line.item_code] || [])].filter(c => !prodFacByItem[line.item_code]?.has(c)).length ? (
                             <div className="text-[11px] text-gray-500 mt-0.5">Packed before at: {[...(assignedFacByItem[line.item_code] || [])].filter(c => !prodFacByItem[line.item_code]?.has(c)).map(factoryName).join(', ')}</div>
                           ) : null}
                         </td>

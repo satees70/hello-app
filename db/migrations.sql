@@ -2816,11 +2816,8 @@ begin
   select * into v_line from public.sales_order_lines where id = p_line_id;
   if not found then raise exception 'Line not found'; end if;
   if not has_perm('sales', 'edit') then raise exception 'Not allowed'; end if;
-  -- May change while open, or when the line already belongs to one of my factories.
-  if my_factory_code() <> 'HEAD_OFFICE'
-     and coalesce(v_line.factory_code, '') <> ''
-     and v_line.factory_code <> all(my_factory_codes())
-  then raise exception 'Not allowed for this factory'; end if;
+  -- Sales orders are shared: any sales-edit user may set the factory on an
+  -- unconfirmed line, regardless of its current factory.
   -- Once the current factory has confirmed the document, it must go through approval.
   if coalesce(v_line.factory_code, '') <> '' and exists (
        select 1 from public.document_confirmations dc
