@@ -2573,3 +2573,40 @@ begin
   return v_req;
 end; $function$;
 grant execute on function public.raise_material_request_custom(uuid[], jsonb) to authenticated;
+
+-- ============================================================================
+-- 2026-06 · Request extra materials to run stock (beyond the order). The extra
+-- is recorded on the request so the next order can be told stock was requested.
+-- ============================================================================
+alter table public.material_requests add column if not exists extra_qty numeric not null default 0;
+alter table public.material_requests add column if not exists note text;
+
+create or replace function public.raise_material_request_ext(p_batch_ids uuid[], p_items jsonb, p_extra numeric, p_note text)
+ returns uuid language plpgsql security definer set search_path to 'public' as $function$
+declare v_item text; v_factory text; v_req uuid; v_no text; r jsonb; v_it public.items; v_qty numeric; v_count int := 0;
+begin
+  select item_code, factory_code into v_item, v_factory from public.production_batches where id = p_batch_ids[1];
+  if v_item is null then raise exception 'Batch not found'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and v_factory <> all(my_factory_codes()) then raise exception 'Not allowed for this factory'; end if;
+  if exists (select 1 from public.production_batches where id = any(p_batch_ids)
+             and (item_code <> v_item or factory_code <> v_factory or material_request_id is not null)) then
+    raise exception 'All batches must be the same item & factory and not already requested';
+  end if;
+  v_no := 'MR-' || lpad(nextval('public.material_request_seq')::text, 5, '0');
+  insert into public.material_requests (request_no, batch_id, factory_code, status, extra_qty, note)
+  values (v_no, p_batch_ids[1], v_factory, 'Open', coalesce(p_extra, 0), p_note) returning id into v_req;
+  for r in select * from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) loop
+    v_qty := coalesce((r->>'qty')::numeric, 0);
+    if v_qty <= 0 then continue; end if;
+    select * into v_it from public.items where code = r->>'code' limit 1;
+    insert into public.material_request_items
+      (request_id, item_id, item_code, description, unit, required_qty, stock_qty, shortfall_qty, requested_qty, received_qty, factory_code)
+    values (v_req, v_it.id, coalesce(v_it.code, r->>'code'), coalesce(v_it.description, r->>'description'),
+            coalesce(v_it.unit, r->>'unit'), v_qty, 0, v_qty, v_qty, 0, v_factory);
+    v_count := v_count + 1;
+  end loop;
+  if v_count = 0 then delete from public.material_requests where id = v_req; raise exception 'Add at least one material with a quantity'; end if;
+  update public.production_batches set status = 'Requested', material_request_id = v_req where id = any(p_batch_ids);
+  return v_req;
+end; $function$;
+grant execute on function public.raise_material_request_ext(uuid[], jsonb, numeric, text) to authenticated;

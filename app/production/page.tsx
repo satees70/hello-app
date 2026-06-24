@@ -80,6 +80,8 @@ export default function ProductionPage() {
   const [customRows, setCustomRows] = useState<{ code: string; description: string; unit: string; qty: string }[]>([])
   const [addMat, setAddMat] = useState<{ code: string; description: string; unit: string } | null>(null)
   const [addMatQty, setAddMatQty] = useState('')
+  const [extra, setExtra] = useState('')   // extra units to make for stock (beyond the order)
+  const [stockReqs, setStockReqs] = useState<{ id: string; request_no: string; pick_run_no: string | null; extra_qty: number; status: string; created_at: string; batch_id: string; production_batches: { item_code: string; factory_code: string } | null }[]>([])
   const [combineOn, setCombineOn] = useState(true)
   const [sortBy, setSortBy] = useState<'due_asc' | 'due_desc' | 'batch'>('due_asc')
   const [consumption, setConsumption] = useState<Record<string, ConsRow[]>>({}) // batch id -> consumed lots
@@ -103,6 +105,11 @@ export default function ProductionPage() {
     const sm: Record<string, number> = {}
     ;(st || []).forEach(r => { sm[`${r.item_id}|${r.factory_code}`] = Number(r.quantity) })
     setStock(sm)
+    // Open requests that included extra-for-stock — to warn before requesting again
+    const { data: sr } = await supabase.from('material_requests')
+      .select('id, request_no, pick_run_no, extra_qty, status, created_at, batch_id, production_batches!batch_id(item_code, factory_code)')
+      .gt('extra_qty', 0).in('status', ['Open', 'Partially Received'])
+    setStockReqs((sr as unknown as typeof stockReqs) || [])
   }
 
   const factoryName = (code: string) => factories.find(f => f.code === code)?.name || code || '—'
@@ -187,7 +194,20 @@ export default function ProductionPage() {
     await loadAll()
   }
 
-  function closeMatModal() { setSelected(null); setAdhoc(false); setCustomRows([]); setAddMat(null); setAddMatQty('') }
+  function closeMatModal() { setSelected(null); setAdhoc(false); setCustomRows([]); setAddMat(null); setAddMatQty(''); setExtra('') }
+  // Raise a request from explicit lines, recording any extra-for-stock + a note
+  async function raiseExt(t: MatTarget, lines: { code: string; description: string; unit: string; qty: number }[], extraQty: number, note: string | null) {
+    if (!canEditFac(t.factory_code)) { setError("You have view-only access at this factory."); return }
+    const items = lines.filter(i => i.code && i.qty > 0)
+    if (items.length === 0) { setError('Add at least one material with a quantity.'); return }
+    setRaising(true); setError(''); setSuccess('')
+    const { error: expErr } = await supabase.from('production_batches').update({ run_mode: t.mode }).in('id', t.batchIds)
+    if (expErr) { setError(expErr.message); setRaising(false); return }
+    const { error: rpcErr } = await supabase.rpc('raise_material_request_ext', { p_batch_ids: t.batchIds, p_items: items, p_extra: extraQty, p_note: note })
+    if (rpcErr) { setError(rpcErr.message); setRaising(false); return }
+    setSuccess(`Material request raised for ${t.label}${extraQty > 0 ? ` (+${extraQty} extra for stock)` : ''}.`)
+    setRaising(false); closeMatModal(); await loadAll()
+  }
   function addCustomRow() {
     if (!addMat) { setError('Pick a material to add.'); return }
     const q = Number(addMatQty)
@@ -197,21 +217,6 @@ export default function ProductionPage() {
     setAddMat(null); setAddMatQty('')
   }
   // Raise with the (possibly edited) ad-hoc material lines for this order
-  async function raiseCustom(t: MatTarget) {
-    if (!canEditFac(t.factory_code)) { setError("You have view-only access at this factory."); return }
-    const items = customRows.map(r => ({ code: r.code, description: r.description, unit: r.unit, qty: Number(r.qty || 0) })).filter(i => i.code && i.qty > 0)
-    if (items.length === 0) { setError('Add at least one material with a quantity.'); return }
-    setRaising(true); setError(''); setSuccess('')
-    const { error: expErr } = await supabase.from('production_batches').update({ run_mode: t.mode }).in('id', t.batchIds)
-    if (expErr) { setError(expErr.message); setRaising(false); return }
-    const { error: rpcErr } = await supabase.rpc('raise_material_request_custom', { p_batch_ids: t.batchIds, p_items: items })
-    if (rpcErr) { setError(rpcErr.message); setRaising(false); return }
-    const sentBatches = t.batchIds.map(id => batches.find(b => b.id === id)?.batch_no || id).join(' + ')
-    setSuccess(`Ad-hoc material request raised for ${t.label} — ${items.length} material(s); batch(es): ${sentBatches}.`)
-    setRaising(false); setSelected(null); setAdhoc(false); setCustomRows([])
-    await loadAll()
-  }
-
   const toggleRow = (id: string) => setExpanded(prev => {
     const n = new Set(prev); const had = n.has(id); had ? n.delete(id) : n.add(id)
     if (!had && !id.startsWith('combo:') && !consumption[id]) loadConsumption(id) // load consumed batches on expand
@@ -282,9 +287,12 @@ export default function ProductionPage() {
   const counts: Record<string, number> = { Planned: 0, Requested: 0, 'In Progress': 0, Completed: 0 }
   batches.forEach(b => { const st = derivedStatus(b); counts[st] = (counts[st] || 0) + 1 })
 
-  const exploded = selected ? explode(selected.item_code, selected.factory_code, selected.total, selected.mode) : null
+  const extraN = Math.max(0, Number(extra) || 0)
+  const exploded = selected ? explode(selected.item_code, selected.factory_code, selected.total + extraN, selected.mode) : null
   const totalShortfall = exploded ? exploded.rows.reduce((s, r) => s + r.shortfall, 0) : 0
   const hasRequest = selected ? selected.batchIds.some(id => batches.find(b => b.id === id)?.material_request_id) : false
+  // Prior open requests that already included extra stock for this item — warn before double-requesting
+  const priorStock = selected ? stockReqs.filter(r => r.production_batches?.item_code === selected.item_code && r.production_batches?.factory_code === selected.factory_code && !selected.batchIds.includes(r.batch_id)) : []
 
   // Sort comparator for batches within a factory
   const cmp = (a: Batch, b: Batch) => {
@@ -577,6 +585,21 @@ export default function ProductionPage() {
               <span className="text-gray-400 text-xs">decides which materials are needed (auto = roll, manual = pieces)</span>
             </div>
 
+            {!hasRequest && (
+              <div className="flex flex-wrap items-center gap-2 text-sm mb-3">
+                <span className="font-medium text-gray-700">Extra to make for stock:</span>
+                <input type="number" min="0" step="any" value={extra} onChange={e => setExtra(e.target.value)} placeholder="0" className="border rounded px-2 py-1 w-28 text-right" />
+                <span className="text-gray-400 text-xs">units on top of the order ({selected.total}) — materials below cover {selected.total + extraN} total</span>
+              </div>
+            )}
+
+            {priorStock.length > 0 && (
+              <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 mb-3 text-sm text-amber-800">
+                ⚠ Materials were already requested for stock for <strong>{selected.item_code}</strong>:
+                {priorStock.map(r => <span key={r.id}> {r.pick_run_no || r.request_no} (+{r.extra_qty} extra, {r.status})</span>)}. You may not need to request again.
+              </div>
+            )}
+
             <>
                 {!hasRequest && (
                   <label className="inline-flex items-center gap-2 text-sm mb-2">
@@ -655,9 +678,13 @@ export default function ProductionPage() {
                             : <span className="text-green-600">Enough stock on hand — no shortfall.</span>}
                     </div>
                     <div className="flex items-end gap-3">
-                      <button onClick={() => adhoc ? raiseCustom(selected) : raiseTarget(selected)} disabled={raising || hasRequest || (adhoc ? customRows.filter(r => Number(r.qty) > 0).length === 0 : totalShortfall <= 0)}
+                      <button onClick={() => {
+                        if (adhoc) raiseExt(selected, customRows.map(r => ({ code: r.code, description: r.description, unit: r.unit, qty: Number(r.qty) })), extraN, extraN > 0 ? `Ad-hoc · +${extraN} for stock` : 'Ad-hoc')
+                        else if (extraN > 0) raiseExt(selected, exploded.rows.map(r => ({ code: r.code, description: r.description, unit: r.unit, qty: r.shortfall > 0 ? r.requested : 0 })), extraN, `+${extraN} extra for stock`)
+                        else raiseTarget(selected)
+                      }} disabled={raising || hasRequest || (adhoc ? customRows.filter(r => Number(r.qty) > 0).length === 0 : totalShortfall <= 0)}
                         className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
-                        {raising ? 'Raising…' : adhoc ? 'Raise ad-hoc request' : 'Raise Material Request'}
+                        {raising ? 'Raising…' : adhoc ? 'Raise ad-hoc request' : extraN > 0 ? 'Raise request (+ stock)' : 'Raise Material Request'}
                       </button>
                     </div>
                   </div>
