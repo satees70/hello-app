@@ -157,6 +157,9 @@ export default function SalesOrdersPage() {
   const [moveLine, setMoveLine] = useState<SalesLine | null>(null)
   const [moveTo, setMoveTo] = useState('')
   const [moveReason, setMoveReason] = useState('')
+  const [transferOn, setTransferOn] = useState(false)
+  const [transferMats, setTransferMats] = useState<{ code: string; description: string; unit: string; received: number; qty: string; pick: boolean }[]>([])
+  const [transferLoading, setTransferLoading] = useState(false)
 
   // Change-request form
   const [reqLine, setReqLine] = useState<SalesLine | null>(null)
@@ -525,17 +528,40 @@ export default function SalesOrdersPage() {
     setBulkSubmitting(false); setBulkOpen(false); setSelectedIds(new Set())
     await viewLines(linesFor); loadSummary()
   }
+  // Load the order's materials (its material-request lines) so the requester can pick what to transfer.
+  async function loadTransferMats(line: SalesLine) {
+    setTransferLoading(true)
+    const { data: bi } = await supabase.from('production_batch_items').select('batch_id').eq('so_number', line.so_number || '')
+    const ids = [...new Set((bi || []).map(x => x.batch_id))]
+    let mats: typeof transferMats = []
+    if (ids.length) {
+      const { data: bs } = await supabase.from('production_batches').select('material_request_id').in('id', ids).eq('item_code', line.item_code)
+      const mrId = (bs || []).map(b => b.material_request_id).filter(Boolean)[0]
+      if (mrId) {
+        const { data: mri } = await supabase.from('material_request_items').select('item_code, description, unit, received_qty, requested_qty').eq('request_id', mrId)
+        mats = (mri || []).map(m => { const r = Number(m.received_qty || 0); return { code: m.item_code, description: m.description || '', unit: m.unit || '', received: r, qty: String(r > 0 ? r : (m.requested_qty || 0)), pick: r > 0 } })
+      }
+    }
+    setTransferMats(mats); setTransferLoading(false)
+  }
+  function toggleTransfer(on: boolean) { setTransferOn(on); if (on && moveLine && transferMats.length === 0) loadTransferMats(moveLine) }
+
   // Request to move a CONFIRMED line to another factory (Head Office approves).
   async function submitMove() {
     if (!moveLine || !linesFor) return
     if (!moveTo) { setError('Pick a factory to move to.'); return }
     if (!moveReason.trim()) { setError('Please give a reason.'); return }
+    const picked = transferOn ? transferMats.filter(m => m.pick && Number(m.qty) > 0).map(m => ({ code: m.code, description: m.description, unit: m.unit, qty: Number(m.qty) })) : []
+    if (transferOn && picked.length === 0) { setError('Tick at least one material to transfer (or untick "transfer materials").'); return }
     setSubmitting(true); setError(''); setSuccess('')
-    const { error: e } = await supabase.rpc('request_factory_change', { p_line_id: moveLine.id, p_to_factory: moveTo, p_reason: moveReason.trim() })
+    const { error: e } = await supabase.rpc('request_factory_change', {
+      p_line_id: moveLine.id, p_to_factory: moveTo, p_reason: moveReason.trim(),
+      p_transfer: transferOn, p_items: picked,
+    })
     setSubmitting(false)
     if (e) { setError(e.message); return }
     setSuccess('Factory-change request sent to Head Office for approval.')
-    setMoveLine(null); setMoveTo(''); setMoveReason('')
+    setMoveLine(null); setMoveTo(''); setMoveReason(''); setTransferOn(false); setTransferMats([])
   }
   // Assign the packing factory directly on an open line (GCH workflow).
   async function assignFactory(line: SalesLine, fac: string) {
@@ -849,6 +875,31 @@ export default function SalesOrdersPage() {
                     <input value={moveReason} onChange={e => setMoveReason(e.target.value)} placeholder="Why move it?" className="w-full border rounded-lg px-3 py-2 text-sm" />
                   </div>
                 </div>
+                <label className="inline-flex items-center gap-2 text-sm mt-4">
+                  <input type="checkbox" checked={transferOn} onChange={e => toggleTransfer(e.target.checked)} className="h-4 w-4" />
+                  Also transfer the materials to {moveTo ? factoryName(moveTo) : 'the new factory'} (both factories confirm; stock moves on receipt)
+                </label>
+                {transferOn && (
+                  <div className="mt-2 border rounded-lg p-3 bg-gray-50">
+                    {transferLoading ? <p className="text-sm text-gray-400">Loading materials…</p>
+                      : transferMats.length === 0 ? <p className="text-sm text-gray-400">No materials found for this order to transfer.</p> : (
+                      <div className="space-y-1">
+                        <div className="grid grid-cols-12 gap-2 text-xs text-gray-500 font-medium px-1">
+                          <div className="col-span-1"></div><div className="col-span-6">Material</div><div className="col-span-2 text-right">In stock here</div><div className="col-span-3 text-right">Transfer qty</div>
+                        </div>
+                        {transferMats.map((m, i) => (
+                          <div key={i} className="grid grid-cols-12 gap-2 items-center text-sm">
+                            <div className="col-span-1"><input type="checkbox" checked={m.pick} onChange={e => setTransferMats(p => p.map((x, j) => j === i ? { ...x, pick: e.target.checked } : x))} className="h-4 w-4" /></div>
+                            <div className="col-span-6"><span className="font-mono">{m.code}</span> <span className="text-gray-500 text-xs">{m.description}</span></div>
+                            <div className="col-span-2 text-right text-gray-600">{Number(m.received.toFixed(3))} {m.unit}</div>
+                            <div className="col-span-3"><input type="number" value={m.qty} disabled={!m.pick} onChange={e => setTransferMats(p => p.map((x, j) => j === i ? { ...x, qty: e.target.value } : x))} className="w-full border rounded px-2 py-1 text-sm text-right disabled:bg-gray-100" /></div>
+                          </div>
+                        ))}
+                        <p className="text-[11px] text-gray-400 mt-1">Defaults to what was received here. Adjust if you&apos;re only sending part.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="flex gap-2 mt-4">
                   <button onClick={submitMove} disabled={submitting} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{submitting ? 'Sending…' : 'Send request'}</button>
                   <button onClick={() => setMoveLine(null)} className="border px-5 py-2 rounded-lg hover:bg-gray-50 text-sm font-medium">Cancel</button>
@@ -1027,7 +1078,7 @@ export default function SalesOrdersPage() {
                           {isFactoryConfirmed(line.factory_code || '')
                             ? <div>
                                 <span className="inline-block bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{factoryName(line.factory_code)} 🔒</span>
-                                {can(profile, 'sales', 'edit') && <button onClick={() => { setMoveLine(line); setMoveTo(''); setMoveReason(''); setError(''); setSuccess('') }} className="block text-[11px] text-blue-600 hover:underline mt-1">change factory…</button>}
+                                {can(profile, 'sales', 'edit') && <button onClick={() => { setMoveLine(line); setMoveTo(''); setMoveReason(''); setTransferOn(false); setTransferMats([]); setError(''); setSuccess('') }} className="block text-[11px] text-blue-600 hover:underline mt-1">change factory…</button>}
                               </div>
                             : can(profile, 'sales', 'edit')
                               ? <select value={line.factory_code || ''} onChange={e => assignFactory(line, e.target.value)} className={`border rounded px-2 py-1 text-xs bg-white ${line.factory_code ? '' : 'text-red-600 border-red-300'}`}>

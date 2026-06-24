@@ -209,6 +209,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/material-requests', label: 'Material Requests', module: 'material_requests' },
       { href: '/labels', label: 'Labels', module: 'material_requests' },
       { href: '/incoming', label: 'Goods Received', module: 'goods_received' },
+      { href: '/transfers', label: 'Material Transfers', module: 'material_requests' },
     ] },
     { header: 'Production', items: [
       { href: '/production', label: 'Order Board', module: 'order_board' },

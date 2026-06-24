@@ -2914,7 +2914,10 @@ begin
     if v_cnt > 1 then raise exception 'Batch % is combined with other orders — un-combine it first, then approve', b.batch_no; end if;
     if b.material_request_id is not null then
       select coalesce(sum(received_qty), 0) into v_recv from public.material_request_items where request_id = b.material_request_id;
-      if v_recv > 0 then raise exception 'Batch % already has received materials — move it manually', b.batch_no; end if;
+      -- If materials were already received, only allow the move when the requester
+      -- asked to transfer them (the transfer note + receipt handle the physical stock).
+      if v_recv > 0 and not coalesce(v_req.transfer, false) then
+        raise exception 'Batch % already has received materials — tick "transfer materials" on the request, or move it manually', b.batch_no; end if;
       update public.material_requests set factory_code = v_to where id = b.material_request_id;
       update public.material_request_items set factory_code = v_to where request_id = b.material_request_id;
     end if;
@@ -2924,6 +2927,21 @@ begin
 
   -- Move the sales line itself.
   update public.sales_order_lines set factory_code = v_to where id = v_req.line_id;
+
+  -- If a material transfer was requested, create the transfer note (both factories confirm it).
+  if coalesce(v_req.transfer, false) and v_req.transfer_items is not null and jsonb_array_length(v_req.transfer_items) > 0 then
+    declare v_tr uuid; r jsonb;
+    begin
+      insert into public.material_transfers (from_factory, to_factory, line_id, import_id, reason, created_by, created_by_name)
+      values (v_req.from_factory, v_to, v_req.line_id, v_line.import_id, 'Factory change of ' || v_line.item_code, auth.uid(), v_name)
+      returning id into v_tr;
+      for r in select * from jsonb_array_elements(v_req.transfer_items) loop
+        if coalesce((r->>'qty')::numeric, 0) <= 0 then continue; end if;
+        insert into public.material_transfer_items (transfer_id, item_code, description, unit, qty)
+        values (v_tr, r->>'code', r->>'description', r->>'unit', (r->>'qty')::numeric);
+      end loop;
+    end;
+  end if;
 
   -- Mark the destination confirmed for this document (so it isn't offered for re-confirm = duplicate batch).
   select full_name into v_name from public.profiles where id = auth.uid();
@@ -2950,3 +2968,116 @@ begin
   update public.factory_change_requests set status = 'Rejected', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id and status = 'Pending';
 end; $function$;
 grant execute on function public.reject_factory_change(uuid) to authenticated;
+
+-- ============================================================================
+-- 2026-06 · Material transfer between factories (tied to a confirmed-line
+-- factory change). When the requester opts to "transfer materials", they pick
+-- the items & quantities; on approval a transfer note is created. BOTH sides
+-- confirm: the sending factory confirms dispatch (stock leaves it) and the
+-- receiving factory confirms receipt (stock arrives). Status: Pending -> Sent
+-- -> Received.
+-- ============================================================================
+alter table public.factory_change_requests add column if not exists transfer boolean not null default false;
+alter table public.factory_change_requests add column if not exists transfer_items jsonb;
+
+create table if not exists public.material_transfers (
+  id uuid primary key default gen_random_uuid(),
+  from_factory text not null,
+  to_factory text not null,
+  line_id uuid, import_id uuid, reason text,
+  status text not null default 'Pending',
+  created_by uuid, created_by_name text, created_at timestamptz not null default now(),
+  sent_by uuid, sent_by_name text, sent_at timestamptz,
+  received_by uuid, received_by_name text, received_at timestamptz
+);
+create table if not exists public.material_transfer_items (
+  id uuid primary key default gen_random_uuid(),
+  transfer_id uuid not null references public.material_transfers(id) on delete cascade,
+  item_code text, description text, unit text, qty numeric
+);
+create index if not exists mti_transfer on public.material_transfer_items(transfer_id);
+grant select, insert, update, delete on public.material_transfers to authenticated;
+grant select, insert, update, delete on public.material_transfer_items to authenticated;
+grant all on public.material_transfers to service_role;
+grant all on public.material_transfer_items to service_role;
+alter table public.material_transfers enable row level security;
+alter table public.material_transfer_items enable row level security;
+drop policy if exists mt_read on public.material_transfers;
+create policy mt_read on public.material_transfers for select
+  using (my_factory_code()='HEAD_OFFICE' or from_factory=any(my_factory_codes()) or to_factory=any(my_factory_codes()));
+drop policy if exists mt_write on public.material_transfers;
+create policy mt_write on public.material_transfers for all
+  using (my_factory_code()='HEAD_OFFICE' or from_factory=any(my_factory_codes()) or to_factory=any(my_factory_codes())) with check (true);
+drop policy if exists mti_read on public.material_transfer_items;
+create policy mti_read on public.material_transfer_items for select
+  using (exists (select 1 from public.material_transfers t where t.id=transfer_id and (my_factory_code()='HEAD_OFFICE' or t.from_factory=any(my_factory_codes()) or t.to_factory=any(my_factory_codes()))));
+drop policy if exists mti_write on public.material_transfer_items;
+create policy mti_write on public.material_transfer_items for all using (true) with check (true);
+
+-- Re-create request_factory_change with the transfer option (drop old 3-arg form).
+drop function if exists public.request_factory_change(uuid, text, text);
+create or replace function public.request_factory_change(
+  p_line_id uuid, p_to_factory text, p_reason text, p_transfer boolean default false, p_items jsonb default null)
+ returns uuid language plpgsql security definer set search_path to 'public' as $function$
+declare v_line public.sales_order_lines; v_id uuid; v_name text;
+begin
+  if not has_perm('sales', 'edit') then raise exception 'Not allowed'; end if;
+  if coalesce(btrim(p_to_factory), '') = '' then raise exception 'Pick a factory to move to'; end if;
+  select * into v_line from public.sales_order_lines where id = p_line_id;
+  if not found then raise exception 'Line not found'; end if;
+  if p_to_factory = coalesce(v_line.factory_code, '') then raise exception 'That is already the line''s factory'; end if;
+  if exists (select 1 from public.factory_change_requests where line_id = p_line_id and status = 'Pending') then
+    raise exception 'A factory-change request for this line is already waiting for Head Office'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  insert into public.factory_change_requests (line_id, import_id, from_factory, to_factory, reason, requested_by, requested_by_name, transfer, transfer_items)
+  values (p_line_id, v_line.import_id, v_line.factory_code, p_to_factory, nullif(btrim(p_reason), ''), auth.uid(), v_name,
+          coalesce(p_transfer, false), case when coalesce(p_transfer,false) then p_items else null end)
+  returning id into v_id;
+  return v_id;
+end; $function$;
+grant execute on function public.request_factory_change(uuid, text, text, boolean, jsonb) to authenticated;
+
+-- Sending factory confirms dispatch — stock leaves it.
+create or replace function public.confirm_transfer_send(p_id uuid)
+ returns void language plpgsql security definer set search_path to 'public' as $function$
+declare v_t public.material_transfers; r record; v_item public.items; v_name text;
+begin
+  select * into v_t from public.material_transfers where id = p_id;
+  if not found then raise exception 'Transfer not found'; end if;
+  if v_t.status <> 'Pending' then raise exception 'This transfer is already %', v_t.status; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_t.from_factory = any (my_factory_codes())) then
+    raise exception 'Only the sending factory (%) can confirm dispatch', v_t.from_factory; end if;
+  for r in select * from public.material_transfer_items where transfer_id = p_id loop
+    select * into v_item from public.items where code = r.item_code limit 1;
+    if v_item.id is null then continue; end if;
+    update public.item_stock set quantity = greatest(quantity - coalesce(r.qty,0), 0), updated_at = now()
+     where item_id = v_item.id and factory_code = v_t.from_factory;
+  end loop;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.material_transfers set status = 'Sent', sent_by = auth.uid(), sent_by_name = v_name, sent_at = now() where id = p_id;
+end; $function$;
+grant execute on function public.confirm_transfer_send(uuid) to authenticated;
+
+-- Receiving factory confirms receipt — stock arrives (item_stock + a stock lot).
+create or replace function public.confirm_transfer_receive(p_id uuid)
+ returns void language plpgsql security definer set search_path to 'public' as $function$
+declare v_t public.material_transfers; r record; v_item public.items; v_name text;
+begin
+  select * into v_t from public.material_transfers where id = p_id;
+  if not found then raise exception 'Transfer not found'; end if;
+  if v_t.status <> 'Sent' then raise exception 'The sending factory must confirm dispatch first (status: %)', v_t.status; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_t.to_factory = any (my_factory_codes())) then
+    raise exception 'Only the receiving factory (%) can confirm receipt', v_t.to_factory; end if;
+  for r in select * from public.material_transfer_items where transfer_id = p_id loop
+    select * into v_item from public.items where code = r.item_code limit 1;
+    if v_item.id is null or coalesce(r.qty,0) <= 0 then continue; end if;
+    insert into public.stock_lots (item_id, item_code, description, factory_code, batch_no, qty_received, qty_remaining)
+    values (v_item.id, v_item.code, v_item.description, v_t.to_factory, 'TRF-' || to_char(now(),'YYMMDD'), r.qty, r.qty);
+    insert into public.item_stock (item_id, factory_code, quantity, updated_at)
+    values (v_item.id, v_t.to_factory, r.qty, now())
+    on conflict (item_id, factory_code) do update set quantity = item_stock.quantity + r.qty, updated_at = now();
+  end loop;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.material_transfers set status = 'Received', received_by = auth.uid(), received_by_name = v_name, received_at = now() where id = p_id;
+end; $function$;
+grant execute on function public.confirm_transfer_receive(uuid) to authenticated;
