@@ -156,13 +156,19 @@ export default function ProductionPage() {
   // Explode a BOM for a given item/factory/quantity
   function explode(itemCode: string, factoryCode: string, total: number, mode = 'auto') {
     const parent = items.find(i => i.code === itemCode)
-    if (!parent) return { note: `Item ${itemCode} is not in Items Master.`, rows: [] }
+    if (!parent) return { note: `Item ${itemCode} is not in Items Master.`, rows: [], labels: [] as { code: string; description: string; unit: string; required: number }[] }
     const all = boms.filter(b => b.parent_item_id === parent.id)
-    if (all.length === 0) return { note: 'No BOM defined for this item. Add a recipe in BOM first.', rows: [] }
-    // Labels (made at the factory) are NOT requested from the warehouse — exclude them here
-    const allWh = all.filter(b => !items.find(i => i.id === b.component_item_id)?.supplied_by_factory)
-    const comps = allWh.filter(b => (b.use_mode || 'any') === 'any' || (b.use_mode || 'any') === mode)
-    if (comps.length === 0) return { note: allWh.length === 0 ? 'This item only has made-at-factory labels — nothing to request from the warehouse.' : `This item's BOM has no warehouse materials for ${mode === 'manual' ? 'Manual' : 'Auto machine'} mode. Switch the Run mode above (or add ${mode} components in BOM).`, rows: [] }
+    if (all.length === 0) return { note: 'No BOM defined for this item. Add a recipe in BOM first.', rows: [], labels: [] as { code: string; description: string; unit: string; required: number }[] }
+    const isLabel = (id: string) => !!items.find(i => i.id === id)?.supplied_by_factory
+    const inMode = (b: BomComp) => (b.use_mode || 'any') === 'any' || (b.use_mode || 'any') === mode
+    // Labels are printed at the factory (not requested from the warehouse) — listed separately
+    const labels = all.filter(b => isLabel(b.component_item_id) && inMode(b)).map(c => {
+      const ci = items.find(i => i.id === c.component_item_id)
+      return { code: ci?.code || '—', description: ci?.description || '', unit: ci?.unit || '', required: c.quantity * total }
+    })
+    const allWh = all.filter(b => !isLabel(b.component_item_id))
+    const comps = allWh.filter(inMode)
+    if (comps.length === 0) return { note: allWh.length === 0 ? 'This item only has made-at-factory labels — nothing to request from the warehouse.' : `This item's BOM has no warehouse materials for ${mode === 'manual' ? 'Manual' : 'Auto machine'} mode. Switch the Run mode above (or add ${mode} components in BOM).`, rows: [], labels }
     const rows = comps.map(c => {
       const ci = items.find(i => i.id === c.component_item_id)
       const required = c.quantity * total
@@ -172,7 +178,7 @@ export default function ProductionPage() {
       const requested = c.apply_allowance ? Math.ceil(shortfall * BUFFER) : clean(shortfall)
       return { item_id: c.component_item_id, key, code: ci?.code || '—', description: ci?.description || '', unit: ci?.unit || '', required, stock: st, shortfall, requested }
     })
-    return { note: '', rows }
+    return { note: '', rows, labels }
   }
 
   async function raiseTarget(t: MatTarget) {
@@ -663,6 +669,16 @@ export default function ProductionPage() {
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                )}
+
+                {exploded.labels.length > 0 && (
+                  <div className="mt-3 bg-indigo-50 border border-indigo-200 rounded-lg p-3 text-sm">
+                    <span className="font-medium text-indigo-800">🏷️ Label(s) also needed (printed at the factory, not from the warehouse):</span>
+                    <ul className="mt-1 space-y-0.5 text-indigo-900">
+                      {exploded.labels.map(l => <li key={l.code}><span className="font-mono font-medium">{l.code}</span> — {l.description} · {clean(l.required)} {l.unit}</li>)}
+                    </ul>
+                    <p className="text-indigo-500 text-xs mt-1">Request &amp; print these in Receiving → Labels.</p>
                   </div>
                 )}
 
