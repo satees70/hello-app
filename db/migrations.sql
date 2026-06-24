@@ -1322,6 +1322,8 @@ declare v_req public.material_requests; v_batch public.production_batches; v_par
 begin
   select * into v_req from public.material_requests where id = p_request_id;
   if not found or v_req.status <> 'Open' then return; end if;
+  -- Ad-hoc requests have hand-entered quantities — never recompute them from the BOM.
+  if coalesce(v_req.note, '') like 'Ad-hoc%' then return; end if;
   select * into v_batch from public.production_batches where id = v_req.batch_id;
   if not found then return; end if;
   -- combined total: sum of EVERY batch that shares this request (not just the linked one)
