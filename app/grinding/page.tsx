@@ -69,6 +69,8 @@ export default function GrindingPage() {
   const recRecipeEdit = openRec ? canRecipeEditFac(openRec.factory_code) : false
   const myFactoryOptions = isHO ? factories.map(f => f.code)
     : (profile?.factory_codes?.length ? profile.factory_codes : (profile?.factory_code ? [profile.factory_code] : []))
+  // Can this user create a recipe at any of their factories? (drives the New recipe button)
+  const canCreateRecipe = myFactoryOptions.some(fc => canRecipeEditFac(fc))
 
   useEffect(() => { if (profile) { loadFactories(); load() } }, [profile])
   // Items master for the recipe pick-lists (only the mixer needs it)
@@ -331,7 +333,7 @@ export default function GrindingPage() {
 
         {tab === 'recipes' && canRecipeView && (
           <>
-            {recRecipeEdit && <button onClick={newRecipe} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium mb-4">+ New recipe</button>}
+            {canCreateRecipe && <button onClick={newRecipe} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium mb-4">+ New recipe</button>}
             <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem]">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b sticky top-0 z-10">
