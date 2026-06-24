@@ -2649,3 +2649,17 @@ update public.profiles set customer_filter = 'GCH' where username = 'sem118';
 
 -- 2026-06 · GCH added as a selectable location/site (non-production, like SUPPLIER)
 insert into public.factories (code, name) values ('GCH', 'GCH') on conflict (code) do nothing;
+
+-- Fix: a filtered user must still be able to UPLOAD a document. The new
+-- sales_imports row has no lines yet, so the "has a matching line" SELECT check
+-- failed on INSERT...RETURNING. Allow rows the user uploaded too.
+drop policy if exists si_customer_grant on public.sales_imports;
+create policy si_customer_grant on public.sales_imports for select to authenticated
+  using (public.my_customer_filter() is not null and (uploaded_by = auth.uid() or exists (
+    select 1 from public.sales_order_lines l where l.import_id = sales_imports.id
+      and coalesce(l.customer_name, '') ilike public.my_customer_filter() || '%')));
+drop policy if exists si_customer_restrict on public.sales_imports;
+create policy si_customer_restrict on public.sales_imports as restrictive for select to authenticated
+  using (public.my_customer_filter() is null or uploaded_by = auth.uid() or exists (
+    select 1 from public.sales_order_lines l where l.import_id = sales_imports.id
+      and coalesce(l.customer_name, '') ilike public.my_customer_filter() || '%'));
