@@ -2722,3 +2722,30 @@ drop policy if exists go_write on public.grinding_outputs;
 create policy go_write on public.grinding_outputs for all
   using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()))
   with check (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()));
+
+-- ============================================================================
+-- 2026-06 · GCH orders: visible to EVERYONE + fix the unmapped site.
+-- GCH lines came in with a blank factory (location GCH-105 was never mapped),
+-- so non-HO users (e.g. Gopi) couldn't see them. Map GCH-105 -> AVINA101 (the
+-- factory the GCH documents were uploaded under) so the orders can still be
+-- scheduled/produced/delivered, then add permissive policies so any logged-in
+-- user can view GCH orders on top of their normal factory access. Customer-
+-- restricted users (e.g. sem118 = GCH-only) are unaffected: the restrictive
+-- policy still limits them, and GCH passes it.
+-- ============================================================================
+insert into public.location_map (location_code, factory_code)
+select 'GCH-105', 'AVINA101'
+where not exists (select 1 from public.location_map where upper(btrim(location_code)) = 'GCH-105');
+
+update public.sales_order_lines set factory_code = 'AVINA101'
+ where coalesce(factory_code, '') = '' and upper(btrim(location_code)) = 'GCH-105';
+
+drop policy if exists sol_gch_view on public.sales_order_lines;
+create policy sol_gch_view on public.sales_order_lines for select to authenticated
+  using (coalesce(location_code, '') ilike 'GCH%' or coalesce(customer_name, '') ilike 'GCH%');
+
+drop policy if exists si_gch_view on public.sales_imports;
+create policy si_gch_view on public.sales_imports for select to authenticated
+  using (exists (select 1 from public.sales_order_lines l
+                 where l.import_id = sales_imports.id
+                   and (coalesce(l.location_code, '') ilike 'GCH%' or coalesce(l.customer_name, '') ilike 'GCH%')));
