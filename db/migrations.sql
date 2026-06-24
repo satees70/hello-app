@@ -2610,3 +2610,39 @@ begin
   return v_req;
 end; $function$;
 grant execute on function public.raise_material_request_ext(uuid[], jsonb, numeric, text) to authenticated;
+
+-- ============================================================================
+-- 2026-06 · Per-user customer filter — limit a user's Sales Orders to one
+-- customer (by name prefix), e.g. sem118 sees only "GCH..." customers.
+-- Additive & safe: only affects users who have customer_filter set.
+-- ============================================================================
+alter table public.profiles add column if not exists customer_filter text;
+
+create or replace function public.my_customer_filter() returns text
+ language sql stable security definer set search_path to 'public' as $$
+  select nullif(btrim(customer_filter), '') from public.profiles where id = auth.uid();
+$$;
+grant execute on function public.my_customer_filter() to authenticated;
+
+-- Lines: filtered users are GRANTED their customer's lines and RESTRICTED from the rest
+drop policy if exists sol_customer_grant on public.sales_order_lines;
+create policy sol_customer_grant on public.sales_order_lines for select to authenticated
+  using (public.my_customer_filter() is not null and coalesce(customer_name, '') ilike public.my_customer_filter() || '%');
+drop policy if exists sol_customer_restrict on public.sales_order_lines;
+create policy sol_customer_restrict on public.sales_order_lines as restrictive for select to authenticated
+  using (public.my_customer_filter() is null or coalesce(customer_name, '') ilike public.my_customer_filter() || '%');
+
+-- Documents: a filtered user only sees documents that contain a matching line
+drop policy if exists si_customer_grant on public.sales_imports;
+create policy si_customer_grant on public.sales_imports for select to authenticated
+  using (public.my_customer_filter() is not null and exists (
+    select 1 from public.sales_order_lines l where l.import_id = sales_imports.id
+      and coalesce(l.customer_name, '') ilike public.my_customer_filter() || '%'));
+drop policy if exists si_customer_restrict on public.sales_imports;
+create policy si_customer_restrict on public.sales_imports as restrictive for select to authenticated
+  using (public.my_customer_filter() is null or exists (
+    select 1 from public.sales_order_lines l where l.import_id = sales_imports.id
+      and coalesce(l.customer_name, '') ilike public.my_customer_filter() || '%'));
+
+-- Apply to sem118 (Aisyah)
+update public.profiles set customer_filter = 'GCH' where username = 'sem118';

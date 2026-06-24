@@ -9,10 +9,10 @@ const supabaseAdmin = createClient(
 const LOGIN_DOMAIN = 'avina.local'
 
 export async function POST(request: Request) {
-  const { id, username, full_name, factory_code, factory_codes, readonly_factories, warehouse_user, role, permissions, capabilities, location_perms, password } = await request.json()
+  const { id, username, full_name, factory_code, factory_codes, readonly_factories, warehouse_user, role, permissions, capabilities, location_perms, customer_filter, password } = await request.json()
   if (!id) return NextResponse.json({ error: 'Missing user id' }, { status: 400 })
 
-  const profileUpdate: Record<string, unknown> = { full_name, factory_code, factory_codes: factory_codes ?? [factory_code], readonly_factories: readonly_factories ?? [], warehouse_user: !!warehouse_user, role, permissions: permissions ?? {}, capabilities: capabilities ?? {}, location_perms: location_perms ?? {} }
+  const profileUpdate: Record<string, unknown> = { full_name, factory_code, factory_codes: factory_codes ?? [factory_code], readonly_factories: readonly_factories ?? [], warehouse_user: !!warehouse_user, role, permissions: permissions ?? {}, capabilities: capabilities ?? {}, location_perms: location_perms ?? {}, customer_filter: (customer_filter ?? '').trim() || null }
 
   // Setting/changing the username also moves the login (internal) email so the
   // user can sign in by that username from now on.

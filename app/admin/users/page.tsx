@@ -7,9 +7,9 @@ import { supabase } from '@/lib/supabase'
 import { PERMISSION_MODULES, CAPABILITIES, defaultGrid, defaultCaps, isConfigured, type Permissions, type Action } from '@/lib/permissions'
 import MultiFilter from '@/components/MultiFilter'
 
-interface UserRow { id: string; username: string | null; email: string; full_name: string; factory_code: string; factory_codes: string[] | null; readonly_factories: string[] | null; warehouse_user?: boolean | null; role: string; permissions: Permissions | null; capabilities?: Record<string, boolean> | null; location_perms?: Record<string, Permissions> | null }
-type FormState = { username: string; email: string; password: string; full_name: string; factory_code: string; factory_codes: string[]; readonly_factories: string[]; warehouse_user: boolean; role: string; permissions: Permissions; capabilities: Record<string, boolean>; location_perms: Record<string, Permissions> }
-const blankForm = (): FormState => ({ username: '', email: '', password: '', full_name: '', factory_code: '', factory_codes: [], readonly_factories: [], warehouse_user: false, role: 'user', permissions: defaultGrid(), capabilities: defaultCaps(), location_perms: {} })
+interface UserRow { id: string; username: string | null; email: string; full_name: string; factory_code: string; factory_codes: string[] | null; readonly_factories: string[] | null; warehouse_user?: boolean | null; role: string; permissions: Permissions | null; capabilities?: Record<string, boolean> | null; location_perms?: Record<string, Permissions> | null; customer_filter?: string | null }
+type FormState = { username: string; email: string; password: string; full_name: string; factory_code: string; factory_codes: string[]; readonly_factories: string[]; warehouse_user: boolean; role: string; permissions: Permissions; capabilities: Record<string, boolean>; location_perms: Record<string, Permissions>; customer_filter: string }
+const blankForm = (): FormState => ({ username: '', email: '', password: '', full_name: '', factory_code: '', factory_codes: [], readonly_factories: [], warehouse_user: false, role: 'user', permissions: defaultGrid(), capabilities: defaultCaps(), location_perms: {}, customer_filter: '' })
 
 export default function UsersPage() {
   const { profile, loading } = useProfile()
@@ -56,6 +56,7 @@ export default function UsersPage() {
       permissions: isConfigured(u.permissions) ? (u.permissions as Permissions) : defaultGrid(),
       capabilities: { ...defaultCaps(), ...(u.capabilities || {}) },
       location_perms: u.location_perms || {},
+      customer_filter: u.customer_filter || '',
     })
     setMode('edit')
   }
@@ -72,6 +73,7 @@ export default function UsersPage() {
       permissions: isConfigured(u.permissions) ? (u.permissions as Permissions) : defaultGrid(),
       capabilities: { ...defaultCaps(), ...(u.capabilities || {}) },
       location_perms: u.location_perms ? JSON.parse(JSON.stringify(u.location_perms)) : {},
+      customer_filter: u.customer_filter || '',
     })
     setMode('create')
     setSuccess(`Copied access from ${u.username || u.full_name || u.email} — set a username & password, adjust if needed, then create.`)
@@ -184,8 +186,8 @@ export default function UsersPage() {
     const isEdit = mode === 'edit'
     const url = isEdit ? '/api/update-user' : '/api/create-user'
     const body = isEdit
-      ? { id: editingId, username: form.username || undefined, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, warehouse_user: form.warehouse_user, role: form.role, permissions: form.permissions, capabilities: form.capabilities, location_perms: form.location_perms, password: form.password || undefined }
-      : { username: form.username, email: form.email || undefined, password: form.password, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, warehouse_user: form.warehouse_user, role: form.role, permissions: form.permissions, capabilities: form.capabilities, location_perms: form.location_perms }
+      ? { id: editingId, username: form.username || undefined, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, warehouse_user: form.warehouse_user, role: form.role, permissions: form.permissions, capabilities: form.capabilities, location_perms: form.location_perms, customer_filter: form.customer_filter, password: form.password || undefined }
+      : { username: form.username, email: form.email || undefined, password: form.password, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, warehouse_user: form.warehouse_user, role: form.role, permissions: form.permissions, capabilities: form.capabilities, location_perms: form.location_perms, customer_filter: form.customer_filter }
     const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     const data = await res.json()
     if (data.error) { setError(data.error); setSaving(false); return }
@@ -260,6 +262,12 @@ export default function UsersPage() {
                   <option value="user">User</option>
                   <option value="admin">Admin</option>
                 </select>
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium mb-1">Customer filter <span className="text-gray-400 font-normal">(optional — limit Sales Orders to a customer)</span></label>
+                <input value={form.customer_filter} onChange={e => setForm({ ...form, customer_filter: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2" placeholder="e.g. GCH — only customers whose name starts with this" />
+                <p className="text-xs text-gray-400 mt-1">Leave blank for no limit. When set, this user only sees Sales Orders whose customer name starts with this text.</p>
               </div>
             </div>
 
