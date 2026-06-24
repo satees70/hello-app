@@ -2686,3 +2686,9 @@ begin
   return v_import;
 end; $function$;
 grant execute on function public.create_repack_order(text, text, text, jsonb) to authenticated;
+
+-- ============================================================================
+-- 2026-06 · Grinding/mixing: record the ACTUAL quantity added per raw material
+-- (vs the recipe-expected qty), so the mixer can log what really went in.
+-- ============================================================================
+alter table public.grinding_materials add column if not exists actual_qty numeric;

@@ -10,7 +10,7 @@ import { requestTimerCancel } from '@/lib/corrections'
 
 interface Recipe { id: string; factory_code: string; product: string; recipe_type: string; active: boolean }
 interface Component { item: string; qty_per_lot: string }
-interface Material { id?: string; item: string; qty: string; batch_no: string; added: boolean }
+interface Material { id?: string; item: string; qty: string; actual_qty: string; batch_no: string; added: boolean }
 interface Seg { s: string; e: string | null }
 interface Timer { status: 'idle' | 'running' | 'paused' | 'stopped'; segments: Seg[] }
 const EMPTY_TIMER: Timer = { status: 'idle', segments: [] }
@@ -45,6 +45,7 @@ export default function GrindingPage() {
   const [collapsedFacs, setCollapsedFacs] = useState<Set<string>>(new Set())
   const toggleFac = (fc: string) => setCollapsedFacs(p => { const n = new Set(p); n.has(fc) ? n.delete(fc) : n.add(fc); return n })
   const [matsByRecord, setMatsByRecord] = useState<Record<string, Material[]>>({})
+  const [stockMap, setStockMap] = useState<Record<string, number>>({})   // `${code}|${factory}` -> qty in stock
   const [error, setError] = useState('')
 
   // Produce panel
@@ -89,11 +90,21 @@ export default function GrindingPage() {
     // materials per record (only returned if you have recipe view)
     const ids = ((recs as GrindingRecord[]) || []).map(r => r.id)
     if (ids.length) {
-      const { data: mats } = await supabase.from('grinding_materials').select('id, grinding_record_id, item, qty, batch_no, added').in('grinding_record_id', ids)
+      const { data: mats } = await supabase.from('grinding_materials').select('id, grinding_record_id, item, qty, actual_qty, batch_no, added').in('grinding_record_id', ids)
       const map: Record<string, Material[]> = {}
-      ;(mats || []).forEach(m => { (map[m.grinding_record_id] = map[m.grinding_record_id] || []).push({ id: m.id, item: m.item || '', qty: m.qty || '', batch_no: m.batch_no || '', added: !!m.added }) })
+      ;(mats || []).forEach(m => { (map[m.grinding_record_id] = map[m.grinding_record_id] || []).push({ id: m.id, item: m.item || '', qty: m.qty || '', actual_qty: m.actual_qty != null ? String(m.actual_qty) : '', batch_no: m.batch_no || '', added: !!m.added }) })
       setMatsByRecord(map)
     } else setMatsByRecord({})
+    // Stock on hand per item code per factory — to flag shortages in the modal.
+    const [{ data: itRows }, { data: stRows }] = await Promise.all([
+      supabase.from('items').select('id, code'),
+      supabase.from('item_stock').select('item_id, factory_code, quantity'),
+    ])
+    const idToCode: Record<string, string> = {}
+    ;(itRows || []).forEach(it => { idToCode[it.id] = it.code })
+    const sm: Record<string, number> = {}
+    ;(stRows || []).forEach(s => { const c = idToCode[s.item_id]; if (c) sm[`${c}|${s.factory_code}`] = Number(s.quantity) })
+    setStockMap(sm)
     // recipe components (only returned with recipe view)
     const rids = ((recp as Recipe[]) || []).map(r => r.id)
     if (rids.length && canRecipeView) {
@@ -148,8 +159,24 @@ export default function GrindingPage() {
     if (res === null) return
     if (res) setError(res); else alert('Cancellation request sent to Head Office for approval.')
   }
-  const setMixMat = (i: number, k: 'batch_no', v: string) => setMixMats(p => { const m = [...p]; m[i] = { ...m[i], [k]: v }; return m })
+  const setMixMat = (i: number, k: 'batch_no' | 'actual_qty', v: string) => setMixMats(p => { const m = [...p]; m[i] = { ...m[i], [k]: v }; return m })
   const toggleMixMat = (i: number) => setMixMats(p => { const m = [...p]; m[i] = { ...m[i], added: !m[i].added }; return m })
+  // The material item is stored as "CODE — Description"; pull the bare code out.
+  const codeOf = (item: string) => item.split(' — ')[0].trim()
+  const stockFor = (item: string) => openRec ? (stockMap[`${codeOf(item)}|${openRec.factory_code}`] ?? 0) : 0
+  // Items where stock on hand is below the quantity needed for this mixture.
+  const shortMats = () => mixMats.filter(m => (Number(m.qty) || 0) - stockFor(m.item) > 0.0001)
+  async function raiseShortfall() {
+    if (!openRec) return
+    const short = shortMats().map(m => ({ code: codeOf(m.item), qty: Number(((Number(m.qty) || 0) - stockFor(m.item)).toFixed(3)) }))
+    if (short.length === 0) { setError('Everything is in stock — no material request needed.'); return }
+    if (!confirm(`Raise a material request at ${factoryName(openRec.factory_code)} for ${short.length} item(s) short on stock?\n\n${short.map(s => `${s.code} — ${s.qty}`).join('\n')}`)) return
+    setSaving(true); setError('')
+    const { error } = await supabase.rpc('raise_manual_material_request', { p_factory: openRec.factory_code, p_items: short })
+    setSaving(false)
+    if (error) { setError(error.message); return }
+    alert('Material request raised. Track it under Material Requests.')
+  }
   async function saveRecord() {
     if (!openRec) return
     const recEdit = canEditFac(openRec.factory_code), recRecipeEdit = canRecipeEditFac(openRec.factory_code)
@@ -168,7 +195,7 @@ export default function GrindingPage() {
       if (recRecipeEdit) {
         for (const m of mixMats) {
           if (!m.id) continue
-          const { error } = await supabase.from('grinding_materials').update({ batch_no: m.batch_no || null, added: m.added }).eq('id', m.id)
+          const { error } = await supabase.from('grinding_materials').update({ batch_no: m.batch_no || null, actual_qty: m.actual_qty === '' ? null : Number(m.actual_qty), added: m.added }).eq('id', m.id)
           if (error) throw error
         }
       }
@@ -374,18 +401,37 @@ export default function GrindingPage() {
                 : mixMats.length === 0 ? <p className="text-sm text-gray-400">—</p> : (
                 <div className="space-y-1">
                   <div className="grid grid-cols-12 gap-2 text-xs text-gray-500 font-medium px-1">
-                    <div className="col-span-5">Item</div><div className="col-span-2 text-right">Qty</div><div className="col-span-4">Batch no</div><div className="col-span-1 text-center">Added</div>
+                    <div className="col-span-4">Item</div><div className="col-span-2 text-right">Need</div><div className="col-span-2 text-right">Actual added</div><div className="col-span-3">Batch no</div><div className="col-span-1 text-center">Added</div>
                   </div>
-                  {mixMats.map((m, i) => (
+                  {mixMats.map((m, i) => {
+                    const have = stockFor(m.item); const need = Number(m.qty) || 0; const short = need - have > 0.0001
+                    return (
                     <div key={m.id || i} className="grid grid-cols-12 gap-2 items-center text-sm">
-                      <div className="col-span-5">{m.item}</div>
+                      <div className="col-span-4">
+                        {m.item}
+                        <div className={`text-xs ${short ? 'text-red-600 font-medium' : 'text-green-700'}`}>
+                          In stock: {Number(have.toFixed(3))}{short ? ` · short ${Number((need - have).toFixed(3))}` : ' ✓'}
+                        </div>
+                      </div>
                       <div className="col-span-2 text-right">{m.qty}</div>
-                      <div className="col-span-4">{recRecipeEdit
+                      <div className="col-span-2">{recRecipeEdit
+                        ? <input type="number" value={m.actual_qty} onChange={e => setMixMat(i, 'actual_qty', e.target.value)} placeholder="Actual" className="w-full border rounded px-2 py-1 text-sm text-right" />
+                        : <div className="text-right">{m.actual_qty || '—'}</div>}</div>
+                      <div className="col-span-3">{recRecipeEdit
                         ? <input value={m.batch_no} onChange={e => setMixMat(i, 'batch_no', e.target.value)} placeholder="Batch no" className="w-full border rounded px-2 py-1 text-sm" />
                         : (m.batch_no || '—')}</div>
                       <div className="col-span-1 text-center"><input type="checkbox" checked={m.added} disabled={!recRecipeEdit} onChange={() => toggleMixMat(i)} className="h-4 w-4" /></div>
                     </div>
-                  ))}
+                  )})}
+                  {shortMats().length > 0 && (
+                    <div className="mt-2 flex items-center justify-between gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+                      <span className="text-xs text-amber-700">{shortMats().length} item(s) short on stock — raise a material request to bring them in.</span>
+                      {recRecipeEdit && <button type="button" onClick={raiseShortfall} disabled={saving}
+                        className="text-xs px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 whitespace-nowrap">
+                        Raise material request
+                      </button>}
+                    </div>
+                  )}
                 </div>
               )}
               {canRecipeView && (
