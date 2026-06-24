@@ -36,6 +36,7 @@ interface DoChangeRequest {
   id: string; request_type: string; field: string | null; old_value: string | null; new_value: string | null
   line_label: string | null; reason: string | null; status: string
   requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
+  delivery_orders: { do_number: string | null; file_name: string | null } | null
 }
 
 interface SplitRequest {
@@ -204,8 +205,8 @@ export default function PendingChangesPage() {
     setSuccess('Timer cancellation rejected.'); setBusyId(''); loadCorrections()
   }
   async function loadDoChanges() {
-    const { data } = await supabase.from('do_change_requests').select('*').order('created_at', { ascending: false })
-    setDoChanges((data as DoChangeRequest[]) || [])
+    const { data } = await supabase.from('do_change_requests').select('*, delivery_orders!do_id(do_number, file_name)').order('created_at', { ascending: false })
+    setDoChanges((data as unknown as DoChangeRequest[]) || [])
   }
   async function approveDo(id: string) {
     setBusyId(id); setError(''); setSuccess('')
@@ -445,7 +446,7 @@ export default function PendingChangesPage() {
   const corrAllSel = corrPending.length > 0 && corrPending.every(c => selCorr.has(c.id))
   const selCorrIds = corrPending.filter(c => selCorr.has(c.id)).map(c => c.id)
   const shownDoAll = filter === 'All' ? doChanges : doChanges.filter(c => c.status === filter)
-  const shownDo = shownDoAll.filter(c => passes(doFilters.label, c.line_label || '—') && passes(doFilters.type, c.request_type) && passes(doFilters.by, c.requested_by_name || '—'))
+  const shownDo = shownDoAll.filter(c => passes(doFilters.doc, c.delivery_orders?.do_number || c.delivery_orders?.file_name || '—') && passes(doFilters.label, c.line_label || '—') && passes(doFilters.type, c.request_type) && passes(doFilters.by, c.requested_by_name || '—'))
   const doPending = shownDo.filter(c => c.status === 'Pending')
   const doAllSel = doPending.length > 0 && doPending.every(c => selDo.has(c.id))
   const selDoIds = doPending.filter(c => selDo.has(c.id)).map(c => c.id)
@@ -648,11 +649,12 @@ export default function PendingChangesPage() {
             <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>
                 {isHO && <th className="px-3 py-2"><input type="checkbox" checked={doAllSel} onChange={() => setSelDo(doAllSel ? new Set() : new Set(doPending.map(c => c.id)))} className="h-4 w-4" /></th>}
-                {['Line', 'Change', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
+                {['Document', 'Line', 'Change', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
                   <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}
               </tr>
               <tr className="border-b">
                 {isHO && <th className="px-2 py-1"></th>}
+                <th className="px-2 py-1"><MultiFilter values={distinctOf(shownDoAll, c => c.delivery_orders?.do_number || c.delivery_orders?.file_name || '—')} selected={doFilters.doc || new Set()} onChange={s => setDoFilters(p => ({ ...p, doc: s }))} /></th>
                 <th className="px-2 py-1"><MultiFilter values={distinctOf(shownDoAll, c => c.line_label || '—')} selected={doFilters.label || new Set()} onChange={s => setDoFilters(p => ({ ...p, label: s }))} /></th>
                 <th className="px-2 py-1"><MultiFilter values={['edit', 'delete']} selected={doFilters.type || new Set()} onChange={s => setDoFilters(p => ({ ...p, type: s }))} /></th>
                 <th className="px-2 py-1"></th>
@@ -661,10 +663,14 @@ export default function PendingChangesPage() {
               </tr>
             </thead>
             <tbody>
-              {shownDo.length === 0 && (<tr><td colSpan={8} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} Goods Received changes.</td></tr>)}
+              {shownDo.length === 0 && (<tr><td colSpan={9} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} Goods Received changes.</td></tr>)}
               {shownDo.map(c => (
                 <tr key={c.id} className={`border-b last:border-0 align-top ${selDo.has(c.id) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
                   {isHO && <td className="px-3 py-2">{c.status === 'Pending' ? <input type="checkbox" checked={selDo.has(c.id)} onChange={() => setSelDo(p => { const n = new Set(p); n.has(c.id) ? n.delete(c.id) : n.add(c.id); return n })} className="h-4 w-4" /> : null}</td>}
+                  <td className="px-3 py-2 min-w-[140px]">
+                    <span className="font-mono font-medium">{c.delivery_orders?.do_number || '—'}</span>
+                    <span className="block text-gray-400 text-xs">{c.delivery_orders?.file_name}</span>
+                  </td>
                   <td className="px-3 py-2 min-w-[160px]">{c.line_label || '—'}</td>
                   <td className="px-3 py-2 min-w-[160px]">
                     {c.request_type === 'delete'
