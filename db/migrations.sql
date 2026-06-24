@@ -2646,3 +2646,6 @@ create policy si_customer_restrict on public.sales_imports as restrictive for se
 
 -- Apply to sem118 (Aisyah)
 update public.profiles set customer_filter = 'GCH' where username = 'sem118';
+
+-- 2026-06 · GCH added as a selectable location/site (non-production, like SUPPLIER)
+insert into public.factories (code, name) values ('GCH', 'GCH') on conflict (code) do nothing;
