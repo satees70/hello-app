@@ -100,7 +100,8 @@ export default function LabelsPage() {
     if (raw.length === 0) return true
     return raw.some(it => grnSet.has(`${r.factory_code}|${it.item_code}`) || grnSet.has(`${r.factory_code}|${grnBase(it.item_code)}`))
   }
-  const printed = (it: MRItem) => !!it.label_photo_path && Number(it.label_print_qty) > 0 && !!(it.label_batch_no || it.label_exp_date)
+  // Photo is optional for now (phone camera issues) — a label is "printed" once its details are saved
+  const printed = (it: MRItem) => Number(it.label_print_qty) > 0 && !!(it.label_batch_no || it.label_exp_date)
   const stageOf = (it: MRItem, r: MReq): Stage => {
     if (it.label_received_at) return 'completed'
     if (it.label_sent_at) return 'sent'

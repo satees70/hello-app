@@ -73,7 +73,7 @@ begin
   loop
     if my_factory_code() <> 'HEAD_OFFICE' and not (it.fac = any (my_factory_codes())) then raise exception 'Not allowed for this factory'; end if;
     if it.label_sent_at is not null then continue; end if;
-    if it.label_photo_path is null then raise exception 'Attach a photo for % before sending', it.item_code; end if;
+    -- photo is optional for now (phone camera issues)
     if coalesce(it.label_print_qty, 0) <= 0 then raise exception 'Enter a print quantity for % before sending', it.item_code; end if;
     update public.material_request_items set label_sent_at = now() where id = it.id;
   end loop;
