@@ -86,6 +86,7 @@ export default function IncomingPage() {
   const [kgPerBag, setKgPerBag] = useState<Record<string, number>>({})
   const [pcsPerRoll, setPcsPerRoll] = useState<Record<string, number>>({})
   const [doItems, setDoItems] = useState<Record<string, string>>({})
+  const [stockCode, setStockCode] = useState<Record<string, string>>({})   // pack code -> loose "stock code" override
   const [receiving, setReceiving] = useState(false)
   const [busyLine, setBusyLine] = useState('')
   const [editReq, setEditReq] = useState<DoLine | null>(null)
@@ -261,10 +262,15 @@ export default function IncomingPage() {
     // pieces-per-roll (roll plastics received in rolls → stocked in pc)
     const { data: rl } = await supabase.from('items').select('code, pcs_per_roll').not('pcs_per_roll', 'is', null)
     const pr: Record<string, number> = {}; (rl || []).forEach(r => { if (r.pcs_per_roll) pr[r.code] = Number(r.pcs_per_roll) }); setPcsPerRoll(pr)
-    // units of every code + base code (to know what's a real item)
+    // units of every code + base code (to know what's a real item), plus stock-code overrides
     const codes = [...new Set(dl.flatMap(l => [l.item_code, baseCode(l.item_code)]))]
-    const { data: items } = await supabase.from('items').select('code, unit').in('code', codes)
-    const u: Record<string, string> = {}; (items || []).forEach(r => { u[r.code] = r.unit || '' }); setDoItems(u)
+    const { data: items } = await supabase.from('items').select('code, unit, stock_code').in('code', codes)
+    const u: Record<string, string> = {}; const sc: Record<string, string> = {}
+    ;(items || []).forEach(r => { u[r.code] = r.unit || ''; if (r.stock_code) sc[r.code] = r.stock_code })
+    // also load the units of any override target codes (e.g. S035) so they resolve
+    const targets = [...new Set(Object.values(sc))].filter(t => u[t] == null)
+    if (targets.length) { const { data: t2 } = await supabase.from('items').select('code, unit').in('code', targets); (t2 || []).forEach(r => { u[r.code] = r.unit || '' }) }
+    setDoItems(u); setStockCode(sc)
   }
 
   // Reload just the lines of the open document (after a QC tick or photo)
@@ -362,12 +368,16 @@ export default function IncomingPage() {
     const run = linesFor?.pick_run_no || ''
     const active = [...requests].reverse().filter(r => ACTIVE.includes(r.status))
     const ordered = run ? [...active].sort((a, b) => (a.pick_run_no === run ? 0 : 1) - (b.pick_run_no === run ? 0 : 1)) : active
+    const sc = stockCode[code]
     const out: MRItem[] = []
-    ordered.forEach(r => (r.material_request_items || []).forEach(it => { if (it.item_code === code || it.item_code === base) out.push(it) }))
+    ordered.forEach(r => (r.material_request_items || []).forEach(it => { if (it.item_code === code || it.item_code === base || (sc && it.item_code === sc)) out.push(it) }))
     return out
   }
-  // Prefer the BASE code (the recipe's KG raw material, e.g. D242) over the bagged SKU (D242-25KG/BAG, unit BAG)
+  // Resolve the code to stock under: explicit stock-code override first (e.g.
+  // E035-25KG/BAG → S035), then the BASE code (D242-25KG/BAG → D242), else the code itself.
   const resolveItem = (code: string): { code: string; unit: string } | null => {
+    const sc = stockCode[code]
+    if (sc && doItems[sc] != null) return { code: sc, unit: doItems[sc] }
     const b = baseCode(code)
     if (b !== code && doItems[b] != null) return { code: b, unit: doItems[b] }
     if (doItems[code] != null) return { code, unit: doItems[code] }

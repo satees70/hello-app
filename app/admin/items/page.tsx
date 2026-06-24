@@ -7,8 +7,8 @@ import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can, hasCap } from '@/lib/permissions'
 
-interface Item { id: string; code: string; description: string; unit: string; type: string; stock_group: string; supplied_by_factory: boolean; kg_per_bag: number | null; pcs_per_roll: number | null }
-const EMPTY = { code: '', description: '', unit: '', type: 'Material', stock_group: '', supplied_by_factory: false, kg_per_bag: '', pcs_per_roll: '' }
+interface Item { id: string; code: string; description: string; unit: string; type: string; stock_group: string; supplied_by_factory: boolean; kg_per_bag: number | null; pcs_per_roll: number | null; stock_code: string | null }
+const EMPTY = { code: '', description: '', unit: '', type: 'Material', stock_group: '', supplied_by_factory: false, kg_per_bag: '', pcs_per_roll: '', stock_code: '' }
 // Fields that can be edited (the Code is locked — it's referenced across documents)
 const ITEM_FIELDS = [
   { key: 'description', label: 'Description' },
@@ -69,7 +69,7 @@ export default function ItemsPage() {
   }
 
   function openCreate() { setEditing(null); setForm(EMPTY); setError(''); setShowForm(true) }
-  function openEdit(item: Item) { setEditing(item); setForm({ code: item.code, description: item.description, unit: item.unit, type: item.type, stock_group: item.stock_group || '', supplied_by_factory: item.supplied_by_factory || false, kg_per_bag: item.kg_per_bag != null ? String(item.kg_per_bag) : '', pcs_per_roll: item.pcs_per_roll != null ? String(item.pcs_per_roll) : '' }); setError(''); setShowForm(true) }
+  function openEdit(item: Item) { setEditing(item); setForm({ code: item.code, description: item.description, unit: item.unit, type: item.type, stock_group: item.stock_group || '', supplied_by_factory: item.supplied_by_factory || false, kg_per_bag: item.kg_per_bag != null ? String(item.kg_per_bag) : '', pcs_per_roll: item.pcs_per_roll != null ? String(item.pcs_per_roll) : '', stock_code: item.stock_code || '' }); setError(''); setShowForm(true) }
 
   // Turn a form field into the string we store on a change request
   const formStr = (k: string): string => {
@@ -94,7 +94,7 @@ export default function ItemsPage() {
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true); setError(''); setSuccess('')
-    const payload = { ...form, kg_per_bag: form.kg_per_bag === '' ? null : Number(form.kg_per_bag), pcs_per_roll: form.pcs_per_roll === '' ? null : Number(form.pcs_per_roll) }
+    const payload = { ...form, kg_per_bag: form.kg_per_bag === '' ? null : Number(form.kg_per_bag), pcs_per_roll: form.pcs_per_roll === '' ? null : Number(form.pcs_per_roll), stock_code: (form.stock_code || '').trim() || null }
     if (editing && !isHO) {
       // Staff: send each changed field to Head Office for approval (code is locked)
       const changed = ITEM_FIELDS.filter(f => formStr(f.key) !== itemStr(editing, f.key))
@@ -305,6 +305,12 @@ export default function ItemsPage() {
                 <input type="number" step="any" min="0" value={form.pcs_per_roll} onChange={e => setForm({ ...form, pcs_per_roll: e.target.value })}
                   className="w-full border rounded-lg px-3 py-2" placeholder="e.g. 1600 — for roll plastics" />
                 <p className="text-xs text-gray-400 mt-1">For roll plastics: how many pieces are in one roll (e.g. 500m = 1600 pc → enter 1600). Stock is counted in pieces, but received and requested in whole rolls.</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Stock code <span className="text-gray-400 font-normal">(optional)</span></label>
+                <input value={form.stock_code} onChange={e => setForm({ ...form, stock_code: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2 font-mono" placeholder="e.g. S035" />
+                <p className="text-xs text-gray-400 mt-1">Only when this code differs from the loose/recipe code. On a bag SKU (e.g. <span className="font-mono">E035-25KG/BAG</span>) set this to the loose code (<span className="font-mono">S035</span>); Goods Received will convert and book stock into that code and match its material request.</p>
               </div>
             </div>
             {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded">{error}</p>}

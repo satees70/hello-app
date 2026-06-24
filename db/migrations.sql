@@ -2668,3 +2668,11 @@ create policy si_customer_restrict on public.sales_imports as restrictive for se
 alter table public.material_request_items add column if not exists label_printed_by uuid;
 alter table public.material_request_items add column if not exists label_printed_by_name text;
 alter table public.material_request_items add column if not exists label_printed_at timestamptz;
+
+-- ============================================================================
+-- 2026-06 · "Stock code" override on items. When a bag/pack SKU's code differs
+-- from the loose/recipe code (e.g. E035-25KG/BAG should stock as S035), set
+-- stock_code on the pack item; Goods Received then books into that code and
+-- matches that material request.
+-- ============================================================================
+alter table public.items add column if not exists stock_code text;
