@@ -23,7 +23,7 @@ interface ChangeRequest {
   reviewed_by_name: string | null
   reviewed_at: string | null
   factory_code: string
-  sales_order_lines: { item_code: string; description: string } | null
+  sales_order_lines: { item_code: string; description: string; so_number: string | null } | null
   sales_imports: { file_name: string } | null
 }
 
@@ -182,7 +182,7 @@ export default function PendingChangesPage() {
   async function loadRequests() {
     const { data } = await supabase
       .from('change_requests')
-      .select('*, sales_order_lines(item_code, description), sales_imports(file_name)')
+      .select('*, sales_order_lines(item_code, description, so_number), sales_imports(file_name)')
       .order('requested_at', { ascending: false })
     setRequests((data as ChangeRequest[]) || [])
   }
@@ -428,7 +428,7 @@ export default function PendingChangesPage() {
   const shown = filter === 'All' ? requests : requests.filter(r => r.status === filter)
   // Filterable columns on the change-requests table (dropdowns list the values present)
   const CR_COLS: { key: string; label: string; get: (r: ChangeRequest) => string }[] = [
-    { key: 'doc', label: 'Document', get: r => r.sales_imports?.file_name || '—' },
+    { key: 'doc', label: 'Document', get: r => r.sales_order_lines?.so_number || r.sales_imports?.file_name || '—' },
     { key: 'line', label: 'Line', get: r => { const c = r.sales_order_lines?.item_code || (r.request_type === 'delete' ? (r.old_value || '') : ''); const d = r.sales_order_lines?.description || ''; return (c ? `${c}${d ? ' — ' + d : ''}` : '') || '—' } },
     { key: 'field', label: 'Field', get: r => r.request_type === 'delete' ? 'Whole line' : (FIELD_LABEL[r.field] || r.field) },
     { key: 'by', label: 'Requested by', get: r => r.requested_by_name || r.requested_by_email || '—' },
@@ -537,8 +537,12 @@ export default function PendingChangesPage() {
               {shownF.map(r => (
                 <tr key={r.id} className={`border-b last:border-0 align-top ${selCr.has(r.id) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
                   {isHO && <td className="px-3 py-2">{r.status === 'Pending' ? <input type="checkbox" checked={selCr.has(r.id)} onChange={() => toggleCr(r.id)} className="h-4 w-4" /> : null}</td>}
-                  <td className="px-3 py-2 min-w-[140px]">{r.sales_imports?.file_name || '—'}</td>
+                  <td className="px-3 py-2 min-w-[140px]">
+                    <span className="font-mono font-medium">{r.sales_order_lines?.so_number || '—'}</span>
+                    <span className="block text-gray-400 text-xs">{r.sales_imports?.file_name}</span>
+                  </td>
                   <td className="px-3 py-2 min-w-[160px]">
+                    {r.sales_order_lines?.so_number && <span className="block text-gray-400 text-xs font-mono">{r.sales_order_lines.so_number}</span>}
                     <span className="font-mono font-medium">{r.sales_order_lines?.item_code || (r.request_type === 'delete' ? r.old_value : '—')}</span>
                     <span className="block text-gray-400">{r.sales_order_lines?.description}</span>
                   </td>
