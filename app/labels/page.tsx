@@ -98,10 +98,9 @@ export default function LabelsPage() {
 
   async function saveLabel(it: MRItem, r: MReq) {
     if (!canEditFac(r.factory_code)) { setError('You have view-only access at this factory.'); return }
-    const e = edits[it.id] ?? { batch: it.label_batch_no ?? '', exp: it.label_exp_date ?? '', qty: String(it.label_print_qty ?? it.requested_qty) }
+    const e = edits[it.id] ?? { batch: it.label_batch_no ?? '', exp: it.label_exp_date ?? '', qty: '' }
     if (!e.batch.trim() && !e.exp) { setError('Enter a batch number or an expiry date for the label.'); return }
-    const qty = e.qty === '' ? it.requested_qty : Number(e.qty)
-    if (!(qty > 0)) { setError('Enter a print quantity.'); return }
+    const qty = Number(it.requested_qty)   // print qty is calculated by the system, not typed
     setBusy(`save|${it.id}`); setError(''); setSuccess('')
     const { error: er } = await supabase.from('material_request_items').update({ label_batch_no: e.batch.trim() || null, label_exp_date: e.exp || null, label_print_qty: qty }).eq('id', it.id)
     if (er) { setError(er.message); setBusy(''); return }
@@ -277,9 +276,7 @@ export default function LabelsPage() {
                       <td className="px-3 py-2"><span className="font-mono">{r.production_batches?.item_code || it.label_for_product || '—'}</span>{r.production_batches?.description && <span className="block text-gray-700 text-xs max-w-[16rem]">{r.production_batches.description}</span>}<span className="block text-gray-400 text-xs">{r.pick_run_no || r.request_no}</span></td>
                       {isHO && <td className="px-3 py-2 whitespace-nowrap text-gray-600">{factoryName(r.factory_code)}</td>}
                       <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STAGE_STYLE[stage]}`}>{STAGES.find(s => s.key === stage)?.label}</span></td>
-                      <td className="px-3 py-2 text-right">{editable
-                        ? <input type="number" min="0" value={e.qty} onChange={ev => setE({ qty: ev.target.value })} className="border rounded px-2 py-1 text-xs w-20 text-right" />
-                        : <span className="font-semibold">{it.label_print_qty ?? it.requested_qty}</span>}</td>
+                      <td className="px-3 py-2 text-right"><span className="font-semibold" title="Calculated by the system from the order">{Number(Number(it.requested_qty).toFixed(3))}</span></td>
                       <td className="px-3 py-2">{editable ? (
                         <div className="flex flex-col gap-1">
                           <input value={e.batch} onChange={ev => setE({ batch: ev.target.value })} placeholder="batch no." className="border rounded px-2 py-1 text-xs w-28" />
