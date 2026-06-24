@@ -577,40 +577,50 @@ export default function ProductionPage() {
               <span className="text-gray-400 text-xs">decides which materials are needed (auto = roll, manual = pieces)</span>
             </div>
 
-            {exploded.note ? (
-              <p className="text-amber-600 text-sm bg-amber-50 p-3 rounded">{exploded.note}</p>
-            ) : (
-              <>
+            <>
                 {!hasRequest && (
                   <label className="inline-flex items-center gap-2 text-sm mb-2">
                     <input type="checkbox" checked={adhoc} onChange={e => {
                       const on = e.target.checked; setAdhoc(on)
                       if (on) setCustomRows(exploded.rows.map(r => ({ code: r.code, description: r.description, unit: r.unit, qty: String(r.shortfall > 0 ? r.requested : clean(r.required)) })))
                     }} className="h-4 w-4" />
-                    ✎ Customise materials (ad-hoc) — change packaging / quantities for this order
+                    ✎ Customise materials (ad-hoc) — request materials by hand for this order{exploded.note ? ' (works even without a recipe)' : ''}
                   </label>
                 )}
-                <div className="overflow-x-auto border rounded-lg">
-                  {adhoc ? (
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 border-b">
-                        <tr>{['Material', 'Description', 'Unit', 'Request qty', ''].map(h => (
-                          <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
-                      </thead>
-                      <tbody>
-                        {customRows.length === 0 && <tr><td colSpan={5} className="text-center py-4 text-gray-400">No materials — add one below.</td></tr>}
-                        {customRows.map((r, i) => (
-                          <tr key={i} className="border-b last:border-0">
-                            <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{r.code}</td>
-                            <td className="px-3 py-2 text-gray-600">{r.description}</td>
-                            <td className="px-3 py-2 text-gray-500">{r.unit}</td>
-                            <td className="px-3 py-2"><input type="number" step="any" value={r.qty} onChange={e => setCustomRows(prev => prev.map((x, j) => j === i ? { ...x, qty: e.target.value } : x))} className="border rounded px-2 py-1 text-sm w-28 text-right" /></td>
-                            <td className="px-3 py-2 text-right"><button onClick={() => setCustomRows(prev => prev.filter((_, j) => j !== i))} className="text-red-500 hover:underline text-xs">remove</button></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : (
+                {adhoc ? (
+                  <>
+                    <div className="overflow-x-auto border rounded-lg">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 border-b">
+                          <tr>{['Material', 'Description', 'Unit', 'Request qty', ''].map(h => (
+                            <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+                        </thead>
+                        <tbody>
+                          {customRows.length === 0 && <tr><td colSpan={5} className="text-center py-4 text-gray-400">No materials — add one below.</td></tr>}
+                          {customRows.map((r, i) => (
+                            <tr key={i} className="border-b last:border-0">
+                              <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{r.code}</td>
+                              <td className="px-3 py-2 text-gray-600">{r.description}</td>
+                              <td className="px-3 py-2 text-gray-500">{r.unit}</td>
+                              <td className="px-3 py-2"><input type="number" step="any" value={r.qty} onChange={e => setCustomRows(prev => prev.map((x, j) => j === i ? { ...x, qty: e.target.value } : x))} className="border rounded px-2 py-1 text-sm w-28 text-right" /></td>
+                              <td className="px-3 py-2 text-right"><button onClick={() => setCustomRows(prev => prev.filter((_, j) => j !== i))} className="text-red-500 hover:underline text-xs">remove</button></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="flex flex-wrap items-end gap-3 mt-2">
+                      <div className="flex flex-col gap-1 flex-1 min-w-[16rem]"><span className="text-xs font-medium text-gray-600">Add a material</span>
+                        <ItemPicker items={items} value={addMat ? `${addMat.code} — ${addMat.description}` : ''} onPick={it => setAddMat(it)} placeholder="Type a material code or name…" /></div>
+                      <div className="flex flex-col gap-1 w-28"><span className="text-xs font-medium text-gray-600">Qty{addMat ? ` (${addMat.unit})` : ''}</span>
+                        <input type="number" step="any" value={addMatQty} onChange={e => setAddMatQty(e.target.value)} className="border rounded-lg px-3 py-2 text-sm text-right" /></div>
+                      <button onClick={addCustomRow} className="border border-blue-600 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 text-sm font-medium">+ Add</button>
+                    </div>
+                  </>
+                ) : exploded.note ? (
+                  <p className="text-amber-600 text-sm bg-amber-50 p-3 rounded">{exploded.note}{!hasRequest ? ' — or tick "Customise materials (ad-hoc)" above to request materials by hand.' : ''}</p>
+                ) : (
+                  <div className="overflow-x-auto border rounded-lg">
                     <table className="w-full text-sm">
                       <thead className="bg-gray-50 border-b">
                         <tr>{['Material', 'Description', 'Unit', 'Required', 'Stock (system)', 'Shortfall', 'Requested'].map(h => (
@@ -630,40 +640,31 @@ export default function ProductionPage() {
                         ))}
                       </tbody>
                     </table>
-                  )}
-                </div>
-
-                {adhoc && (
-                  <div className="flex flex-wrap items-end gap-3 mt-2">
-                    <div className="flex flex-col gap-1 flex-1 min-w-[16rem]"><span className="text-xs font-medium text-gray-600">Add a material</span>
-                      <ItemPicker items={items} value={addMat ? `${addMat.code} — ${addMat.description}` : ''} onPick={it => setAddMat(it)} placeholder="Type a material code or name…" /></div>
-                    <div className="flex flex-col gap-1 w-28"><span className="text-xs font-medium text-gray-600">Qty{addMat ? ` (${addMat.unit})` : ''}</span>
-                      <input type="number" step="any" value={addMatQty} onChange={e => setAddMatQty(e.target.value)} className="border rounded-lg px-3 py-2 text-sm text-right" /></div>
-                    <button onClick={addCustomRow} className="border border-blue-600 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 text-sm font-medium">+ Add</button>
                   </div>
                 )}
 
-                <div className="flex flex-wrap items-end justify-between gap-3 mt-4">
-                  <div className="text-sm">
-                    {hasRequest
-                      ? <span className="text-purple-700">A material request is already open{reqCreator ? ` (raised by ${reqCreator})` : ''} — see Material Requests.</span>
-                      : adhoc
-                        ? <span className="text-gray-600">Ad-hoc: requesting exactly the materials & quantities listed above.</span>
-                        : totalShortfall > 0
-                          ? <span className="text-red-600">Total shortfall across {exploded.rows.filter(r => r.shortfall > 0).length} material(s).</span>
-                          : <span className="text-green-600">Enough stock on hand — no shortfall.</span>}
+                {(adhoc || !exploded.note) && (
+                  <div className="flex flex-wrap items-end justify-between gap-3 mt-4">
+                    <div className="text-sm">
+                      {hasRequest
+                        ? <span className="text-purple-700">A material request is already open{reqCreator ? ` (raised by ${reqCreator})` : ''} — see Material Requests.</span>
+                        : adhoc
+                          ? <span className="text-gray-600">Ad-hoc: requesting exactly the materials & quantities listed above.</span>
+                          : totalShortfall > 0
+                            ? <span className="text-red-600">Total shortfall across {exploded.rows.filter(r => r.shortfall > 0).length} material(s).</span>
+                            : <span className="text-green-600">Enough stock on hand — no shortfall.</span>}
+                    </div>
+                    <div className="flex items-end gap-3">
+                      <button onClick={() => adhoc ? raiseCustom(selected) : raiseTarget(selected)} disabled={raising || hasRequest || (adhoc ? customRows.filter(r => Number(r.qty) > 0).length === 0 : totalShortfall <= 0)}
+                        className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
+                        {raising ? 'Raising…' : adhoc ? 'Raise ad-hoc request' : 'Raise Material Request'}
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-end gap-3">
-                    <button onClick={() => adhoc ? raiseCustom(selected) : raiseTarget(selected)} disabled={raising || hasRequest || (adhoc ? customRows.filter(r => Number(r.qty) > 0).length === 0 : totalShortfall <= 0)}
-                      className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
-                      {raising ? 'Raising…' : adhoc ? 'Raise ad-hoc request' : 'Raise Material Request'}
-                    </button>
-                  </div>
-                </div>
+                )}
                 {error && <p className="text-red-500 text-sm bg-red-50 border border-red-200 rounded p-2 mt-3">Couldn’t raise: {error}</p>}
-                <p className="text-gray-400 text-xs mt-2">Tip: the request captures the current shortfall and adds a safety margin (rounded up). The product expiry &amp; batch number are entered later on the label, after the materials are received. Stock comes from the system — adjust it under Stock Adjustment if it’s wrong.</p>
+                <p className="text-gray-400 text-xs mt-2">Tip: standard requests capture the current shortfall plus a safety margin. Ad-hoc requests use exactly what you list. Batch &amp; expiry are entered later on the label.</p>
               </>
-            )}
           </div>
           </div>
         )}
