@@ -186,7 +186,7 @@ export default function DeliverySchedulePage() {
         body * { visibility: hidden; }
         #delivery-print, #delivery-print * { visibility: visible; }
         #delivery-print { position: absolute; left: 0; top: 0; width: 100%; font-size: 10px; }
-        #delivery-print table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+        #delivery-print table { width: 100%; table-layout: auto; border-collapse: collapse; }
         #delivery-print th, #delivery-print td { white-space: normal; word-break: break-word; padding: 3px 5px !important; border: 1px solid #ccc; }
         #delivery-print .shadow-sm { box-shadow: none !important; }
         .no-print { display: none !important; }
@@ -338,8 +338,8 @@ export default function DeliverySchedulePage() {
                         <th className="px-3 py-2">PO date</th>
                         <th className="px-3 py-2">Customer</th>
                         <th className="px-3 py-2 text-center">Invoice ✓</th>
-                        <th className="px-3 py-2">Doc</th>
-                        <th className="px-3 py-2">Delivery date</th>
+                        <th className="px-3 py-2 no-print">Doc</th>
+                        <th className="px-3 py-2 no-print">Delivery date</th>
                         <th className="px-3 py-2 no-print">Move to</th><th className="no-print"></th>
                       </tr>
                     </thead>
@@ -353,8 +353,8 @@ export default function DeliverySchedulePage() {
                             <td className="px-3 py-1.5 text-gray-700">{poKey ? cellView(s.data?.[poKey] ?? '') : '—'}</td>
                             <td className="px-3 py-1.5 text-gray-700">{(custKey && s.data?.[custKey]) || s.customer_name || '—'}</td>
                             <td className="px-3 py-1.5 text-center"><input type="checkbox" checked={s.invoiced} onChange={e => updateSched(s.id, { invoiced: e.target.checked })} className="h-4 w-4" /></td>
-                            <td className="px-3 py-1.5">{linkKey && s.data?.[linkKey] ? cellView(s.data[linkKey]) : '—'}</td>
-                            <td className="px-3 py-1.5"><input type="date" value={s.delivery_date || ''} onChange={e => updateSched(s.id, { delivery_date: e.target.value || null })} className="border rounded px-2 py-1 text-xs" />{isTomorrow && <span className="ml-1 bg-yellow-200 text-yellow-900 px-1 rounded text-[10px] font-semibold">TOMORROW</span>}</td>
+                            <td className="px-3 py-1.5 no-print">{linkKey && s.data?.[linkKey] ? cellView(s.data[linkKey]) : '—'}</td>
+                            <td className="px-3 py-1.5 no-print"><input type="date" value={s.delivery_date || ''} onChange={e => updateSched(s.id, { delivery_date: e.target.value || null })} className="border rounded px-2 py-1 text-xs" />{isTomorrow && <span className="ml-1 bg-yellow-200 text-yellow-900 px-1 rounded text-[10px] font-semibold">TOMORROW</span>}</td>
                             <td className="px-3 py-1.5 no-print">
                               <select value={s.route || ''} onChange={e => updateSched(s.id, { route: e.target.value || null })} className="border rounded px-2 py-1 text-xs">
                                 <option value="">—</option>
