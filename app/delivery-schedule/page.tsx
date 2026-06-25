@@ -2,7 +2,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
-import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
 import { tomorrowISO } from '@/lib/delivery'
 import * as XLSX from 'xlsx'
@@ -38,7 +37,7 @@ function cellView(v: string): React.ReactNode {
 
 export default function DeliverySchedulePage() {
   const { profile, loading, error: profileError } = useProfile()
-  useRequireView(profile, 'dispatch')
+  // Delivery Schedule is viewable by any logged-in user for now.
 
   const [sched, setSched] = useState<Sched[]>([])
   const [trips, setTrips] = useState<Record<string, Trip>>({})   // `${route}|${date}` -> trip
@@ -185,13 +184,13 @@ export default function DeliverySchedulePage() {
         @page { size: A4 portrait; margin: 10mm; }
         body * { visibility: hidden; }
         #delivery-print, #delivery-print * { visibility: visible; }
-        #delivery-print { position: absolute; left: 0; top: 0; width: 100%; font-size: 10px; }
+        #delivery-print { position: absolute; left: 0; top: 0; width: 100%; font-size: 8.5px; }
         #delivery-print table { width: 100%; table-layout: fixed; border-collapse: collapse; }
-        #delivery-print th, #delivery-print td { white-space: normal; word-break: break-word; padding: 3px 5px !important; border: 1px solid #ccc; vertical-align: top; }
+        #delivery-print th, #delivery-print td { white-space: normal; word-break: break-word; padding: 2px 4px !important; border: 1px solid #ccc; vertical-align: top; overflow: hidden; }
         /* identical column widths across every line box; only Customer wraps */
-        #delivery-print th:nth-child(1), #delivery-print td:nth-child(1) { width: 68px; white-space: nowrap; }
+        #delivery-print th:nth-child(1), #delivery-print td:nth-child(1) { width: 80px; white-space: nowrap; }
         #delivery-print th:nth-child(2), #delivery-print td:nth-child(2) { width: 78px; white-space: nowrap; }
-        #delivery-print th:nth-child(4), #delivery-print td:nth-child(4) { width: 52px; text-align: center; }
+        #delivery-print th:nth-child(4), #delivery-print td:nth-child(4) { width: 56px; white-space: nowrap; text-align: center; }
         #delivery-print .shadow-sm { box-shadow: none !important; }
         .no-print { display: none !important; }
         #delivery-print input, #delivery-print select { border: none !important; padding: 0 !important; background: transparent !important; -webkit-appearance: none; appearance: none; color: #000 !important; font-size: 10px; }
