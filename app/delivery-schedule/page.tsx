@@ -90,6 +90,9 @@ export default function DeliverySchedulePage() {
 
   // Column holding the PO delivery date (UDF_PODELDATE) — rows due tomorrow get highlighted.
   const podelKey = useMemo(() => headers.find(h => /podel/i.test(h)) || '', [headers])
+  // Column holding the ON HOLD flag — rows with "T" get highlighted red.
+  const holdKey = useMemo(() => headers.find(h => /hold/i.test(h)) || '', [headers])
+  const isHold = (v: unknown) => String(v ?? '').trim().toUpperCase() === 'T'
   const allSel = mapped.length > 0 && mapped.every(m => sel.has(m.i))
   const toggleAll = () => setSel(allSel ? new Set() : new Set(mapped.map(m => m.i)))
   const toggleRow = (i: number) => setSel(p => { const n = new Set(p); n.has(i) ? n.delete(i) : n.add(i); return n })
@@ -177,8 +180,9 @@ export default function DeliverySchedulePage() {
                     {mapped.length === 0 && <tr><td colSpan={headers.length + 1} className="px-3 py-4 text-gray-400 text-center">Nothing left to assign — pick the SO column above, or all rows are assigned.</td></tr>}
                     {mapped.map(m => {
                       const dueT = !!podelKey && m.data[podelKey] === tomorrowISO()
+                      const hold = !!holdKey && isHold(m.data[holdKey])
                       return (
-                      <tr key={m.i} className={`border-t ${sel.has(m.i) ? 'bg-blue-100' : dueT ? 'bg-yellow-100' : 'hover:bg-gray-50'}`}>
+                      <tr key={m.i} className={`border-t ${sel.has(m.i) ? 'bg-blue-100' : hold ? 'bg-red-100' : dueT ? 'bg-yellow-100' : 'hover:bg-gray-50'}`}>
                         <td className="px-3 py-1.5"><input type="checkbox" checked={sel.has(m.i)} onChange={() => toggleRow(m.i)} className="h-4 w-4" /></td>
                         {headers.map((h, i) => { const key = h || `Column ${i + 1}`; return <td key={i} className="px-3 py-1.5 text-gray-700">{cellView(m.data[key])}</td> })}
                       </tr>
@@ -204,6 +208,7 @@ export default function DeliverySchedulePage() {
         {shownSched.length === 0 ? <p className="text-gray-400 text-sm">No scheduled deliveries.</p> : (() => {
           const dataCols: string[] = []
           shownSched.forEach(s => { if (s.data) Object.keys(s.data).forEach(k => { if (!dataCols.includes(k)) dataCols.push(k) }) })
+          const schedHoldKey = dataCols.find(c => /hold/i.test(c)) || ''
           return (
           <div className="border rounded-xl overflow-auto bg-white shadow-sm">
             <table className="w-full text-sm whitespace-nowrap">
@@ -218,8 +223,9 @@ export default function DeliverySchedulePage() {
               <tbody>
                 {shownSched.map(s => {
                   const isTomorrow = s.delivery_date === tomorrowISO()
+                  const hold = !!schedHoldKey && isHold(s.data?.[schedHoldKey])
                   return (
-                    <tr key={s.id} className={`border-t ${isTomorrow ? 'bg-yellow-50' : ''}`}>
+                    <tr key={s.id} className={`border-t ${hold ? 'bg-red-100' : isTomorrow ? 'bg-yellow-50' : ''}`}>
                       <td className="px-3 py-1.5">
                         <select value={s.route || ''} onChange={e => updateSched(s.id, { route: e.target.value || null })} className="border rounded px-2 py-1 text-xs font-medium">
                           <option value="">—</option>
