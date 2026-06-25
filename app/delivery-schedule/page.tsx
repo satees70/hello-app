@@ -91,6 +91,8 @@ export default function DeliverySchedulePage() {
     }
   }).filter(m => m.so), [rows, headers, colSO, colCust, colDate])
 
+  // Column holding the PO delivery date (UDF_PODELDATE) — rows due tomorrow get highlighted.
+  const podelKey = useMemo(() => headers.find(h => /podel/i.test(h)) || '', [headers])
   const allSel = mapped.length > 0 && mapped.every(m => sel.has(m.i))
   const toggleAll = () => setSel(allSel ? new Set() : new Set(mapped.map(m => m.i)))
   const toggleRow = (i: number) => setSel(p => { const n = new Set(p); n.has(i) ? n.delete(i) : n.add(i); return n })
@@ -181,12 +183,15 @@ export default function DeliverySchedulePage() {
                   </thead>
                   <tbody>
                     {mapped.length === 0 && <tr><td colSpan={headers.length + 1} className="px-3 py-4 text-gray-400 text-center">Nothing left to assign — pick the SO column above, or all rows are assigned.</td></tr>}
-                    {mapped.map(m => (
-                      <tr key={m.i} className={`border-t ${sel.has(m.i) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                    {mapped.map(m => {
+                      const dueT = !!podelKey && m.data[podelKey] === tomorrowISO()
+                      return (
+                      <tr key={m.i} className={`border-t ${sel.has(m.i) ? 'bg-blue-100' : dueT ? 'bg-yellow-100' : 'hover:bg-gray-50'}`}>
                         <td className="px-3 py-1.5"><input type="checkbox" checked={sel.has(m.i)} onChange={() => toggleRow(m.i)} className="h-4 w-4" /></td>
                         {headers.map((h, i) => { const key = h || `Column ${i + 1}`; return <td key={i} className="px-3 py-1.5 text-gray-700">{cellView(m.data[key])}</td> })}
                       </tr>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
