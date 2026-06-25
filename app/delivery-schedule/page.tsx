@@ -9,8 +9,9 @@ import * as XLSX from 'xlsx'
 
 interface Sched {
   id: string; so_number: string; customer_name: string | null; route: string | null
-  delivery_date: string | null; created_by_name: string | null; data: Record<string, string> | null
+  delivery_date: string | null; created_by_name: string | null; data: Record<string, string> | null; invoiced: boolean
 }
+interface Trip { route: string; delivery_date: string; lorry_no: string | null; driver: string | null; kelindan: string | null }
 
 // Fixed delivery lines A … K.
 const LINES = Array.from({ length: 11 }, (_, i) => 'LINE ' + String.fromCharCode(65 + i))
@@ -40,6 +41,7 @@ export default function DeliverySchedulePage() {
   useRequireView(profile, 'dispatch')
 
   const [sched, setSched] = useState<Sched[]>([])
+  const [trips, setTrips] = useState<Record<string, Trip>>({})   // `${route}|${date}` -> trip
   const [uploads, setUploads] = useState<{ id: string; file_name: string; path: string; created_at: string; created_by_name: string | null }[]>([])
   const [fileName, setFileName] = useState('')
   const [headers, setHeaders] = useState<string[]>([])
@@ -57,8 +59,17 @@ export default function DeliverySchedulePage() {
 
   useEffect(() => { if (profile) { load(); loadUploads() } }, [profile])
   async function load() {
-    const { data: s } = await supabase.from('delivery_schedule').select('id, so_number, customer_name, route, delivery_date, created_by_name, data').order('route', { ascending: true, nullsFirst: false }).order('delivery_date', { ascending: true, nullsFirst: false })
+    const { data: s } = await supabase.from('delivery_schedule').select('id, so_number, customer_name, route, delivery_date, created_by_name, data, invoiced').order('route', { ascending: true, nullsFirst: false }).order('delivery_date', { ascending: true, nullsFirst: false })
     setSched((s as Sched[]) || [])
+    const { data: t } = await supabase.from('delivery_trips').select('route, delivery_date, lorry_no, driver, kelindan')
+    const tm: Record<string, Trip> = {}; (t as Trip[] || []).forEach(x => { tm[`${x.route}|${x.delivery_date}`] = x }); setTrips(tm)
+  }
+  async function saveTrip(route: string, deliveryDate: string, patch: Partial<Trip>) {
+    const key = `${route}|${deliveryDate}`
+    const cur = trips[key] || { route, delivery_date: deliveryDate, lorry_no: '', driver: '', kelindan: '' }
+    const next = { ...cur, ...patch }
+    setTrips(p => ({ ...p, [key]: next }))
+    await supabase.from('delivery_trips').upsert({ route, delivery_date: deliveryDate, lorry_no: next.lorry_no || null, driver: next.driver || null, kelindan: next.kelindan || null, updated_at: new Date().toISOString() }, { onConflict: 'route,delivery_date' })
   }
   async function loadUploads() {
     const { data } = await supabase.from('delivery_uploads').select('id, file_name, path, created_at, created_by_name').order('created_at', { ascending: false }).limit(30)
@@ -258,38 +269,60 @@ export default function DeliverySchedulePage() {
           </div>
         </div>
         {shownSched.length === 0 ? <p className="text-gray-400 text-sm">No scheduled deliveries.</p> : (() => {
-          const dataCols: string[] = []
-          shownSched.forEach(s => { if (s.data) Object.keys(s.data).forEach(k => { if (!dataCols.includes(k)) dataCols.push(k) }) })
-          const schedHoldKey = dataCols.find(c => /hold/i.test(c)) || ''
-          // Group by line, ordering LINE A..K first then anything else / unassigned.
-          const groups: Record<string, Sched[]> = {}
-          shownSched.forEach(s => { const k = s.route || 'Unassigned'; (groups[k] = groups[k] || []).push(s) })
-          const order = [...LINES.filter(l => groups[l]), ...Object.keys(groups).filter(k => !LINES.includes(k))]
+          const allKeys: string[] = []
+          shownSched.forEach(s => { if (s.data) Object.keys(s.data).forEach(k => { if (!allKeys.includes(k)) allKeys.push(k) }) })
+          const poKey = allKeys.find(c => /podel/i.test(c)) || ''
+          const custKey = allKeys.find(c => /company|customer/i.test(c)) || ''
+          const linkKey = allKeys.find(c => /drive|link/i.test(c)) || ''
+          const holdKeyS = allKeys.find(c => /hold/i.test(c)) || ''
+          const fmtD = (d: string | null) => { const m = (d || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}/${m[2]}/${m[1]}` : (d || '—') }
+          // Group by line + delivery date (one box per trip).
+          const groups: Record<string, { route: string | null; date: string | null; rows: Sched[] }> = {}
+          shownSched.forEach(s => { const k = `${s.route || ''}||${s.delivery_date || ''}`; (groups[k] = groups[k] || { route: s.route, date: s.delivery_date, rows: [] }).rows.push(s) })
+          const li = (r: string | null) => { const i = LINES.indexOf(r || ''); return i < 0 ? 999 : i }
+          const keys = Object.keys(groups).sort((a, b) => (li(groups[a].route) - li(groups[b].route)) || (groups[a].date || '').localeCompare(groups[b].date || ''))
           return (
           <div className="space-y-5">
-            {order.map(line => (
-              <div key={line} className="border rounded-xl bg-white shadow-sm overflow-hidden">
-                <div className="px-4 py-2 bg-gray-100 flex items-center justify-between">
-                  <span className="font-semibold">{line}</span>
-                  <span className="text-gray-500 text-sm">{groups[line].length} order(s)</span>
+            {keys.map(k => {
+              const g = groups[k]
+              const tripKey = g.route && g.date ? `${g.route}|${g.date}` : ''
+              const trip = tripKey ? trips[tripKey] : undefined
+              return (
+              <div key={k} className="border rounded-xl bg-white shadow-sm overflow-hidden">
+                <div className="px-4 py-2 bg-gray-100 flex items-center justify-between flex-wrap gap-2">
+                  <span className="font-semibold">{g.route || 'Unassigned'}{g.date ? ` · ${fmtD(g.date)}` : ''} <span className="text-gray-500 font-normal text-sm">· {g.rows.length} order(s)</span></span>
+                  {tripKey && (
+                    <div className="flex items-center gap-2 text-xs">
+                      <input value={trip?.lorry_no || ''} placeholder="Lorry no" onChange={e => setTrips(p => ({ ...p, [tripKey]: { route: g.route!, delivery_date: g.date!, lorry_no: e.target.value, driver: p[tripKey]?.driver || '', kelindan: p[tripKey]?.kelindan || '' } }))} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-28" />
+                      <input value={trip?.driver || ''} placeholder="Driver" onChange={e => setTrips(p => ({ ...p, [tripKey]: { route: g.route!, delivery_date: g.date!, driver: e.target.value, lorry_no: p[tripKey]?.lorry_no || '', kelindan: p[tripKey]?.kelindan || '' } }))} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-28" />
+                      <input value={trip?.kelindan || ''} placeholder="Kelindan" onChange={e => setTrips(p => ({ ...p, [tripKey]: { route: g.route!, delivery_date: g.date!, kelindan: e.target.value, lorry_no: p[tripKey]?.lorry_no || '', driver: p[tripKey]?.driver || '' } }))} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-28" />
+                    </div>
+                  )}
                 </div>
                 <div className="overflow-auto">
                   <table className="w-full text-sm whitespace-nowrap">
                     <thead className="bg-gray-50 text-gray-500 text-left">
                       <tr>
-                        {dataCols.length === 0 && <><th className="px-3 py-2">SO</th><th className="px-3 py-2">Customer</th></>}
-                        {dataCols.map(c => <th key={c} className="px-3 py-2 font-medium">{c}</th>)}
-                        <th className="px-3 py-2">Delivery date</th><th className="px-3 py-2">Move to</th><th></th>
+                        <th className="px-3 py-2">SO No</th>
+                        <th className="px-3 py-2">PO date</th>
+                        <th className="px-3 py-2">Customer</th>
+                        <th className="px-3 py-2 text-center">Invoice ✓</th>
+                        <th className="px-3 py-2">Doc</th>
+                        <th className="px-3 py-2">Delivery date</th>
+                        <th className="px-3 py-2">Move to</th><th></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {groups[line].map(s => {
+                      {g.rows.map(s => {
                         const isTomorrow = s.delivery_date === tomorrowISO()
-                        const hold = !!schedHoldKey && isHold(s.data?.[schedHoldKey])
+                        const hold = !!holdKeyS && isHold(s.data?.[holdKeyS])
                         return (
                           <tr key={s.id} className={`border-t ${hold ? 'bg-red-100' : isTomorrow ? 'bg-yellow-50' : ''}`}>
-                            {dataCols.length === 0 && <><td className="px-3 py-1.5 font-mono">{s.so_number}</td><td className="px-3 py-1.5 text-gray-600">{s.customer_name || '—'}</td></>}
-                            {dataCols.map(c => <td key={c} className="px-3 py-1.5 text-gray-700">{cellView(s.data?.[c] ?? '')}</td>)}
+                            <td className="px-3 py-1.5 font-mono">{s.so_number}</td>
+                            <td className="px-3 py-1.5 text-gray-700">{poKey ? cellView(s.data?.[poKey] ?? '') : '—'}</td>
+                            <td className="px-3 py-1.5 text-gray-700">{(custKey && s.data?.[custKey]) || s.customer_name || '—'}</td>
+                            <td className="px-3 py-1.5 text-center"><input type="checkbox" checked={s.invoiced} onChange={e => updateSched(s.id, { invoiced: e.target.checked })} className="h-4 w-4" /></td>
+                            <td className="px-3 py-1.5">{linkKey && s.data?.[linkKey] ? cellView(s.data[linkKey]) : '—'}</td>
                             <td className="px-3 py-1.5"><input type="date" value={s.delivery_date || ''} onChange={e => updateSched(s.id, { delivery_date: e.target.value || null })} className="border rounded px-2 py-1 text-xs" />{isTomorrow && <span className="ml-1 bg-yellow-200 text-yellow-900 px-1 rounded text-[10px] font-semibold">TOMORROW</span>}</td>
                             <td className="px-3 py-1.5">
                               <select value={s.route || ''} onChange={e => updateSched(s.id, { route: e.target.value || null })} className="border rounded px-2 py-1 text-xs">
@@ -305,7 +338,8 @@ export default function DeliverySchedulePage() {
                   </table>
                 </div>
               </div>
-            ))}
+              )
+            })}
           </div>
           )
         })()}

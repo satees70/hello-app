@@ -519,3 +519,20 @@ drop policy if exists "delivery files write" on storage.objects;
 create policy "delivery files write" on storage.objects for insert to authenticated with check (bucket_id = 'delivery-files');
 drop policy if exists "delivery files delete" on storage.objects;
 create policy "delivery files delete" on storage.objects for delete to authenticated using (bucket_id = 'delivery-files');
+
+-- 2026-06 · Delivery: invoice-done flag + per-trip (line+date) lorry/driver/kelindan
+alter table public.delivery_schedule add column if not exists invoiced boolean not null default false;
+create table if not exists public.delivery_trips (
+  id uuid primary key default gen_random_uuid(),
+  route text not null, delivery_date date not null,
+  lorry_no text, driver text, kelindan text, updated_at timestamptz default now(),
+  unique(route, delivery_date)
+);
+grant select, insert, update, delete on public.delivery_trips to authenticated;
+grant all on public.delivery_trips to service_role;
+alter table public.delivery_trips enable row level security;
+drop policy if exists dt_read on public.delivery_trips;
+create policy dt_read on public.delivery_trips for select using (true);
+drop policy if exists dt_write on public.delivery_trips;
+create policy dt_write on public.delivery_trips for all using (true) with check (true);
+
