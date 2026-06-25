@@ -26,6 +26,14 @@ function normDate(v: unknown): string {
   if (isNaN(d.getTime())) return ''
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
+// How a data cell is shown: links become clickable, ISO dates become dd/mm/yyyy.
+function cellView(v: string): React.ReactNode {
+  if (!v) return ''
+  if (/^https?:\/\//i.test(v)) return <a href={v} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">Open ↗</a>
+  const m = v.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`
+  return v
+}
 
 export default function DeliverySchedulePage() {
   const { profile, loading, error: profileError } = useProfile()
@@ -176,7 +184,7 @@ export default function DeliverySchedulePage() {
                     {mapped.map(m => (
                       <tr key={m.i} className={`border-t ${sel.has(m.i) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
                         <td className="px-3 py-1.5"><input type="checkbox" checked={sel.has(m.i)} onChange={() => toggleRow(m.i)} className="h-4 w-4" /></td>
-                        {headers.map((h, i) => { const key = h || `Column ${i + 1}`; return <td key={i} className="px-3 py-1.5 text-gray-700">{m.data[key]}</td> })}
+                        {headers.map((h, i) => { const key = h || `Column ${i + 1}`; return <td key={i} className="px-3 py-1.5 text-gray-700">{cellView(m.data[key])}</td> })}
                       </tr>
                     ))}
                   </tbody>
@@ -222,7 +230,7 @@ export default function DeliverySchedulePage() {
                         </select>
                       </td>
                       {dataCols.length === 0 && <><td className="px-3 py-1.5 font-mono">{s.so_number}</td><td className="px-3 py-1.5 text-gray-600">{s.customer_name || '—'}</td></>}
-                      {dataCols.map(c => <td key={c} className="px-3 py-1.5 text-gray-700">{s.data?.[c] ?? ''}</td>)}
+                      {dataCols.map(c => <td key={c} className="px-3 py-1.5 text-gray-700">{cellView(s.data?.[c] ?? '')}</td>)}
                       <td className="px-3 py-1.5"><input type="date" value={s.delivery_date || ''} onChange={e => updateSched(s.id, { delivery_date: e.target.value || null })} className="border rounded px-2 py-1 text-xs" />{isTomorrow && <span className="ml-1 bg-yellow-200 text-yellow-900 px-1 rounded text-[10px] font-semibold">TOMORROW</span>}</td>
                       <td className="px-3 py-1.5 text-right"><button onClick={() => removeSched(s.id)} className="text-red-600 hover:underline text-xs">Remove</button></td>
                     </tr>
