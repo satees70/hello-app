@@ -10,7 +10,7 @@ import * as XLSX from 'xlsx'
 interface Route { id: string; name: string }
 interface Sched {
   id: string; so_number: string; customer_name: string | null; route_id: string | null
-  delivery_date: string | null; created_by_name: string | null
+  delivery_date: string | null; created_by_name: string | null; data: Record<string, string> | null
 }
 
 // Normalise an SO value to "SO-#####" so it matches sales_order_lines.so_number.
@@ -53,7 +53,7 @@ export default function DeliverySchedulePage() {
   async function load() {
     const [{ data: r }, { data: s }] = await Promise.all([
       supabase.from('delivery_routes').select('id, name').order('name'),
-      supabase.from('delivery_schedule').select('id, so_number, customer_name, route_id, delivery_date, created_by_name').order('delivery_date', { ascending: true, nullsFirst: false }),
+      supabase.from('delivery_schedule').select('id, so_number, customer_name, route_id, delivery_date, created_by_name, data').order('delivery_date', { ascending: true, nullsFirst: false }),
     ])
     setRoutes(r || [])
     setSched((s as Sched[]) || [])
@@ -90,19 +90,24 @@ export default function DeliverySchedulePage() {
     } catch { setError('Could not read that file. Make sure it is an Excel or CSV export.') }
   }
 
-  // Map the uploaded rows to { so, customer, date } using the chosen columns.
-  const mapped = rows.map(r => ({
-    so: colSO !== '' ? normSO(r[Number(colSO)]) : '',
-    customer: colCust !== '' ? String(r[Number(colCust)] ?? '').trim() : '',
-    rowDate: colDate !== '' ? normDate(r[Number(colDate)]) : '',
-  })).filter(m => m.so)
+  // Map the uploaded rows using the chosen columns, keeping the WHOLE row as data.
+  const mapped = rows.map(r => {
+    const data: Record<string, string> = {}
+    headers.forEach((h, i) => { const key = h || `Column ${i + 1}`; const v = r[i]; data[key] = v instanceof Date ? normDate(v) : String(v ?? '') })
+    return {
+      so: colSO !== '' ? normSO(r[Number(colSO)]) : '',
+      customer: colCust !== '' ? String(r[Number(colCust)] ?? '').trim() : '',
+      rowDate: colDate !== '' ? normDate(r[Number(colDate)]) : '',
+      data,
+    }
+  }).filter(m => m.so)
 
   async function addToSchedule() {
     if (!routeId) { setError('Pick a route.'); return }
     if (mapped.length === 0) { setError('No SO numbers found — check the column mapping.'); return }
     if (colDate === '' && !date) { setError('Pick a delivery date (or map a date column).'); return }
     setBusy('add'); setError(''); setSuccess('')
-    const ins = mapped.map(m => ({ so_number: m.so, customer_name: m.customer || null, route_id: routeId, delivery_date: m.rowDate || date, created_by: profile?.id, created_by_name: profile?.full_name }))
+    const ins = mapped.map(m => ({ so_number: m.so, customer_name: m.customer || null, route_id: routeId, delivery_date: m.rowDate || date, data: m.data, created_by: profile?.id, created_by_name: profile?.full_name }))
     const { error: e } = await supabase.from('delivery_schedule').insert(ins)
     setBusy('')
     if (e) { setError(e.message); return }
@@ -217,24 +222,34 @@ export default function DeliverySchedulePage() {
             </select>
           </label>
         </div>
-        {shownSched.length === 0 ? <p className="text-gray-400 text-sm">No scheduled deliveries.</p> : (
+        {shownSched.length === 0 ? <p className="text-gray-400 text-sm">No scheduled deliveries.</p> : (() => {
+          // Every column that came from the uploaded files (union, in first-seen order).
+          const dataCols: string[] = []
+          shownSched.forEach(s => { if (s.data) Object.keys(s.data).forEach(k => { if (!dataCols.includes(k)) dataCols.push(k) }) })
+          return (
           <div className="border rounded-xl overflow-auto bg-white shadow-sm">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-500 text-left"><tr><th className="px-3 py-2">SO</th><th className="px-3 py-2">Customer</th><th className="px-3 py-2">Route</th><th className="px-3 py-2">Delivery date</th><th></th></tr></thead>
+            <table className="w-full text-sm whitespace-nowrap">
+              <thead className="bg-gray-50 text-gray-500 text-left sticky top-0">
+                <tr>
+                  {dataCols.length === 0 && <><th className="px-3 py-2">SO</th><th className="px-3 py-2">Customer</th></>}
+                  {dataCols.map(c => <th key={c} className="px-3 py-2 font-medium">{c}</th>)}
+                  <th className="px-3 py-2">Route</th><th className="px-3 py-2">Delivery date</th><th></th>
+                </tr>
+              </thead>
               <tbody>
                 {shownSched.map(s => {
                   const isTomorrow = s.delivery_date === tomorrowISO()
                   return (
                     <tr key={s.id} className={`border-t ${isTomorrow ? 'bg-yellow-50' : ''}`}>
-                      <td className="px-3 py-1.5 font-mono">{s.so_number}{isTomorrow && <span className="ml-2 bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-[10px] font-semibold">TOMORROW</span>}</td>
-                      <td className="px-3 py-1.5 text-gray-600">{s.customer_name || '—'}</td>
+                      {dataCols.length === 0 && <><td className="px-3 py-1.5 font-mono">{s.so_number}</td><td className="px-3 py-1.5 text-gray-600">{s.customer_name || '—'}</td></>}
+                      {dataCols.map(c => <td key={c} className="px-3 py-1.5 text-gray-700">{s.data?.[c] ?? ''}</td>)}
                       <td className="px-3 py-1.5">
                         <select value={s.route_id || ''} onChange={e => updateSched(s.id, { route_id: e.target.value || null })} className="border rounded px-2 py-1 text-xs">
                           <option value="">—</option>
                           {routes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                         </select>
                       </td>
-                      <td className="px-3 py-1.5"><input type="date" value={s.delivery_date || ''} onChange={e => updateSched(s.id, { delivery_date: e.target.value || null })} className="border rounded px-2 py-1 text-xs" /></td>
+                      <td className="px-3 py-1.5"><input type="date" value={s.delivery_date || ''} onChange={e => updateSched(s.id, { delivery_date: e.target.value || null })} className="border rounded px-2 py-1 text-xs" />{isTomorrow && <span className="ml-1 bg-yellow-200 text-yellow-900 px-1 rounded text-[10px] font-semibold">TOMORROW</span>}</td>
                       <td className="px-3 py-1.5 text-right"><button onClick={() => removeSched(s.id)} className="text-red-600 hover:underline text-xs">Remove</button></td>
                     </tr>
                   )
@@ -242,7 +257,8 @@ export default function DeliverySchedulePage() {
               </tbody>
             </table>
           </div>
-        )}
+          )
+        })()}
       </div>
     </>
   )

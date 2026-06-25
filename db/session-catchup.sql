@@ -477,8 +477,9 @@ create table if not exists public.delivery_routes (
 create table if not exists public.delivery_schedule (
   id uuid primary key default gen_random_uuid(),
   so_number text not null, customer_name text, route_id uuid references public.delivery_routes(id) on delete set null,
-  delivery_date date, created_by uuid, created_by_name text, created_at timestamptz not null default now()
+  delivery_date date, data jsonb, created_by uuid, created_by_name text, created_at timestamptz not null default now()
 );
+alter table public.delivery_schedule add column if not exists data jsonb;
 create index if not exists ds_so on public.delivery_schedule(so_number);
 create index if not exists ds_date on public.delivery_schedule(delivery_date);
 grant select, insert, update, delete on public.delivery_routes to authenticated;
