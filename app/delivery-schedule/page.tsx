@@ -163,22 +163,20 @@ export default function DeliverySchedulePage() {
                 </button>
               </div>
 
-              <div className="mt-3 border rounded-lg overflow-auto max-h-80">
-                <table className="w-full text-sm">
+              <div className="mt-3 border rounded-lg overflow-auto max-h-96">
+                <table className="w-full text-sm whitespace-nowrap">
                   <thead className="bg-gray-50 text-gray-500 text-left sticky top-0">
                     <tr>
                       <th className="px-3 py-2"><input type="checkbox" checked={allSel} onChange={toggleAll} className="h-4 w-4" /></th>
-                      <th className="px-3 py-2">SO number</th><th className="px-3 py-2">Customer</th><th className="px-3 py-2">Delivery date</th>
+                      {headers.map((h, i) => <th key={i} className="px-3 py-2 font-medium">{h || `Column ${i + 1}`}</th>)}
                     </tr>
                   </thead>
                   <tbody>
-                    {mapped.length === 0 && <tr><td colSpan={4} className="px-3 py-4 text-gray-400 text-center">Nothing left to assign — pick the SO column above, or all rows are assigned.</td></tr>}
+                    {mapped.length === 0 && <tr><td colSpan={headers.length + 1} className="px-3 py-4 text-gray-400 text-center">Nothing left to assign — pick the SO column above, or all rows are assigned.</td></tr>}
                     {mapped.map(m => (
                       <tr key={m.i} className={`border-t ${sel.has(m.i) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
                         <td className="px-3 py-1.5"><input type="checkbox" checked={sel.has(m.i)} onChange={() => toggleRow(m.i)} className="h-4 w-4" /></td>
-                        <td className="px-3 py-1.5 font-mono">{m.so}</td>
-                        <td className="px-3 py-1.5 text-gray-600">{m.customer || '—'}</td>
-                        <td className="px-3 py-1.5 text-gray-600">{m.rowDate || (colDate === '' ? date : '—')}</td>
+                        {headers.map((h, i) => { const key = h || `Column ${i + 1}`; return <td key={i} className="px-3 py-1.5 text-gray-700">{m.data[key]}</td> })}
                       </tr>
                     ))}
                   </tbody>
