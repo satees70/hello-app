@@ -3211,3 +3211,5 @@ drop policy if exists ds_write on public.delivery_schedule;
 create policy ds_write on public.delivery_schedule for all using (true) with check (true);
 
 alter table public.delivery_schedule add column if not exists data jsonb;
+
+alter table public.delivery_schedule add column if not exists route text;

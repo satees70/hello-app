@@ -496,3 +496,5 @@ drop policy if exists ds_read on public.delivery_schedule;
 create policy ds_read on public.delivery_schedule for select using (true);
 drop policy if exists ds_write on public.delivery_schedule;
 create policy ds_write on public.delivery_schedule for all using (true) with check (true);
+
+alter table public.delivery_schedule add column if not exists route text;
