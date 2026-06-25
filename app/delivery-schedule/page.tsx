@@ -181,6 +181,14 @@ export default function DeliverySchedulePage() {
 
   return (
     <>
+      <style>{`@media print {
+        body * { visibility: hidden; }
+        #delivery-print, #delivery-print * { visibility: visible; }
+        #delivery-print { position: absolute; left: 0; top: 0; width: 100%; }
+        .no-print { display: none !important; }
+        #delivery-print input, #delivery-print select { border: none !important; padding: 0 !important; background: transparent !important; -webkit-appearance: none; appearance: none; color: #000 !important; }
+        #delivery-print .border { break-inside: avoid; }
+      }`}</style>
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
       <div className="max-w-6xl mx-auto p-4 sm:p-6">
         <h1 className="text-2xl font-bold mb-1">Delivery Schedule</h1>
@@ -268,9 +276,10 @@ export default function DeliverySchedulePage() {
         </div>
 
         {/* Scheduled list */}
-        <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-3 no-print">
           <h2 className="font-semibold">Scheduled deliveries</h2>
           <div className="flex items-center gap-3 flex-wrap">
+            <button onClick={() => window.print()} className="text-sm px-3 py-1.5 rounded-lg bg-gray-800 text-white hover:bg-gray-900">🖨 Print / PDF</button>
             <label className="flex items-center gap-2 text-sm text-gray-500">Date
               <select value={dateFilter} onChange={e => setDateFilter(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm">
                 <option value="all">All dates</option>
@@ -299,7 +308,8 @@ export default function DeliverySchedulePage() {
           const li = (r: string | null) => { const i = LINES.indexOf(r || ''); return i < 0 ? 999 : i }
           const keys = Object.keys(groups).sort((a, b) => (li(groups[a].route) - li(groups[b].route)) || (groups[a].date || '').localeCompare(groups[b].date || ''))
           return (
-          <div className="space-y-5">
+          <div id="delivery-print" className="space-y-5">
+            <div className="hidden print:block mb-2"><h1 className="text-xl font-bold">Delivery Schedule{dateFilter !== 'all' ? ` — ${fmtD(dateFilter)}` : ''}</h1></div>
             {keys.map(k => {
               const g = groups[k]
               const tripKey = g.route && g.date ? `${g.route}|${g.date}` : ''
@@ -326,7 +336,7 @@ export default function DeliverySchedulePage() {
                         <th className="px-3 py-2 text-center">Invoice ✓</th>
                         <th className="px-3 py-2">Doc</th>
                         <th className="px-3 py-2">Delivery date</th>
-                        <th className="px-3 py-2">Move to</th><th></th>
+                        <th className="px-3 py-2 no-print">Move to</th><th className="no-print"></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -341,13 +351,13 @@ export default function DeliverySchedulePage() {
                             <td className="px-3 py-1.5 text-center"><input type="checkbox" checked={s.invoiced} onChange={e => updateSched(s.id, { invoiced: e.target.checked })} className="h-4 w-4" /></td>
                             <td className="px-3 py-1.5">{linkKey && s.data?.[linkKey] ? cellView(s.data[linkKey]) : '—'}</td>
                             <td className="px-3 py-1.5"><input type="date" value={s.delivery_date || ''} onChange={e => updateSched(s.id, { delivery_date: e.target.value || null })} className="border rounded px-2 py-1 text-xs" />{isTomorrow && <span className="ml-1 bg-yellow-200 text-yellow-900 px-1 rounded text-[10px] font-semibold">TOMORROW</span>}</td>
-                            <td className="px-3 py-1.5">
+                            <td className="px-3 py-1.5 no-print">
                               <select value={s.route || ''} onChange={e => updateSched(s.id, { route: e.target.value || null })} className="border rounded px-2 py-1 text-xs">
                                 <option value="">—</option>
                                 {LINES.map(l => <option key={l} value={l}>{l}</option>)}
                               </select>
                             </td>
-                            <td className="px-3 py-1.5 text-right"><button onClick={() => removeSched(s.id)} className="text-red-600 hover:underline text-xs">Remove</button></td>
+                            <td className="px-3 py-1.5 text-right no-print"><button onClick={() => removeSched(s.id)} className="text-red-600 hover:underline text-xs">Remove</button></td>
                           </tr>
                         )
                       })}
