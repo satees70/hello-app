@@ -40,6 +40,7 @@ export default function DeliverySchedulePage() {
   useRequireView(profile, 'dispatch')
 
   const [sched, setSched] = useState<Sched[]>([])
+  const [uploads, setUploads] = useState<{ id: string; file_name: string; path: string; created_at: string; created_by_name: string | null }[]>([])
   const [fileName, setFileName] = useState('')
   const [headers, setHeaders] = useState<string[]>([])
   const [rows, setRows] = useState<unknown[][]>([])
@@ -49,14 +50,29 @@ export default function DeliverySchedulePage() {
   const [assignLine, setAssignLine] = useState(LINES[0])
   const [date, setDate] = useState(tomorrowISO())
   const [routeFilter, setRouteFilter] = useState('all')
+  const [dateFilter, setDateFilter] = useState('all')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
-  useEffect(() => { if (profile) load() }, [profile])
+  useEffect(() => { if (profile) { load(); loadUploads() } }, [profile])
   async function load() {
     const { data: s } = await supabase.from('delivery_schedule').select('id, so_number, customer_name, route, delivery_date, created_by_name, data').order('route', { ascending: true, nullsFirst: false }).order('delivery_date', { ascending: true, nullsFirst: false })
     setSched((s as Sched[]) || [])
+  }
+  async function loadUploads() {
+    const { data } = await supabase.from('delivery_uploads').select('id, file_name, path, created_at, created_by_name').order('created_at', { ascending: false }).limit(30)
+    setUploads(data || [])
+  }
+  async function openUpload(path: string) {
+    const { data } = await supabase.storage.from('delivery-files').createSignedUrl(path, 120)
+    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+  }
+  async function deleteUpload(u: { id: string; path: string }) {
+    if (!confirm('Delete this saved file?')) return
+    await supabase.storage.from('delivery-files').remove([u.path])
+    await supabase.from('delivery_uploads').delete().eq('id', u.id)
+    loadUploads()
   }
 
   async function onFile(f: File | undefined) {
@@ -73,6 +89,13 @@ export default function DeliverySchedulePage() {
       const find = (...keys: string[]) => String(hdr.findIndex(h => keys.some(k => h.toLowerCase().includes(k))))
       const so = find('so no', 'so number', 'sonumber', 'so'); setColSO(so === '-1' ? '0' : so)
       const cust = find('customer', 'company', 'name'); setColCust(cust === '-1' ? '' : cust)
+      // Keep the file so the schedule can be amended later.
+      try {
+        const safe = f.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+        const path = `${Date.now()}-${safe}`
+        const up = await supabase.storage.from('delivery-files').upload(path, f)
+        if (!up.error) { await supabase.from('delivery_uploads').insert({ file_name: f.name, path, created_by: profile?.id, created_by_name: profile?.full_name }); loadUploads() }
+      } catch { /* keeping the file is best-effort; parsing still works without it */ }
     } catch { setError('Could not read that file. Make sure it is an Excel or CSV export.') }
   }
 
@@ -116,7 +139,11 @@ export default function DeliverySchedulePage() {
   async function removeSched(id: string) { await supabase.from('delivery_schedule').delete().eq('id', id); load() }
   async function updateSched(id: string, patch: Partial<Sched>) { await supabase.from('delivery_schedule').update(patch).eq('id', id); load() }
 
-  const shownSched = useMemo(() => routeFilter === 'all' ? sched : sched.filter(s => (s.route || '') === routeFilter), [sched, routeFilter])
+  const schedDates = useMemo(() => [...new Set(sched.map(s => s.delivery_date).filter(Boolean) as string[])].sort(), [sched])
+  const shownSched = useMemo(() => sched.filter(s =>
+    (routeFilter === 'all' || (s.route || '') === routeFilter) &&
+    (dateFilter === 'all' || s.delivery_date === dateFilter)
+  ), [sched, routeFilter, dateFilter])
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
   if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
@@ -193,17 +220,39 @@ export default function DeliverySchedulePage() {
               </div>
             </>
           )}
+          {uploads.length > 0 && (
+            <div className="mt-4 border-t pt-3">
+              <div className="text-xs text-gray-500 mb-1">Saved files (re-open to amend a schedule)</div>
+              <div className="flex flex-wrap gap-2">
+                {uploads.map(u => (
+                  <span key={u.id} className="inline-flex items-center gap-1.5 bg-gray-100 rounded-full pl-3 pr-2 py-1 text-xs">
+                    <button onClick={() => openUpload(u.path)} className="text-blue-600 hover:underline">📄 {u.file_name}</button>
+                    <span className="text-gray-400">{new Date(u.created_at).toLocaleDateString()}</span>
+                    <button onClick={() => deleteUpload(u)} className="text-gray-400 hover:text-red-600">✕</button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Scheduled list */}
         <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
           <h2 className="font-semibold">Scheduled deliveries</h2>
-          <label className="flex items-center gap-2 text-sm text-gray-500">Line
-            <select value={routeFilter} onChange={e => setRouteFilter(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm">
-              <option value="all">All</option>
-              {LINES.map(l => <option key={l} value={l}>{l}</option>)}
-            </select>
-          </label>
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="flex items-center gap-2 text-sm text-gray-500">Date
+              <select value={dateFilter} onChange={e => setDateFilter(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm">
+                <option value="all">All dates</option>
+                {schedDates.map(d => { const m = d.match(/^(\d{4})-(\d{2})-(\d{2})$/); return <option key={d} value={d}>{m ? `${m[3]}/${m[2]}/${m[1]}` : d}</option> })}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-sm text-gray-500">Line
+              <select value={routeFilter} onChange={e => setRouteFilter(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm">
+                <option value="all">All</option>
+                {LINES.map(l => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </label>
+          </div>
         </div>
         {shownSched.length === 0 ? <p className="text-gray-400 text-sm">No scheduled deliveries.</p> : (() => {
           const dataCols: string[] = []

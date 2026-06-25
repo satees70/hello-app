@@ -498,3 +498,24 @@ drop policy if exists ds_write on public.delivery_schedule;
 create policy ds_write on public.delivery_schedule for all using (true) with check (true);
 
 alter table public.delivery_schedule add column if not exists route text;
+
+-- ─── 10) Delivery: route text + keep uploaded files + per-date amend ─────────
+alter table public.delivery_schedule add column if not exists route text;
+create table if not exists public.delivery_uploads (
+  id uuid primary key default gen_random_uuid(),
+  file_name text, path text, created_by uuid, created_by_name text, created_at timestamptz not null default now()
+);
+grant select, insert, delete on public.delivery_uploads to authenticated;
+grant all on public.delivery_uploads to service_role;
+alter table public.delivery_uploads enable row level security;
+drop policy if exists du_read on public.delivery_uploads;
+create policy du_read on public.delivery_uploads for select using (true);
+drop policy if exists du_write on public.delivery_uploads;
+create policy du_write on public.delivery_uploads for all using (true) with check (true);
+insert into storage.buckets (id, name, public) values ('delivery-files', 'delivery-files', false) on conflict (id) do nothing;
+drop policy if exists "delivery files read" on storage.objects;
+create policy "delivery files read" on storage.objects for select to authenticated using (bucket_id = 'delivery-files');
+drop policy if exists "delivery files write" on storage.objects;
+create policy "delivery files write" on storage.objects for insert to authenticated with check (bucket_id = 'delivery-files');
+drop policy if exists "delivery files delete" on storage.objects;
+create policy "delivery files delete" on storage.objects for delete to authenticated using (bucket_id = 'delivery-files');
