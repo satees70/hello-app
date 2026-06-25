@@ -209,38 +209,51 @@ export default function DeliverySchedulePage() {
           const dataCols: string[] = []
           shownSched.forEach(s => { if (s.data) Object.keys(s.data).forEach(k => { if (!dataCols.includes(k)) dataCols.push(k) }) })
           const schedHoldKey = dataCols.find(c => /hold/i.test(c)) || ''
+          // Group by line, ordering LINE A..K first then anything else / unassigned.
+          const groups: Record<string, Sched[]> = {}
+          shownSched.forEach(s => { const k = s.route || 'Unassigned'; (groups[k] = groups[k] || []).push(s) })
+          const order = [...LINES.filter(l => groups[l]), ...Object.keys(groups).filter(k => !LINES.includes(k))]
           return (
-          <div className="border rounded-xl overflow-auto bg-white shadow-sm">
-            <table className="w-full text-sm whitespace-nowrap">
-              <thead className="bg-gray-50 text-gray-500 text-left sticky top-0">
-                <tr>
-                  <th className="px-3 py-2">Line</th>
-                  {dataCols.length === 0 && <><th className="px-3 py-2">SO</th><th className="px-3 py-2">Customer</th></>}
-                  {dataCols.map(c => <th key={c} className="px-3 py-2 font-medium">{c}</th>)}
-                  <th className="px-3 py-2">Delivery date</th><th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {shownSched.map(s => {
-                  const isTomorrow = s.delivery_date === tomorrowISO()
-                  const hold = !!schedHoldKey && isHold(s.data?.[schedHoldKey])
-                  return (
-                    <tr key={s.id} className={`border-t ${hold ? 'bg-red-100' : isTomorrow ? 'bg-yellow-50' : ''}`}>
-                      <td className="px-3 py-1.5">
-                        <select value={s.route || ''} onChange={e => updateSched(s.id, { route: e.target.value || null })} className="border rounded px-2 py-1 text-xs font-medium">
-                          <option value="">—</option>
-                          {LINES.map(l => <option key={l} value={l}>{l}</option>)}
-                        </select>
-                      </td>
-                      {dataCols.length === 0 && <><td className="px-3 py-1.5 font-mono">{s.so_number}</td><td className="px-3 py-1.5 text-gray-600">{s.customer_name || '—'}</td></>}
-                      {dataCols.map(c => <td key={c} className="px-3 py-1.5 text-gray-700">{cellView(s.data?.[c] ?? '')}</td>)}
-                      <td className="px-3 py-1.5"><input type="date" value={s.delivery_date || ''} onChange={e => updateSched(s.id, { delivery_date: e.target.value || null })} className="border rounded px-2 py-1 text-xs" />{isTomorrow && <span className="ml-1 bg-yellow-200 text-yellow-900 px-1 rounded text-[10px] font-semibold">TOMORROW</span>}</td>
-                      <td className="px-3 py-1.5 text-right"><button onClick={() => removeSched(s.id)} className="text-red-600 hover:underline text-xs">Remove</button></td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+          <div className="space-y-5">
+            {order.map(line => (
+              <div key={line} className="border rounded-xl bg-white shadow-sm overflow-hidden">
+                <div className="px-4 py-2 bg-gray-100 flex items-center justify-between">
+                  <span className="font-semibold">{line}</span>
+                  <span className="text-gray-500 text-sm">{groups[line].length} order(s)</span>
+                </div>
+                <div className="overflow-auto">
+                  <table className="w-full text-sm whitespace-nowrap">
+                    <thead className="bg-gray-50 text-gray-500 text-left">
+                      <tr>
+                        {dataCols.length === 0 && <><th className="px-3 py-2">SO</th><th className="px-3 py-2">Customer</th></>}
+                        {dataCols.map(c => <th key={c} className="px-3 py-2 font-medium">{c}</th>)}
+                        <th className="px-3 py-2">Delivery date</th><th className="px-3 py-2">Move to</th><th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {groups[line].map(s => {
+                        const isTomorrow = s.delivery_date === tomorrowISO()
+                        const hold = !!schedHoldKey && isHold(s.data?.[schedHoldKey])
+                        return (
+                          <tr key={s.id} className={`border-t ${hold ? 'bg-red-100' : isTomorrow ? 'bg-yellow-50' : ''}`}>
+                            {dataCols.length === 0 && <><td className="px-3 py-1.5 font-mono">{s.so_number}</td><td className="px-3 py-1.5 text-gray-600">{s.customer_name || '—'}</td></>}
+                            {dataCols.map(c => <td key={c} className="px-3 py-1.5 text-gray-700">{cellView(s.data?.[c] ?? '')}</td>)}
+                            <td className="px-3 py-1.5"><input type="date" value={s.delivery_date || ''} onChange={e => updateSched(s.id, { delivery_date: e.target.value || null })} className="border rounded px-2 py-1 text-xs" />{isTomorrow && <span className="ml-1 bg-yellow-200 text-yellow-900 px-1 rounded text-[10px] font-semibold">TOMORROW</span>}</td>
+                            <td className="px-3 py-1.5">
+                              <select value={s.route || ''} onChange={e => updateSched(s.id, { route: e.target.value || null })} className="border rounded px-2 py-1 text-xs">
+                                <option value="">—</option>
+                                {LINES.map(l => <option key={l} value={l}>{l}</option>)}
+                              </select>
+                            </td>
+                            <td className="px-3 py-1.5 text-right"><button onClick={() => removeSched(s.id)} className="text-red-600 hover:underline text-xs">Remove</button></td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
           </div>
           )
         })()}
