@@ -186,8 +186,12 @@ export default function DeliverySchedulePage() {
         body * { visibility: hidden; }
         #delivery-print, #delivery-print * { visibility: visible; }
         #delivery-print { position: absolute; left: 0; top: 0; width: 100%; font-size: 10px; }
-        #delivery-print table { width: 100%; table-layout: auto; border-collapse: collapse; }
-        #delivery-print th, #delivery-print td { white-space: normal; word-break: break-word; padding: 3px 5px !important; border: 1px solid #ccc; }
+        #delivery-print table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+        #delivery-print th, #delivery-print td { white-space: normal; word-break: break-word; padding: 3px 5px !important; border: 1px solid #ccc; vertical-align: top; }
+        /* identical column widths across every line box; only Customer wraps */
+        #delivery-print th:nth-child(1), #delivery-print td:nth-child(1) { width: 68px; white-space: nowrap; }
+        #delivery-print th:nth-child(2), #delivery-print td:nth-child(2) { width: 78px; white-space: nowrap; }
+        #delivery-print th:nth-child(4), #delivery-print td:nth-child(4) { width: 52px; text-align: center; }
         #delivery-print .shadow-sm { box-shadow: none !important; }
         .no-print { display: none !important; }
         #delivery-print input, #delivery-print select { border: none !important; padding: 0 !important; background: transparent !important; -webkit-appearance: none; appearance: none; color: #000 !important; font-size: 10px; }
