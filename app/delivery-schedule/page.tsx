@@ -45,7 +45,6 @@ export default function DeliverySchedulePage() {
   const [rows, setRows] = useState<unknown[][]>([])
   const [colSO, setColSO] = useState('')
   const [colCust, setColCust] = useState('')
-  const [colDate, setColDate] = useState('')
   const [sel, setSel] = useState<Set<number>>(new Set())   // selected source-row indices
   const [assignLine, setAssignLine] = useState(LINES[0])
   const [date, setDate] = useState(tomorrowISO())
@@ -74,7 +73,6 @@ export default function DeliverySchedulePage() {
       const find = (...keys: string[]) => String(hdr.findIndex(h => keys.some(k => h.toLowerCase().includes(k))))
       const so = find('so no', 'so number', 'sonumber', 'so'); setColSO(so === '-1' ? '0' : so)
       const cust = find('customer', 'company', 'name'); setColCust(cust === '-1' ? '' : cust)
-      const dt = find('deliver', 'date'); setColDate(dt === '-1' ? '' : dt)
     } catch { setError('Could not read that file. Make sure it is an Excel or CSV export.') }
   }
 
@@ -86,10 +84,9 @@ export default function DeliverySchedulePage() {
       i: idx,
       so: colSO !== '' ? normSO(r[Number(colSO)]) : '',
       customer: colCust !== '' ? String(r[Number(colCust)] ?? '').trim() : '',
-      rowDate: colDate !== '' ? normDate(r[Number(colDate)]) : '',
       data,
     }
-  }).filter(m => m.so), [rows, headers, colSO, colCust, colDate])
+  }).filter(m => m.so), [rows, headers, colSO, colCust])
 
   // Column holding the PO delivery date (UDF_PODELDATE) — rows due tomorrow get highlighted.
   const podelKey = useMemo(() => headers.find(h => /podel/i.test(h)) || '', [headers])
@@ -100,9 +97,9 @@ export default function DeliverySchedulePage() {
   async function assignSelected() {
     const chosen = mapped.filter(m => sel.has(m.i))
     if (chosen.length === 0) { setError('Tick the orders you want to assign first.'); return }
-    if (colDate === '' && !date) { setError('Pick a delivery date (or map a date column).'); return }
+    if (!date) { setError('Pick the delivery date.'); return }
     setBusy('assign'); setError(''); setSuccess('')
-    const ins = chosen.map(m => ({ so_number: m.so, customer_name: m.customer || null, route: assignLine, delivery_date: m.rowDate || date, data: m.data, created_by: profile?.id, created_by_name: profile?.full_name }))
+    const ins = chosen.map(m => ({ so_number: m.so, customer_name: m.customer || null, route: assignLine, delivery_date: date, data: m.data, created_by: profile?.id, created_by_name: profile?.full_name }))
     const { error: e } = await supabase.from('delivery_schedule').insert(ins)
     setBusy('')
     if (e) { setError(e.message); return }
@@ -143,7 +140,7 @@ export default function DeliverySchedulePage() {
 
           {headers.length > 0 && (
             <>
-              <div className="grid sm:grid-cols-3 gap-3 mt-4">
+              <div className="grid sm:grid-cols-2 gap-3 mt-4">
                 <label className="block"><span className="text-xs text-gray-500">SO number column *</span>
                   <select value={colSO} onChange={e => setColSO(e.target.value)} className="block w-full border rounded-lg px-3 py-2 text-sm mt-1">
                     {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
@@ -151,11 +148,6 @@ export default function DeliverySchedulePage() {
                 <label className="block"><span className="text-xs text-gray-500">Customer column (optional)</span>
                   <select value={colCust} onChange={e => setColCust(e.target.value)} className="block w-full border rounded-lg px-3 py-2 text-sm mt-1">
                     <option value="">— none —</option>
-                    {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
-                  </select></label>
-                <label className="block"><span className="text-xs text-gray-500">Delivery-date column (optional)</span>
-                  <select value={colDate} onChange={e => setColDate(e.target.value)} className="block w-full border rounded-lg px-3 py-2 text-sm mt-1">
-                    <option value="">— use the date picker below —</option>
                     {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
                   </select></label>
               </div>
@@ -166,8 +158,8 @@ export default function DeliverySchedulePage() {
                   <select value={assignLine} onChange={e => setAssignLine(e.target.value)} className="block w-36 border rounded-lg px-3 py-2 text-sm mt-1">
                     {LINES.map(l => <option key={l} value={l}>{l}</option>)}
                   </select></label>
-                {colDate === '' && <label className="block"><span className="text-xs text-gray-500">Delivery date</span>
-                  <input type="date" value={date} onChange={e => setDate(e.target.value)} className="block border rounded-lg px-3 py-2 text-sm mt-1" /></label>}
+                <label className="block"><span className="text-xs text-gray-500">Delivery date (you set this)</span>
+                  <input type="date" value={date} onChange={e => setDate(e.target.value)} className="block border rounded-lg px-3 py-2 text-sm mt-1" /></label>
                 <button onClick={assignSelected} disabled={busy === 'assign' || sel.size === 0} className="px-5 py-2 rounded-lg bg-blue-700 text-white text-sm font-semibold hover:bg-blue-800 disabled:opacity-50">
                   {busy === 'assign' ? 'Assigning…' : `Assign ${sel.size || ''} to ${assignLine}`}
                 </button>
