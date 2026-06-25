@@ -75,9 +75,13 @@ export default function DeliverySchedulePage() {
     const { data } = await supabase.from('delivery_uploads').select('id, file_name, path, created_at, created_by_name').order('created_at', { ascending: false }).limit(30)
     setUploads(data || [])
   }
-  async function openUpload(path: string) {
-    const { data } = await supabase.storage.from('delivery-files').createSignedUrl(path, 120)
-    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+  // Re-open a saved file back into the assign preview (to amend / continue scheduling).
+  async function openUpload(u: { file_name: string; path: string }) {
+    setError(''); setSuccess('')
+    const { data, error: e } = await supabase.storage.from('delivery-files').download(u.path)
+    if (e || !data) { setError('Could not open the saved file.'); return }
+    try { const buf = await data.arrayBuffer(); if (loadWorkbook(buf, u.file_name)) setSuccess(`Re-opened "${u.file_name}" — tick the orders and assign them to a line.`) }
+    catch { setError('Could not read the saved file.') }
   }
   async function deleteUpload(u: { id: string; path: string }) {
     if (!confirm('Delete this saved file?')) return
@@ -86,20 +90,26 @@ export default function DeliverySchedulePage() {
     loadUploads()
   }
 
+  // Parse an Excel/CSV buffer into the assign preview (used by upload AND re-open).
+  function loadWorkbook(buf: ArrayBuffer, name: string): boolean {
+    const wb = XLSX.read(buf, { type: 'array', cellDates: true })
+    const ws = wb.Sheets[wb.SheetNames[0]]
+    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false }) as unknown[][]
+    if (aoa.length === 0) { setError('That file looks empty.'); return false }
+    const hdr = (aoa[0] as unknown[]).map(x => String(x ?? '').trim())
+    setFileName(name); setHeaders(hdr); setRows(aoa.slice(1)); setSel(new Set())
+    const find = (...keys: string[]) => String(hdr.findIndex(h => keys.some(k => h.toLowerCase().includes(k))))
+    const so = find('so no', 'so number', 'sonumber', 'so'); setColSO(so === '-1' ? '0' : so)
+    const cust = find('customer', 'company', 'name'); setColCust(cust === '-1' ? '' : cust)
+    return true
+  }
+
   async function onFile(f: File | undefined) {
     if (!f) return
-    setError(''); setSuccess(''); setSel(new Set())
+    setError(''); setSuccess('')
     try {
       const buf = await f.arrayBuffer()
-      const wb = XLSX.read(buf, { type: 'array', cellDates: true })
-      const ws = wb.Sheets[wb.SheetNames[0]]
-      const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false }) as unknown[][]
-      if (aoa.length === 0) { setError('That file looks empty.'); return }
-      const hdr = (aoa[0] as unknown[]).map(x => String(x ?? '').trim())
-      setFileName(f.name); setHeaders(hdr); setRows(aoa.slice(1))
-      const find = (...keys: string[]) => String(hdr.findIndex(h => keys.some(k => h.toLowerCase().includes(k))))
-      const so = find('so no', 'so number', 'sonumber', 'so'); setColSO(so === '-1' ? '0' : so)
-      const cust = find('customer', 'company', 'name'); setColCust(cust === '-1' ? '' : cust)
+      if (!loadWorkbook(buf, f.name)) return
       // Keep the file so the schedule can be amended later.
       try {
         const safe = f.name.replace(/[^a-zA-Z0-9._-]/g, '_')
@@ -240,7 +250,7 @@ export default function DeliverySchedulePage() {
               <div className="flex flex-wrap gap-2">
                 {uploads.map(u => (
                   <span key={u.id} className="inline-flex items-center gap-1.5 bg-gray-100 rounded-full pl-3 pr-2 py-1 text-xs">
-                    <button onClick={() => openUpload(u.path)} className="text-blue-600 hover:underline">📄 {u.file_name}</button>
+                    <button onClick={() => openUpload(u)} className="text-blue-600 hover:underline" title="Re-open to amend / continue scheduling">📄 {u.file_name}</button>
                     <span className="text-gray-400">{new Date(u.created_at).toLocaleDateString()}</span>
                     <button onClick={() => deleteUpload(u)} className="text-gray-400 hover:text-red-600">✕</button>
                   </span>
