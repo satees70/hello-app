@@ -1,0 +1,192 @@
+'use client'
+import { useEffect, useMemo, useState } from 'react'
+import Navbar from '@/components/Navbar'
+import { useProfile } from '@/hooks/useProfile'
+import { useRequireView } from '@/hooks/useRequireView'
+import { supabase } from '@/lib/supabase'
+import { tomorrowISO } from '@/lib/delivery'
+
+interface Route { id: string; name: string }
+interface Sched {
+  id: string; so_number: string; customer_name: string | null; route_id: string | null
+  delivery_date: string | null; created_by_name: string | null
+}
+type Parsed = { so: string; customer: string; raw: string }
+
+function parsePaste(text: string): Parsed[] {
+  return text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(line => {
+    const m = line.match(/SO[-\s]?(\d+)/i)
+    const so = m ? 'SO-' + m[1] : ''
+    const rest = line.replace(/SO[-\s]?\d+/i, ' ').replace(/[\t,;|]+/g, ' ').replace(/\s{2,}/g, ' ').trim()
+    return { so, customer: rest.slice(0, 80), raw: line }
+  })
+}
+
+export default function DeliverySchedulePage() {
+  const { profile, loading, error: profileError } = useProfile()
+  useRequireView(profile, 'dispatch')
+
+  const [routes, setRoutes] = useState<Route[]>([])
+  const [sched, setSched] = useState<Sched[]>([])
+  const [newRoute, setNewRoute] = useState('')
+  const [paste, setPaste] = useState('')
+  const [parsed, setParsed] = useState<Parsed[]>([])
+  const [routeId, setRouteId] = useState('')
+  const [date, setDate] = useState(tomorrowISO())
+  const [routeFilter, setRouteFilter] = useState('all')
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+
+  const routeName = (id: string | null) => routes.find(r => r.id === id)?.name || '—'
+
+  useEffect(() => { if (profile) load() }, [profile])
+  async function load() {
+    const [{ data: r }, { data: s }] = await Promise.all([
+      supabase.from('delivery_routes').select('id, name').order('name'),
+      supabase.from('delivery_schedule').select('id, so_number, customer_name, route_id, delivery_date, created_by_name').order('delivery_date', { ascending: true, nullsFirst: false }),
+    ])
+    setRoutes(r || [])
+    setSched((s as Sched[]) || [])
+  }
+
+  async function addRoute() {
+    const name = newRoute.trim()
+    if (!name) return
+    setError(''); setSuccess('')
+    const { error: e } = await supabase.from('delivery_routes').insert({ name, created_by: profile?.id, created_by_name: profile?.full_name })
+    if (e) { setError(e.message); return }
+    setNewRoute(''); load()
+  }
+  async function delRoute(id: string) {
+    if (!confirm('Delete this route? Orders assigned to it will keep their date but lose the route.')) return
+    await supabase.from('delivery_routes').delete().eq('id', id); load()
+  }
+
+  function doPreview() { setError(''); setParsed(parsePaste(paste)) }
+  const valid = parsed.filter(p => p.so)
+
+  async function addToSchedule() {
+    if (!routeId) { setError('Pick a route.'); return }
+    if (!date) { setError('Pick a delivery date.'); return }
+    if (valid.length === 0) { setError('No SO numbers found in the pasted text — check the preview.'); return }
+    setBusy('add'); setError(''); setSuccess('')
+    const rows = valid.map(p => ({ so_number: p.so, customer_name: p.customer || null, route_id: routeId, delivery_date: date, created_by: profile?.id, created_by_name: profile?.full_name }))
+    const { error: e } = await supabase.from('delivery_schedule').insert(rows)
+    setBusy('')
+    if (e) { setError(e.message); return }
+    setSuccess(`${rows.length} order(s) scheduled on ${routeName(routeId)} for ${date}.`)
+    setPaste(''); setParsed([]); load()
+  }
+  async function removeSched(id: string) { await supabase.from('delivery_schedule').delete().eq('id', id); load() }
+  async function updateSched(id: string, patch: Partial<Sched>) { await supabase.from('delivery_schedule').update(patch).eq('id', id); load() }
+
+  const shownSched = useMemo(() => routeFilter === 'all' ? sched : sched.filter(s => (s.route_id || '') === routeFilter), [sched, routeFilter])
+
+  if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (!profile) return null
+
+  return (
+    <>
+      <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
+      <div className="max-w-5xl mx-auto p-4 sm:p-6">
+        <h1 className="text-2xl font-bold mb-1">Delivery Schedule</h1>
+        <p className="text-gray-500 mb-5 text-sm">Create routes, paste orders from SQL Accounting (by SO number), and assign them to a route + delivery date. Orders due <strong>tomorrow</strong> show a yellow <span className="bg-yellow-200 text-yellow-900 px-1 rounded text-xs font-semibold">TOMORROW DELIVERY</span> tag across Sales Orders and production.</p>
+
+        {error && <div className="mb-4 p-3 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>}
+        {success && <div className="mb-4 p-3 rounded-lg bg-green-50 text-green-700 text-sm">{success}</div>}
+
+        {/* Routes */}
+        <div className="border rounded-2xl p-4 sm:p-5 bg-white shadow-sm mb-6">
+          <h2 className="font-semibold mb-3">Routes</h2>
+          <div className="flex flex-wrap gap-2 mb-3">
+            {routes.map(r => (
+              <span key={r.id} className="inline-flex items-center gap-1.5 bg-gray-100 rounded-full px-3 py-1 text-sm">
+                {r.name}
+                <button onClick={() => delRoute(r.id)} className="text-gray-400 hover:text-red-600">✕</button>
+              </span>
+            ))}
+            {routes.length === 0 && <span className="text-gray-400 text-sm">No routes yet — add one below.</span>}
+          </div>
+          <div className="flex gap-2">
+            <input value={newRoute} onChange={e => setNewRoute(e.target.value)} onKeyDown={e => e.key === 'Enter' && addRoute()} placeholder="New route name (e.g. KL Truck, Route A)" className="flex-1 border rounded-lg px-3 py-2 text-sm" />
+            <button onClick={addRoute} className="px-4 py-2 rounded-lg border bg-gray-50 hover:bg-gray-100 text-sm font-medium">+ Add route</button>
+          </div>
+        </div>
+
+        {/* Paste & schedule */}
+        <div className="border rounded-2xl p-4 sm:p-5 bg-white shadow-sm mb-8">
+          <h2 className="font-semibold mb-3">Paste orders &amp; schedule</h2>
+          <textarea value={paste} onChange={e => setPaste(e.target.value)} rows={5} placeholder="Paste rows copied from SQL Accounting here. Each line should contain the SO number (e.g. SO-40844)…" className="w-full border rounded-lg px-3 py-2 text-sm font-mono" />
+          <div className="flex flex-wrap items-end gap-3 mt-3">
+            <button onClick={doPreview} className="px-4 py-2 rounded-lg border bg-gray-50 hover:bg-gray-100 text-sm font-medium">Preview</button>
+            <label className="block"><span className="text-xs text-gray-500">Route</span>
+              <select value={routeId} onChange={e => setRouteId(e.target.value)} className="block w-44 border rounded-lg px-3 py-2 text-sm mt-1">
+                <option value="">Pick a route…</option>
+                {routes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select></label>
+            <label className="block"><span className="text-xs text-gray-500">Delivery date</span>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="block border rounded-lg px-3 py-2 text-sm mt-1" /></label>
+            <button onClick={addToSchedule} disabled={busy === 'add' || valid.length === 0} className="px-5 py-2 rounded-lg bg-blue-700 text-white text-sm font-semibold hover:bg-blue-800 disabled:opacity-50">
+              {busy === 'add' ? 'Adding…' : `Add ${valid.length || ''} to schedule`}
+            </button>
+          </div>
+
+          {parsed.length > 0 && (
+            <div className="mt-3 border rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-gray-500 text-left"><tr><th className="px-3 py-2">SO number</th><th className="px-3 py-2">Customer / line</th></tr></thead>
+                <tbody>
+                  {parsed.map((p, i) => (
+                    <tr key={i} className={`border-t ${p.so ? '' : 'bg-red-50'}`}>
+                      <td className="px-3 py-1.5 font-mono">{p.so || <span className="text-red-600 text-xs">no SO found — skipped</span>}</td>
+                      <td className="px-3 py-1.5 text-gray-600">{p.customer || p.raw}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Scheduled list */}
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+          <h2 className="font-semibold">Scheduled deliveries</h2>
+          <label className="flex items-center gap-2 text-sm text-gray-500">Route
+            <select value={routeFilter} onChange={e => setRouteFilter(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm">
+              <option value="all">All</option>
+              {routes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </label>
+        </div>
+        {shownSched.length === 0 ? <p className="text-gray-400 text-sm">No scheduled deliveries.</p> : (
+          <div className="border rounded-xl overflow-auto bg-white shadow-sm">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-500 text-left"><tr><th className="px-3 py-2">SO</th><th className="px-3 py-2">Customer</th><th className="px-3 py-2">Route</th><th className="px-3 py-2">Delivery date</th><th></th></tr></thead>
+              <tbody>
+                {shownSched.map(s => {
+                  const isTomorrow = s.delivery_date === tomorrowISO()
+                  return (
+                    <tr key={s.id} className={`border-t ${isTomorrow ? 'bg-yellow-50' : ''}`}>
+                      <td className="px-3 py-1.5 font-mono">{s.so_number}{isTomorrow && <span className="ml-2 bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-[10px] font-semibold">TOMORROW</span>}</td>
+                      <td className="px-3 py-1.5 text-gray-600">{s.customer_name || '—'}</td>
+                      <td className="px-3 py-1.5">
+                        <select value={s.route_id || ''} onChange={e => updateSched(s.id, { route_id: e.target.value || null })} className="border rounded px-2 py-1 text-xs">
+                          <option value="">—</option>
+                          {routes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                        </select>
+                      </td>
+                      <td className="px-3 py-1.5"><input type="date" value={s.delivery_date || ''} onChange={e => updateSched(s.id, { delivery_date: e.target.value || null })} className="border rounded px-2 py-1 text-xs" /></td>
+                      <td className="px-3 py-1.5 text-right"><button onClick={() => removeSched(s.id)} className="text-red-600 hover:underline text-xs">Remove</button></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
+  )
+}

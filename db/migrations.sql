@@ -3173,3 +3173,39 @@ begin
      and (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()) or created_by = auth.uid());
 end; $function$;
 grant execute on function public.reject_repack_order(uuid) to authenticated;
+
+-- ============================================================================
+-- 2026-06 · Delivery schedule. Paste orders (by SO number) from SQL Accounting,
+-- create named routes, and assign each order to a route + delivery date. Orders
+-- whose delivery_date is tomorrow get a "TOMORROW DELIVERY" highlight across the
+-- app (computed live, like urgent). Readable by everyone so any page can show it.
+-- ============================================================================
+create table if not exists public.delivery_routes (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  created_by uuid, created_by_name text, created_at timestamptz not null default now()
+);
+create table if not exists public.delivery_schedule (
+  id uuid primary key default gen_random_uuid(),
+  so_number text not null,
+  customer_name text,
+  route_id uuid references public.delivery_routes(id) on delete set null,
+  delivery_date date,
+  created_by uuid, created_by_name text, created_at timestamptz not null default now()
+);
+create index if not exists ds_so on public.delivery_schedule(so_number);
+create index if not exists ds_date on public.delivery_schedule(delivery_date);
+grant select, insert, update, delete on public.delivery_routes to authenticated;
+grant select, insert, update, delete on public.delivery_schedule to authenticated;
+grant all on public.delivery_routes to service_role;
+grant all on public.delivery_schedule to service_role;
+alter table public.delivery_routes enable row level security;
+alter table public.delivery_schedule enable row level security;
+drop policy if exists dr_read on public.delivery_routes;
+create policy dr_read on public.delivery_routes for select using (true);
+drop policy if exists dr_write on public.delivery_routes;
+create policy dr_write on public.delivery_routes for all using (true) with check (true);
+drop policy if exists ds_read on public.delivery_schedule;
+create policy ds_read on public.delivery_schedule for select using (true);
+drop policy if exists ds_write on public.delivery_schedule;
+create policy ds_write on public.delivery_schedule for all using (true) with check (true);

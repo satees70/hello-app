@@ -6,6 +6,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can, hasCap } from '@/lib/permissions'
+import { fetchTomorrowDeliverySOs } from '@/lib/delivery'
 import MultiFilter from '@/components/MultiFilter'
 
 interface SalesImport {
@@ -179,8 +180,9 @@ export default function SalesOrdersPage() {
   const [reqMode, setReqMode] = useState<'edit' | 'delete'>('edit')
   const [submitting, setSubmitting] = useState(false)
 
+  const [tomorrowSOs, setTomorrowSOs] = useState<Set<string>>(new Set())
   useEffect(() => {
-    if (profile) { loadImports(); loadRefs(); loadSummary(); loadDiscCounts() }
+    if (profile) { loadImports(); loadRefs(); loadSummary(); loadDiscCounts(); fetchTomorrowDeliverySOs().then(setTomorrowSOs) }
   }, [profile])
 
   async function loadImports() {
@@ -1066,6 +1068,7 @@ export default function SalesOrdersPage() {
                             ? <button onClick={() => openDisc(line.so_number)} title={discSo[line.so_number] ? `${discSo[line.so_number]} message(s) — open discussion` : 'Open discussion for this SO'} className="text-blue-600 hover:underline">{line.so_number}{discSo[line.so_number] ? <span className="ml-1 text-indigo-600">💬{discSo[line.so_number]}</span> : null}</button>
                             : line.so_number}
                           {isDuplicate(line) && <span className="ml-1.5 inline-block align-middle bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded text-[11px] font-bold" title={dupWhere(line)}>⚠ DUP</span>}
+                          {line.so_number && tomorrowSOs.has(line.so_number) && <span className="ml-1.5 inline-block align-middle bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-[11px] font-bold">🚚 TOMORROW DELIVERY</span>}
                         </td>
                         <td className="px-3 py-2 font-medium whitespace-nowrap">{line.item_code}</td>
                         <td className="px-3 py-2 text-gray-600 min-w-[200px]">{line.description}</td>

@@ -5,6 +5,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can, hasCap } from '@/lib/permissions'
+import { fetchTomorrowDeliverySOs } from '@/lib/delivery'
 import ItemPicker from '@/components/ItemPicker'
 
 interface BatchItem { id: string; customer_name: string; so_number: string; quantity: number }
@@ -88,7 +89,9 @@ export default function ProductionPage() {
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
-  useEffect(() => { if (profile) loadAll() }, [profile])
+  const [tomorrowSOs, setTomorrowSOs] = useState<Set<string>>(new Set())
+  const dueTomorrow = (b: Batch) => (b.production_batch_items || []).some(it => it.so_number && tomorrowSOs.has(it.so_number))
+  useEffect(() => { if (profile) { loadAll(); fetchTomorrowDeliverySOs().then(setTomorrowSOs) } }, [profile])
 
   async function loadAll() {
     const [{ data: b }, { data: f }, it, bc, { data: st }] = await Promise.all([
@@ -487,6 +490,7 @@ export default function ProductionPage() {
                               <td className="px-3 py-2 whitespace-nowrap">{b.delivery_date || '—'}</td>
                               <td className="px-3 py-2">
                                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[derivedStatus(b)] || 'bg-gray-100 text-gray-700'}`}>{derivedStatus(b)}</span>
+                                {dueTomorrow(b) && <span className="block mt-0.5 bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-[11px] font-bold whitespace-nowrap">🚚 TOMORROW DELIVERY</span>}
                               </td>
                               <td className="px-3 py-2 text-right whitespace-nowrap">
                                 {combineOn && b.no_combine && isHO && <button onClick={e => { e.stopPropagation(); recombine(b) }} className="text-blue-600 hover:underline text-xs mr-2">↩ Re-combine</button>}

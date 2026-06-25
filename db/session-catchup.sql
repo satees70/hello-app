@@ -468,3 +468,30 @@ grant execute on function public.confirm_transfer_receive(uuid) to authenticated
 -- ============================================================================
 -- Done. Everything from this session is now live.
 -- ============================================================================
+
+-- ─── 9) Delivery schedule (routes + paste-by-SO; TOMORROW DELIVERY tag) ──────
+create table if not exists public.delivery_routes (
+  id uuid primary key default gen_random_uuid(),
+  name text not null, created_by uuid, created_by_name text, created_at timestamptz not null default now()
+);
+create table if not exists public.delivery_schedule (
+  id uuid primary key default gen_random_uuid(),
+  so_number text not null, customer_name text, route_id uuid references public.delivery_routes(id) on delete set null,
+  delivery_date date, created_by uuid, created_by_name text, created_at timestamptz not null default now()
+);
+create index if not exists ds_so on public.delivery_schedule(so_number);
+create index if not exists ds_date on public.delivery_schedule(delivery_date);
+grant select, insert, update, delete on public.delivery_routes to authenticated;
+grant select, insert, update, delete on public.delivery_schedule to authenticated;
+grant all on public.delivery_routes to service_role;
+grant all on public.delivery_schedule to service_role;
+alter table public.delivery_routes enable row level security;
+alter table public.delivery_schedule enable row level security;
+drop policy if exists dr_read on public.delivery_routes;
+create policy dr_read on public.delivery_routes for select using (true);
+drop policy if exists dr_write on public.delivery_routes;
+create policy dr_write on public.delivery_routes for all using (true) with check (true);
+drop policy if exists ds_read on public.delivery_schedule;
+create policy ds_read on public.delivery_schedule for select using (true);
+drop policy if exists ds_write on public.delivery_schedule;
+create policy ds_write on public.delivery_schedule for all using (true) with check (true);
