@@ -3081,3 +3081,95 @@ begin
   update public.material_transfers set status = 'Received', received_by = auth.uid(), received_by_name = v_name, received_at = now() where id = p_id;
 end; $function$;
 grant execute on function public.confirm_transfer_receive(uuid) to authenticated;
+
+-- ============================================================================
+-- 2026-06 · Repacking redesigned. No longer posts to sales orders. Warehouse
+-- creates a repack order (own tables); the selected factory APPROVES it, and
+-- only then are production batches created directly (Planned).
+-- ============================================================================
+create table if not exists public.repack_orders (
+  id uuid primary key default gen_random_uuid(),
+  repack_no text, factory_code text not null, note text, delivery_date date,
+  status text not null default 'Pending',
+  created_by uuid, created_by_name text, created_at timestamptz not null default now(),
+  reviewed_by uuid, reviewed_by_name text, reviewed_at timestamptz
+);
+create table if not exists public.repack_order_items (
+  id uuid primary key default gen_random_uuid(),
+  repack_id uuid not null references public.repack_orders(id) on delete cascade,
+  item_code text, description text, unit text, qty numeric
+);
+create index if not exists roi_repack on public.repack_order_items(repack_id);
+grant select, insert, update, delete on public.repack_orders to authenticated;
+grant select, insert, update, delete on public.repack_order_items to authenticated;
+grant all on public.repack_orders to service_role;
+grant all on public.repack_order_items to service_role;
+alter table public.repack_orders enable row level security;
+alter table public.repack_order_items enable row level security;
+drop policy if exists ro_read on public.repack_orders;
+create policy ro_read on public.repack_orders for select using (true);
+drop policy if exists ro_write on public.repack_orders;
+create policy ro_write on public.repack_orders for all
+  using (my_factory_code()='HEAD_OFFICE' or factory_code=any(my_factory_codes()) or created_by=auth.uid()) with check (true);
+drop policy if exists roi_read on public.repack_order_items;
+create policy roi_read on public.repack_order_items for select using (true);
+drop policy if exists roi_write on public.repack_order_items;
+create policy roi_write on public.repack_order_items for all using (true) with check (true);
+
+create or replace function public.create_repack_order(p_factory text, p_customer text, p_delivery_date text, p_items jsonb)
+ returns uuid language plpgsql security definer set search_path to 'public' as $function$
+declare v_id uuid; v_no text; r jsonb; v_qty numeric; v_item public.items; v_count int := 0; v_name text;
+begin
+  if coalesce(btrim(p_factory), '') = '' then raise exception 'Pick a factory'; end if;
+  if not has_perm('sales', 'edit') then raise exception 'Not allowed'; end if;
+  v_no := 'RP-' || to_char(now(), 'YYMMDD') || '-' || lpad(nextval('public.repack_seq')::text, 4, '0');
+  select full_name into v_name from public.profiles where id = auth.uid();
+  insert into public.repack_orders (repack_no, factory_code, note, delivery_date, status, created_by, created_by_name)
+  values (v_no, p_factory, nullif(btrim(coalesce(p_customer, '')), ''), nullif(p_delivery_date, '')::date, 'Pending', auth.uid(), v_name)
+  returning id into v_id;
+  for r in select * from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) loop
+    v_qty := coalesce((r->>'qty')::numeric, 0);
+    if v_qty <= 0 then continue; end if;
+    select * into v_item from public.items where code = r->>'code' limit 1;
+    insert into public.repack_order_items (repack_id, item_code, description, unit, qty)
+    values (v_id, coalesce(v_item.code, r->>'code'), coalesce(v_item.description, r->>'description'), coalesce(v_item.unit, r->>'unit'), v_qty);
+    v_count := v_count + 1;
+  end loop;
+  if v_count = 0 then delete from public.repack_orders where id = v_id; raise exception 'Add at least one item with a quantity'; end if;
+  return v_id;
+end; $function$;
+grant execute on function public.create_repack_order(text, text, text, jsonb) to authenticated;
+
+create or replace function public.approve_repack_order(p_id uuid)
+ returns void language plpgsql security definer set search_path to 'public' as $function$
+declare v_o public.repack_orders; r record; v_b uuid; v_name text; v_count int := 0;
+begin
+  select * into v_o from public.repack_orders where id = p_id and status = 'Pending';
+  if not found then raise exception 'Not a pending repack order'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_o.factory_code = any (my_factory_codes())) then
+    raise exception 'Only the chosen factory (%) can approve this repack', v_o.factory_code; end if;
+  for r in select * from public.repack_order_items where repack_id = p_id loop
+    if coalesce(r.qty, 0) <= 0 then continue; end if;
+    insert into public.production_batches (batch_no, item_code, description, delivery_date, factory_code, total_quantity, status, run_mode)
+    values ('PB-' || lpad(nextval('public.production_batch_seq')::text, 5, '0'), r.item_code, r.description, v_o.delivery_date, v_o.factory_code, r.qty, 'Planned', 'manual')
+    returning id into v_b;
+    insert into public.production_batch_items (batch_id, so_number, customer_name, quantity, factory_code)
+    values (v_b, v_o.repack_no, coalesce(v_o.note, 'REPACK (stock)'), r.qty, v_o.factory_code);
+    v_count := v_count + 1;
+  end loop;
+  if v_count = 0 then raise exception 'This repack order has no items'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.repack_orders set status = 'Approved', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id;
+end; $function$;
+grant execute on function public.approve_repack_order(uuid) to authenticated;
+
+create or replace function public.reject_repack_order(p_id uuid)
+ returns void language plpgsql security definer set search_path to 'public' as $function$
+declare v_name text;
+begin
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.repack_orders set status = 'Rejected', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now()
+   where id = p_id and status = 'Pending'
+     and (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()) or created_by = auth.uid());
+end; $function$;
+grant execute on function public.reject_repack_order(uuid) to authenticated;
