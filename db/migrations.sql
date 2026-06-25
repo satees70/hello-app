@@ -3154,7 +3154,7 @@ begin
     values ('PB-' || lpad(nextval('public.production_batch_seq')::text, 5, '0'), r.item_code, r.description, v_o.delivery_date, v_o.factory_code, r.qty, 'Planned', 'manual')
     returning id into v_b;
     insert into public.production_batch_items (batch_id, so_number, customer_name, quantity, factory_code)
-    values (v_b, v_o.repack_no, coalesce(v_o.note, 'REPACK (stock)'), r.qty, v_o.factory_code);
+    values (v_b, v_o.repack_no, 'WAREHOUSE' || case when nullif(btrim(coalesce(v_o.note, '')), '') is not null then ' · ' || v_o.note else '' end, r.qty, v_o.factory_code);
     v_count := v_count + 1;
   end loop;
   if v_count = 0 then raise exception 'This repack order has no items'; end if;
