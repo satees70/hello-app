@@ -99,7 +99,9 @@ export default function DeliverySchedulePage() {
     } catch { setError('Could not read that file. Make sure it is an Excel or CSV export.') }
   }
 
-  // Rows that still need assigning (have an SO), keeping the source index.
+  // SOs already on the schedule — hidden from the preview so only pending orders show.
+  const scheduledSOs = useMemo(() => new Set(sched.map(s => s.so_number)), [sched])
+  // Rows that still need assigning (have an SO, not already scheduled), keeping the source index.
   const mapped = useMemo(() => rows.map((r, idx) => {
     const data: Record<string, string> = {}
     headers.forEach((h, i) => { const key = h || `Column ${i + 1}`; const v = r[i]; data[key] = v instanceof Date ? normDate(v) : String(v ?? '') })
@@ -109,7 +111,8 @@ export default function DeliverySchedulePage() {
       customer: colCust !== '' ? String(r[Number(colCust)] ?? '').trim() : '',
       data,
     }
-  }).filter(m => m.so), [rows, headers, colSO, colCust])
+  }).filter(m => m.so && !scheduledSOs.has(m.so)), [rows, headers, colSO, colCust, scheduledSOs])
+  const alreadyScheduledCount = useMemo(() => rows.filter(r => colSO !== '' && scheduledSOs.has(normSO(r[Number(colSO)]))).length, [rows, colSO, scheduledSOs])
 
   // Column holding the PO delivery date (UDF_PODELDATE) — rows due tomorrow get highlighted.
   const podelKey = useMemo(() => headers.find(h => /podel/i.test(h)) || '', [headers])
@@ -166,7 +169,7 @@ export default function DeliverySchedulePage() {
             📄 Choose Excel / CSV file
             <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => onFile(e.target.files?.[0])} />
           </label>
-          {fileName && <span className="ml-2 text-sm text-gray-500">{fileName} · {mapped.length} order(s) left to assign</span>}
+          {fileName && <span className="ml-2 text-sm text-gray-500">{fileName} · <strong>{mapped.length}</strong> pending{alreadyScheduledCount ? ` · ${alreadyScheduledCount} already scheduled (hidden)` : ''}</span>}
 
           {headers.length > 0 && (
             <>
