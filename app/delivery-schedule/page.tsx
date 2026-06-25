@@ -120,9 +120,14 @@ export default function DeliverySchedulePage() {
     } catch { setError('Could not read that file. Make sure it is an Excel or CSV export.') }
   }
 
-  // SOs already on the schedule — hidden from the preview so only pending orders show.
+  // SOs already scheduled, and which dates. We hide scheduled orders EXCEPT ones whose
+  // only schedule was yesterday (those show in green so you can carry them over). We look
+  // back exactly 1 day — older scheduled orders stay hidden.
+  const yesterdayISO = useMemo(() => { const d = new Date(); d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }, [])
   const scheduledSOs = useMemo(() => new Set(sched.map(s => s.so_number)), [sched])
-  // Rows that still need assigning (have an SO, not already scheduled), keeping the source index.
+  const schedDatesBySO = useMemo(() => { const m = new Map<string, Set<string>>(); sched.forEach(s => { if (!s.so_number) return; const set = m.get(s.so_number) || new Set<string>(); if (s.delivery_date) set.add(s.delivery_date); m.set(s.so_number, set) }); return m }, [sched])
+  const onlyScheduledYesterday = (so: string) => { if (!scheduledSOs.has(so)) return false; const dates = schedDatesBySO.get(so) || new Set(); return dates.size > 0 && [...dates].every(d => d === yesterdayISO) }
+  // Rows to show: pending (not scheduled) + ones scheduled only yesterday (green).
   const mapped = useMemo(() => rows.map((r, idx) => {
     const data: Record<string, string> = {}
     headers.forEach((h, i) => { const key = h || `Column ${i + 1}`; const v = r[i]; data[key] = v instanceof Date ? normDate(v) : String(v ?? '') })
@@ -132,8 +137,9 @@ export default function DeliverySchedulePage() {
       customer: colCust !== '' ? String(r[Number(colCust)] ?? '').trim() : '',
       data,
     }
-  }).filter(m => m.so && !scheduledSOs.has(m.so)), [rows, headers, colSO, colCust, scheduledSOs])
-  const alreadyScheduledCount = useMemo(() => rows.filter(r => colSO !== '' && scheduledSOs.has(normSO(r[Number(colSO)]))).length, [rows, colSO, scheduledSOs])
+  }).filter(m => m.so && (!scheduledSOs.has(m.so) || onlyScheduledYesterday(m.so))), [rows, headers, colSO, colCust, scheduledSOs, schedDatesBySO])
+  const pendingCount = mapped.filter(m => !scheduledSOs.has(m.so)).length
+  const yesterdayCount = mapped.length - pendingCount
 
   // Column holding the PO delivery date (UDF_PODELDATE) — rows due tomorrow get highlighted.
   const podelKey = useMemo(() => headers.find(h => /podel/i.test(h)) || '', [headers])
@@ -190,7 +196,7 @@ export default function DeliverySchedulePage() {
             📄 Choose Excel / CSV file
             <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => onFile(e.target.files?.[0])} />
           </label>
-          {fileName && <span className="ml-2 text-sm text-gray-500">{fileName} · <strong>{mapped.length}</strong> pending{alreadyScheduledCount ? ` · ${alreadyScheduledCount} already scheduled (hidden)` : ''}</span>}
+          {fileName && <span className="ml-2 text-sm text-gray-500">{fileName} · <strong>{pendingCount}</strong> pending{yesterdayCount ? ` · ${yesterdayCount} scheduled yesterday (green)` : ''}</span>}
 
           {headers.length > 0 && (
             <>
@@ -232,8 +238,9 @@ export default function DeliverySchedulePage() {
                     {mapped.map(m => {
                       const dueT = !!podelKey && m.data[podelKey] === tomorrowISO()
                       const hold = !!holdKey && isHold(m.data[holdKey])
+                      const schedYest = scheduledSOs.has(m.so)
                       return (
-                      <tr key={m.i} className={`border-t ${sel.has(m.i) ? 'bg-blue-100' : hold ? 'bg-red-100' : dueT ? 'bg-yellow-100' : 'hover:bg-gray-50'}`}>
+                      <tr key={m.i} className={`border-t ${sel.has(m.i) ? 'bg-blue-100' : hold ? 'bg-red-100' : schedYest ? 'bg-green-100' : dueT ? 'bg-yellow-100' : 'hover:bg-gray-50'}`}>
                         <td className="px-3 py-1.5"><input type="checkbox" checked={sel.has(m.i)} onChange={() => toggleRow(m.i)} className="h-4 w-4" /></td>
                         {headers.map((h, i) => { const key = h || `Column ${i + 1}`; return <td key={i} className="px-3 py-1.5 text-gray-700">{cellView(m.data[key])}</td> })}
                       </tr>
