@@ -435,7 +435,7 @@ export default function ProductionPage() {
                                 <td className="px-3 py-2"><span className="font-medium">{item}</span><span className="block text-gray-500 text-xs">{members[0].description}</span>{bomBadge(item)}</td>
                                 <td className="px-3 py-2 font-semibold whitespace-nowrap">{total}</td>
                                 <td className="px-3 py-2 whitespace-nowrap">{dateLabel}</td>
-                                <td className="px-3 py-2"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">Planned</span></td>
+                                <td className="px-3 py-2"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">Planned</span>{members.some(dueTomorrow) && <span className="block mt-0.5 bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-[11px] font-bold whitespace-nowrap">🚚 TOMORROW DELIVERY</span>}</td>
                                 <td className="px-3 py-2 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
                                   <button onClick={() => { setSelected(target); setError(''); setSuccess('') }} className="text-blue-600 hover:underline text-xs font-medium">Materials</button>
                                 </td>
