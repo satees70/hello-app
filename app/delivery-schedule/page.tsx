@@ -5,21 +5,26 @@ import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
 import { tomorrowISO } from '@/lib/delivery'
+import * as XLSX from 'xlsx'
 
 interface Route { id: string; name: string }
 interface Sched {
   id: string; so_number: string; customer_name: string | null; route_id: string | null
   delivery_date: string | null; created_by_name: string | null
 }
-type Parsed = { so: string; customer: string; raw: string }
 
-function parsePaste(text: string): Parsed[] {
-  return text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(line => {
-    const m = line.match(/SO[-\s]?(\d+)/i)
-    const so = m ? 'SO-' + m[1] : ''
-    const rest = line.replace(/SO[-\s]?\d+/i, ' ').replace(/[\t,;|]+/g, ' ').replace(/\s{2,}/g, ' ').trim()
-    return { so, customer: rest.slice(0, 80), raw: line }
-  })
+// Normalise an SO value to "SO-#####" so it matches sales_order_lines.so_number.
+function normSO(v: unknown): string {
+  const raw = String(v ?? '').trim()
+  const m = raw.match(/SO[-\s]?(\d+)/i)
+  return m ? 'SO-' + m[1] : raw
+}
+// Excel dates come as JS Date (cellDates); strings get parsed. Returns YYYY-MM-DD or ''.
+function normDate(v: unknown): string {
+  if (!v) return ''
+  const d = v instanceof Date ? v : new Date(String(v))
+  if (isNaN(d.getTime())) return ''
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 export default function DeliverySchedulePage() {
@@ -29,8 +34,12 @@ export default function DeliverySchedulePage() {
   const [routes, setRoutes] = useState<Route[]>([])
   const [sched, setSched] = useState<Sched[]>([])
   const [newRoute, setNewRoute] = useState('')
-  const [paste, setPaste] = useState('')
-  const [parsed, setParsed] = useState<Parsed[]>([])
+  const [fileName, setFileName] = useState('')
+  const [headers, setHeaders] = useState<string[]>([])
+  const [rows, setRows] = useState<unknown[][]>([])
+  const [colSO, setColSO] = useState('')      // column index (as string) for the SO number
+  const [colCust, setColCust] = useState('')  // optional customer column
+  const [colDate, setColDate] = useState('')  // optional delivery-date column
   const [routeId, setRouteId] = useState('')
   const [date, setDate] = useState(tomorrowISO())
   const [routeFilter, setRouteFilter] = useState('all')
@@ -63,20 +72,42 @@ export default function DeliverySchedulePage() {
     await supabase.from('delivery_routes').delete().eq('id', id); load()
   }
 
-  function doPreview() { setError(''); setParsed(parsePaste(paste)) }
-  const valid = parsed.filter(p => p.so)
+  async function onFile(f: File | undefined) {
+    if (!f) return
+    setError(''); setSuccess('')
+    try {
+      const buf = await f.arrayBuffer()
+      const wb = XLSX.read(buf, { type: 'array', cellDates: true })
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false }) as unknown[][]
+      if (aoa.length === 0) { setError('That file looks empty.'); return }
+      const hdr = (aoa[0] as unknown[]).map(x => String(x ?? '').trim())
+      setFileName(f.name); setHeaders(hdr); setRows(aoa.slice(1))
+      const find = (...keys: string[]) => String(hdr.findIndex(h => keys.some(k => h.toLowerCase().includes(k))))
+      const so = find('so no', 'so number', 'sonumber', 'so'); setColSO(so === '-1' ? '0' : so)
+      const cust = find('customer', 'company', 'name'); setColCust(cust === '-1' ? '' : cust)
+      const dt = find('deliver', 'date'); setColDate(dt === '-1' ? '' : dt)
+    } catch { setError('Could not read that file. Make sure it is an Excel or CSV export.') }
+  }
+
+  // Map the uploaded rows to { so, customer, date } using the chosen columns.
+  const mapped = rows.map(r => ({
+    so: colSO !== '' ? normSO(r[Number(colSO)]) : '',
+    customer: colCust !== '' ? String(r[Number(colCust)] ?? '').trim() : '',
+    rowDate: colDate !== '' ? normDate(r[Number(colDate)]) : '',
+  })).filter(m => m.so)
 
   async function addToSchedule() {
     if (!routeId) { setError('Pick a route.'); return }
-    if (!date) { setError('Pick a delivery date.'); return }
-    if (valid.length === 0) { setError('No SO numbers found in the pasted text — check the preview.'); return }
+    if (mapped.length === 0) { setError('No SO numbers found — check the column mapping.'); return }
+    if (colDate === '' && !date) { setError('Pick a delivery date (or map a date column).'); return }
     setBusy('add'); setError(''); setSuccess('')
-    const rows = valid.map(p => ({ so_number: p.so, customer_name: p.customer || null, route_id: routeId, delivery_date: date, created_by: profile?.id, created_by_name: profile?.full_name }))
-    const { error: e } = await supabase.from('delivery_schedule').insert(rows)
+    const ins = mapped.map(m => ({ so_number: m.so, customer_name: m.customer || null, route_id: routeId, delivery_date: m.rowDate || date, created_by: profile?.id, created_by_name: profile?.full_name }))
+    const { error: e } = await supabase.from('delivery_schedule').insert(ins)
     setBusy('')
     if (e) { setError(e.message); return }
-    setSuccess(`${rows.length} order(s) scheduled on ${routeName(routeId)} for ${date}.`)
-    setPaste(''); setParsed([]); load()
+    setSuccess(`${ins.length} order(s) scheduled on ${routeName(routeId)}.`)
+    setFileName(''); setHeaders([]); setRows([]); setColSO(''); setColCust(''); setColDate(''); load()
   }
   async function removeSched(id: string) { await supabase.from('delivery_schedule').delete().eq('id', id); load() }
   async function updateSched(id: string, patch: Partial<Sched>) { await supabase.from('delivery_schedule').update(patch).eq('id', id); load() }
@@ -115,38 +146,64 @@ export default function DeliverySchedulePage() {
           </div>
         </div>
 
-        {/* Paste & schedule */}
+        {/* Upload & schedule */}
         <div className="border rounded-2xl p-4 sm:p-5 bg-white shadow-sm mb-8">
-          <h2 className="font-semibold mb-3">Paste orders &amp; schedule</h2>
-          <textarea value={paste} onChange={e => setPaste(e.target.value)} rows={5} placeholder="Paste rows copied from SQL Accounting here. Each line should contain the SO number (e.g. SO-40844)…" className="w-full border rounded-lg px-3 py-2 text-sm font-mono" />
-          <div className="flex flex-wrap items-end gap-3 mt-3">
-            <button onClick={doPreview} className="px-4 py-2 rounded-lg border bg-gray-50 hover:bg-gray-100 text-sm font-medium">Preview</button>
-            <label className="block"><span className="text-xs text-gray-500">Route</span>
-              <select value={routeId} onChange={e => setRouteId(e.target.value)} className="block w-44 border rounded-lg px-3 py-2 text-sm mt-1">
-                <option value="">Pick a route…</option>
-                {routes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-              </select></label>
-            <label className="block"><span className="text-xs text-gray-500">Delivery date</span>
-              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="block border rounded-lg px-3 py-2 text-sm mt-1" /></label>
-            <button onClick={addToSchedule} disabled={busy === 'add' || valid.length === 0} className="px-5 py-2 rounded-lg bg-blue-700 text-white text-sm font-semibold hover:bg-blue-800 disabled:opacity-50">
-              {busy === 'add' ? 'Adding…' : `Add ${valid.length || ''} to schedule`}
-            </button>
-          </div>
+          <h2 className="font-semibold mb-3">Upload orders &amp; schedule</h2>
+          <label className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border bg-gray-50 hover:bg-gray-100 text-sm font-medium cursor-pointer">
+            📄 Choose Excel / CSV file
+            <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => onFile(e.target.files?.[0])} />
+          </label>
+          {fileName && <span className="ml-2 text-sm text-gray-500">{fileName} · {rows.length} row(s)</span>}
 
-          {parsed.length > 0 && (
-            <div className="mt-3 border rounded-lg overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 text-gray-500 text-left"><tr><th className="px-3 py-2">SO number</th><th className="px-3 py-2">Customer / line</th></tr></thead>
-                <tbody>
-                  {parsed.map((p, i) => (
-                    <tr key={i} className={`border-t ${p.so ? '' : 'bg-red-50'}`}>
-                      <td className="px-3 py-1.5 font-mono">{p.so || <span className="text-red-600 text-xs">no SO found — skipped</span>}</td>
-                      <td className="px-3 py-1.5 text-gray-600">{p.customer || p.raw}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          {headers.length > 0 && (
+            <>
+              <div className="grid sm:grid-cols-3 gap-3 mt-4">
+                <label className="block"><span className="text-xs text-gray-500">SO number column *</span>
+                  <select value={colSO} onChange={e => setColSO(e.target.value)} className="block w-full border rounded-lg px-3 py-2 text-sm mt-1">
+                    {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
+                  </select></label>
+                <label className="block"><span className="text-xs text-gray-500">Customer column (optional)</span>
+                  <select value={colCust} onChange={e => setColCust(e.target.value)} className="block w-full border rounded-lg px-3 py-2 text-sm mt-1">
+                    <option value="">— none —</option>
+                    {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
+                  </select></label>
+                <label className="block"><span className="text-xs text-gray-500">Delivery-date column (optional)</span>
+                  <select value={colDate} onChange={e => setColDate(e.target.value)} className="block w-full border rounded-lg px-3 py-2 text-sm mt-1">
+                    <option value="">— use the date picker below —</option>
+                    {headers.map((h, i) => <option key={i} value={i}>{h || `Column ${i + 1}`}</option>)}
+                  </select></label>
+              </div>
+
+              <div className="flex flex-wrap items-end gap-3 mt-4">
+                <label className="block"><span className="text-xs text-gray-500">Route *</span>
+                  <select value={routeId} onChange={e => setRouteId(e.target.value)} className="block w-44 border rounded-lg px-3 py-2 text-sm mt-1">
+                    <option value="">Pick a route…</option>
+                    {routes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  </select></label>
+                {colDate === '' && <label className="block"><span className="text-xs text-gray-500">Delivery date</span>
+                  <input type="date" value={date} onChange={e => setDate(e.target.value)} className="block border rounded-lg px-3 py-2 text-sm mt-1" /></label>}
+                <button onClick={addToSchedule} disabled={busy === 'add' || mapped.length === 0} className="px-5 py-2 rounded-lg bg-blue-700 text-white text-sm font-semibold hover:bg-blue-800 disabled:opacity-50">
+                  {busy === 'add' ? 'Adding…' : `Add ${mapped.length || ''} to schedule`}
+                </button>
+              </div>
+
+              <div className="mt-3 border rounded-lg overflow-auto max-h-72">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-500 text-left sticky top-0"><tr><th className="px-3 py-2">SO number</th><th className="px-3 py-2">Customer</th><th className="px-3 py-2">Delivery date</th></tr></thead>
+                  <tbody>
+                    {mapped.length === 0 && <tr><td colSpan={3} className="px-3 py-4 text-gray-400 text-center">No SO numbers detected — pick the correct SO column above.</td></tr>}
+                    {mapped.slice(0, 200).map((m, i) => (
+                      <tr key={i} className="border-t">
+                        <td className="px-3 py-1.5 font-mono">{m.so}</td>
+                        <td className="px-3 py-1.5 text-gray-600">{m.customer || '—'}</td>
+                        <td className="px-3 py-1.5 text-gray-600">{m.rowDate || (colDate === '' ? date : '—')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {mapped.length > 200 && <p className="text-[11px] text-gray-400 mt-1">Showing first 200 of {mapped.length}.</p>}
+            </>
           )}
         </div>
 
