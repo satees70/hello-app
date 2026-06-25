@@ -93,6 +93,8 @@ export default function SalesOrdersPage() {
   const [imports, setImports] = useState<SalesImport[]>([])
   const [docFilters, setDocFilters] = useState<Record<string, Set<string>>>({})
   const [docSearch, setDocSearch] = useState('')
+  const [docTomorrow, setDocTomorrow] = useState(false)
+  const [docUrgent, setDocUrgent] = useState(false)
   const [docLineText, setDocLineText] = useState<Record<string, string>>({})   // import -> item codes + descriptions inside it
   const [importSos, setImportSos] = useState<Record<string, string[]>>({})   // import -> its SO numbers
   const [discSo, setDiscSo] = useState<Record<string, number>>({})   // SO number -> discussion message count
@@ -750,13 +752,18 @@ export default function SalesOrdersPage() {
   const docMine = (d: SalesImport) => myFacs.size > 0 && (
     (!!d.factory_code && myFacs.has(d.factory_code)) ||
     Object.values(docSummary[d.id]?.locFactory || {}).some(f => myFacs.has(f)))
+  const docIsTomorrow = (d: SalesImport) => (importSos[d.id] || []).some(so => tomorrowSOs.has(so))
+  const tomorrowDocCount = imports.filter(docIsTomorrow).length
+  const urgentDocCount = imports.filter(d => d.urgent).length
   const shownImports = imports.filter(d =>
     (!docSearch || d.file_name.toLowerCase().includes(docSearch.toLowerCase()) || (docLineText[d.id] || '').includes(docSearch.toLowerCase())) &&
     docPass(docFilters.status, [d.status]) &&
     docPass(docFilters.locations, docSummary[d.id]?.locations || []) &&
-    docPass(docFilters.issues, docIssueTags(d)))
+    docPass(docFilters.issues, docIssueTags(d)) &&
+    (!docTomorrow || docIsTomorrow(d)) &&
+    (!docUrgent || !!d.urgent))
     .sort((a, b) => (docMine(a) ? 0 : 1) - (docMine(b) ? 0 : 1))  // my location's documents first
-  const anyDocFilter = ['status', 'locations', 'issues'].some(k => docFilters[k]?.size)
+  const anyDocFilter = ['status', 'locations', 'issues'].some(k => docFilters[k]?.size) || docTomorrow || docUrgent
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -784,8 +791,10 @@ export default function SalesOrdersPage() {
           <div className="w-44"><span className="text-xs text-gray-500">Location</span><MultiFilter values={docDistinct('locations')} selected={docFilters.locations || new Set()} onChange={s => setDocFilters(p => ({ ...p, locations: s }))} /></div>
           <div className="w-40"><span className="text-xs text-gray-500">Status</span><MultiFilter values={docDistinct('status')} selected={docFilters.status || new Set()} onChange={s => setDocFilters(p => ({ ...p, status: s }))} /></div>
           <div className="w-44"><span className="text-xs text-gray-500">Issues</span><MultiFilter values={docDistinct('issues')} selected={docFilters.issues || new Set()} onChange={s => setDocFilters(p => ({ ...p, issues: s }))} /></div>
+          <button onClick={() => setDocTomorrow(v => !v)} className={`text-xs px-3 py-1.5 rounded-full font-medium border self-end ${docTomorrow ? 'bg-yellow-300 border-yellow-400 text-yellow-900' : 'bg-white border-gray-300 text-gray-600 hover:bg-yellow-50'}`}>🚚 Tomorrow{tomorrowDocCount ? ` (${tomorrowDocCount})` : ''}</button>
+          <button onClick={() => setDocUrgent(v => !v)} className={`text-xs px-3 py-1.5 rounded-full font-medium border self-end ${docUrgent ? 'bg-red-600 border-red-700 text-white' : 'bg-white border-gray-300 text-gray-600 hover:bg-red-50'}`}>🔴 Urgent{urgentDocCount ? ` (${urgentDocCount})` : ''}</button>
           <span className="text-gray-400 text-xs self-end">{shownImports.length} of {imports.length}</span>
-          {(anyDocFilter || docSearch) && <button onClick={() => { setDocFilters({}); setDocSearch('') }} className="text-blue-600 hover:underline text-xs self-end">Clear</button>}
+          {(anyDocFilter || docSearch) && <button onClick={() => { setDocFilters({}); setDocSearch(''); setDocTomorrow(false); setDocUrgent(false) }} className="text-blue-600 hover:underline text-xs self-end">Clear</button>}
         </div>
         <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[24rem] mb-8">
           <table className="w-full text-sm">
