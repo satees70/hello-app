@@ -84,6 +84,7 @@ export default function ProductionPage() {
   const [extra, setExtra] = useState('')   // extra units to make for stock (beyond the order)
   const [stockReqs, setStockReqs] = useState<{ id: string; request_no: string; pick_run_no: string | null; extra_qty: number; status: string; created_at: string; batch_id: string; production_batches: { item_code: string; factory_code: string } | null }[]>([])
   const [combineOn, setCombineOn] = useState(true)
+  const [tomorrowOnly, setTomorrowOnly] = useState(false)
   const [sortBy, setSortBy] = useState<'due_asc' | 'due_desc' | 'batch'>('due_asc')
   const [consumption, setConsumption] = useState<Record<string, ConsRow[]>>({}) // batch id -> consumed lots
 
@@ -293,6 +294,8 @@ export default function ProductionPage() {
   if (fromTs !== null) shown = shown.filter(b => { const k = dateKey(b.delivery_date); return k !== Number.MAX_SAFE_INTEGER && k >= fromTs })
   if (toTs !== null) shown = shown.filter(b => { const k = dateKey(b.delivery_date); return k !== Number.MAX_SAFE_INTEGER && k <= toTs })
   if (isHO && factoryFilter) shown = shown.filter(b => b.factory_code === factoryFilter)
+  if (tomorrowOnly) shown = shown.filter(dueTomorrow)
+  const tomorrowCount = batches.filter(dueTomorrow).length
   const counts: Record<string, number> = { Planned: 0, Requested: 0, 'In Progress': 0, Completed: 0 }
   batches.forEach(b => { const st = derivedStatus(b); counts[st] = (counts[st] || 0) + 1 })
 
@@ -383,11 +386,17 @@ export default function ProductionPage() {
           )}
         </div>
 
-        <label className="flex items-center gap-2 mb-5 text-sm cursor-pointer w-fit">
-          <input type="checkbox" checked={combineOn} onChange={e => setCombineOn(e.target.checked)} className="h-4 w-4" />
-          <span className="text-gray-700 font-medium">Combine same item to run together</span>
-          <span className="text-gray-400">(Planned batches not yet requested, grouped by factory)</span>
-        </label>
+        <div className="flex items-center gap-4 mb-5 flex-wrap">
+          <label className="flex items-center gap-2 text-sm cursor-pointer w-fit">
+            <input type="checkbox" checked={combineOn} onChange={e => setCombineOn(e.target.checked)} className="h-4 w-4" />
+            <span className="text-gray-700 font-medium">Combine same item to run together</span>
+            <span className="text-gray-400">(Planned batches not yet requested, grouped by factory)</span>
+          </label>
+          <button onClick={() => setTomorrowOnly(v => !v)}
+            className={`text-sm px-3 py-1 rounded-full font-medium border ${tomorrowOnly ? 'bg-yellow-300 border-yellow-400 text-yellow-900' : 'bg-white border-gray-300 text-gray-600 hover:bg-yellow-50'}`}>
+            🚚 Tomorrow delivery{tomorrowCount ? ` (${tomorrowCount})` : ''}{tomorrowOnly ? ' ✓' : ''}
+          </button>
+        </div>
 
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
         {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}

@@ -5,8 +5,9 @@ import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can, hasCap } from '@/lib/permissions'
+import { fetchTomorrowDeliverySOs } from '@/lib/delivery'
 
-interface PBItem { customer_name: string; quantity: number }
+interface PBItem { customer_name: string; quantity: number; so_number?: string | null }
 interface Batch {
   id: string
   batch_no: string
@@ -57,17 +58,20 @@ export default function PackingPage() {
   const [savingId, setSavingId] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [tomorrowSOs, setTomorrowSOs] = useState<Set<string>>(new Set())
+  const [tomorrowOnly, setTomorrowOnly] = useState(false)
+  const dueTomorrow = (b: Batch) => (b.production_batch_items || []).some(it => it.so_number && tomorrowSOs.has(it.so_number))
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
   const multiFac = isHO || (profile?.factory_codes?.length || 0) > 1   // sees more than one factory
   const canEdit = can(profile, 'packing', 'edit')
   const canEditFac = (fc: string) => can(profile, 'packing', 'edit', fc)   // honours per-factory view-only
 
-  useEffect(() => { if (profile) { load(); loadFactories() } }, [profile])
+  useEffect(() => { if (profile) { load(); loadFactories(); fetchTomorrowDeliverySOs().then(setTomorrowSOs) } }, [profile])
 
   async function load() {
     const { data } = await supabase.from('production_batches')
-      .select('id, batch_no, item_code, description, factory_code, total_quantity, produced_qty, material_request_id, pack_line, pack_date, run_mode, delivery_date, urgent, production_batch_items(customer_name, quantity)')
+      .select('id, batch_no, item_code, description, factory_code, total_quantity, produced_qty, material_request_id, pack_line, pack_date, run_mode, delivery_date, urgent, production_batch_items(customer_name, quantity, so_number)')
       .order('delivery_date')
     setBatches((data as Batch[]) || [])
     const { data: pl } = await supabase.from('packing_lines').select('factory_code, name, active, line_mode').order('name')
@@ -202,7 +206,8 @@ export default function PackingPage() {
   if (!profile) return null
 
   const fmtDate = (d: string) => d.split('-').reverse().join('/')
-  const facFilter = (b: Batch) => !factoryFilter || b.factory_code === factoryFilter
+  const facFilter = (b: Batch) => (!factoryFilter || b.factory_code === factoryFilter) && (!tomorrowOnly || dueTomorrow(b))
+  const tomorrowCount = batches.filter(dueTomorrow).length
 
   // Unscheduled, still-to-produce batches split by whether materials are in
   const unscheduled = batches.filter(b => !b.pack_date && status(b) !== 'Completed' && facFilter(b))
@@ -269,6 +274,10 @@ export default function PackingPage() {
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-2 bg-white" />
           <button onClick={() => setDate(today)} className="text-blue-600 hover:underline">Today</button>
           <label className="flex items-center gap-2 cursor-pointer ml-2"><input type="checkbox" checked={hideDone} onChange={e => setHideDone(e.target.checked)} className="h-4 w-4" /><span className="text-gray-700">Hide completed</span></label>
+          <button onClick={() => setTomorrowOnly(v => !v)}
+            className={`text-sm px-3 py-1 rounded-full font-medium border ${tomorrowOnly ? 'bg-yellow-300 border-yellow-400 text-yellow-900' : 'bg-white border-gray-300 text-gray-600 hover:bg-yellow-50'}`}>
+            🚚 Tomorrow delivery{tomorrowCount ? ` (${tomorrowCount})` : ''}{tomorrowOnly ? ' ✓' : ''}
+          </button>
         </div>
 
         {facs.length === 0 ? (
@@ -354,7 +363,7 @@ export default function PackingPage() {
                     <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span>
                       <button onClick={() => toggleMat(b.id)} className="text-blue-600 hover:underline text-xs mt-0.5">{openMat.has(b.id) ? '▾ hide materials' : '▸ show materials'}</button></td>
                     <td className="px-3 py-2 text-right font-semibold">{b.total_quantity}</td>
-                    <td className="px-3 py-2 whitespace-nowrap text-gray-600">{b.delivery_date ? fmtDate(b.delivery_date) : '—'}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-gray-600">{b.delivery_date ? fmtDate(b.delivery_date) : '—'}{dueTomorrow(b) && <span className="block mt-0.5 bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-[11px] font-bold">🚚 TOMORROW</span>}</td>
                     <td className="px-3 py-2">{canEditFac(b.factory_code) ? <PackForm b={b} /> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${partial(b) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{partial(b) ? `Enough for ${availability(b).units}` : 'Materials ready'}</span>}</td>
                   </tr>
                   {openMat.has(b.id) && (
@@ -387,7 +396,7 @@ export default function PackingPage() {
                     <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span>
                       <button onClick={() => toggleMat(b.id)} className="text-blue-600 hover:underline text-xs mt-0.5">{openMat.has(b.id) ? '▾ hide materials' : '▸ show materials'}</button></td>
                     <td className="px-3 py-2 text-right font-semibold">{b.total_quantity}</td>
-                    <td className="px-3 py-2 whitespace-nowrap text-gray-600">{b.delivery_date ? fmtDate(b.delivery_date) : '—'}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-gray-600">{b.delivery_date ? fmtDate(b.delivery_date) : '—'}{dueTomorrow(b) && <span className="block mt-0.5 bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-[11px] font-bold">🚚 TOMORROW</span>}</td>
                     <td className="px-3 py-2"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{waitReason(b)}</span></td>
                   </tr>
                   {openMat.has(b.id) && (
