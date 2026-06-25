@@ -182,11 +182,15 @@ export default function DeliverySchedulePage() {
   return (
     <>
       <style>{`@media print {
+        @page { size: A4 portrait; margin: 10mm; }
         body * { visibility: hidden; }
         #delivery-print, #delivery-print * { visibility: visible; }
-        #delivery-print { position: absolute; left: 0; top: 0; width: 100%; }
+        #delivery-print { position: absolute; left: 0; top: 0; width: 100%; font-size: 10px; }
+        #delivery-print table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+        #delivery-print th, #delivery-print td { white-space: normal; word-break: break-word; padding: 3px 5px !important; border: 1px solid #ccc; }
+        #delivery-print .shadow-sm { box-shadow: none !important; }
         .no-print { display: none !important; }
-        #delivery-print input, #delivery-print select { border: none !important; padding: 0 !important; background: transparent !important; -webkit-appearance: none; appearance: none; color: #000 !important; }
+        #delivery-print input, #delivery-print select { border: none !important; padding: 0 !important; background: transparent !important; -webkit-appearance: none; appearance: none; color: #000 !important; font-size: 10px; }
         #delivery-print .border { break-inside: avoid; }
       }`}</style>
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
