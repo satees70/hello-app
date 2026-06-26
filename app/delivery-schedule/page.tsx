@@ -406,7 +406,11 @@ export default function DeliverySchedulePage() {
                                 {LINES.map(l => <option key={l} value={l}>{l}</option>)}
                               </select>
                             </td>
-                            <td className="px-3 py-1.5 text-right no-print"><button onClick={() => removeSched(s.id)} className="text-red-600 hover:underline text-xs">Remove</button></td>
+                            <td className="px-3 py-1.5 text-right no-print">
+                              {s.route
+                                ? <button onClick={() => updateSched(s.id, { route: null })} className="text-amber-600 hover:underline text-xs" title="Take off this line — it moves to the Unassigned box so you can re-assign it">Unassign</button>
+                                : <button onClick={() => { if (confirm('Delete this order from the schedule for good?')) removeSched(s.id) }} className="text-red-600 hover:underline text-xs">Delete</button>}
+                            </td>
                           </tr>
                         )
                       })}
