@@ -91,8 +91,14 @@ export default function DeliverySchedulePage() {
     }
     setProdStatus(pm)
   }
-  // The line's label is per-day (line + date): e.g. LINE A — Klang today, JB tomorrow.
-  const lineLabel = (l: string, d?: string | null) => { const r = d ? trips[`${l}|${d}`]?.remark : ''; return `${l}${r ? ' — ' + r : ''}` }
+  // Most recent label set for each line (used when the chosen date has none yet).
+  const lineLatest = useMemo(() => {
+    const best: Record<string, { date: string; remark: string }> = {}
+    Object.values(trips).forEach(t => { if (t.remark) { const cur = best[t.route]; if (!cur || (t.delivery_date || '') > cur.date) best[t.route] = { date: t.delivery_date || '', remark: t.remark } } })
+    const m: Record<string, string> = {}; Object.entries(best).forEach(([k, v]) => { m[k] = v.remark }); return m
+  }, [trips])
+  // The line's label is per-day (line + date), falling back to the line's latest label.
+  const lineLabel = (l: string, d?: string | null) => { const r = (d ? trips[`${l}|${d}`]?.remark : '') || lineLatest[l] || ''; return `${l}${r ? ' — ' + r : ''}` }
   // Update one field of a trip (line+date) locally; persist on blur via saveTrip.
   const setTripField = (route: string, date: string, field: keyof Trip, value: string) => setTrips(p => {
     const key = `${route}|${date}`; const cur = p[key] || { route, delivery_date: date, lorry_no: '', driver: '', kelindan: '', remark: '' }
