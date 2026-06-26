@@ -10,10 +10,11 @@ interface Sched {
   id: string; so_number: string; customer_name: string | null; route: string | null
   delivery_date: string | null; created_by_name: string | null; data: Record<string, string> | null; invoiced: boolean
 }
-interface Trip { route: string; delivery_date: string; lorry_no: string | null; driver: string | null; kelindan: string | null; remark: string | null }
+interface Trip { route: string; delivery_date: string; lorry_no: string | null; driver: string | null; kelindan: string | null; remark: string | null; category: string | null }
 
 // Fixed delivery lines A … K.
 const LINES = Array.from({ length: 11 }, (_, i) => 'LINE ' + String.fromCharCode(65 + i))
+const TRIP_TYPES = ['LOCAL', 'GCH', 'OS1', 'OS2']
 
 function normSO(v: unknown): string {
   const raw = String(v ?? '').trim()
@@ -74,7 +75,7 @@ export default function DeliverySchedulePage() {
   async function load() {
     const { data: s } = await supabase.from('delivery_schedule').select('id, so_number, customer_name, route, delivery_date, created_by_name, data, invoiced').order('route', { ascending: true, nullsFirst: false }).order('delivery_date', { ascending: true, nullsFirst: false })
     setSched((s as Sched[]) || [])
-    const { data: t } = await supabase.from('delivery_trips').select('route, delivery_date, lorry_no, driver, kelindan, remark')
+    const { data: t } = await supabase.from('delivery_trips').select('route, delivery_date, lorry_no, driver, kelindan, remark, category')
     const tm: Record<string, Trip> = {}; (t as Trip[] || []).forEach(x => { tm[`${x.route}|${x.delivery_date}`] = x }); setTrips(tm)
     // Production status per SO (least-advanced batch), pulled from the Order Board.
     const sos = [...new Set(((s as Sched[]) || []).map(x => x.so_number).filter(Boolean))]
@@ -101,15 +102,15 @@ export default function DeliverySchedulePage() {
   const lineLabel = (l: string, d?: string | null) => { const r = (d ? trips[`${l}|${d}`]?.remark : '') || lineLatest[l] || ''; return `${l}${r ? ' — ' + r : ''}` }
   // Update one field of a trip (line+date) locally; persist on blur via saveTrip.
   const setTripField = (route: string, date: string, field: keyof Trip, value: string) => setTrips(p => {
-    const key = `${route}|${date}`; const cur = p[key] || { route, delivery_date: date, lorry_no: '', driver: '', kelindan: '', remark: '' }
+    const key = `${route}|${date}`; const cur = p[key] || { route, delivery_date: date, lorry_no: '', driver: '', kelindan: '', remark: '', category: '' }
     return { ...p, [key]: { ...cur, [field]: value } }
   })
   async function saveTrip(route: string, deliveryDate: string, patch: Partial<Trip>) {
     const key = `${route}|${deliveryDate}`
-    const cur = trips[key] || { route, delivery_date: deliveryDate, lorry_no: '', driver: '', kelindan: '', remark: '' }
+    const cur = trips[key] || { route, delivery_date: deliveryDate, lorry_no: '', driver: '', kelindan: '', remark: '', category: '' }
     const next = { ...cur, ...patch }
     setTrips(p => ({ ...p, [key]: next }))
-    const { error: e } = await supabase.from('delivery_trips').upsert({ route, delivery_date: deliveryDate, lorry_no: next.lorry_no || null, driver: next.driver || null, kelindan: next.kelindan || null, remark: next.remark || null, updated_at: new Date().toISOString() }, { onConflict: 'route,delivery_date' })
+    const { error: e } = await supabase.from('delivery_trips').upsert({ route, delivery_date: deliveryDate, lorry_no: next.lorry_no || null, driver: next.driver || null, kelindan: next.kelindan || null, remark: next.remark || null, category: next.category || null, updated_at: new Date().toISOString() }, { onConflict: 'route,delivery_date' })
     if (e) setError(`Could not save line info: ${e.message}`)
   }
   async function loadUploads() {
@@ -362,6 +363,11 @@ export default function DeliverySchedulePage() {
           shownSched.forEach(s => { const k = `${s.route || ''}||${s.delivery_date || ''}`; (groups[k] = groups[k] || { route: s.route, date: s.delivery_date, rows: [] }).rows.push(s) })
           const li = (r: string | null) => { const i = LINES.indexOf(r || ''); return i < 0 ? 999 : i }
           const keys = Object.keys(groups).sort((a, b) => (li(groups[a].route) - li(groups[b].route)) || (groups[a].date || '').localeCompare(groups[b].date || ''))
+          // Driver trips summary (each line+date with a driver = one trip), respecting the date filter.
+          const driverSum: Record<string, { total: number; cat: Record<string, number> }> = {}
+          Object.values(trips).filter(t => (dateFilter === 'all' || t.delivery_date === dateFilter) && (t.driver || '').trim())
+            .forEach(t => { const d = t.driver!.trim(); const e = (driverSum[d] = driverSum[d] || { total: 0, cat: {} }); e.total++; const c = t.category || '—'; e.cat[c] = (e.cat[c] || 0) + 1 })
+          const driverNames = Object.keys(driverSum).sort()
           return (
           <div id="delivery-print" className="space-y-5">
             <div className="hidden print:block mb-2"><h1 className="text-xl font-bold">Delivery Schedule{dateFilter !== 'all' ? ` — ${fmtD(dateFilter)}` : ''}</h1></div>
@@ -369,6 +375,14 @@ export default function DeliverySchedulePage() {
               <strong>Pending: {totalPending} of {shownSched.length}</strong>
               {Object.keys(pendByLine).length > 0 && <span className="text-gray-600"> · {Object.entries(pendByLine).sort((a, b) => li(a[0]) - li(b[0])).map(([l, n]) => `${l}: ${n}`).join('  ·  ')}</span>}
             </div>
+            {driverNames.length > 0 && (
+              <div className="mb-3 p-3 rounded-lg bg-gray-50 border text-sm">
+                <div className="font-semibold mb-1">Driver trips{dateFilter !== 'all' ? ` — ${fmtD(dateFilter)}` : ' (all dates)'}</div>
+                <div className="grid sm:grid-cols-2 gap-x-6 gap-y-0.5">
+                  {driverNames.map(d => <div key={d}><strong>{d}</strong>: {driverSum[d].total} trip(s) <span className="text-gray-500">({Object.entries(driverSum[d].cat).map(([c, n]) => `${c} ${n}`).join(', ')})</span></div>)}
+                </div>
+              </div>
+            )}
             {keys.map(k => {
               const g = groups[k]
               const tripKey = g.route && g.date ? `${g.route}|${g.date}` : ''
@@ -379,6 +393,10 @@ export default function DeliverySchedulePage() {
                   <span className="font-semibold">{g.route ? lineLabel(g.route, g.date) : 'Unassigned'}{g.date ? ` · ${fmtD(g.date)}` : ''} <span className="text-gray-500 font-normal text-sm">· {g.rows.length} order(s){(() => { const p = g.rows.filter(s => !s.invoiced).length; return p ? ` · ${p} pending` : '' })()}</span></span>
                   {tripKey && (
                     <div className="flex items-center gap-2 text-xs flex-wrap">
+                      <select value={trip?.category || ''} onChange={e => { setTripField(g.route!, g.date!, 'category', e.target.value); saveTrip(g.route!, g.date!, { category: e.target.value }) }} className="border rounded px-2 py-1 bg-white">
+                        <option value="">Type…</option>
+                        {TRIP_TYPES.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
                       <input value={trip?.remark || ''} placeholder="For (e.g. Klang)" onChange={e => setTripField(g.route!, g.date!, 'remark', e.target.value)} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-32" />
                       <input value={trip?.lorry_no || ''} placeholder="Lorry no" onChange={e => setTripField(g.route!, g.date!, 'lorry_no', e.target.value)} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-28" />
                       <input value={trip?.driver || ''} placeholder="Driver" onChange={e => setTripField(g.route!, g.date!, 'driver', e.target.value)} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-28" />

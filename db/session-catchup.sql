@@ -551,3 +551,5 @@ create policy dli_write on public.delivery_line_info for all using (true) with c
 
 
 alter table public.delivery_trips add column if not exists remark text;
+
+alter table public.delivery_trips add column if not exists category text;
