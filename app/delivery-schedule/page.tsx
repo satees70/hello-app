@@ -55,7 +55,6 @@ export default function DeliverySchedulePage() {
   const [sched, setSched] = useState<Sched[]>([])
   const [trips, setTrips] = useState<Record<string, Trip>>({})   // `${route}|${date}` -> trip
   const [prodStatus, setProdStatus] = useState<Record<string, string>>({})   // so_number -> production status
-  const [showLines, setShowLines] = useState(false)
   const [uploads, setUploads] = useState<{ id: string; file_name: string; path: string; created_at: string; created_by_name: string | null }[]>([])
   const [fileName, setFileName] = useState('')
   const [headers, setHeaders] = useState<string[]>([])
@@ -315,24 +314,6 @@ export default function DeliverySchedulePage() {
                   </span>
                 ))}
               </div>
-            </div>
-          )}
-        </div>
-
-        {/* Lines key — what each line is for ON THE SELECTED DATE (changes daily) */}
-        <div className="border rounded-2xl bg-white shadow-sm mb-8 no-print">
-          <button onClick={() => setShowLines(v => !v)} className="w-full flex items-center justify-between px-4 sm:px-5 py-3 text-left">
-            <span className="font-semibold">Lines key <span className="text-gray-400 font-normal text-sm">— what each line is for on <strong>{(() => { const m = date.match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}/${m[2]}/${m[1]}` : date })()}</strong> (set above). Changes per day.</span></span>
-            <span className="text-gray-400">{showLines ? '▾' : '▸'}</span>
-          </button>
-          {showLines && (
-            <div className="px-4 sm:px-5 pb-4 grid sm:grid-cols-2 gap-2">
-              {LINES.map(l => (
-                <label key={l} className="flex items-center gap-2 text-sm">
-                  <span className="w-16 font-medium">{l}</span>
-                  <input value={trips[`${l}|${date}`]?.remark || ''} placeholder="e.g. Klang / KL area" onChange={e => setTripField(l, date, 'remark', e.target.value)} onBlur={() => saveTrip(l, date, {})} className="flex-1 border rounded-lg px-3 py-1.5" />
-                </label>
-              ))}
             </div>
           )}
         </div>
