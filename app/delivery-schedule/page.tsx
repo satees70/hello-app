@@ -74,7 +74,7 @@ export default function DeliverySchedulePage() {
   async function load() {
     const { data: s } = await supabase.from('delivery_schedule').select('id, so_number, customer_name, route, delivery_date, created_by_name, data, invoiced').order('route', { ascending: true, nullsFirst: false }).order('delivery_date', { ascending: true, nullsFirst: false })
     setSched((s as Sched[]) || [])
-    const { data: t } = await supabase.from('delivery_trips').select('route, delivery_date, lorry_no, driver, kelindan')
+    const { data: t } = await supabase.from('delivery_trips').select('route, delivery_date, lorry_no, driver, kelindan, remark')
     const tm: Record<string, Trip> = {}; (t as Trip[] || []).forEach(x => { tm[`${x.route}|${x.delivery_date}`] = x }); setTrips(tm)
     // Production status per SO (least-advanced batch), pulled from the Order Board.
     const sos = [...new Set(((s as Sched[]) || []).map(x => x.so_number).filter(Boolean))]
@@ -109,7 +109,8 @@ export default function DeliverySchedulePage() {
     const cur = trips[key] || { route, delivery_date: deliveryDate, lorry_no: '', driver: '', kelindan: '', remark: '' }
     const next = { ...cur, ...patch }
     setTrips(p => ({ ...p, [key]: next }))
-    await supabase.from('delivery_trips').upsert({ route, delivery_date: deliveryDate, lorry_no: next.lorry_no || null, driver: next.driver || null, kelindan: next.kelindan || null, remark: next.remark || null, updated_at: new Date().toISOString() }, { onConflict: 'route,delivery_date' })
+    const { error: e } = await supabase.from('delivery_trips').upsert({ route, delivery_date: deliveryDate, lorry_no: next.lorry_no || null, driver: next.driver || null, kelindan: next.kelindan || null, remark: next.remark || null, updated_at: new Date().toISOString() }, { onConflict: 'route,delivery_date' })
+    if (e) setError(`Could not save line info: ${e.message}`)
   }
   async function loadUploads() {
     const { data } = await supabase.from('delivery_uploads').select('id, file_name, path, created_at, created_by_name').order('created_at', { ascending: false }).limit(30)
