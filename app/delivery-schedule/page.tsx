@@ -400,7 +400,7 @@ export default function DeliverySchedulePage() {
                     <span className="font-semibold">{g.route ? lineLabel(g.route, g.date) : 'Unassigned'}{g.date ? ` · ${fmtD(g.date)}` : ''} <span className="text-gray-500 font-normal text-sm">· {g.rows.length} order(s){(() => { const p = g.rows.filter(s => !s.invoiced).length; return p ? ` · ${p} pending` : '' })()}</span></span>
                     {(() => {
                       const loc: Record<string, { total: number; done: number }> = {}
-                      g.rows.forEach(s => { const f = soFactory[s.so_number] || '—'; const e = (loc[f] = loc[f] || { total: 0, done: 0 }); e.total++; if (s.invoiced) e.done++ })
+                      g.rows.forEach(s => { const f = soFactory[s.so_number] || 'No location'; const e = (loc[f] = loc[f] || { total: 0, done: 0 }); e.total++; if (s.invoiced) e.done++ })
                       const parts = Object.entries(loc).sort((a, b) => a[0].localeCompare(b[0]))
                       return <div className="text-xs text-gray-500 mt-0.5">{parts.map(([f, c]) => `${f} (${c.done}/${c.total})`).join('  ·  ')}</div>
                     })()}
