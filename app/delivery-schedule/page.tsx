@@ -56,6 +56,7 @@ export default function DeliverySchedulePage() {
   const [sched, setSched] = useState<Sched[]>([])
   const [trips, setTrips] = useState<Record<string, Trip>>({})   // `${route}|${date}` -> trip
   const [prodStatus, setProdStatus] = useState<Record<string, string>>({})   // so_number -> production status
+  const [soFactory, setSoFactory] = useState<Record<string, string>>({})   // so_number -> factory/location
   const [uploads, setUploads] = useState<{ id: string; file_name: string; path: string; created_at: string; created_by_name: string | null }[]>([])
   const [fileName, setFileName] = useState('')
   const [headers, setHeaders] = useState<string[]>([])
@@ -80,17 +81,22 @@ export default function DeliverySchedulePage() {
     // Production status per SO (least-advanced batch), pulled from the Order Board.
     const sos = [...new Set(((s as Sched[]) || []).map(x => x.so_number).filter(Boolean))]
     const pm: Record<string, string> = {}
+    const sf: Record<string, string> = {}
     for (let i = 0; i < sos.length; i += 150) {
+      const chunk = sos.slice(i, i + 150)
       const { data: pbi } = await supabase.from('production_batch_items')
         .select('so_number, production_batches!batch_id(total_quantity, produced_qty, material_request_id)')
-        .in('so_number', sos.slice(i, i + 150))
+        .in('so_number', chunk)
       ;(pbi as unknown as { so_number: string; production_batches: BatchLite | null }[] || []).forEach(r => {
         if (!r.production_batches) return
         const st = deriveProd(r.production_batches)
         if (pm[r.so_number] === undefined || PROD_RANK[st] < PROD_RANK[pm[r.so_number]]) pm[r.so_number] = st
       })
+      // each SO's production location (factory)
+      const { data: sl } = await supabase.from('sales_order_lines').select('so_number, factory_code').in('so_number', chunk)
+      ;(sl || []).forEach(l => { if (l.so_number && l.factory_code && !sf[l.so_number]) sf[l.so_number] = l.factory_code })
     }
-    setProdStatus(pm)
+    setProdStatus(pm); setSoFactory(sf)
   }
   // Most recent label set for each line (used when the chosen date has none yet).
   const lineLatest = useMemo(() => {
@@ -389,8 +395,16 @@ export default function DeliverySchedulePage() {
               const trip = tripKey ? trips[tripKey] : undefined
               return (
               <div key={k} className="border rounded-xl bg-white shadow-sm overflow-hidden">
-                <div className="px-4 py-2 bg-gray-100 flex items-center justify-between flex-wrap gap-2">
-                  <span className="font-semibold">{g.route ? lineLabel(g.route, g.date) : 'Unassigned'}{g.date ? ` · ${fmtD(g.date)}` : ''} <span className="text-gray-500 font-normal text-sm">· {g.rows.length} order(s){(() => { const p = g.rows.filter(s => !s.invoiced).length; return p ? ` · ${p} pending` : '' })()}</span></span>
+                <div className="px-4 py-2 bg-gray-100 flex items-start justify-between flex-wrap gap-2">
+                  <div>
+                    <span className="font-semibold">{g.route ? lineLabel(g.route, g.date) : 'Unassigned'}{g.date ? ` · ${fmtD(g.date)}` : ''} <span className="text-gray-500 font-normal text-sm">· {g.rows.length} order(s){(() => { const p = g.rows.filter(s => !s.invoiced).length; return p ? ` · ${p} pending` : '' })()}</span></span>
+                    {(() => {
+                      const loc: Record<string, { total: number; done: number }> = {}
+                      g.rows.forEach(s => { const f = soFactory[s.so_number] || '—'; const e = (loc[f] = loc[f] || { total: 0, done: 0 }); e.total++; if (s.invoiced) e.done++ })
+                      const parts = Object.entries(loc).sort((a, b) => a[0].localeCompare(b[0]))
+                      return <div className="text-xs text-gray-500 mt-0.5">{parts.map(([f, c]) => `${f} (${c.done}/${c.total})`).join('  ·  ')}</div>
+                    })()}
+                  </div>
                   {tripKey && (
                     <div className="flex items-center gap-2 text-xs flex-wrap">
                       <select value={trip?.category || ''} onChange={e => { setTripField(g.route!, g.date!, 'category', e.target.value); saveTrip(g.route!, g.date!, { category: e.target.value }) }} className="border rounded px-2 py-1 bg-white">
