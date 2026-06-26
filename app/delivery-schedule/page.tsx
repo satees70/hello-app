@@ -10,7 +10,7 @@ interface Sched {
   id: string; so_number: string; customer_name: string | null; route: string | null
   delivery_date: string | null; created_by_name: string | null; data: Record<string, string> | null; invoiced: boolean
 }
-interface Trip { route: string; delivery_date: string; lorry_no: string | null; driver: string | null; kelindan: string | null }
+interface Trip { route: string; delivery_date: string; lorry_no: string | null; driver: string | null; kelindan: string | null; remark: string | null }
 
 // Fixed delivery lines A … K.
 const LINES = Array.from({ length: 11 }, (_, i) => 'LINE ' + String.fromCharCode(65 + i))
@@ -55,7 +55,6 @@ export default function DeliverySchedulePage() {
   const [sched, setSched] = useState<Sched[]>([])
   const [trips, setTrips] = useState<Record<string, Trip>>({})   // `${route}|${date}` -> trip
   const [prodStatus, setProdStatus] = useState<Record<string, string>>({})   // so_number -> production status
-  const [lineRemarks, setLineRemarks] = useState<Record<string, string>>({})   // line -> what it's for
   const [showLines, setShowLines] = useState(false)
   const [uploads, setUploads] = useState<{ id: string; file_name: string; path: string; created_at: string; created_by_name: string | null }[]>([])
   const [fileName, setFileName] = useState('')
@@ -92,20 +91,20 @@ export default function DeliverySchedulePage() {
       })
     }
     setProdStatus(pm)
-    const { data: lr } = await supabase.from('delivery_line_info').select('line, remark')
-    const lm: Record<string, string> = {}; (lr || []).forEach(x => { if (x.remark) lm[x.line] = x.remark }); setLineRemarks(lm)
   }
-  async function saveLineRemark(line: string, remark: string) {
-    setLineRemarks(p => ({ ...p, [line]: remark }))
-    await supabase.from('delivery_line_info').upsert({ line, remark: remark || null, updated_at: new Date().toISOString() }, { onConflict: 'line' })
-  }
-  const lineLabel = (l: string) => `${l}${lineRemarks[l] ? ' — ' + lineRemarks[l] : ''}`
+  // The line's label is per-day (line + date): e.g. LINE A — Klang today, JB tomorrow.
+  const lineLabel = (l: string, d?: string | null) => { const r = d ? trips[`${l}|${d}`]?.remark : ''; return `${l}${r ? ' — ' + r : ''}` }
+  // Update one field of a trip (line+date) locally; persist on blur via saveTrip.
+  const setTripField = (route: string, date: string, field: keyof Trip, value: string) => setTrips(p => {
+    const key = `${route}|${date}`; const cur = p[key] || { route, delivery_date: date, lorry_no: '', driver: '', kelindan: '', remark: '' }
+    return { ...p, [key]: { ...cur, [field]: value } }
+  })
   async function saveTrip(route: string, deliveryDate: string, patch: Partial<Trip>) {
     const key = `${route}|${deliveryDate}`
-    const cur = trips[key] || { route, delivery_date: deliveryDate, lorry_no: '', driver: '', kelindan: '' }
+    const cur = trips[key] || { route, delivery_date: deliveryDate, lorry_no: '', driver: '', kelindan: '', remark: '' }
     const next = { ...cur, ...patch }
     setTrips(p => ({ ...p, [key]: next }))
-    await supabase.from('delivery_trips').upsert({ route, delivery_date: deliveryDate, lorry_no: next.lorry_no || null, driver: next.driver || null, kelindan: next.kelindan || null, updated_at: new Date().toISOString() }, { onConflict: 'route,delivery_date' })
+    await supabase.from('delivery_trips').upsert({ route, delivery_date: deliveryDate, lorry_no: next.lorry_no || null, driver: next.driver || null, kelindan: next.kelindan || null, remark: next.remark || null, updated_at: new Date().toISOString() }, { onConflict: 'route,delivery_date' })
   }
   async function loadUploads() {
     const { data } = await supabase.from('delivery_uploads').select('id, file_name, path, created_at, created_by_name').order('created_at', { ascending: false }).limit(30)
@@ -268,8 +267,8 @@ export default function DeliverySchedulePage() {
               <div className="flex flex-wrap items-end gap-3 mt-4 p-3 bg-blue-50 rounded-lg">
                 <span className="text-sm font-medium text-blue-900 self-center">{sel.size} selected →</span>
                 <label className="block"><span className="text-xs text-gray-500">Assign to line</span>
-                  <select value={assignLine} onChange={e => setAssignLine(e.target.value)} className="block w-36 border rounded-lg px-3 py-2 text-sm mt-1">
-                    {LINES.map(l => <option key={l} value={l}>{lineLabel(l)}</option>)}
+                  <select value={assignLine} onChange={e => setAssignLine(e.target.value)} className="block w-48 border rounded-lg px-3 py-2 text-sm mt-1">
+                    {LINES.map(l => <option key={l} value={l}>{lineLabel(l, date)}</option>)}
                   </select></label>
                 <label className="block"><span className="text-xs text-gray-500">Delivery date (you set this)</span>
                   <input type="date" value={date} onChange={e => setDate(e.target.value)} className="block border rounded-lg px-3 py-2 text-sm mt-1" /></label>
@@ -320,10 +319,10 @@ export default function DeliverySchedulePage() {
           )}
         </div>
 
-        {/* Lines key — describe what each line is for */}
+        {/* Lines key — what each line is for ON THE SELECTED DATE (changes daily) */}
         <div className="border rounded-2xl bg-white shadow-sm mb-8 no-print">
           <button onClick={() => setShowLines(v => !v)} className="w-full flex items-center justify-between px-4 sm:px-5 py-3 text-left">
-            <span className="font-semibold">Lines key <span className="text-gray-400 font-normal text-sm">— note what each line (A–K) is for, so it's easier to assign</span></span>
+            <span className="font-semibold">Lines key <span className="text-gray-400 font-normal text-sm">— what each line is for on <strong>{(() => { const m = date.match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}/${m[2]}/${m[1]}` : date })()}</strong> (set above). Changes per day.</span></span>
             <span className="text-gray-400">{showLines ? '▾' : '▸'}</span>
           </button>
           {showLines && (
@@ -331,7 +330,7 @@ export default function DeliverySchedulePage() {
               {LINES.map(l => (
                 <label key={l} className="flex items-center gap-2 text-sm">
                   <span className="w-16 font-medium">{l}</span>
-                  <input defaultValue={lineRemarks[l] || ''} placeholder="e.g. Klang / KL area" onBlur={e => { if ((e.target.value || '') !== (lineRemarks[l] || '')) saveLineRemark(l, e.target.value) }} className="flex-1 border rounded-lg px-3 py-1.5" />
+                  <input value={trips[`${l}|${date}`]?.remark || ''} placeholder="e.g. Klang / KL area" onChange={e => setTripField(l, date, 'remark', e.target.value)} onBlur={() => saveTrip(l, date, {})} className="flex-1 border rounded-lg px-3 py-1.5" />
                 </label>
               ))}
             </div>
@@ -352,7 +351,7 @@ export default function DeliverySchedulePage() {
             <label className="flex items-center gap-2 text-sm text-gray-500">Line
               <select value={routeFilter} onChange={e => setRouteFilter(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm">
                 <option value="all">All</option>
-                {LINES.map(l => <option key={l} value={l}>{lineLabel(l)}</option>)}
+                {LINES.map(l => <option key={l} value={l}>{lineLabel(l, dateFilter !== 'all' ? dateFilter : undefined)}</option>)}
               </select>
             </label>
           </div>
@@ -389,12 +388,13 @@ export default function DeliverySchedulePage() {
               return (
               <div key={k} className="border rounded-xl bg-white shadow-sm overflow-hidden">
                 <div className="px-4 py-2 bg-gray-100 flex items-center justify-between flex-wrap gap-2">
-                  <span className="font-semibold">{g.route ? lineLabel(g.route) : 'Unassigned'}{g.date ? ` · ${fmtD(g.date)}` : ''} <span className="text-gray-500 font-normal text-sm">· {g.rows.length} order(s){(() => { const p = g.rows.filter(s => !s.invoiced).length; return p ? ` · ${p} pending` : '' })()}</span></span>
+                  <span className="font-semibold">{g.route ? lineLabel(g.route, g.date) : 'Unassigned'}{g.date ? ` · ${fmtD(g.date)}` : ''} <span className="text-gray-500 font-normal text-sm">· {g.rows.length} order(s){(() => { const p = g.rows.filter(s => !s.invoiced).length; return p ? ` · ${p} pending` : '' })()}</span></span>
                   {tripKey && (
-                    <div className="flex items-center gap-2 text-xs">
-                      <input value={trip?.lorry_no || ''} placeholder="Lorry no" onChange={e => setTrips(p => ({ ...p, [tripKey]: { route: g.route!, delivery_date: g.date!, lorry_no: e.target.value, driver: p[tripKey]?.driver || '', kelindan: p[tripKey]?.kelindan || '' } }))} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-28" />
-                      <input value={trip?.driver || ''} placeholder="Driver" onChange={e => setTrips(p => ({ ...p, [tripKey]: { route: g.route!, delivery_date: g.date!, driver: e.target.value, lorry_no: p[tripKey]?.lorry_no || '', kelindan: p[tripKey]?.kelindan || '' } }))} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-28" />
-                      <input value={trip?.kelindan || ''} placeholder="Kelindan" onChange={e => setTrips(p => ({ ...p, [tripKey]: { route: g.route!, delivery_date: g.date!, kelindan: e.target.value, lorry_no: p[tripKey]?.lorry_no || '', driver: p[tripKey]?.driver || '' } }))} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-28" />
+                    <div className="flex items-center gap-2 text-xs flex-wrap">
+                      <input value={trip?.remark || ''} placeholder="For (e.g. Klang)" onChange={e => setTripField(g.route!, g.date!, 'remark', e.target.value)} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-32" />
+                      <input value={trip?.lorry_no || ''} placeholder="Lorry no" onChange={e => setTripField(g.route!, g.date!, 'lorry_no', e.target.value)} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-28" />
+                      <input value={trip?.driver || ''} placeholder="Driver" onChange={e => setTripField(g.route!, g.date!, 'driver', e.target.value)} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-28" />
+                      <input value={trip?.kelindan || ''} placeholder="Kelindan" onChange={e => setTripField(g.route!, g.date!, 'kelindan', e.target.value)} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-28" />
                     </div>
                   )}
                 </div>
@@ -430,7 +430,7 @@ export default function DeliverySchedulePage() {
                             <td className="px-3 py-1.5 no-print">
                               <select value={s.route || ''} onChange={e => updateSched(s.id, { route: e.target.value || null })} className="border rounded px-2 py-1 text-xs">
                                 <option value="">—</option>
-                                {LINES.map(l => <option key={l} value={l}>{lineLabel(l)}</option>)}
+                                {LINES.map(l => <option key={l} value={l}>{lineLabel(l, s.delivery_date)}</option>)}
                               </select>
                             </td>
                             <td className="px-3 py-1.5 text-right no-print">

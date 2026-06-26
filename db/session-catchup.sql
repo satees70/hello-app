@@ -549,3 +549,5 @@ create policy dli_read on public.delivery_line_info for select using (true);
 drop policy if exists dli_write on public.delivery_line_info;
 create policy dli_write on public.delivery_line_info for all using (true) with check (true);
 
+
+alter table public.delivery_trips add column if not exists remark text;
