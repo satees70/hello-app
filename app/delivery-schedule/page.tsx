@@ -184,13 +184,14 @@ export default function DeliverySchedulePage() {
         @page { size: A4 portrait; margin: 10mm; }
         body * { visibility: hidden; }
         #delivery-print, #delivery-print * { visibility: visible; }
-        #delivery-print { position: absolute; left: 0; top: 0; width: 100%; font-size: 8.5px; }
+        #delivery-print { position: absolute; left: 0; top: 0; width: 100%; font-size: 6px; }
         #delivery-print table { width: 100%; table-layout: fixed; border-collapse: collapse; }
         #delivery-print th, #delivery-print td { white-space: normal; word-break: break-word; padding: 2px 4px !important; border: 1px solid #ccc; vertical-align: top; overflow: hidden; }
         /* identical column widths across every line box; only Customer wraps */
-        #delivery-print th:nth-child(1), #delivery-print td:nth-child(1) { width: 80px; white-space: nowrap; }
-        #delivery-print th:nth-child(2), #delivery-print td:nth-child(2) { width: 78px; white-space: nowrap; }
-        #delivery-print th:nth-child(4), #delivery-print td:nth-child(4) { width: 56px; white-space: nowrap; text-align: center; }
+        #delivery-print th:nth-child(1), #delivery-print td:nth-child(1) { width: 64px; white-space: nowrap; }
+        #delivery-print th:nth-child(2), #delivery-print td:nth-child(2) { width: 58px; white-space: nowrap; }
+        #delivery-print .status-col { width: 56px; }
+        #delivery-print .inv-col { width: 44px; white-space: nowrap; text-align: center; }
         #delivery-print .shadow-sm { box-shadow: none !important; }
         .no-print { display: none !important; }
         #delivery-print input, #delivery-print select { border: none !important; padding: 0 !important; background: transparent !important; -webkit-appearance: none; appearance: none; color: #000 !important; font-size: 10px; }
@@ -308,7 +309,12 @@ export default function DeliverySchedulePage() {
           const custKey = allKeys.find(c => /company|customer/i.test(c)) || ''
           const linkKey = allKeys.find(c => /drive|link/i.test(c)) || ''
           const holdKeyS = allKeys.find(c => /hold/i.test(c)) || ''
+          const statusKey = allKeys.find(c => /^status$/i.test(c)) || allKeys.find(c => /status/i.test(c)) || ''
           const fmtD = (d: string | null) => { const m = (d || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}/${m[2]}/${m[1]}` : (d || '—') }
+          // "Pending" = invoice not yet ticked. Totals overall + per line.
+          const totalPending = shownSched.filter(s => !s.invoiced).length
+          const pendByLine: Record<string, number> = {}
+          shownSched.forEach(s => { if (!s.invoiced) { const l = s.route || 'Unassigned'; pendByLine[l] = (pendByLine[l] || 0) + 1 } })
           // Group by line + delivery date (one box per trip).
           const groups: Record<string, { route: string | null; date: string | null; rows: Sched[] }> = {}
           shownSched.forEach(s => { const k = `${s.route || ''}||${s.delivery_date || ''}`; (groups[k] = groups[k] || { route: s.route, date: s.delivery_date, rows: [] }).rows.push(s) })
@@ -317,6 +323,10 @@ export default function DeliverySchedulePage() {
           return (
           <div id="delivery-print" className="space-y-5">
             <div className="hidden print:block mb-2"><h1 className="text-xl font-bold">Delivery Schedule{dateFilter !== 'all' ? ` — ${fmtD(dateFilter)}` : ''}</h1></div>
+            <div className="mb-3 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm">
+              <strong>Pending: {totalPending} of {shownSched.length}</strong>
+              {Object.keys(pendByLine).length > 0 && <span className="text-gray-600"> · {Object.entries(pendByLine).sort((a, b) => li(a[0]) - li(b[0])).map(([l, n]) => `${l}: ${n}`).join('  ·  ')}</span>}
+            </div>
             {keys.map(k => {
               const g = groups[k]
               const tripKey = g.route && g.date ? `${g.route}|${g.date}` : ''
@@ -324,7 +334,7 @@ export default function DeliverySchedulePage() {
               return (
               <div key={k} className="border rounded-xl bg-white shadow-sm overflow-hidden">
                 <div className="px-4 py-2 bg-gray-100 flex items-center justify-between flex-wrap gap-2">
-                  <span className="font-semibold">{g.route || 'Unassigned'}{g.date ? ` · ${fmtD(g.date)}` : ''} <span className="text-gray-500 font-normal text-sm">· {g.rows.length} order(s)</span></span>
+                  <span className="font-semibold">{g.route || 'Unassigned'}{g.date ? ` · ${fmtD(g.date)}` : ''} <span className="text-gray-500 font-normal text-sm">· {g.rows.length} order(s){(() => { const p = g.rows.filter(s => !s.invoiced).length; return p ? ` · ${p} pending` : '' })()}</span></span>
                   {tripKey && (
                     <div className="flex items-center gap-2 text-xs">
                       <input value={trip?.lorry_no || ''} placeholder="Lorry no" onChange={e => setTrips(p => ({ ...p, [tripKey]: { route: g.route!, delivery_date: g.date!, lorry_no: e.target.value, driver: p[tripKey]?.driver || '', kelindan: p[tripKey]?.kelindan || '' } }))} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-28" />
@@ -340,7 +350,8 @@ export default function DeliverySchedulePage() {
                         <th className="px-3 py-2">SO No</th>
                         <th className="px-3 py-2">PO date</th>
                         <th className="px-3 py-2">Customer</th>
-                        <th className="px-3 py-2 text-center">Invoice ✓</th>
+                        {statusKey && <th className="px-3 py-2 status-col">Status</th>}
+                        <th className="px-3 py-2 text-center inv-col">Invoice ✓</th>
                         <th className="px-3 py-2 no-print">Doc</th>
                         <th className="px-3 py-2 no-print">Delivery date</th>
                         <th className="px-3 py-2 no-print">Move to</th><th className="no-print"></th>
@@ -355,7 +366,8 @@ export default function DeliverySchedulePage() {
                             <td className="px-3 py-1.5 font-mono">{s.so_number}</td>
                             <td className="px-3 py-1.5 text-gray-700">{poKey ? cellView(s.data?.[poKey] ?? '') : '—'}</td>
                             <td className="px-3 py-1.5 text-gray-700">{(custKey && s.data?.[custKey]) || s.customer_name || '—'}</td>
-                            <td className="px-3 py-1.5 text-center"><input type="checkbox" checked={s.invoiced} onChange={e => updateSched(s.id, { invoiced: e.target.checked })} className="h-4 w-4" /></td>
+                            {statusKey && <td className="px-3 py-1.5 text-gray-700 status-col">{s.data?.[statusKey] || '—'}</td>}
+                            <td className="px-3 py-1.5 text-center inv-col"><input type="checkbox" checked={s.invoiced} onChange={e => updateSched(s.id, { invoiced: e.target.checked })} className="h-4 w-4" /></td>
                             <td className="px-3 py-1.5 no-print">{linkKey && s.data?.[linkKey] ? cellView(s.data[linkKey]) : '—'}</td>
                             <td className="px-3 py-1.5 no-print"><input type="date" value={s.delivery_date || ''} onChange={e => updateSched(s.id, { delivery_date: e.target.value || null })} className="border rounded px-2 py-1 text-xs" />{isTomorrow && <span className="ml-1 bg-yellow-200 text-yellow-900 px-1 rounded text-[10px] font-semibold">TOMORROW</span>}</td>
                             <td className="px-3 py-1.5 no-print">
