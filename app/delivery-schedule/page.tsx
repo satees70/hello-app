@@ -404,7 +404,6 @@ export default function DeliverySchedulePage() {
                       const parts = Object.entries(loc).sort((a, b) => a[0].localeCompare(b[0]))
                       return <div className="text-xs text-gray-500 mt-0.5">{parts.map(([f, c]) => `${f} (${c.done}/${c.total})`).join('  ·  ')}</div>
                     })()}
-                    {(() => { const p = g.rows.filter(s => !s.invoiced).map(s => s.so_number); return p.length ? <div className="text-[11px] text-amber-700 mt-0.5"><strong>Pending ({p.length}):</strong> {p.join(', ')}</div> : <div className="text-[11px] text-green-700 mt-0.5">✓ all invoiced</div> })()}
                   </div>
                   {tripKey && (
                     <div className="flex items-center gap-2 text-xs flex-wrap">
@@ -445,7 +444,7 @@ export default function DeliverySchedulePage() {
                             <td className="px-3 py-1.5 text-gray-700">{(custKey && s.data?.[custKey]) || s.customer_name || '—'}</td>
                             {statusKey && <td className="px-3 py-1.5 text-gray-700 status-col">{s.data?.[statusKey] || '—'}</td>}
                             <td className="px-3 py-1.5 status-col">{prodStatus[s.so_number] ? <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${PROD_STYLE[prodStatus[s.so_number]] || 'bg-gray-100 text-gray-600'}`}>{prodStatus[s.so_number]}</span> : <span className="text-gray-400">—</span>}</td>
-                            <td className="px-3 py-1.5 text-center inv-col"><input type="checkbox" checked={s.invoiced} onChange={e => updateSched(s.id, { invoiced: e.target.checked })} className="h-4 w-4" /></td>
+                            <td className="px-3 py-1.5 text-center inv-col"><input type="checkbox" checked={s.invoiced} onChange={e => updateSched(s.id, { invoiced: e.target.checked })} className="h-4 w-4" /><div className={`text-[10px] font-semibold ${s.invoiced ? 'text-green-700' : 'text-amber-700'}`}>{s.invoiced ? 'Done' : 'Pending'}</div></td>
                             <td className="px-3 py-1.5 no-print">{linkKey && s.data?.[linkKey] ? cellView(s.data[linkKey]) : '—'}</td>
                             <td className="px-3 py-1.5 no-print"><input type="date" value={s.delivery_date || ''} onChange={e => updateSched(s.id, { delivery_date: e.target.value || null })} className="border rounded px-2 py-1 text-xs" />{isTomorrow && <span className="ml-1 bg-yellow-200 text-yellow-900 px-1 rounded text-[10px] font-semibold">TOMORROW</span>}</td>
                             <td className="px-3 py-1.5 no-print">
