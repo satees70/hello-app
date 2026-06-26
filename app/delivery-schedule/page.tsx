@@ -27,19 +27,6 @@ function normDate(v: unknown): string {
   if (isNaN(d.getTime())) return ''
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
-type BatchLite = { total_quantity: number | null; produced_qty: number | null; material_request_id: string | null }
-const PROD_RANK: Record<string, number> = { Planned: 0, Requested: 1, 'In progress': 2, Done: 3 }
-function deriveProd(b: BatchLite): string {
-  const p = Number(b.produced_qty || 0), t = Number(b.total_quantity || 0)
-  if (p >= t && t > 0) return 'Done'
-  if (p > 0) return 'In progress'
-  if (b.material_request_id) return 'Requested'
-  return 'Planned'
-}
-const PROD_STYLE: Record<string, string> = {
-  Planned: 'bg-blue-100 text-blue-700', Requested: 'bg-indigo-100 text-indigo-700',
-  'In progress': 'bg-amber-100 text-amber-700', Done: 'bg-green-100 text-green-700',
-}
 // How a data cell is shown: links become clickable, ISO dates become dd/mm/yyyy.
 function cellView(v: string): React.ReactNode {
   if (!v) return ''
@@ -55,7 +42,6 @@ export default function DeliverySchedulePage() {
 
   const [sched, setSched] = useState<Sched[]>([])
   const [trips, setTrips] = useState<Record<string, Trip>>({})   // `${route}|${date}` -> trip
-  const [prodStatus, setProdStatus] = useState<Record<string, string>>({})   // so_number -> production status
   const [soFactory, setSoFactory] = useState<Record<string, string>>({})   // so_number -> factory/location
   const [uploads, setUploads] = useState<{ id: string; file_name: string; path: string; created_at: string; created_by_name: string | null }[]>([])
   const [fileName, setFileName] = useState('')
@@ -78,25 +64,15 @@ export default function DeliverySchedulePage() {
     setSched((s as Sched[]) || [])
     const { data: t } = await supabase.from('delivery_trips').select('route, delivery_date, lorry_no, driver, kelindan, remark, category')
     const tm: Record<string, Trip> = {}; (t as Trip[] || []).forEach(x => { tm[`${x.route}|${x.delivery_date}`] = x }); setTrips(tm)
-    // Production status per SO (least-advanced batch), pulled from the Order Board.
+    // Each SO's production location (factory) for the per-line location breakdown.
     const sos = [...new Set(((s as Sched[]) || []).map(x => x.so_number).filter(Boolean))]
-    const pm: Record<string, string> = {}
     const sf: Record<string, string> = {}
     for (let i = 0; i < sos.length; i += 150) {
       const chunk = sos.slice(i, i + 150)
-      const { data: pbi } = await supabase.from('production_batch_items')
-        .select('so_number, production_batches!batch_id(total_quantity, produced_qty, material_request_id)')
-        .in('so_number', chunk)
-      ;(pbi as unknown as { so_number: string; production_batches: BatchLite | null }[] || []).forEach(r => {
-        if (!r.production_batches) return
-        const st = deriveProd(r.production_batches)
-        if (pm[r.so_number] === undefined || PROD_RANK[st] < PROD_RANK[pm[r.so_number]]) pm[r.so_number] = st
-      })
-      // each SO's production location (factory)
       const { data: sl } = await supabase.from('sales_order_lines').select('so_number, factory_code').in('so_number', chunk)
       ;(sl || []).forEach(l => { if (l.so_number && l.factory_code && !sf[l.so_number]) sf[l.so_number] = l.factory_code })
     }
-    setProdStatus(pm); setSoFactory(sf)
+    setSoFactory(sf)
   }
   // Most recent label set for each line (used when the chosen date has none yet).
   const lineLatest = useMemo(() => {
@@ -358,7 +334,6 @@ export default function DeliverySchedulePage() {
           const custKey = allKeys.find(c => /company|customer/i.test(c)) || ''
           const linkKey = allKeys.find(c => /drive|link/i.test(c)) || ''
           const holdKeyS = allKeys.find(c => /hold/i.test(c)) || ''
-          const statusKey = allKeys.find(c => /^status$/i.test(c)) || allKeys.find(c => /status/i.test(c)) || ''
           const fmtD = (d: string | null) => { const m = (d || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}/${m[2]}/${m[1]}` : (d || '—') }
           // "Pending" = invoice not yet ticked. Totals overall + per line.
           const totalPending = shownSched.filter(s => !s.invoiced).length
@@ -402,7 +377,7 @@ export default function DeliverySchedulePage() {
                       const loc: Record<string, { total: number; done: number }> = {}
                       g.rows.forEach(s => { const f = soFactory[s.so_number] || 'No location'; const e = (loc[f] = loc[f] || { total: 0, done: 0 }); e.total++; if (s.invoiced) e.done++ })
                       const parts = Object.entries(loc).sort((a, b) => a[0].localeCompare(b[0]))
-                      return <div className="text-xs text-gray-500 mt-0.5">{parts.map(([f, c]) => `${f} (${c.done}/${c.total})`).join('  ·  ')}</div>
+                      return <div className="text-xs text-gray-500 mt-0.5">{parts.map(([f, c]) => { const pend = c.total - c.done; return `${pend === 0 ? '✓ ' : ''}${f} (${pend}/${c.total})` }).join('  ·  ')}</div>
                     })()}
                   </div>
                   {tripKey && (
@@ -425,8 +400,6 @@ export default function DeliverySchedulePage() {
                         <th className="px-3 py-2">SO No</th>
                         <th className="px-3 py-2">PO date</th>
                         <th className="px-3 py-2">Customer</th>
-                        {statusKey && <th className="px-3 py-2 status-col">Status</th>}
-                        <th className="px-3 py-2 status-col">Production</th>
                         <th className="px-3 py-2 text-center inv-col">Invoice ✓</th>
                         <th className="px-3 py-2 no-print">Doc</th>
                         <th className="px-3 py-2 no-print">Delivery date</th>
@@ -442,8 +415,6 @@ export default function DeliverySchedulePage() {
                             <td className="px-3 py-1.5 font-mono">{s.so_number}</td>
                             <td className="px-3 py-1.5 text-gray-700">{poKey ? cellView(s.data?.[poKey] ?? '') : '—'}</td>
                             <td className="px-3 py-1.5 text-gray-700">{(custKey && s.data?.[custKey]) || s.customer_name || '—'}</td>
-                            {statusKey && <td className="px-3 py-1.5 text-gray-700 status-col">{s.data?.[statusKey] || '—'}</td>}
-                            <td className="px-3 py-1.5 status-col">{prodStatus[s.so_number] ? <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${PROD_STYLE[prodStatus[s.so_number]] || 'bg-gray-100 text-gray-600'}`}>{prodStatus[s.so_number]}</span> : <span className="text-gray-400">—</span>}</td>
                             <td className="px-3 py-1.5 text-center inv-col"><input type="checkbox" checked={s.invoiced} onChange={e => updateSched(s.id, { invoiced: e.target.checked })} className="h-4 w-4" /><div className={`text-[10px] font-semibold ${s.invoiced ? 'text-green-700' : 'text-amber-700'}`}>{s.invoiced ? 'Done' : 'Pending'}</div></td>
                             <td className="px-3 py-1.5 no-print">{linkKey && s.data?.[linkKey] ? cellView(s.data[linkKey]) : '—'}</td>
                             <td className="px-3 py-1.5 no-print"><input type="date" value={s.delivery_date || ''} onChange={e => updateSched(s.id, { delivery_date: e.target.value || null })} className="border rounded px-2 py-1 text-xs" />{isTomorrow && <span className="ml-1 bg-yellow-200 text-yellow-900 px-1 rounded text-[10px] font-semibold">TOMORROW</span>}</td>
