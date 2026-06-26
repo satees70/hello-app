@@ -3253,3 +3253,16 @@ create policy dt_read on public.delivery_trips for select using (true);
 drop policy if exists dt_write on public.delivery_trips;
 create policy dt_write on public.delivery_trips for all using (true) with check (true);
 
+
+-- 2026-06 · Delivery: a remark/label per line (what each line is for)
+create table if not exists public.delivery_line_info (
+  line text primary key, remark text, updated_at timestamptz default now()
+);
+grant select, insert, update, delete on public.delivery_line_info to authenticated;
+grant all on public.delivery_line_info to service_role;
+alter table public.delivery_line_info enable row level security;
+drop policy if exists dli_read on public.delivery_line_info;
+create policy dli_read on public.delivery_line_info for select using (true);
+drop policy if exists dli_write on public.delivery_line_info;
+create policy dli_write on public.delivery_line_info for all using (true) with check (true);
+

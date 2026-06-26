@@ -55,6 +55,8 @@ export default function DeliverySchedulePage() {
   const [sched, setSched] = useState<Sched[]>([])
   const [trips, setTrips] = useState<Record<string, Trip>>({})   // `${route}|${date}` -> trip
   const [prodStatus, setProdStatus] = useState<Record<string, string>>({})   // so_number -> production status
+  const [lineRemarks, setLineRemarks] = useState<Record<string, string>>({})   // line -> what it's for
+  const [showLines, setShowLines] = useState(false)
   const [uploads, setUploads] = useState<{ id: string; file_name: string; path: string; created_at: string; created_by_name: string | null }[]>([])
   const [fileName, setFileName] = useState('')
   const [headers, setHeaders] = useState<string[]>([])
@@ -90,7 +92,14 @@ export default function DeliverySchedulePage() {
       })
     }
     setProdStatus(pm)
+    const { data: lr } = await supabase.from('delivery_line_info').select('line, remark')
+    const lm: Record<string, string> = {}; (lr || []).forEach(x => { if (x.remark) lm[x.line] = x.remark }); setLineRemarks(lm)
   }
+  async function saveLineRemark(line: string, remark: string) {
+    setLineRemarks(p => ({ ...p, [line]: remark }))
+    await supabase.from('delivery_line_info').upsert({ line, remark: remark || null, updated_at: new Date().toISOString() }, { onConflict: 'line' })
+  }
+  const lineLabel = (l: string) => `${l}${lineRemarks[l] ? ' — ' + lineRemarks[l] : ''}`
   async function saveTrip(route: string, deliveryDate: string, patch: Partial<Trip>) {
     const key = `${route}|${deliveryDate}`
     const cur = trips[key] || { route, delivery_date: deliveryDate, lorry_no: '', driver: '', kelindan: '' }
@@ -260,7 +269,7 @@ export default function DeliverySchedulePage() {
                 <span className="text-sm font-medium text-blue-900 self-center">{sel.size} selected →</span>
                 <label className="block"><span className="text-xs text-gray-500">Assign to line</span>
                   <select value={assignLine} onChange={e => setAssignLine(e.target.value)} className="block w-36 border rounded-lg px-3 py-2 text-sm mt-1">
-                    {LINES.map(l => <option key={l} value={l}>{l}</option>)}
+                    {LINES.map(l => <option key={l} value={l}>{lineLabel(l)}</option>)}
                   </select></label>
                 <label className="block"><span className="text-xs text-gray-500">Delivery date (you set this)</span>
                   <input type="date" value={date} onChange={e => setDate(e.target.value)} className="block border rounded-lg px-3 py-2 text-sm mt-1" /></label>
@@ -311,6 +320,24 @@ export default function DeliverySchedulePage() {
           )}
         </div>
 
+        {/* Lines key — describe what each line is for */}
+        <div className="border rounded-2xl bg-white shadow-sm mb-8 no-print">
+          <button onClick={() => setShowLines(v => !v)} className="w-full flex items-center justify-between px-4 sm:px-5 py-3 text-left">
+            <span className="font-semibold">Lines key <span className="text-gray-400 font-normal text-sm">— note what each line (A–K) is for, so it's easier to assign</span></span>
+            <span className="text-gray-400">{showLines ? '▾' : '▸'}</span>
+          </button>
+          {showLines && (
+            <div className="px-4 sm:px-5 pb-4 grid sm:grid-cols-2 gap-2">
+              {LINES.map(l => (
+                <label key={l} className="flex items-center gap-2 text-sm">
+                  <span className="w-16 font-medium">{l}</span>
+                  <input defaultValue={lineRemarks[l] || ''} placeholder="e.g. Klang / KL area" onBlur={e => { if ((e.target.value || '') !== (lineRemarks[l] || '')) saveLineRemark(l, e.target.value) }} className="flex-1 border rounded-lg px-3 py-1.5" />
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Scheduled list */}
         <div className="flex items-center justify-between flex-wrap gap-2 mb-3 no-print">
           <h2 className="font-semibold">Scheduled deliveries</h2>
@@ -325,7 +352,7 @@ export default function DeliverySchedulePage() {
             <label className="flex items-center gap-2 text-sm text-gray-500">Line
               <select value={routeFilter} onChange={e => setRouteFilter(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm">
                 <option value="all">All</option>
-                {LINES.map(l => <option key={l} value={l}>{l}</option>)}
+                {LINES.map(l => <option key={l} value={l}>{lineLabel(l)}</option>)}
               </select>
             </label>
           </div>
@@ -362,7 +389,7 @@ export default function DeliverySchedulePage() {
               return (
               <div key={k} className="border rounded-xl bg-white shadow-sm overflow-hidden">
                 <div className="px-4 py-2 bg-gray-100 flex items-center justify-between flex-wrap gap-2">
-                  <span className="font-semibold">{g.route || 'Unassigned'}{g.date ? ` · ${fmtD(g.date)}` : ''} <span className="text-gray-500 font-normal text-sm">· {g.rows.length} order(s){(() => { const p = g.rows.filter(s => !s.invoiced).length; return p ? ` · ${p} pending` : '' })()}</span></span>
+                  <span className="font-semibold">{g.route ? lineLabel(g.route) : 'Unassigned'}{g.date ? ` · ${fmtD(g.date)}` : ''} <span className="text-gray-500 font-normal text-sm">· {g.rows.length} order(s){(() => { const p = g.rows.filter(s => !s.invoiced).length; return p ? ` · ${p} pending` : '' })()}</span></span>
                   {tripKey && (
                     <div className="flex items-center gap-2 text-xs">
                       <input value={trip?.lorry_no || ''} placeholder="Lorry no" onChange={e => setTrips(p => ({ ...p, [tripKey]: { route: g.route!, delivery_date: g.date!, lorry_no: e.target.value, driver: p[tripKey]?.driver || '', kelindan: p[tripKey]?.kelindan || '' } }))} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-28" />
@@ -403,7 +430,7 @@ export default function DeliverySchedulePage() {
                             <td className="px-3 py-1.5 no-print">
                               <select value={s.route || ''} onChange={e => updateSched(s.id, { route: e.target.value || null })} className="border rounded px-2 py-1 text-xs">
                                 <option value="">—</option>
-                                {LINES.map(l => <option key={l} value={l}>{l}</option>)}
+                                {LINES.map(l => <option key={l} value={l}>{lineLabel(l)}</option>)}
                               </select>
                             </td>
                             <td className="px-3 py-1.5 text-right no-print">
