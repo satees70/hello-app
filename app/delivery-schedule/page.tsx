@@ -385,7 +385,6 @@ export default function DeliverySchedulePage() {
                       const parts = Object.entries(loc).sort((a, b) => a[0].localeCompare(b[0]))
                       return <div className="text-xs text-gray-500 mt-0.5">{parts.map(([f, c]) => { const pend = c.total - c.done; return `${pend === 0 ? '✓ ' : ''}${f} (${pend}/${c.total})` }).join('  ·  ')}</div>
                     })()}
-                    {(() => { const p = g.rows.filter(s => !s.invoiced).map(s => s.so_number); return p.length ? <div className="text-[11px] text-amber-700 mt-0.5"><strong>Pending ({p.length}):</strong> {p.join(', ')}</div> : <div className="text-[11px] text-green-700 mt-0.5">✓ all invoiced</div> })()}
                   </div>
                   {tripKey && (
                     <div className="flex items-center gap-2 text-xs flex-wrap">
@@ -405,6 +404,8 @@ export default function DeliverySchedulePage() {
                     <thead className="bg-gray-50 text-gray-500 text-left">
                       <tr>
                         <th className="px-3 py-2">SO No</th>
+                        <th className="px-3 py-2">Location</th>
+                        <th className="px-3 py-2 status-col">Pending</th>
                         <th className="px-3 py-2">PO date</th>
                         <th className="px-3 py-2">Customer</th>
                         <th className="px-3 py-2 text-center inv-col">Invoice ✓</th>
@@ -420,6 +421,8 @@ export default function DeliverySchedulePage() {
                         return (
                           <tr key={s.id} className={`border-t ${hold ? 'bg-red-100' : isTomorrow ? 'bg-yellow-50' : ''}`}>
                             <td className="px-3 py-1.5 font-mono">{s.so_number}</td>
+                            <td className="px-3 py-1.5 text-gray-700">{soFactory[s.so_number] || '—'}</td>
+                            <td className="px-3 py-1.5 status-col">{s.invoiced ? <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Done</span> : <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">Pending</span>}</td>
                             <td className="px-3 py-1.5 text-gray-700">{poKey ? cellView(s.data?.[poKey] ?? '') : '—'}</td>
                             <td className="px-3 py-1.5 text-gray-700">{(custKey && s.data?.[custKey]) || s.customer_name || '—'}</td>
                             <td className="px-3 py-1.5 text-center inv-col"><input type="checkbox" checked={s.invoiced} onChange={e => updateSched(s.id, { invoiced: e.target.checked })} className="h-4 w-4" /></td>
