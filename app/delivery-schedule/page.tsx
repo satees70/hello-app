@@ -385,6 +385,7 @@ export default function DeliverySchedulePage() {
                       const parts = Object.entries(loc).sort((a, b) => a[0].localeCompare(b[0]))
                       return <div className="text-xs text-gray-500 mt-0.5">{parts.map(([f, c]) => { const pend = c.total - c.done; return `${pend === 0 ? '✓ ' : ''}${f} (${pend}/${c.total})` }).join('  ·  ')}</div>
                     })()}
+                    {(() => { const p = g.rows.filter(s => !s.invoiced).map(s => s.so_number); return p.length ? <div className="text-[11px] text-amber-700 mt-0.5"><strong>Pending ({p.length}):</strong> {p.join(', ')}</div> : <div className="text-[11px] text-green-700 mt-0.5">✓ all invoiced</div> })()}
                   </div>
                   {tripKey && (
                     <div className="flex items-center gap-2 text-xs flex-wrap">
