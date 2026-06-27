@@ -492,7 +492,7 @@ export default function DeliverySchedulePage() {
                                 <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">{pend.length} of {its.length} item(s) pending</span>
                                 <div className="text-[11px] text-gray-500 mt-0.5 whitespace-normal">{pend.map((i, k) => <div key={k}>{i.item} <span className="text-gray-400">· {i.factory} · {i.status}</span></div>)}</div>
                               </div>
-                            })()}
+                            })()}</td>
                             <td className="px-3 py-1.5 text-gray-700">{poKey ? cellView(s.data?.[poKey] ?? '') : '—'}</td>
                             <td className="px-3 py-1.5 text-gray-700">{(custKey && s.data?.[custKey]) || s.customer_name || '—'}</td>
                             <td className="px-3 py-1.5 text-center inv-col"><input type="checkbox" checked={s.invoiced} onChange={e => updateSched(s.id, { invoiced: e.target.checked })} className="h-4 w-4" /></td>
