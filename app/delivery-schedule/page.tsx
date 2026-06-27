@@ -288,7 +288,9 @@ export default function DeliverySchedulePage() {
         .no-print { display: none !important; }
         #delivery-print input, #delivery-print select { border: none !important; padding: 0 !important; background: transparent !important; -webkit-appearance: none; appearance: none; color: #000 !important; font-size: 10px; }
         #delivery-print .border { break-inside: avoid; }
-      }`}</style>
+        #delivery-print .pend-detail > div { display: block !important; }
+      }
+      .pend-detail > summary::-webkit-details-marker { display: none; }`}</style>
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
       <div className="max-w-6xl mx-auto p-4 sm:p-6">
         <h1 className="text-2xl font-bold mb-1">Delivery Schedule</h1>
@@ -497,10 +499,10 @@ export default function DeliverySchedulePage() {
                               if (!its || !its.length) return <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700" title="No production batch yet">{soProd[s.so_number]?.status || 'Pending'}</span>
                               const pend = its.filter(i => !i.done)
                               if (!pend.length) return <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Completed ({its.length}/{its.length})</span>
-                              return <div>
-                                <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">{pend.length} of {its.length} item(s) pending</span>
-                                <div className="text-[11px] text-gray-500 mt-0.5 whitespace-normal">{pend.map((i, k) => <div key={k}>{itemName[i.item] || i.item} <span className="text-gray-400">· {i.factory} · {i.status}</span></div>)}</div>
-                              </div>
+                              return <details className="pend-detail">
+                                <summary className="cursor-pointer list-none inline-flex items-center gap-1"><span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">{pend.length} of {its.length} item(s) pending</span><span className="text-gray-400 text-[10px]">▼</span></summary>
+                                <div className="text-[11px] text-gray-500 mt-1 whitespace-normal">{pend.map((i, k) => <div key={k}>{itemName[i.item] || i.item} <span className="text-gray-400">· {i.factory} · {i.status}</span></div>)}</div>
+                              </details>
                             })()}</td>
                             <td className="px-3 py-1.5 text-gray-700">{poKey ? cellView(s.data?.[poKey] ?? '') : '—'}</td>
                             <td className="px-3 py-1.5 text-gray-700">{(custKey && s.data?.[custKey]) || s.customer_name || '—'}</td>
