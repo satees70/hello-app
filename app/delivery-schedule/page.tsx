@@ -37,7 +37,7 @@ function cellView(v: string): React.ReactNode {
 }
 
 // Where a production batch is in its lifecycle — same logic the Sales Orders / Order Board use.
-type BatchLite = { factory_code: string; material_request_id: string | null; pack_date: string | null; produced_qty: number | null; total_quantity: number; dispatched_at: string | null }
+type BatchLite = { item_code: string; factory_code: string; material_request_id: string | null; pack_date: string | null; produced_qty: number | null; total_quantity: number; dispatched_at: string | null }
 function lineStatusOf(b: BatchLite, mrStatus: Record<string, string>): string {
   if (b.dispatched_at) return 'Delivered to warehouse'
   const prod = Number(b.produced_qty || 0), tot = Number(b.total_quantity || 0)
@@ -61,6 +61,7 @@ export default function DeliverySchedulePage() {
   const [soFactory, setSoFactory] = useState<Record<string, string>>({})   // so_number -> factory/location
   const [soProd, setSoProd] = useState<Record<string, { done: boolean; status: string }>>({})   // so_number -> production state
   const [soLoc, setSoLoc] = useState<Record<string, Record<string, { total: number; done: number }>>>({})   // so_number -> location -> counts (a SO can produce at several factories)
+  const [soItems, setSoItems] = useState<Record<string, { item: string; factory: string; status: string; done: boolean }[]>>({})   // so_number -> per-item production detail
   const [uploads, setUploads] = useState<{ id: string; file_name: string; path: string; created_at: string; created_by_name: string | null }[]>([])
   const [fileName, setFileName] = useState('')
   const [headers, setHeaders] = useState<string[]>([])
@@ -100,10 +101,11 @@ export default function DeliverySchedulePage() {
     // Production progress per SO — and per location, because one SO can be produced at several factories.
     const statuses: Record<string, string[]> = {}
     const locs: Record<string, Record<string, { total: number; done: number }>> = {}
+    const items: Record<string, { item: string; factory: string; status: string; done: boolean }[]> = {}
     for (let i = 0; i < sos.length; i += 150) {
       const chunk = sos.slice(i, i + 150)
       const { data: bi } = await supabase.from('production_batch_items')
-        .select('so_number, production_batches!batch_id(factory_code, material_request_id, pack_date, produced_qty, total_quantity, dispatched_at)')
+        .select('so_number, production_batches!batch_id(item_code, factory_code, material_request_id, pack_date, produced_qty, total_quantity, dispatched_at)')
         .in('so_number', chunk)
       const brows = (bi || []) as unknown as { so_number: string; production_batches: BatchLite | null }[]
       const mrIds = [...new Set(brows.map(r => r.production_batches?.material_request_id).filter(Boolean) as string[])]
@@ -112,10 +114,12 @@ export default function DeliverySchedulePage() {
       brows.forEach(r => {
         const b = r.production_batches; if (!r.so_number || !b) return
         const st = lineStatusOf(b, mrStatus)
+        const done = PROD_DONE.has(st)
         ;(statuses[r.so_number] = statuses[r.so_number] || []).push(st)
         const f = b.factory_code || 'No location'
         const e = ((locs[r.so_number] = locs[r.so_number] || {})[f] = locs[r.so_number][f] || { total: 0, done: 0 })
-        e.total++; if (PROD_DONE.has(st)) e.done++
+        e.total++; if (done) e.done++
+        ;(items[r.so_number] = items[r.so_number] || []).push({ item: b.item_code, factory: f, status: st, done })
       })
     }
     const prod: Record<string, { done: boolean; status: string }> = {}
@@ -126,7 +130,7 @@ export default function DeliverySchedulePage() {
       const headline = st.slice().sort((a, b) => order.indexOf(a) - order.indexOf(b))[0]
       prod[so] = { done, status: headline }
     })
-    setSoProd(prod); setSoLoc(locs)
+    setSoProd(prod); setSoLoc(locs); setSoItems(items)
   }
   // Most recent label set for each line (used when the chosen date has none yet).
   const lineLatest = useMemo(() => {
@@ -479,7 +483,16 @@ export default function DeliverySchedulePage() {
                           <tr key={s.id} className={`border-t ${hold ? 'bg-red-100' : isTomorrow ? 'bg-yellow-50' : ''}`}>
                             <td className="px-3 py-1.5 font-mono">{s.so_number}</td>
                             <td className="px-3 py-1.5 text-gray-700">{(() => { const m = soLoc[s.so_number]; if (m && Object.keys(m).length) return Object.entries(m).sort((a, b) => a[0].localeCompare(b[0])).map(([f, c]) => `${f}${c.done >= c.total ? ' ✓' : c.done > 0 ? ` (${c.total - c.done} left)` : ''}`).join(', '); return soFactory[s.so_number] || '—' })()}</td>
-                            <td className="px-3 py-1.5 status-col">{(() => { const pr = soProd[s.so_number]; return pr?.done ? <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Completed</span> : <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700" title={pr?.status || 'No production batch yet'}>{pr?.status || 'Pending'}</span> })()}</td>
+                            <td className="px-3 py-1.5 status-col">{(() => {
+                              const its = soItems[s.so_number]
+                              if (!its || !its.length) return <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700" title="No production batch yet">{soProd[s.so_number]?.status || 'Pending'}</span>
+                              const pend = its.filter(i => !i.done)
+                              if (!pend.length) return <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Completed ({its.length}/{its.length})</span>
+                              return <div>
+                                <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">{pend.length} of {its.length} item(s) pending</span>
+                                <div className="text-[11px] text-gray-500 mt-0.5 whitespace-normal">{pend.map((i, k) => <div key={k}>{i.item} <span className="text-gray-400">· {i.factory} · {i.status}</span></div>)}</div>
+                              </div>
+                            })()}
                             <td className="px-3 py-1.5 text-gray-700">{poKey ? cellView(s.data?.[poKey] ?? '') : '—'}</td>
                             <td className="px-3 py-1.5 text-gray-700">{(custKey && s.data?.[custKey]) || s.customer_name || '—'}</td>
                             <td className="px-3 py-1.5 text-center inv-col"><input type="checkbox" checked={s.invoiced} onChange={e => updateSched(s.id, { invoiced: e.target.checked })} className="h-4 w-4" /></td>
