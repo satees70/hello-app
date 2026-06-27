@@ -62,6 +62,7 @@ export default function DeliverySchedulePage() {
   const [soProd, setSoProd] = useState<Record<string, { done: boolean; status: string }>>({})   // so_number -> production state
   const [soLoc, setSoLoc] = useState<Record<string, Record<string, { total: number; done: number }>>>({})   // so_number -> location -> counts (a SO can produce at several factories)
   const [soItems, setSoItems] = useState<Record<string, { item: string; factory: string; status: string; done: boolean }[]>>({})   // so_number -> per-item production detail
+  const [itemName, setItemName] = useState<Record<string, string>>({})   // item code -> description (name)
   const [uploads, setUploads] = useState<{ id: string; file_name: string; path: string; created_at: string; created_by_name: string | null }[]>([])
   const [fileName, setFileName] = useState('')
   const [headers, setHeaders] = useState<string[]>([])
@@ -131,6 +132,14 @@ export default function DeliverySchedulePage() {
       prod[so] = { done, status: headline }
     })
     setSoProd(prod); setSoLoc(locs); setSoItems(items)
+    // Item names for the pending detail.
+    const codes = [...new Set(Object.values(items).flat().map(i => i.item).filter(Boolean))]
+    const nm: Record<string, string> = {}
+    for (let i = 0; i < codes.length; i += 200) {
+      const { data: its } = await supabase.from('items').select('code, description').in('code', codes.slice(i, i + 200))
+      ;(its || []).forEach(it => { if (it.code && it.description) nm[it.code] = it.description })
+    }
+    setItemName(nm)
   }
   // Most recent label set for each line (used when the chosen date has none yet).
   const lineLatest = useMemo(() => {
@@ -490,7 +499,7 @@ export default function DeliverySchedulePage() {
                               if (!pend.length) return <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Completed ({its.length}/{its.length})</span>
                               return <div>
                                 <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">{pend.length} of {its.length} item(s) pending</span>
-                                <div className="text-[11px] text-gray-500 mt-0.5 whitespace-normal">{pend.map((i, k) => <div key={k}>{i.item} <span className="text-gray-400">· {i.factory} · {i.status}</span></div>)}</div>
+                                <div className="text-[11px] text-gray-500 mt-0.5 whitespace-normal">{pend.map((i, k) => <div key={k}>{itemName[i.item] || i.item} <span className="text-gray-400">· {i.factory} · {i.status}</span></div>)}</div>
                               </div>
                             })()}</td>
                             <td className="px-3 py-1.5 text-gray-700">{poKey ? cellView(s.data?.[poKey] ?? '') : '—'}</td>
