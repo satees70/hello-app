@@ -90,13 +90,21 @@ export default function DeliverySchedulePage() {
     }
     const { data: t } = await supabase.from('delivery_trips').select('route, delivery_date, lorry_no, driver, kelindan, remark, category')
     const tm: Record<string, Trip> = {}; (t as Trip[] || []).forEach(x => { tm[`${x.route}|${x.delivery_date}`] = x }); setTrips(tm)
-    // Each SO's production location (factory) for the per-line location breakdown.
+    // Each SO's production location (factory) + its ordered items (the fallback detail for SOs with no batch yet).
     const sos = [...new Set(((s as Sched[]) || []).map(x => x.so_number).filter(Boolean))]
     const sf: Record<string, string> = {}
+    const salesItems: Record<string, { item: string; factory: string; status: string; done: boolean }[]> = {}
+    const nmSales: Record<string, string> = {}
     for (let i = 0; i < sos.length; i += 150) {
       const chunk = sos.slice(i, i + 150)
-      const { data: sl } = await supabase.from('sales_order_lines').select('so_number, factory_code').in('so_number', chunk)
-      ;(sl || []).forEach(l => { if (l.so_number && l.factory_code && !sf[l.so_number]) sf[l.so_number] = l.factory_code })
+      const { data: sl } = await supabase.from('sales_order_lines').select('so_number, factory_code, item_code, description').in('so_number', chunk)
+      ;(sl || []).forEach(l => {
+        if (l.so_number && l.factory_code && !sf[l.so_number]) sf[l.so_number] = l.factory_code
+        if (l.so_number && l.item_code) {
+          ;(salesItems[l.so_number] = salesItems[l.so_number] || []).push({ item: l.item_code, factory: l.factory_code || 'No location', status: 'Not started', done: false })
+          if (l.description) nmSales[l.item_code] = l.description
+        }
+      })
     }
     setSoFactory(sf)
     // Production progress per SO — and per location, because one SO can be produced at several factories.
@@ -131,10 +139,12 @@ export default function DeliverySchedulePage() {
       const headline = st.slice().sort((a, b) => order.indexOf(a) - order.indexOf(b))[0]
       prod[so] = { done, status: headline }
     })
+    // SOs with no production batch yet → fall back to the items on the sales order, so they still list.
+    sos.forEach(so => { if (!items[so] && salesItems[so]) items[so] = salesItems[so] })
     setSoProd(prod); setSoLoc(locs); setSoItems(items)
-    // Item names for the pending detail.
+    // Item names for the pending detail (sales-line descriptions first, items table fills any gaps).
     const codes = [...new Set(Object.values(items).flat().map(i => i.item).filter(Boolean))]
-    const nm: Record<string, string> = {}
+    const nm: Record<string, string> = { ...nmSales }
     for (let i = 0; i < codes.length; i += 200) {
       const { data: its } = await supabase.from('items').select('code, description').in('code', codes.slice(i, i + 200))
       ;(its || []).forEach(it => { if (it.code && it.description) nm[it.code] = it.description })
