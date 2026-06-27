@@ -440,7 +440,7 @@ export default function DeliverySchedulePage() {
                         }
                       })
                       const parts = Object.entries(loc).sort((a, b) => a[0].localeCompare(b[0]))
-                      return <div className="text-xs text-gray-500 mt-0.5">{parts.map(([f, c]) => { const pend = c.total - c.done; return `${pend === 0 ? '✓ ' : ''}${f} (${pend}/${c.total} pending)` }).join('  ·  ')}</div>
+                      return <div className="text-xs text-gray-500 mt-0.5">{parts.map(([f, c]) => `${c.done >= c.total ? '✓ ' : ''}${f} (${c.done}/${c.total})`).join('  ·  ')}</div>
                     })()}
                   </div>
                   {tripKey && (
