@@ -36,6 +36,22 @@ function cellView(v: string): React.ReactNode {
   return v
 }
 
+// Where a production batch is in its lifecycle — same logic the Sales Orders / Order Board use.
+type BatchLite = { factory_code: string; material_request_id: string | null; pack_date: string | null; produced_qty: number | null; total_quantity: number; dispatched_at: string | null }
+function lineStatusOf(b: BatchLite, mrStatus: Record<string, string>): string {
+  if (b.dispatched_at) return 'Delivered to warehouse'
+  const prod = Number(b.produced_qty || 0), tot = Number(b.total_quantity || 0)
+  if (prod > 0 && prod >= tot) return 'Production completed'
+  if (prod > 0) return 'Production started'
+  if (!b.material_request_id) return 'Pending Material Request'
+  const ms = mrStatus[b.material_request_id]
+  if (ms === 'Fulfilled') return b.pack_date ? 'Pending Schedule' : 'Material Received Fully'
+  if (ms === 'Partially Received') return 'Material Received Partial'
+  return 'Pending Material Request'
+}
+// A SO's production counts as done once every one of its batches is produced (or already delivered).
+const PROD_DONE = new Set(['Production completed', 'Delivered to warehouse'])
+
 export default function DeliverySchedulePage() {
   const { profile, loading, error: profileError } = useProfile()
   // Delivery Schedule is viewable by any logged-in user for now.
@@ -43,6 +59,7 @@ export default function DeliverySchedulePage() {
   const [sched, setSched] = useState<Sched[]>([])
   const [trips, setTrips] = useState<Record<string, Trip>>({})   // `${route}|${date}` -> trip
   const [soFactory, setSoFactory] = useState<Record<string, string>>({})   // so_number -> factory/location
+  const [soProd, setSoProd] = useState<Record<string, { done: boolean; status: string }>>({})   // so_number -> production state
   const [uploads, setUploads] = useState<{ id: string; file_name: string; path: string; created_at: string; created_by_name: string | null }[]>([])
   const [fileName, setFileName] = useState('')
   const [headers, setHeaders] = useState<string[]>([])
@@ -79,6 +96,28 @@ export default function DeliverySchedulePage() {
       ;(sl || []).forEach(l => { if (l.so_number && l.factory_code && !sf[l.so_number]) sf[l.so_number] = l.factory_code })
     }
     setSoFactory(sf)
+    // Production progress per SO (so invoicing can see who's finished vs. still pending).
+    const statuses: Record<string, string[]> = {}
+    for (let i = 0; i < sos.length; i += 150) {
+      const chunk = sos.slice(i, i + 150)
+      const { data: bi } = await supabase.from('production_batch_items')
+        .select('so_number, production_batches!batch_id(factory_code, material_request_id, pack_date, produced_qty, total_quantity, dispatched_at)')
+        .in('so_number', chunk)
+      const brows = (bi || []) as unknown as { so_number: string; production_batches: BatchLite | null }[]
+      const mrIds = [...new Set(brows.map(r => r.production_batches?.material_request_id).filter(Boolean) as string[])]
+      const mrStatus: Record<string, string> = {}
+      if (mrIds.length) { const { data: mrs } = await supabase.from('material_requests').select('id, status').in('id', mrIds); (mrs || []).forEach(m => { mrStatus[m.id] = m.status }) }
+      brows.forEach(r => { if (r.so_number && r.production_batches) (statuses[r.so_number] = statuses[r.so_number] || []).push(lineStatusOf(r.production_batches, mrStatus)) })
+    }
+    const prod: Record<string, { done: boolean; status: string }> = {}
+    Object.entries(statuses).forEach(([so, st]) => {
+      const done = st.length > 0 && st.every(x => PROD_DONE.has(x))
+      // Show the least-finished line's status as the headline (what's holding the order up).
+      const order = ['Pending Material Request', 'Material Received Partial', 'Material Received Fully', 'Pending Schedule', 'Production started', 'Production completed', 'Delivered to warehouse']
+      const headline = st.slice().sort((a, b) => order.indexOf(a) - order.indexOf(b))[0]
+      prod[so] = { done, status: headline }
+    })
+    setSoProd(prod)
   }
   // Most recent label set for each line (used when the chosen date has none yet).
   const lineLatest = useMemo(() => {
@@ -341,10 +380,10 @@ export default function DeliverySchedulePage() {
           const linkKey = allKeys.find(c => /drive|link/i.test(c)) || ''
           const holdKeyS = allKeys.find(c => /hold/i.test(c)) || ''
           const fmtD = (d: string | null) => { const m = (d || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}/${m[2]}/${m[1]}` : (d || '—') }
-          // "Pending" = invoice not yet ticked. Totals overall + per line.
-          const totalPending = shownSched.filter(s => !s.invoiced).length
+          // "Pending" = production not yet completed. Totals overall + per line.
+          const totalPending = shownSched.filter(s => !soProd[s.so_number]?.done).length
           const pendByLine: Record<string, number> = {}
-          shownSched.forEach(s => { if (!s.invoiced) { const l = s.route || 'Unassigned'; pendByLine[l] = (pendByLine[l] || 0) + 1 } })
+          shownSched.forEach(s => { if (!soProd[s.so_number]?.done) { const l = s.route || 'Unassigned'; pendByLine[l] = (pendByLine[l] || 0) + 1 } })
           // Group by line + delivery date (one box per trip).
           const groups: Record<string, { route: string | null; date: string | null; rows: Sched[] }> = {}
           shownSched.forEach(s => { const k = `${s.route || ''}||${s.delivery_date || ''}`; (groups[k] = groups[k] || { route: s.route, date: s.delivery_date, rows: [] }).rows.push(s) })
@@ -359,7 +398,7 @@ export default function DeliverySchedulePage() {
           <div id="delivery-print" className="space-y-5">
             <div className="hidden print:block mb-2"><h1 className="text-xl font-bold">Delivery Schedule{dateFilter !== 'all' ? ` — ${fmtD(dateFilter)}` : ''}</h1></div>
             <div className="mb-3 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm">
-              <strong>Pending: {totalPending} of {shownSched.length}</strong>
+              <strong>Production pending: {totalPending} of {shownSched.length}</strong>
               {Object.keys(pendByLine).length > 0 && <span className="text-gray-600"> · {Object.entries(pendByLine).sort((a, b) => li(a[0]) - li(b[0])).map(([l, n]) => `${l}: ${n}`).join('  ·  ')}</span>}
             </div>
             {driverNames.length > 0 && (
@@ -378,12 +417,13 @@ export default function DeliverySchedulePage() {
               <div key={k} className="border rounded-xl bg-white shadow-sm overflow-hidden">
                 <div className="px-4 py-2 bg-gray-100 flex items-start justify-between flex-wrap gap-2">
                   <div>
-                    <span className="font-semibold">{g.route ? lineLabel(g.route, g.date) : 'Unassigned'}{g.date ? ` · ${fmtD(g.date)}` : ''} <span className="text-gray-500 font-normal text-sm">· {g.rows.length} order(s){(() => { const p = g.rows.filter(s => !s.invoiced).length; return p ? ` · ${p} pending` : '' })()}</span></span>
+                    <span className="font-semibold">{g.route ? lineLabel(g.route, g.date) : 'Unassigned'}{g.date ? ` · ${fmtD(g.date)}` : ''} <span className="text-gray-500 font-normal text-sm">· {g.rows.length} order(s){(() => { const p = g.rows.filter(s => !soProd[s.so_number]?.done).length; return p ? ` · ${p} in production` : '' })()}</span></span>
                     {(() => {
+                      // Production progress by location, so invoicing knows which factory to chase.
                       const loc: Record<string, { total: number; done: number }> = {}
-                      g.rows.forEach(s => { const f = soFactory[s.so_number] || 'No location'; const e = (loc[f] = loc[f] || { total: 0, done: 0 }); e.total++; if (s.invoiced) e.done++ })
+                      g.rows.forEach(s => { const f = soFactory[s.so_number] || 'No location'; const e = (loc[f] = loc[f] || { total: 0, done: 0 }); e.total++; if (soProd[s.so_number]?.done) e.done++ })
                       const parts = Object.entries(loc).sort((a, b) => a[0].localeCompare(b[0]))
-                      return <div className="text-xs text-gray-500 mt-0.5">{parts.map(([f, c]) => { const pend = c.total - c.done; return `${pend === 0 ? '✓ ' : ''}${f} (${pend}/${c.total})` }).join('  ·  ')}</div>
+                      return <div className="text-xs text-gray-500 mt-0.5">{parts.map(([f, c]) => { const pend = c.total - c.done; return `${pend === 0 ? '✓ ' : ''}${f} (${pend}/${c.total} pending)` }).join('  ·  ')}</div>
                     })()}
                   </div>
                   {tripKey && (
@@ -422,7 +462,7 @@ export default function DeliverySchedulePage() {
                           <tr key={s.id} className={`border-t ${hold ? 'bg-red-100' : isTomorrow ? 'bg-yellow-50' : ''}`}>
                             <td className="px-3 py-1.5 font-mono">{s.so_number}</td>
                             <td className="px-3 py-1.5 text-gray-700">{soFactory[s.so_number] || '—'}</td>
-                            <td className="px-3 py-1.5 status-col">{s.invoiced ? <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Done</span> : <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">Pending</span>}</td>
+                            <td className="px-3 py-1.5 status-col">{(() => { const pr = soProd[s.so_number]; return pr?.done ? <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Completed</span> : <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700" title={pr?.status || 'No production batch yet'}>{pr?.status || 'Pending'}</span> })()}</td>
                             <td className="px-3 py-1.5 text-gray-700">{poKey ? cellView(s.data?.[poKey] ?? '') : '—'}</td>
                             <td className="px-3 py-1.5 text-gray-700">{(custKey && s.data?.[custKey]) || s.customer_name || '—'}</td>
                             <td className="px-3 py-1.5 text-center inv-col"><input type="checkbox" checked={s.invoiced} onChange={e => updateSched(s.id, { invoiced: e.target.checked })} className="h-4 w-4" /></td>
