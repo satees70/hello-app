@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { supabase } from '@/lib/supabase'
@@ -54,6 +54,7 @@ export default function DeliverySchedulePage() {
   const [date, setDate] = useState(tomorrowISO())
   const [routeFilter, setRouteFilter] = useState('all')
   const [dateFilter, setDateFilter] = useState('all')
+  const didInitDate = useRef(false)   // default the date filter to the latest day, once
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -62,6 +63,11 @@ export default function DeliverySchedulePage() {
   async function load() {
     const { data: s } = await supabase.from('delivery_schedule').select('id, so_number, customer_name, route, delivery_date, created_by_name, data, invoiced').order('route', { ascending: true, nullsFirst: false }).order('delivery_date', { ascending: true, nullsFirst: false })
     setSched((s as Sched[]) || [])
+    // On first load, default the Date filter to the latest scheduled day.
+    if (!didInitDate.current) {
+      const dates = [...new Set(((s as Sched[]) || []).map(x => x.delivery_date).filter(Boolean) as string[])].sort()
+      if (dates.length) { setDateFilter(dates[dates.length - 1]); didInitDate.current = true }
+    }
     const { data: t } = await supabase.from('delivery_trips').select('route, delivery_date, lorry_no, driver, kelindan, remark, category')
     const tm: Record<string, Trip> = {}; (t as Trip[] || []).forEach(x => { tm[`${x.route}|${x.delivery_date}`] = x }); setTrips(tm)
     // Each SO's production location (factory) for the per-line location breakdown.
