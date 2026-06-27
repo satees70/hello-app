@@ -60,6 +60,7 @@ export default function DeliverySchedulePage() {
   const [trips, setTrips] = useState<Record<string, Trip>>({})   // `${route}|${date}` -> trip
   const [soFactory, setSoFactory] = useState<Record<string, string>>({})   // so_number -> factory/location
   const [soProd, setSoProd] = useState<Record<string, { done: boolean; status: string }>>({})   // so_number -> production state
+  const [soLoc, setSoLoc] = useState<Record<string, Record<string, { total: number; done: number }>>>({})   // so_number -> location -> counts (a SO can produce at several factories)
   const [uploads, setUploads] = useState<{ id: string; file_name: string; path: string; created_at: string; created_by_name: string | null }[]>([])
   const [fileName, setFileName] = useState('')
   const [headers, setHeaders] = useState<string[]>([])
@@ -96,8 +97,9 @@ export default function DeliverySchedulePage() {
       ;(sl || []).forEach(l => { if (l.so_number && l.factory_code && !sf[l.so_number]) sf[l.so_number] = l.factory_code })
     }
     setSoFactory(sf)
-    // Production progress per SO (so invoicing can see who's finished vs. still pending).
+    // Production progress per SO — and per location, because one SO can be produced at several factories.
     const statuses: Record<string, string[]> = {}
+    const locs: Record<string, Record<string, { total: number; done: number }>> = {}
     for (let i = 0; i < sos.length; i += 150) {
       const chunk = sos.slice(i, i + 150)
       const { data: bi } = await supabase.from('production_batch_items')
@@ -107,7 +109,14 @@ export default function DeliverySchedulePage() {
       const mrIds = [...new Set(brows.map(r => r.production_batches?.material_request_id).filter(Boolean) as string[])]
       const mrStatus: Record<string, string> = {}
       if (mrIds.length) { const { data: mrs } = await supabase.from('material_requests').select('id, status').in('id', mrIds); (mrs || []).forEach(m => { mrStatus[m.id] = m.status }) }
-      brows.forEach(r => { if (r.so_number && r.production_batches) (statuses[r.so_number] = statuses[r.so_number] || []).push(lineStatusOf(r.production_batches, mrStatus)) })
+      brows.forEach(r => {
+        const b = r.production_batches; if (!r.so_number || !b) return
+        const st = lineStatusOf(b, mrStatus)
+        ;(statuses[r.so_number] = statuses[r.so_number] || []).push(st)
+        const f = b.factory_code || 'No location'
+        const e = ((locs[r.so_number] = locs[r.so_number] || {})[f] = locs[r.so_number][f] || { total: 0, done: 0 })
+        e.total++; if (PROD_DONE.has(st)) e.done++
+      })
     }
     const prod: Record<string, { done: boolean; status: string }> = {}
     Object.entries(statuses).forEach(([so, st]) => {
@@ -117,7 +126,7 @@ export default function DeliverySchedulePage() {
       const headline = st.slice().sort((a, b) => order.indexOf(a) - order.indexOf(b))[0]
       prod[so] = { done, status: headline }
     })
-    setSoProd(prod)
+    setSoProd(prod); setSoLoc(locs)
   }
   // Most recent label set for each line (used when the chosen date has none yet).
   const lineLatest = useMemo(() => {
@@ -419,9 +428,17 @@ export default function DeliverySchedulePage() {
                   <div>
                     <span className="font-semibold">{g.route ? lineLabel(g.route, g.date) : 'Unassigned'}{g.date ? ` · ${fmtD(g.date)}` : ''} <span className="text-gray-500 font-normal text-sm">· {g.rows.length} order(s){(() => { const p = g.rows.filter(s => !soProd[s.so_number]?.done).length; return p ? ` · ${p} in production` : '' })()}</span></span>
                     {(() => {
-                      // Production progress by location, so invoicing knows which factory to chase.
+                      // Production progress by location (per-batch), so invoicing knows exactly which factory to chase.
                       const loc: Record<string, { total: number; done: number }> = {}
-                      g.rows.forEach(s => { const f = soFactory[s.so_number] || 'No location'; const e = (loc[f] = loc[f] || { total: 0, done: 0 }); e.total++; if (soProd[s.so_number]?.done) e.done++ })
+                      g.rows.forEach(s => {
+                        const m = soLoc[s.so_number]
+                        if (m && Object.keys(m).length) {
+                          Object.entries(m).forEach(([f, c]) => { const e = (loc[f] = loc[f] || { total: 0, done: 0 }); e.total += c.total; e.done += c.done })
+                        } else {
+                          const f = soFactory[s.so_number] || 'No location'   // no batch yet → still pending at its sales-line factory
+                          const e = (loc[f] = loc[f] || { total: 0, done: 0 }); e.total++
+                        }
+                      })
                       const parts = Object.entries(loc).sort((a, b) => a[0].localeCompare(b[0]))
                       return <div className="text-xs text-gray-500 mt-0.5">{parts.map(([f, c]) => { const pend = c.total - c.done; return `${pend === 0 ? '✓ ' : ''}${f} (${pend}/${c.total} pending)` }).join('  ·  ')}</div>
                     })()}
@@ -461,7 +478,7 @@ export default function DeliverySchedulePage() {
                         return (
                           <tr key={s.id} className={`border-t ${hold ? 'bg-red-100' : isTomorrow ? 'bg-yellow-50' : ''}`}>
                             <td className="px-3 py-1.5 font-mono">{s.so_number}</td>
-                            <td className="px-3 py-1.5 text-gray-700">{soFactory[s.so_number] || '—'}</td>
+                            <td className="px-3 py-1.5 text-gray-700">{(() => { const m = soLoc[s.so_number]; if (m && Object.keys(m).length) return Object.entries(m).sort((a, b) => a[0].localeCompare(b[0])).map(([f, c]) => `${f}${c.done >= c.total ? ' ✓' : c.done > 0 ? ` (${c.total - c.done} left)` : ''}`).join(', '); return soFactory[s.so_number] || '—' })()}</td>
                             <td className="px-3 py-1.5 status-col">{(() => { const pr = soProd[s.so_number]; return pr?.done ? <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Completed</span> : <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700" title={pr?.status || 'No production batch yet'}>{pr?.status || 'Pending'}</span> })()}</td>
                             <td className="px-3 py-1.5 text-gray-700">{poKey ? cellView(s.data?.[poKey] ?? '') : '—'}</td>
                             <td className="px-3 py-1.5 text-gray-700">{(custKey && s.data?.[custKey]) || s.customer_name || '—'}</td>
