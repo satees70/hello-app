@@ -19,7 +19,7 @@ interface DOrder {
   dispatch_order_lines?: { item_code: string; description: string | null; quantity: number }[]
   material_returns?: { item_code: string; description: string | null; quantity: number; batch_no: string | null }[]
 }
-interface CartReturn { lotId: string; itemCode: string; description: string; unit: string; batchNo: string | null; qty: number; reason: string; factory: string; factoryName: string }
+interface CartReturn { lotId: string; itemCode: string; description: string; unit: string; batchNo: string | null; qty: number; reason: string; factory: string; factoryName: string; manual?: boolean }
 interface MReturn {
   id: string; factory_code: string; item_code: string; description: string | null
   batch_no: string | null; quantity: number; reason: string | null; created_by_name: string | null; created_at: string
@@ -49,6 +49,8 @@ export default function DispatchPage() {
   const [factory, setFactory] = useState('')
   const [code, setCode] = useState('')
   const [lotId, setLotId] = useState('')
+  const [manual, setManual] = useState(false)   // type an item not in stock
+  const [manBatch, setManBatch] = useState('')   // manual batch no (optional)
   const [qty, setQty] = useState('')
   const [issue, setIssue] = useState<'no' | 'yes'>('no')
   const [reason, setReason] = useState('')
@@ -111,15 +113,24 @@ export default function DispatchPage() {
   function addReturn(e: React.FormEvent) {
     e.preventDefault()
     setError(''); setSuccess('')
-    const it = resolve(code)
-    if (!it) { setError('Pick a valid raw-material code from the list.'); return }
-    if (!lot) { setError('Pick the batch you are returning.'); return }
     const num = Number(qty)
     if (!(num > 0)) { setError('Enter a quantity greater than zero.'); return }
     if (issue === 'yes' && !reason.trim()) { setError('Please give the reason for the issue.'); return }
+    const note = issue === 'yes' ? reason.trim() : ''
+    if (manual) {
+      // Item not in stock — keyed in by hand. No batch check (there's no lot in the system).
+      const mc = code.trim()
+      if (!mc) { setError('Enter the item code.'); return }
+      const known = resolve(mc)
+      setReturnCart(c => [...c, { lotId: '', itemCode: known?.code || mc.toUpperCase(), description: known?.description || '', unit: known?.unit || '', batchNo: manBatch.trim() || null, qty: num, reason: note, factory, factoryName: factoryName(factory), manual: true }])
+      setCode(''); setManBatch(''); setQty(''); setIssue('no'); setReason('')
+      return
+    }
+    const it = resolve(code)
+    if (!it) { setError('Pick a valid raw-material code from the list.'); return }
+    if (!lot) { setError('Pick the batch you are returning.'); return }
     const already = returnCart.filter(r => r.lotId === lot.id).reduce((s, r) => s + r.qty, 0)
     if (already + num > lot.qty_remaining) { setError(`Batch ${lot.batch_no || '—'} only has ${lot.qty_remaining} ${it.unit} left${already ? ` (you already added ${already})` : ''}.`); return }
-    const note = issue === 'yes' ? reason.trim() : ''
     setReturnCart(c => [...c, { lotId: lot.id, itemCode: it.code, description: it.description, unit: it.unit, batchNo: lot.batch_no, qty: num, reason: note, factory, factoryName: factoryName(factory) }])
     setCode(''); setLotId(''); setQty(''); setIssue('no'); setReason('')
   }
@@ -135,7 +146,9 @@ export default function DispatchPage() {
     setBusy(true); setError(''); setSuccess('')
     const { data, error: e } = await supabase.rpc('create_delivery_order', {
       p_batch_ids: batchIds,
-      p_returns: facReturns.map(r => ({ lot_id: r.lotId, qty: r.qty, reason: r.reason })),
+      p_returns: facReturns.map(r => r.manual
+        ? { manual: true, item_code: r.itemCode, description: r.description, batch_no: r.batchNo, qty: r.qty, reason: r.reason, factory_code: r.factory }
+        : { lot_id: r.lotId, qty: r.qty, reason: r.reason }),
     })
     if (e) { setError(e.message); setBusy(false); return }
     setSuccess(`Delivery order ${data} created — ${count} item(s) sent to warehouse.`)
@@ -258,17 +271,26 @@ export default function DispatchPage() {
                 <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Factory (location)</span>
                   <div className="border rounded px-2 py-1.5 text-sm bg-gray-50 text-gray-700 min-w-[140px]">{factoryName(factory)}</div></div>
               )}
-              <div className="flex flex-col gap-1 min-w-[220px] flex-1"><span className="text-xs font-medium text-gray-600">Material</span>
-                {inStock.length > 0 ? (
+              <div className="flex flex-col gap-1 min-w-[220px] flex-1">
+                <span className="text-xs font-medium text-gray-600 flex items-center justify-between gap-2">Material
+                  <label className="font-normal text-[11px] text-blue-600 inline-flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={manual} onChange={e => { setManual(e.target.checked); setCode(''); setLotId(''); setManBatch('') }} className="h-3.5 w-3.5" /> Not listed? Enter manually</label>
+                </span>
+                {manual ? (
+                  <input value={code} onChange={e => setCode(e.target.value)} placeholder="Item code (e.g. D955)" className="border rounded px-2 py-1.5 text-sm" />
+                ) : inStock.length > 0 ? (
                   <select value={code} onChange={e => { setCode(e.target.value); setLotId('') }} className="border rounded px-2 py-1.5 text-sm bg-white">
                     <option value="">Choose a material…</option>
                     {inStock.map(i => <option key={i.id} value={i.code}>{i.code} — {i.description} · {onHand[`${i.id}|${factory}`]} {i.unit}</option>)}
                   </select>
                 ) : (
-                  <div className="border rounded px-2 py-1.5 text-sm bg-gray-50 text-gray-400">No materials in stock at {factoryName(factory)}.</div>
+                  <div className="border rounded px-2 py-1.5 text-sm bg-gray-50 text-gray-400">No materials in stock — tick &quot;Enter manually&quot; to key one in.</div>
                 )}
               </div>
-              {item && (
+              {manual && (
+                <div className="flex flex-col gap-1 min-w-[140px]"><span className="text-xs font-medium text-gray-600">Batch (optional)</span>
+                  <input value={manBatch} onChange={e => setManBatch(e.target.value)} placeholder="Batch no" className="border rounded px-2 py-1.5 text-sm" /></div>
+              )}
+              {!manual && item && (
                 <div className="flex flex-col gap-1 min-w-[180px]"><span className="text-xs font-medium text-gray-600">Batch</span>
                   <select value={lotId} onChange={e => setLotId(e.target.value)} className="border rounded px-2 py-1.5 text-sm bg-white">
                     <option value="">Choose a batch…</option>
