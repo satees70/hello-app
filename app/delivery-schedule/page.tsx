@@ -300,24 +300,32 @@ export default function DeliverySchedulePage() {
   return (
     <>
       <style>{`@media print {
-        @page { size: A4 portrait; margin: 10mm; }
+        @page { size: A4 portrait; margin: 8mm; }
         body * { visibility: hidden; }
         #delivery-print, #delivery-print * { visibility: visible; }
-        #delivery-print { position: absolute; left: 0; top: 0; width: 100%; font-size: 6px; }
+        #delivery-print { position: absolute; left: 0; top: 0; width: 100%; color: #000; }
+        /* one consistent size so nothing renders tiny or huge */
+        #delivery-print, #delivery-print * { font-size: 8.5px !important; line-height: 1.25 !important; }
+        #delivery-print h1 { font-size: 15px !important; font-weight: 700; }
         #delivery-print table { width: 100%; table-layout: fixed; border-collapse: collapse; }
-        #delivery-print th, #delivery-print td { white-space: normal; word-break: break-word; padding: 2px 4px !important; border: 1px solid #ccc; vertical-align: top; overflow: hidden; }
-        /* identical column widths across every line box; only Customer wraps */
-        #delivery-print th:nth-child(1), #delivery-print td:nth-child(1) { width: 64px; white-space: nowrap; }
-        #delivery-print th:nth-child(2), #delivery-print td:nth-child(2) { width: 58px; white-space: nowrap; }
-        #delivery-print .status-col { width: 56px; }
-        #delivery-print .inv-col { width: 44px; white-space: nowrap; text-align: center; }
-        #delivery-print .shadow-sm { box-shadow: none !important; }
+        #delivery-print th, #delivery-print td { border: 1px solid #bbb; padding: 2px 4px !important; vertical-align: top; text-align: left; white-space: normal; word-break: break-word; overflow: hidden; }
+        #delivery-print thead th { background: #f3f4f6 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        /* the 8 visible columns fill the page; date columns never wrap */
+        #delivery-print th:nth-child(1), #delivery-print td:nth-child(1) { width: 8%; white-space: nowrap; }
+        #delivery-print th:nth-child(2), #delivery-print td:nth-child(2) { width: 9%; }
+        #delivery-print th:nth-child(3), #delivery-print td:nth-child(3) { width: 13%; }
+        #delivery-print th:nth-child(4), #delivery-print td:nth-child(4),
+        #delivery-print th:nth-child(5), #delivery-print td:nth-child(5),
+        #delivery-print th:nth-child(6), #delivery-print td:nth-child(6) { width: 11%; white-space: nowrap; }
+        #delivery-print th:nth-child(7), #delivery-print td:nth-child(7) { width: 30%; }
+        #delivery-print th:nth-child(8), #delivery-print td:nth-child(8) { width: 7%; text-align: center; }
+        /* the full-width pending detail strip must NOT inherit the column widths */
+        #delivery-print tr.pend-row td { width: auto !important; white-space: normal !important; }
         .no-print { display: none !important; }
-        #delivery-print input, #delivery-print select { border: none !important; padding: 0 !important; background: transparent !important; -webkit-appearance: none; appearance: none; color: #000 !important; font-size: 10px; }
+        #delivery-print input, #delivery-print select { border: none !important; padding: 0 !important; background: transparent !important; -webkit-appearance: none; appearance: none; color: #000 !important; }
+        #delivery-print .shadow-sm { box-shadow: none !important; }
         #delivery-print .border { break-inside: avoid; }
-        #delivery-print .pend-detail > div { display: block !important; max-height: none !important; overflow: visible !important; }
-      }
-      .pend-detail > summary::-webkit-details-marker { display: none; }`}</style>
+      }`}</style>
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
       <div className="w-full max-w-[2000px] mx-auto p-4 sm:p-6">
         <h1 className="text-2xl font-bold mb-1">Delivery Schedule</h1>
@@ -487,8 +495,8 @@ export default function DeliverySchedulePage() {
                       return <div className="text-xs text-gray-500 mt-0.5">{parts.map(([f, c]) => `${c.done >= c.total ? '✓ ' : ''}${f} (${c.done}/${c.total})`).join('  ·  ')}</div>
                     })()}
                   </div>
-                  {tripKey && (
-                    <div className="flex items-center gap-2 text-xs flex-wrap">
+                  {tripKey && (<>
+                    <div className="flex items-center gap-2 text-xs flex-wrap no-print">
                       <select value={trip?.category || ''} onChange={e => { setTripField(g.route!, g.date!, 'category', e.target.value); saveTrip(g.route!, g.date!, { category: e.target.value }) }} className="border rounded px-2 py-1 bg-white">
                         <option value="">Type…</option>
                         {TRIP_TYPES.map(c => <option key={c} value={c}>{c}</option>)}
@@ -498,7 +506,9 @@ export default function DeliverySchedulePage() {
                       <input value={trip?.driver || ''} placeholder="Driver" onChange={e => setTripField(g.route!, g.date!, 'driver', e.target.value)} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-28" />
                       <input value={trip?.kelindan || ''} placeholder="Kelindan" onChange={e => setTripField(g.route!, g.date!, 'kelindan', e.target.value)} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-28" />
                     </div>
-                  )}
+                    {/* Print-only: show only the filled-in trip details, no empty boxes */}
+                    <div className="hidden print:block text-xs text-gray-700">{[trip?.category && `Type: ${trip.category}`, trip?.remark && `For: ${trip.remark}`, trip?.lorry_no && `Lorry: ${trip.lorry_no}`, trip?.driver && `Driver: ${trip.driver}`, trip?.kelindan && `Kelindan: ${trip.kelindan}`].filter(Boolean).join('   ·   ')}</div>
+                  </>)}
                 </div>
                 <div className="overflow-auto">
                   <table className="w-full text-sm whitespace-nowrap">
@@ -532,7 +542,7 @@ export default function DeliverySchedulePage() {
                             <td className="px-3 py-1.5 status-col">{
                               !its.length ? <span className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500" title="No item lines found in Sales Orders for this SO — it may not have been imported yet">No order lines</span>
                               : !pend.length ? <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Completed ({its.length}/{its.length})</span>
-                              : <button type="button" onClick={() => toggleExpand(s.id)} className="inline-flex items-center gap-1 no-print"><span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">{pend.length} of {its.length} item(s) pending</span><span className="text-gray-400 text-[10px]">{open ? '▲' : '▼'}</span></button>
+                              : <button type="button" onClick={() => toggleExpand(s.id)} className="inline-flex items-center gap-1"><span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">{pend.length} of {its.length} item(s) pending</span><span className="text-gray-400 text-[10px] no-print">{open ? '▲' : '▼'}</span></button>
                             }</td>
                             <td className="px-3 py-1.5 text-gray-700">{orderDateKey ? cellView(s.data?.[orderDateKey] ?? '') : '—'}</td>
                             <td className="px-3 py-1.5 text-gray-700">{podelKeyS ? cellView(s.data?.[podelKeyS] ?? '') : '—'}</td>
@@ -554,7 +564,7 @@ export default function DeliverySchedulePage() {
                             </td>
                           </tr>
                           {pend.length > 0 && (
-                            <tr className={open ? 'bg-amber-50/40' : 'hidden print:table-row'}>
+                            <tr className={`pend-row ${open ? 'bg-amber-50/40' : 'hidden print:table-row'}`}>
                               <td colSpan={12} className="px-4 pb-3 pt-1 whitespace-normal">
                                 <div className="text-xs font-semibold text-gray-600 mb-1">{s.so_number} — {pend.length} item(s) pending</div>
                                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-8 gap-y-1">
