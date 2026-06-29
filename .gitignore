@@ -15,6 +15,9 @@
 
 # next.js
 /.next/
+# iCloud sometimes makes duplicate build folders like ".next 3/" — ignore those too
+.next*/
+.turbo*/
 /out/
 
 # production
