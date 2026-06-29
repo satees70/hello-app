@@ -29,11 +29,12 @@ function normDate(v: unknown): string {
 }
 // How a data cell is shown: links become clickable, ISO dates become dd/mm/yyyy.
 function cellView(v: string): React.ReactNode {
-  if (!v) return ''
-  if (/^https?:\/\//i.test(v)) return <a href={v} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">Open ↗</a>
-  const m = v.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  const t = String(v ?? '').trim()   // values from the upload sometimes carry leading/trailing spaces
+  if (!t) return ''
+  if (/^https?:\/\//i.test(t)) return <a href={t} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">Open ↗</a>
+  const m = t.match(/^(\d{4})-(\d{2})-(\d{2})$/)
   if (m) return `${m[3]}/${m[2]}/${m[1]}`
-  return v
+  return t
 }
 
 // Where a production batch is in its lifecycle — same logic the Sales Orders / Order Board use.
@@ -522,7 +523,7 @@ export default function DeliverySchedulePage() {
                             <td className="px-3 py-1.5 font-mono">{s.so_number}</td>
                             <td className="px-3 py-1.5 text-gray-700">{(() => { const m = soLoc[s.so_number]; if (m && Object.keys(m).length) return Object.entries(m).sort((a, b) => a[0].localeCompare(b[0])).map(([f, c]) => `${f}${c.done >= c.total ? ' ✓' : c.done > 0 ? ` (${c.total - c.done} left)` : ''}`).join(', '); return soFactory[s.so_number] || '—' })()}</td>
                             <td className="px-3 py-1.5 status-col">{
-                              !its.length ? <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700" title="No production batch yet">{soProd[s.so_number]?.status || 'Pending'}</span>
+                              !its.length ? <span className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500" title="No item lines found in Sales Orders for this SO — it may not have been imported yet">No order lines</span>
                               : !pend.length ? <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Completed ({its.length}/{its.length})</span>
                               : <button type="button" onClick={() => toggleExpand(s.id)} className="inline-flex items-center gap-1 no-print"><span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">{pend.length} of {its.length} item(s) pending</span><span className="text-gray-400 text-[10px]">{open ? '▲' : '▼'}</span></button>
                             }</td>
