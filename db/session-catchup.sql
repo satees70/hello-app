@@ -647,3 +647,52 @@ begin
   return v_no;
 end $$;
 grant execute on function public.create_delivery_order(uuid[], jsonb) to authenticated;
+
+-- ─── Direct delivery from a sales order (bypass production) ──────────────────
+-- Deliver a sales-order line straight to the warehouse without producing it. Records a DO line,
+-- marks the sales line delivered (+ DO number), and reduces item_stock (going negative if needed —
+-- when the item is later produced, the incoming stock nets the negative back toward zero).
+alter table public.sales_order_lines add column if not exists delivered_qty numeric;
+alter table public.sales_order_lines add column if not exists delivered_do text;
+alter table public.sales_order_lines add column if not exists delivered_at timestamptz;
+alter table public.dispatch_order_lines add column if not exists source text;
+
+create or replace function public.create_direct_delivery(p_lines jsonb) returns text
+language plpgsql security definer set search_path = public as $$
+declare v_fac text; v_dig text; v_no text; v_id uuid; v_name text; v_seq int;
+        r jsonb; v_line public.sales_order_lines; v_item public.items; v_qty numeric;
+begin
+  if not has_perm('dispatch', 'edit') then raise exception 'Not allowed to create delivery orders'; end if;
+  if p_lines is null or jsonb_array_length(p_lines) = 0 then raise exception 'Add at least one item'; end if;
+  select * into v_line from public.sales_order_lines where id = (p_lines->0->>'line_id')::uuid;
+  if not found then raise exception 'Sales order line not found'; end if;
+  v_fac := v_line.factory_code;
+  if nullif(v_fac, '') is null then raise exception 'This sales line has no factory/location set — set it first'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_fac = any (my_factory_codes())) then raise exception 'Not allowed for this factory'; end if;
+
+  v_dig := coalesce(nullif(regexp_replace(v_fac, '[^0-9]', '', 'g'), ''), v_fac);
+  select count(*) + 1 into v_seq from public.dispatch_orders where factory_code = v_fac and to_char(created_at, 'YYMM') = to_char(now(), 'YYMM');
+  v_no := 'DO' || v_dig || '-' || to_char(now(), 'YYMM') || '/' || lpad(v_seq::text, 4, '0');
+  select full_name into v_name from public.profiles where id = auth.uid();
+  insert into public.dispatch_orders (do_number, factory_code, created_by, created_by_name)
+  values (v_no, v_fac, auth.uid(), v_name) returning id into v_id;
+
+  for r in select value from jsonb_array_elements(p_lines) as e(value) loop
+    select * into v_line from public.sales_order_lines where id = (r->>'line_id')::uuid;
+    if not found then continue; end if;
+    if v_line.factory_code <> v_fac then raise exception 'All items must be from the same factory'; end if;
+    v_qty := (r->>'qty')::numeric;
+    if v_qty is null or v_qty <= 0 then raise exception 'Quantity must be greater than zero'; end if;
+    insert into public.dispatch_order_lines (dispatch_id, batch_id, item_code, description, quantity, source)
+    values (v_id, null, v_line.item_code, v_line.description, v_qty, 'sales-direct');
+    select * into v_item from public.items where code = v_line.item_code limit 1;
+    if v_item.id is not null then
+      update public.item_stock set quantity = quantity - v_qty, updated_at = now() where item_id = v_item.id and factory_code = v_fac;
+      if not found then insert into public.item_stock (item_id, factory_code, quantity, updated_at) values (v_item.id, v_fac, -v_qty, now()); end if;
+    end if;
+    update public.sales_order_lines set delivered_qty = coalesce(delivered_qty, 0) + v_qty, delivered_do = v_no, delivered_at = now() where id = v_line.id;
+  end loop;
+
+  return v_no;
+end $$;
+grant execute on function public.create_direct_delivery(jsonb) to authenticated;

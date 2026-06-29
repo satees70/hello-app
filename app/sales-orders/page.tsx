@@ -31,6 +31,8 @@ interface SalesLine {
   delivery_date: string
   location_code: string
   factory_code: string
+  delivered_qty?: number | null
+  delivered_do?: string | null
 }
 
 interface ChangeRequest {
@@ -1079,7 +1081,7 @@ export default function SalesOrdersPage() {
                           {isDuplicate(line) && <span className="ml-1.5 inline-block align-middle bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded text-[11px] font-bold" title={dupWhere(line)}>⚠ DUP</span>}
                           {line.so_number && tomorrowSOs.has(line.so_number) && <span className="ml-1.5 inline-block align-middle bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-[11px] font-bold">🚚 TOMORROW DELIVERY</span>}
                         </td>
-                        <td className="px-3 py-2 font-medium whitespace-nowrap">{line.item_code}</td>
+                        <td className="px-3 py-2 font-medium whitespace-nowrap">{line.item_code}{Number(line.delivered_qty || 0) > 0 && <span className="ml-1.5 inline-block align-middle bg-green-100 text-green-700 px-1.5 py-0.5 rounded text-[11px] font-semibold" title={`Delivered directly · ${line.delivered_do || ''}`}>✓ Delivered {line.delivered_do ? `· ${line.delivered_do}` : ''}</span>}</td>
                         <td className="px-3 py-2 text-gray-600 min-w-[200px]">{line.description}</td>
                         <td className="px-3 py-2 text-right">{line.quantity}</td>
                         <td className="px-3 py-2 text-right">{line.outstanding_qty}</td>

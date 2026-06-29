@@ -20,6 +20,7 @@ interface DOrder {
   material_returns?: { item_code: string; description: string | null; quantity: number; batch_no: string | null }[]
 }
 interface CartReturn { lotId: string; itemCode: string; description: string; unit: string; batchNo: string | null; qty: number; reason: string; factory: string; factoryName: string; manual?: boolean }
+interface SLine { id: string; so_number: string; item_code: string; description: string | null; quantity: number | null; outstanding_qty: number | null; factory_code: string; delivered_qty: number | null }
 interface MReturn {
   id: string; factory_code: string; item_code: string; description: string | null
   batch_no: string | null; quantity: number; reason: string | null; created_by_name: string | null; created_at: string
@@ -55,6 +56,11 @@ export default function DispatchPage() {
   const [issue, setIssue] = useState<'no' | 'yes'>('no')
   const [reason, setReason] = useState('')
   const [returnCart, setReturnCart] = useState<CartReturn[]>([])
+  const [salesLines, setSalesLines] = useState<SLine[]>([])
+  const [directCart, setDirectCart] = useState<{ lineId: string; so: string; itemCode: string; description: string; qty: number; factory: string; factoryName: string }[]>([])
+  const [dSo, setDSo] = useState('')
+  const [dLineId, setDLineId] = useState('')
+  const [dQty, setDQty] = useState('')
   // Edit-a-return modal (needs HO approval)
   const [editRet, setEditRet] = useState<MReturn | null>(null)
   const [editQty, setEditQty] = useState('')
@@ -91,6 +97,18 @@ export default function DispatchPage() {
     setReturns((r as MReturn[]) || [])
     const { data: pe } = await supabase.from('return_edit_requests').select('return_id').eq('status', 'Pending')
     setEditPending(new Set((pe || []).map(x => x.return_id).filter(Boolean)))
+    // Sales-order lines (for direct delivery). Limit to the factories the user can act on.
+    const facCodes = isHO ? null : codes
+    const sLines: SLine[] = []
+    for (let from = 0; ; from += 1000) {
+      let q = supabase.from('sales_order_lines').select('id, so_number, item_code, description, quantity, outstanding_qty, factory_code, delivered_qty')
+      if (facCodes) q = q.in('factory_code', facCodes)
+      const { data: sl } = await q.range(from, from + 999)
+      const page = (sl as SLine[]) || []
+      sLines.push(...page)
+      if (page.length < 1000) break
+    }
+    setSalesLines(sLines)
   }
 
   const factoryName = (c: string) => factories.find(f => f.code === c)?.name || c || '—'
@@ -133,6 +151,38 @@ export default function DispatchPage() {
     if (already + num > lot.qty_remaining) { setError(`Batch ${lot.batch_no || '—'} only has ${lot.qty_remaining} ${it.unit} left${already ? ` (you already added ${already})` : ''}.`); return }
     setReturnCart(c => [...c, { lotId: lot.id, itemCode: it.code, description: it.description, unit: it.unit, batchNo: lot.batch_no, qty: num, reason: note, factory, factoryName: factoryName(factory) }])
     setCode(''); setLotId(''); setQty(''); setIssue('no'); setReason('')
+  }
+
+  // ---- Direct delivery from a sales order (bypass production) ----
+  const remainingOf = (l: SLine) => Math.max(0, Number(l.outstanding_qty ?? l.quantity ?? 0) - Number(l.delivered_qty || 0))
+  const openSOs = [...new Set(salesLines.filter(remainingOf).map(l => l.so_number))].sort()
+  const linesForSO = salesLines.filter(l => l.so_number === dSo && remainingOf(l) > 0)
+  function addDirect(e: React.FormEvent) {
+    e.preventDefault(); setError(''); setSuccess('')
+    const line = salesLines.find(l => l.id === dLineId)
+    if (!line) { setError('Pick a sales-order item line.'); return }
+    if (!line.factory_code) { setError('This line has no factory/location set — set it on the Sales Orders page first.'); return }
+    const n = Number(dQty)
+    if (!(n > 0)) { setError('Enter a quantity greater than zero.'); return }
+    const left = remainingOf(line) - directCart.filter(c => c.lineId === line.id).reduce((s, c) => s + c.qty, 0)
+    if (n > left) { setError(`Only ${left} left to deliver on this line.`); return }
+    setDirectCart(c => [...c, { lineId: line.id, so: line.so_number, itemCode: line.item_code, description: line.description || '', qty: n, factory: line.factory_code, factoryName: factoryName(line.factory_code) }])
+    setDLineId(''); setDQty('')
+  }
+  async function createDirect() {
+    if (directCart.length === 0) return
+    if (!confirm(`Deliver ${directCart.length} item(s) directly to the warehouse (bypassing production)?`)) return
+    setBusy(true); setError(''); setSuccess('')
+    const facs = [...new Set(directCart.map(c => c.factory))]
+    const dos: string[] = []
+    for (const fac of facs) {
+      const lines = directCart.filter(c => c.factory === fac).map(c => ({ line_id: c.lineId, qty: c.qty }))
+      const { data, error: e } = await supabase.rpc('create_direct_delivery', { p_lines: lines })
+      if (e) { setError(e.message); setBusy(false); return }
+      dos.push(data as string)
+    }
+    setSuccess(`Direct delivery created — ${dos.join(', ')}.`)
+    setDirectCart([]); setBusy(false); load()
   }
 
   // Create ONE delivery order for a single factory's items (finished goods + returns).
@@ -314,6 +364,47 @@ export default function DispatchPage() {
             </div>
             {lot && Number(qty) > lot.qty_remaining && <p className="text-amber-600 text-xs mt-2">⚠ Only {lot.qty_remaining} {item?.unit} left in this batch.</p>}
           </form>
+        )}
+
+        {/* ---- Direct delivery from a sales order (bypass production) ---- */}
+        {canEdit && (
+          <>
+            <h2 className="text-lg font-semibold mb-2">Deliver directly from a sales order <span className="text-gray-400 font-normal text-sm">· bypasses production</span></h2>
+            <p className="text-gray-500 text-xs mb-3">Send a sales-order item straight to the warehouse without producing it. The sales line is marked delivered with the DO number. Stock is reduced (it may go negative — producing the item later brings it back toward zero).</p>
+            <form onSubmit={addDirect} className="bg-white border rounded-xl shadow-sm p-4 mb-4">
+              <div className="flex flex-wrap gap-4 items-end">
+                <div className="flex flex-col gap-1 min-w-[160px]"><span className="text-xs font-medium text-gray-600">Sales order</span>
+                  <select value={dSo} onChange={e => { setDSo(e.target.value); setDLineId(''); setDQty('') }} className="border rounded px-2 py-1.5 text-sm bg-white">
+                    <option value="">Choose a sales order…</option>
+                    {openSOs.map(so => <option key={so} value={so}>{so}</option>)}
+                  </select></div>
+                {dSo && (
+                  <div className="flex flex-col gap-1 min-w-[280px] flex-1"><span className="text-xs font-medium text-gray-600">Item</span>
+                    <select value={dLineId} onChange={e => { setDLineId(e.target.value); const l = salesLines.find(x => x.id === e.target.value); setDQty(l ? String(remainingOf(l)) : '') }} className="border rounded px-2 py-1.5 text-sm bg-white">
+                      <option value="">Choose an item…</option>
+                      {linesForSO.map(l => <option key={l.id} value={l.id}>{l.item_code} — {l.description} · {remainingOf(l)} left · {factoryName(l.factory_code)}</option>)}
+                    </select></div>
+                )}
+                <div className="flex flex-col gap-1 w-28"><span className="text-xs font-medium text-gray-600">Quantity</span>
+                  <input type="number" step="any" min="0" value={dQty} onChange={e => setDQty(e.target.value)} className="border rounded px-2 py-1.5 text-sm" /></div>
+                <button className="bg-orange-600 text-white px-5 py-2 rounded-lg hover:bg-orange-700 text-sm font-medium">Add</button>
+              </div>
+            </form>
+            {directCart.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-8">
+                <div className="font-medium mb-2">Direct delivery — {directCart.length} item(s)</div>
+                <ul className="space-y-1 mb-3">
+                  {directCart.map((c, i) => (
+                    <li key={i} className="flex items-center justify-between gap-2 text-sm border-b border-amber-100 py-1">
+                      <span><span className="font-mono">{c.itemCode}</span> {c.description && <span className="text-gray-500">{c.description}</span>} · {c.qty} · {c.so} · {c.factoryName}</span>
+                      <button onClick={() => setDirectCart(cart => cart.filter((_, j) => j !== i))} className="text-red-500 hover:text-red-700 text-xs shrink-0">Remove</button>
+                    </li>
+                  ))}
+                </ul>
+                <button onClick={createDirect} disabled={busy} className="bg-gray-800 text-white px-5 py-2 rounded-lg hover:bg-gray-900 text-sm font-medium disabled:opacity-50">Create direct delivery order</button>
+              </div>
+            )}
+          </>
         )}
 
         {/* ---- Delivery-order cart, grouped by factory (one DO per factory) ---- */}
