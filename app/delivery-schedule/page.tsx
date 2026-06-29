@@ -23,8 +23,11 @@ function normSO(v: unknown): string {
 }
 function normDate(v: unknown): string {
   if (!v) return ''
-  const d = v instanceof Date ? v : new Date(String(v))
-  if (isNaN(d.getTime())) return ''
+  const raw = v instanceof Date ? v : new Date(String(v))
+  if (isNaN(raw.getTime())) return ''
+  // SheetJS lands Excel dates a hair before/after midnight (timezone + float), so the day can read
+  // one off. Snap to the nearest whole day before formatting.
+  const d = new Date(raw.getTime() + 12 * 3600 * 1000)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 // How a data cell is shown: links become clickable, ISO dates become dd/mm/yyyy.
