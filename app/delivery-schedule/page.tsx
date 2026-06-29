@@ -78,9 +78,10 @@ export default function DeliverySchedulePage() {
   const [routeFilter, setRouteFilter] = useState('all')
   const [dateFilter, setDateFilter] = useState('all')
   const [showScheduled, setShowScheduled] = useState(false)   // upload list: also show orders already scheduled
-  const [resources, setResources] = useState<Record<'lorry' | 'driver' | 'kelindan', { id: string; name: string }[]>>({ lorry: [], driver: [], kelindan: [] })
+  const [resources, setResources] = useState<Record<'lorry' | 'driver' | 'kelindan', { id: string; name: string; phone: string | null }[]>>({ lorry: [], driver: [], kelindan: [] })
   const [showManage, setShowManage] = useState(false)
   const [newRes, setNewRes] = useState<Record<'lorry' | 'driver' | 'kelindan', string>>({ lorry: '', driver: '', kelindan: '' })
+  const [newPhone, setNewPhone] = useState<Record<'lorry' | 'driver' | 'kelindan', string>>({ lorry: '', driver: '', kelindan: '' })
   const didInitDate = useRef(false)   // default the date filter to the latest day, once
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
@@ -89,16 +90,16 @@ export default function DeliverySchedulePage() {
   useEffect(() => { if (profile) { load(); loadUploads(); loadResources() } }, [profile])
   // Master lists of lorries / drivers / kelindan (the future driver app reads from here too).
   async function loadResources() {
-    const { data } = await supabase.from('delivery_resources').select('id, kind, name').eq('active', true).order('name')
-    const g: Record<'lorry' | 'driver' | 'kelindan', { id: string; name: string }[]> = { lorry: [], driver: [], kelindan: [] }
-    ;(data || []).forEach((r: { id: string; kind: 'lorry' | 'driver' | 'kelindan'; name: string }) => { if (g[r.kind]) g[r.kind].push({ id: r.id, name: r.name }) })
+    const { data } = await supabase.from('delivery_resources').select('id, kind, name, phone').eq('active', true).order('name')
+    const g: Record<'lorry' | 'driver' | 'kelindan', { id: string; name: string; phone: string | null }[]> = { lorry: [], driver: [], kelindan: [] }
+    ;(data || []).forEach((r: { id: string; kind: 'lorry' | 'driver' | 'kelindan'; name: string; phone: string | null }) => { if (g[r.kind]) g[r.kind].push({ id: r.id, name: r.name, phone: r.phone }) })
     setResources(g)
   }
-  async function addResource(kind: 'lorry' | 'driver' | 'kelindan', name: string) {
+  async function addResource(kind: 'lorry' | 'driver' | 'kelindan', name: string, phone?: string) {
     const n = (name || '').trim()
     if (!n || resources[kind].some(r => r.name.toLowerCase() === n.toLowerCase())) return
-    const { error: e } = await supabase.from('delivery_resources').insert({ kind, name: n })
-    if (!e) { setNewRes(p => ({ ...p, [kind]: '' })); loadResources() }
+    const { error: e } = await supabase.from('delivery_resources').insert({ kind, name: n, phone: (phone || '').trim() || null })
+    if (!e) { setNewRes(p => ({ ...p, [kind]: '' })); setNewPhone(p => ({ ...p, [kind]: '' })); loadResources() }
   }
   async function removeResource(id: string) {
     await supabase.from('delivery_resources').delete().eq('id', id)
@@ -458,16 +459,19 @@ export default function DeliverySchedulePage() {
                 {(['lorry', 'driver', 'kelindan'] as const).map(kind => (
                   <div key={kind} className="border rounded-xl p-3">
                     <div className="font-medium capitalize mb-2">{kind === 'lorry' ? 'Lorries' : kind === 'driver' ? 'Drivers' : 'Kelindan'} <span className="text-gray-400 font-normal">({resources[kind].length})</span></div>
-                    <div className="flex gap-1 mb-2">
-                      <input value={newRes[kind]} onChange={e => setNewRes(p => ({ ...p, [kind]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') addResource(kind, newRes[kind]) }} placeholder={`Add ${kind}…`} className="border rounded px-2 py-1 text-sm w-full" />
-                      <button onClick={() => addResource(kind, newRes[kind])} className="px-2 py-1 rounded bg-gray-800 text-white text-sm">Add</button>
+                    <div className="flex flex-col gap-1 mb-2">
+                      <input value={newRes[kind]} onChange={e => setNewRes(p => ({ ...p, [kind]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') addResource(kind, newRes[kind], newPhone[kind]) }} placeholder={kind === 'lorry' ? 'Lorry no…' : 'Name…'} className="border rounded px-2 py-1 text-sm w-full" />
+                      <div className="flex gap-1">
+                        {kind !== 'lorry' && <input value={newPhone[kind]} onChange={e => setNewPhone(p => ({ ...p, [kind]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') addResource(kind, newRes[kind], newPhone[kind]) }} placeholder="Phone (optional)" className="border rounded px-2 py-1 text-sm w-full" />}
+                        <button onClick={() => addResource(kind, newRes[kind], newPhone[kind])} className="px-3 py-1 rounded bg-gray-800 text-white text-sm shrink-0">Add</button>
+                      </div>
                     </div>
                     <ul className="space-y-1 max-h-60 overflow-auto">
                       {resources[kind].length === 0 && <li className="text-xs text-gray-400">None yet.</li>}
                       {resources[kind].map(r => (
                         <li key={r.id} className="flex items-center justify-between gap-2 text-sm border-b border-gray-100 py-1">
-                          <span>{r.name}</span>
-                          <button onClick={() => removeResource(r.id)} className="text-red-500 hover:text-red-700 text-xs">Remove</button>
+                          <span>{r.name}{r.phone && <span className="text-gray-400 text-xs ml-1">· {r.phone}</span>}</span>
+                          <button onClick={() => removeResource(r.id)} className="text-red-500 hover:text-red-700 text-xs shrink-0">Remove</button>
                         </li>
                       ))}
                     </ul>
