@@ -1,5 +1,5 @@
 'use client'
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { supabase } from '@/lib/supabase'
@@ -55,17 +55,6 @@ function lineStatusOf(b: BatchLite, mrStatus: Record<string, string>): string {
 }
 // A SO's production counts as done once every one of its batches is produced (or already delivered).
 const PROD_DONE = new Set(['Production completed', 'Delivered to warehouse'])
-// Colour each stage so the pending list is easy to scan.
-const STATUS_CHIP: Record<string, string> = {
-  'Not started': 'bg-gray-100 text-gray-600',
-  'Pending Material Request': 'bg-gray-100 text-gray-600',
-  'Material Received Partial': 'bg-amber-100 text-amber-700',
-  'Material Received Fully': 'bg-lime-100 text-lime-700',
-  'Pending Schedule': 'bg-yellow-100 text-yellow-700',
-  'Production started': 'bg-blue-100 text-blue-700',
-  'Production completed': 'bg-teal-100 text-teal-700',
-  'Delivered to warehouse': 'bg-green-100 text-green-700',
-}
 
 export default function DeliverySchedulePage() {
   const { profile, loading, error: profileError } = useProfile()
@@ -77,9 +66,6 @@ export default function DeliverySchedulePage() {
   const [soProd, setSoProd] = useState<Record<string, { done: boolean; status: string }>>({})   // so_number -> production state
   const [soLoc, setSoLoc] = useState<Record<string, Record<string, { total: number; done: number }>>>({})   // so_number -> location -> counts (a SO can produce at several factories)
   const [soItems, setSoItems] = useState<Record<string, { item: string; factory: string; status: string; done: boolean }[]>>({})   // so_number -> per-item production detail
-  const [itemName, setItemName] = useState<Record<string, string>>({})   // item code -> description (name)
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())   // schedule rows whose pending list is open
-  const toggleExpand = (id: string) => setExpanded(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
   const [uploads, setUploads] = useState<{ id: string; file_name: string; path: string; created_at: string; created_by_name: string | null }[]>([])
   const [fileName, setFileName] = useState('')
   const [headers, setHeaders] = useState<string[]>([])
@@ -111,29 +97,37 @@ export default function DeliverySchedulePage() {
     const sos = [...new Set(((s as Sched[]) || []).map(x => x.so_number).filter(Boolean))]
     const sf: Record<string, string> = {}
     const salesItems: Record<string, { item: string; factory: string; status: string; done: boolean }[]> = {}
-    const nmSales: Record<string, string> = {}
-    for (let i = 0; i < sos.length; i += 150) {
-      const chunk = sos.slice(i, i + 150)
-      const { data: sl } = await supabase.from('sales_order_lines').select('so_number, factory_code, item_code, description').in('so_number', chunk)
-      ;(sl || []).forEach(l => {
-        if (l.so_number && l.factory_code && !sf[l.so_number]) sf[l.so_number] = l.factory_code
-        if (l.so_number && l.item_code) {
-          ;(salesItems[l.so_number] = salesItems[l.so_number] || []).push({ item: l.item_code, factory: l.factory_code || 'No location', status: 'Not started', done: false })
-          if (l.description) nmSales[l.item_code] = l.description
-        }
-      })
+    for (let i = 0; i < sos.length; i += 60) {
+      const chunk = sos.slice(i, i + 60)
+      // Paginate — PostgREST caps each response at 1000 rows, and these chunks can exceed that.
+      for (let from = 0; ; from += 1000) {
+        const { data: sl } = await supabase.from('sales_order_lines').select('so_number, factory_code, item_code').in('so_number', chunk).range(from, from + 999)
+        const rows = sl || []
+        rows.forEach(l => {
+          if (l.so_number && l.factory_code && !sf[l.so_number]) sf[l.so_number] = l.factory_code
+          if (l.so_number && l.item_code) {
+            ;(salesItems[l.so_number] = salesItems[l.so_number] || []).push({ item: l.item_code, factory: l.factory_code || 'No location', status: 'Not started', done: false })
+          }
+        })
+        if (rows.length < 1000) break
+      }
     }
     setSoFactory(sf)
     // Production progress per SO — and per location, because one SO can be produced at several factories.
     const statuses: Record<string, string[]> = {}
     const locs: Record<string, Record<string, { total: number; done: number }>> = {}
     const items: Record<string, { item: string; factory: string; status: string; done: boolean }[]> = {}
-    for (let i = 0; i < sos.length; i += 150) {
-      const chunk = sos.slice(i, i + 150)
-      const { data: bi } = await supabase.from('production_batch_items')
-        .select('so_number, production_batches!batch_id(item_code, factory_code, material_request_id, pack_date, produced_qty, total_quantity, dispatched_at)')
-        .in('so_number', chunk)
-      const brows = (bi || []) as unknown as { so_number: string; production_batches: BatchLite | null }[]
+    for (let i = 0; i < sos.length; i += 60) {
+      const chunk = sos.slice(i, i + 60)
+      const brows: { so_number: string; production_batches: BatchLite | null }[] = []
+      for (let from = 0; ; from += 1000) {   // paginate past the 1000-row cap
+        const { data: bi } = await supabase.from('production_batch_items')
+          .select('so_number, production_batches!batch_id(item_code, factory_code, material_request_id, pack_date, produced_qty, total_quantity, dispatched_at)')
+          .in('so_number', chunk).range(from, from + 999)
+        const page = (bi || []) as unknown as { so_number: string; production_batches: BatchLite | null }[]
+        brows.push(...page)
+        if (page.length < 1000) break
+      }
       const mrIds = [...new Set(brows.map(r => r.production_batches?.material_request_id).filter(Boolean) as string[])]
       const mrStatus: Record<string, string> = {}
       if (mrIds.length) { const { data: mrs } = await supabase.from('material_requests').select('id, status').in('id', mrIds); (mrs || []).forEach(m => { mrStatus[m.id] = m.status }) }
@@ -156,17 +150,9 @@ export default function DeliverySchedulePage() {
       const headline = st.slice().sort((a, b) => order.indexOf(a) - order.indexOf(b))[0]
       prod[so] = { done, status: headline }
     })
-    // SOs with no production batch yet → fall back to the items on the sales order, so they still list.
+    // SOs with no production batch yet → fall back to the items on the sales order, so they still count.
     sos.forEach(so => { if (!items[so] && salesItems[so]) items[so] = salesItems[so] })
     setSoProd(prod); setSoLoc(locs); setSoItems(items)
-    // Item names for the pending detail (sales-line descriptions first, items table fills any gaps).
-    const codes = [...new Set(Object.values(items).flat().map(i => i.item).filter(Boolean))]
-    const nm: Record<string, string> = { ...nmSales }
-    for (let i = 0; i < codes.length; i += 200) {
-      const { data: its } = await supabase.from('items').select('code, description').in('code', codes.slice(i, i + 200))
-      ;(its || []).forEach(it => { if (it.code && it.description) nm[it.code] = it.description })
-    }
-    setItemName(nm)
   }
   // Most recent label set for each line (used when the chosen date has none yet).
   const lineLatest = useMemo(() => {
@@ -533,17 +519,18 @@ export default function DeliverySchedulePage() {
                         const hold = !!holdKeyS && isHold(s.data?.[holdKeyS])
                         const its = soItems[s.so_number] || []
                         const pend = its.filter(i => !i.done)
-                        const open = expanded.has(s.id)
                         return (
-                          <Fragment key={s.id}>
-                          <tr className={`border-t ${hold ? 'bg-red-100' : isTomorrow ? 'bg-yellow-50' : ''}`}>
+                          <tr key={s.id} className={`border-t ${hold ? 'bg-red-100' : isTomorrow ? 'bg-yellow-50' : ''}`}>
                             <td className="px-3 py-1.5 font-mono">{s.so_number}</td>
                             <td className="px-3 py-1.5 text-gray-700">{(() => { const m = soLoc[s.so_number]; if (m && Object.keys(m).length) return Object.entries(m).sort((a, b) => a[0].localeCompare(b[0])).map(([f, c]) => `${f}${c.done >= c.total ? ' ✓' : c.done > 0 ? ` (${c.total - c.done} left)` : ''}`).join(', '); return soFactory[s.so_number] || '—' })()}</td>
-                            <td className="px-3 py-1.5 status-col">{
-                              !its.length ? <span className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500" title="No item lines found in Sales Orders for this SO — it may not have been imported yet">No order lines</span>
-                              : !pend.length ? <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Completed ({its.length}/{its.length})</span>
-                              : <button type="button" onClick={() => toggleExpand(s.id)} className="inline-flex items-center gap-1"><span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">{pend.length} of {its.length} item(s) pending</span><span className="text-gray-400 text-[10px] no-print">{open ? '▲' : '▼'}</span></button>
-                            }</td>
+                            <td className="px-3 py-1.5">{(() => {
+                              if (!its.length) return <span className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500" title="No item lines found in Sales Orders for this SO — it may not have been imported yet">No order lines</span>
+                              if (!pend.length) return <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Completed</span>
+                              // Pending count grouped by location (no item names).
+                              const byLoc: Record<string, number> = {}
+                              pend.forEach(i => { byLoc[i.factory] = (byLoc[i.factory] || 0) + 1 })
+                              return <span className="flex flex-wrap gap-1">{Object.entries(byLoc).sort((a, b) => a[0].localeCompare(b[0])).map(([f, n]) => <span key={f} className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">{f} ({n} pending)</span>)}</span>
+                            })()}</td>
                             <td className="px-3 py-1.5 text-gray-700">{orderDateKey ? cellView(s.data?.[orderDateKey] ?? '') : '—'}</td>
                             <td className="px-3 py-1.5 text-gray-700">{podelKeyS ? cellView(s.data?.[podelKeyS] ?? '') : '—'}</td>
                             <td className="px-3 py-1.5 text-gray-700">{cancelKey ? cellView(s.data?.[cancelKey] ?? '') : '—'}</td>
@@ -563,22 +550,6 @@ export default function DeliverySchedulePage() {
                                 : <button onClick={() => { if (confirm('Delete this order from the schedule for good?')) removeSched(s.id) }} className="text-red-600 hover:underline text-xs">Delete</button>}
                             </td>
                           </tr>
-                          {pend.length > 0 && (
-                            <tr className={`pend-row ${open ? 'bg-amber-50/40' : 'hidden print:table-row'}`}>
-                              <td colSpan={12} className="px-4 pb-3 pt-1 whitespace-normal">
-                                <div className="text-xs font-semibold text-gray-600 mb-1">{s.so_number} — {pend.length} item(s) pending</div>
-                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-8 gap-y-1">
-                                  {pend.map((i, k) => (
-                                    <div key={k} className="flex items-start justify-between gap-2 border-b border-gray-100 py-0.5">
-                                      <span className="text-xs text-gray-700"><span className="text-gray-400 mr-1">{k + 1}.</span>{itemName[i.item] || i.item}{i.factory !== 'No location' && <span className="text-gray-400"> · {i.factory}</span>}</span>
-                                      <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${STATUS_CHIP[i.status] || 'bg-gray-100 text-gray-600'}`}>{i.status}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                          </Fragment>
                         )
                       })}
                     </tbody>
