@@ -51,6 +51,17 @@ function lineStatusOf(b: BatchLite, mrStatus: Record<string, string>): string {
 }
 // A SO's production counts as done once every one of its batches is produced (or already delivered).
 const PROD_DONE = new Set(['Production completed', 'Delivered to warehouse'])
+// Colour each stage so the pending list is easy to scan.
+const STATUS_CHIP: Record<string, string> = {
+  'Not started': 'bg-gray-100 text-gray-600',
+  'Pending Material Request': 'bg-gray-100 text-gray-600',
+  'Material Received Partial': 'bg-amber-100 text-amber-700',
+  'Material Received Fully': 'bg-lime-100 text-lime-700',
+  'Pending Schedule': 'bg-yellow-100 text-yellow-700',
+  'Production started': 'bg-blue-100 text-blue-700',
+  'Production completed': 'bg-teal-100 text-teal-700',
+  'Delivered to warehouse': 'bg-green-100 text-green-700',
+}
 
 export default function DeliverySchedulePage() {
   const { profile, loading, error: profileError } = useProfile()
@@ -298,7 +309,7 @@ export default function DeliverySchedulePage() {
         .no-print { display: none !important; }
         #delivery-print input, #delivery-print select { border: none !important; padding: 0 !important; background: transparent !important; -webkit-appearance: none; appearance: none; color: #000 !important; font-size: 10px; }
         #delivery-print .border { break-inside: avoid; }
-        #delivery-print .pend-detail > div { display: block !important; }
+        #delivery-print .pend-detail > div { display: block !important; max-height: none !important; overflow: visible !important; }
       }
       .pend-detail > summary::-webkit-details-marker { display: none; }`}</style>
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
@@ -511,7 +522,12 @@ export default function DeliverySchedulePage() {
                               if (!pend.length) return <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Completed ({its.length}/{its.length})</span>
                               return <details className="pend-detail">
                                 <summary className="cursor-pointer list-none inline-flex items-center gap-1"><span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">{pend.length} of {its.length} item(s) pending</span><span className="text-gray-400 text-[10px]">▼</span></summary>
-                                <div className="text-[11px] text-gray-500 mt-1 whitespace-normal">{pend.map((i, k) => <div key={k}>{itemName[i.item] || i.item} <span className="text-gray-400">· {i.factory} · {i.status}</span></div>)}</div>
+                                <div className="mt-1 border rounded-lg bg-gray-50 max-h-56 overflow-auto divide-y divide-gray-100 whitespace-normal">{pend.map((i, k) => (
+                                  <div key={k} className="flex items-start justify-between gap-2 px-2 py-1">
+                                    <span className="text-xs text-gray-700"><span className="text-gray-400 mr-1">{k + 1}.</span>{itemName[i.item] || i.item}{i.factory !== 'No location' && <span className="text-gray-400"> · {i.factory}</span>}</span>
+                                    <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${STATUS_CHIP[i.status] || 'bg-gray-100 text-gray-600'}`}>{i.status}</span>
+                                  </div>
+                                ))}</div>
                               </details>
                             })()}</td>
                             <td className="px-3 py-1.5 text-gray-700">{poKey ? cellView(s.data?.[poKey] ?? '') : '—'}</td>
