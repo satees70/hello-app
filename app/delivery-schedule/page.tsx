@@ -77,6 +77,7 @@ export default function DeliverySchedulePage() {
   const [date, setDate] = useState(tomorrowISO())
   const [routeFilter, setRouteFilter] = useState('all')
   const [dateFilter, setDateFilter] = useState('all')
+  const [showScheduled, setShowScheduled] = useState(false)   // upload list: also show orders already scheduled
   const didInitDate = useRef(false)   // default the date filter to the latest day, once
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
@@ -241,7 +242,7 @@ export default function DeliverySchedulePage() {
       customer: colCust !== '' ? String(r[Number(colCust)] ?? '').trim() : '',
       data,
     }
-  }).filter(m => m.so && (!scheduledSOs.has(m.so) || onlyScheduledYesterday(m.so))), [rows, headers, colSO, colCust, scheduledSOs, schedDatesBySO])
+  }).filter(m => m.so && (showScheduled || !scheduledSOs.has(m.so) || onlyScheduledYesterday(m.so))), [rows, headers, colSO, colCust, scheduledSOs, schedDatesBySO, showScheduled])
   const pendingCount = mapped.filter(m => !scheduledSOs.has(m.so)).length
   const yesterdayCount = mapped.length - pendingCount
 
@@ -328,6 +329,7 @@ export default function DeliverySchedulePage() {
             <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => onFile(e.target.files?.[0])} />
           </label>
           {fileName && <span className="ml-2 text-sm text-gray-500">{fileName} · <strong>{pendingCount}</strong> pending{yesterdayCount ? ` · ${yesterdayCount} scheduled yesterday (green)` : ''}</span>}
+          {headers.length > 0 && <label className="ml-3 inline-flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer"><input type="checkbox" checked={showScheduled} onChange={e => setShowScheduled(e.target.checked)} className="h-4 w-4" /> Show already-scheduled too</label>}
 
           {headers.length > 0 && (
             <>
@@ -372,7 +374,7 @@ export default function DeliverySchedulePage() {
                       const schedYest = scheduledSOs.has(m.so)
                       return (
                       <tr key={m.i} className={`border-t ${sel.has(m.i) ? 'bg-blue-100' : hold ? 'bg-red-100' : schedYest ? 'bg-green-100' : dueT ? 'bg-yellow-100' : 'hover:bg-gray-50'}`}>
-                        <td className="px-3 py-1.5"><input type="checkbox" checked={sel.has(m.i)} onChange={() => toggleRow(m.i)} className="h-4 w-4" /></td>
+                        <td className="px-3 py-1.5 whitespace-nowrap"><input type="checkbox" checked={sel.has(m.i)} onChange={() => toggleRow(m.i)} className="h-4 w-4" />{schedYest && <span className="ml-1 text-[10px] text-green-700 font-semibold">scheduled</span>}</td>
                         {headers.map((h, i) => { const key = h || `Column ${i + 1}`; return <td key={i} className="px-3 py-1.5 text-gray-700">{cellView(m.data[key])}</td> })}
                       </tr>
                       )
