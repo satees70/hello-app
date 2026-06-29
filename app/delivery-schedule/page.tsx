@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { supabase } from '@/lib/supabase'
@@ -74,6 +74,8 @@ export default function DeliverySchedulePage() {
   const [soLoc, setSoLoc] = useState<Record<string, Record<string, { total: number; done: number }>>>({})   // so_number -> location -> counts (a SO can produce at several factories)
   const [soItems, setSoItems] = useState<Record<string, { item: string; factory: string; status: string; done: boolean }[]>>({})   // so_number -> per-item production detail
   const [itemName, setItemName] = useState<Record<string, string>>({})   // item code -> description (name)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())   // schedule rows whose pending list is open
+  const toggleExpand = (id: string) => setExpanded(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
   const [uploads, setUploads] = useState<{ id: string; file_name: string; path: string; created_at: string; created_by_name: string | null }[]>([])
   const [fileName, setFileName] = useState('')
   const [headers, setHeaders] = useState<string[]>([])
@@ -313,7 +315,7 @@ export default function DeliverySchedulePage() {
       }
       .pend-detail > summary::-webkit-details-marker { display: none; }`}</style>
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
-      <div className="max-w-6xl mx-auto p-4 sm:p-6">
+      <div className="w-full max-w-[2000px] mx-auto p-4 sm:p-6">
         <h1 className="text-2xl font-bold mb-1">Delivery Schedule</h1>
         <p className="text-gray-500 mb-5 text-sm">Upload orders from SQL Accounting, then tick the orders and assign them to a delivery line (A–K). Orders due <strong>tomorrow</strong> show a yellow <span className="bg-yellow-200 text-yellow-900 px-1 rounded text-xs font-semibold">TOMORROW DELIVERY</span> tag across Sales Orders and production.</p>
 
@@ -511,25 +513,19 @@ export default function DeliverySchedulePage() {
                       {g.rows.map(s => {
                         const isTomorrow = s.delivery_date === tomorrowISO()
                         const hold = !!holdKeyS && isHold(s.data?.[holdKeyS])
+                        const its = soItems[s.so_number] || []
+                        const pend = its.filter(i => !i.done)
+                        const open = expanded.has(s.id)
                         return (
-                          <tr key={s.id} className={`border-t ${hold ? 'bg-red-100' : isTomorrow ? 'bg-yellow-50' : ''}`}>
+                          <Fragment key={s.id}>
+                          <tr className={`border-t ${hold ? 'bg-red-100' : isTomorrow ? 'bg-yellow-50' : ''}`}>
                             <td className="px-3 py-1.5 font-mono">{s.so_number}</td>
                             <td className="px-3 py-1.5 text-gray-700">{(() => { const m = soLoc[s.so_number]; if (m && Object.keys(m).length) return Object.entries(m).sort((a, b) => a[0].localeCompare(b[0])).map(([f, c]) => `${f}${c.done >= c.total ? ' ✓' : c.done > 0 ? ` (${c.total - c.done} left)` : ''}`).join(', '); return soFactory[s.so_number] || '—' })()}</td>
-                            <td className="px-3 py-1.5 status-col">{(() => {
-                              const its = soItems[s.so_number]
-                              if (!its || !its.length) return <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700" title="No production batch yet">{soProd[s.so_number]?.status || 'Pending'}</span>
-                              const pend = its.filter(i => !i.done)
-                              if (!pend.length) return <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Completed ({its.length}/{its.length})</span>
-                              return <details className="pend-detail">
-                                <summary className="cursor-pointer list-none inline-flex items-center gap-1"><span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">{pend.length} of {its.length} item(s) pending</span><span className="text-gray-400 text-[10px]">▼</span></summary>
-                                <div className="mt-1 border rounded-lg bg-gray-50 max-h-56 overflow-auto divide-y divide-gray-100 whitespace-normal">{pend.map((i, k) => (
-                                  <div key={k} className="flex items-start justify-between gap-2 px-2 py-1">
-                                    <span className="text-xs text-gray-700"><span className="text-gray-400 mr-1">{k + 1}.</span>{itemName[i.item] || i.item}{i.factory !== 'No location' && <span className="text-gray-400"> · {i.factory}</span>}</span>
-                                    <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${STATUS_CHIP[i.status] || 'bg-gray-100 text-gray-600'}`}>{i.status}</span>
-                                  </div>
-                                ))}</div>
-                              </details>
-                            })()}</td>
+                            <td className="px-3 py-1.5 status-col">{
+                              !its.length ? <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700" title="No production batch yet">{soProd[s.so_number]?.status || 'Pending'}</span>
+                              : !pend.length ? <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Completed ({its.length}/{its.length})</span>
+                              : <button type="button" onClick={() => toggleExpand(s.id)} className="inline-flex items-center gap-1 no-print"><span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">{pend.length} of {its.length} item(s) pending</span><span className="text-gray-400 text-[10px]">{open ? '▲' : '▼'}</span></button>
+                            }</td>
                             <td className="px-3 py-1.5 text-gray-700">{poKey ? cellView(s.data?.[poKey] ?? '') : '—'}</td>
                             <td className="px-3 py-1.5 text-gray-700">{(custKey && s.data?.[custKey]) || s.customer_name || '—'}</td>
                             <td className="px-3 py-1.5 text-center inv-col"><input type="checkbox" checked={s.invoiced} onChange={e => updateSched(s.id, { invoiced: e.target.checked })} className="h-4 w-4" /></td>
@@ -547,6 +543,22 @@ export default function DeliverySchedulePage() {
                                 : <button onClick={() => { if (confirm('Delete this order from the schedule for good?')) removeSched(s.id) }} className="text-red-600 hover:underline text-xs">Delete</button>}
                             </td>
                           </tr>
+                          {pend.length > 0 && (
+                            <tr className={open ? 'bg-amber-50/40' : 'hidden print:table-row'}>
+                              <td colSpan={10} className="px-4 pb-3 pt-1 whitespace-normal">
+                                <div className="text-xs font-semibold text-gray-600 mb-1">{s.so_number} — {pend.length} item(s) pending</div>
+                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-8 gap-y-1">
+                                  {pend.map((i, k) => (
+                                    <div key={k} className="flex items-start justify-between gap-2 border-b border-gray-100 py-0.5">
+                                      <span className="text-xs text-gray-700"><span className="text-gray-400 mr-1">{k + 1}.</span>{itemName[i.item] || i.item}{i.factory !== 'No location' && <span className="text-gray-400"> · {i.factory}</span>}</span>
+                                      <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${STATUS_CHIP[i.status] || 'bg-gray-100 text-gray-600'}`}>{i.status}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                          </Fragment>
                         )
                       })}
                     </tbody>
