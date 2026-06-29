@@ -215,13 +215,11 @@ export default function DeliverySchedulePage() {
     if (owner && owner !== route) {
       const d = (date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); const ds = d ? `${d[3]}/${d[2]}/${d[1]}` : date
       setError(`"${v}" is already assigned to ${owner} on ${ds}. Each ${kind} can only be on one line per day.`)
-      setTripField(route, date, field, '')
-      saveTrip(route, date, { [field]: '' })
       return
     }
     setError('')
-    saveTrip(route, date, {})
-    addResource(kind, v)
+    setTripField(route, date, field, v)
+    saveTrip(route, date, { [field]: v })
   }
   async function loadUploads() {
     const { data } = await supabase.from('delivery_uploads').select('id, file_name, path, created_at, created_by_name').order('created_at', { ascending: false }).limit(30)
@@ -545,7 +543,6 @@ export default function DeliverySchedulePage() {
             {keys.map(k => {
               const g = groups[k]
               const tripKey = g.route && g.date ? `${g.route}|${g.date}` : ''
-              const tkSafe = tripKey.replace(/[^a-zA-Z0-9]/g, '_')   // datalist id can't contain spaces/pipes
               const availRes = (kind: 'lorry' | 'driver' | 'kelindan') => resources[kind].filter(r => { const o = ownerOf(g.date, kind, r.name); return !o || o === g.route })
               const trip = tripKey ? trips[tripKey] : undefined
               return (
@@ -576,12 +573,18 @@ export default function DeliverySchedulePage() {
                         {TRIP_TYPES.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
                       <input value={trip?.remark || ''} placeholder="For (e.g. Klang)" onChange={e => setTripField(g.route!, g.date!, 'remark', e.target.value)} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-32" />
-                      <input list={`dr-lorry-${tkSafe}`} value={trip?.lorry_no || ''} placeholder="Lorry no" onChange={e => setTripField(g.route!, g.date!, 'lorry_no', e.target.value)} onBlur={e => commitResource(g.route!, g.date!, 'lorry', 'lorry_no', e.target.value)} className="border rounded px-2 py-1 w-28" />
-                      <input list={`dr-driver-${tkSafe}`} value={trip?.driver || ''} placeholder="Driver" onChange={e => setTripField(g.route!, g.date!, 'driver', e.target.value)} onBlur={e => commitResource(g.route!, g.date!, 'driver', 'driver', e.target.value)} className="border rounded px-2 py-1 w-28" />
-                      <input list={`dr-kelindan-${tkSafe}`} value={trip?.kelindan || ''} placeholder="Kelindan" onChange={e => setTripField(g.route!, g.date!, 'kelindan', e.target.value)} onBlur={e => commitResource(g.route!, g.date!, 'kelindan', 'kelindan', e.target.value)} className="border rounded px-2 py-1 w-28" />
-                      <datalist id={`dr-lorry-${tkSafe}`}>{availRes('lorry').map(r => <option key={r.id} value={r.name} />)}</datalist>
-                      <datalist id={`dr-driver-${tkSafe}`}>{availRes('driver').map(r => <option key={r.id} value={r.name} />)}</datalist>
-                      <datalist id={`dr-kelindan-${tkSafe}`}>{availRes('kelindan').map(r => <option key={r.id} value={r.name} />)}</datalist>
+                      {(['lorry', 'driver', 'kelindan'] as const).map(kind => {
+                        const field = (kind === 'lorry' ? 'lorry_no' : kind) as keyof Trip
+                        const cur = (trip?.[field] as string) || ''
+                        const opts = availRes(kind)
+                        return (
+                          <select key={kind} value={cur} onChange={e => commitResource(g.route!, g.date!, kind, field, e.target.value)} className="border rounded px-2 py-1 w-28 bg-white">
+                            <option value="">{kind === 'lorry' ? 'Lorry no' : kind === 'driver' ? 'Driver' : 'Kelindan'}…</option>
+                            {opts.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
+                            {cur && !opts.some(r => r.name === cur) && <option value={cur}>{cur}</option>}
+                          </select>
+                        )
+                      })}
                     </div>
                     {/* Print-only: show only the filled-in trip details, no empty boxes */}
                     <div className="hidden print:block text-xs text-gray-700">{[trip?.category && `Type: ${trip.category}`, trip?.remark && `For: ${trip.remark}`, trip?.lorry_no && `Lorry: ${trip.lorry_no}`, trip?.driver && `Driver: ${trip.driver}`, trip?.kelindan && `Kelindan: ${trip.kelindan}`].filter(Boolean).join('   ·   ')}</div>
