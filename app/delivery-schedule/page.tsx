@@ -78,12 +78,32 @@ export default function DeliverySchedulePage() {
   const [routeFilter, setRouteFilter] = useState('all')
   const [dateFilter, setDateFilter] = useState('all')
   const [showScheduled, setShowScheduled] = useState(false)   // upload list: also show orders already scheduled
+  const [resources, setResources] = useState<Record<'lorry' | 'driver' | 'kelindan', { id: string; name: string }[]>>({ lorry: [], driver: [], kelindan: [] })
+  const [showManage, setShowManage] = useState(false)
+  const [newRes, setNewRes] = useState<Record<'lorry' | 'driver' | 'kelindan', string>>({ lorry: '', driver: '', kelindan: '' })
   const didInitDate = useRef(false)   // default the date filter to the latest day, once
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
-  useEffect(() => { if (profile) { load(); loadUploads() } }, [profile])
+  useEffect(() => { if (profile) { load(); loadUploads(); loadResources() } }, [profile])
+  // Master lists of lorries / drivers / kelindan (the future driver app reads from here too).
+  async function loadResources() {
+    const { data } = await supabase.from('delivery_resources').select('id, kind, name').eq('active', true).order('name')
+    const g: Record<'lorry' | 'driver' | 'kelindan', { id: string; name: string }[]> = { lorry: [], driver: [], kelindan: [] }
+    ;(data || []).forEach((r: { id: string; kind: 'lorry' | 'driver' | 'kelindan'; name: string }) => { if (g[r.kind]) g[r.kind].push({ id: r.id, name: r.name }) })
+    setResources(g)
+  }
+  async function addResource(kind: 'lorry' | 'driver' | 'kelindan', name: string) {
+    const n = (name || '').trim()
+    if (!n || resources[kind].some(r => r.name.toLowerCase() === n.toLowerCase())) return
+    const { error: e } = await supabase.from('delivery_resources').insert({ kind, name: n })
+    if (!e) { setNewRes(p => ({ ...p, [kind]: '' })); loadResources() }
+  }
+  async function removeResource(id: string) {
+    await supabase.from('delivery_resources').delete().eq('id', id)
+    loadResources()
+  }
   async function load() {
     const { data: s } = await supabase.from('delivery_schedule').select('id, so_number, customer_name, route, delivery_date, created_by_name, data, invoiced').order('route', { ascending: true, nullsFirst: false }).order('delivery_date', { ascending: true, nullsFirst: false })
     setSched((s as Sched[]) || [])
@@ -405,6 +425,7 @@ export default function DeliverySchedulePage() {
           <h2 className="font-semibold">Scheduled deliveries</h2>
           <div className="flex items-center gap-3 flex-wrap">
             <button onClick={() => window.print()} className="text-sm px-3 py-1.5 rounded-lg bg-gray-800 text-white hover:bg-gray-900">🖨 Print / PDF</button>
+            <button onClick={() => setShowManage(true)} className="text-sm px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50">🚚 Manage lorries / drivers / kelindan</button>
             <label className="flex items-center gap-2 text-sm text-gray-500">Date
               <select value={dateFilter} onChange={e => setDateFilter(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm">
                 <option value="all">All dates</option>
@@ -419,6 +440,44 @@ export default function DeliverySchedulePage() {
             </label>
           </div>
         </div>
+
+        {/* Pick-from-list options for the Lorry / Driver / Kelindan inputs */}
+        <datalist id="dr-lorry">{resources.lorry.map(r => <option key={r.id} value={r.name} />)}</datalist>
+        <datalist id="dr-driver">{resources.driver.map(r => <option key={r.id} value={r.name} />)}</datalist>
+        <datalist id="dr-kelindan">{resources.kelindan.map(r => <option key={r.id} value={r.name} />)}</datalist>
+
+        {showManage && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 overflow-auto no-print" onClick={() => setShowManage(false)}>
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl mt-10 p-5" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-lg">Lorries · Drivers · Kelindan</h3>
+                <button onClick={() => setShowManage(false)} className="text-gray-400 hover:text-gray-700 text-xl leading-none">×</button>
+              </div>
+              <p className="text-sm text-gray-500 mb-4">These saved names appear as a dropdown when you fill in a trip. Add or remove them here. (This master list is what your future driver app will use.)</p>
+              <div className="grid sm:grid-cols-3 gap-4">
+                {(['lorry', 'driver', 'kelindan'] as const).map(kind => (
+                  <div key={kind} className="border rounded-xl p-3">
+                    <div className="font-medium capitalize mb-2">{kind === 'lorry' ? 'Lorries' : kind === 'driver' ? 'Drivers' : 'Kelindan'} <span className="text-gray-400 font-normal">({resources[kind].length})</span></div>
+                    <div className="flex gap-1 mb-2">
+                      <input value={newRes[kind]} onChange={e => setNewRes(p => ({ ...p, [kind]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') addResource(kind, newRes[kind]) }} placeholder={`Add ${kind}…`} className="border rounded px-2 py-1 text-sm w-full" />
+                      <button onClick={() => addResource(kind, newRes[kind])} className="px-2 py-1 rounded bg-gray-800 text-white text-sm">Add</button>
+                    </div>
+                    <ul className="space-y-1 max-h-60 overflow-auto">
+                      {resources[kind].length === 0 && <li className="text-xs text-gray-400">None yet.</li>}
+                      {resources[kind].map(r => (
+                        <li key={r.id} className="flex items-center justify-between gap-2 text-sm border-b border-gray-100 py-1">
+                          <span>{r.name}</span>
+                          <button onClick={() => removeResource(r.id)} className="text-red-500 hover:text-red-700 text-xs">Remove</button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {shownSched.length === 0 ? <p className="text-gray-400 text-sm">No scheduled deliveries.</p> : (() => {
           const allKeys: string[] = []
           shownSched.forEach(s => { if (s.data) Object.keys(s.data).forEach(k => { if (!allKeys.includes(k)) allKeys.push(k) }) })
@@ -490,9 +549,9 @@ export default function DeliverySchedulePage() {
                         {TRIP_TYPES.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
                       <input value={trip?.remark || ''} placeholder="For (e.g. Klang)" onChange={e => setTripField(g.route!, g.date!, 'remark', e.target.value)} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-32" />
-                      <input value={trip?.lorry_no || ''} placeholder="Lorry no" onChange={e => setTripField(g.route!, g.date!, 'lorry_no', e.target.value)} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-28" />
-                      <input value={trip?.driver || ''} placeholder="Driver" onChange={e => setTripField(g.route!, g.date!, 'driver', e.target.value)} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-28" />
-                      <input value={trip?.kelindan || ''} placeholder="Kelindan" onChange={e => setTripField(g.route!, g.date!, 'kelindan', e.target.value)} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-28" />
+                      <input list="dr-lorry" value={trip?.lorry_no || ''} placeholder="Lorry no" onChange={e => setTripField(g.route!, g.date!, 'lorry_no', e.target.value)} onBlur={e => { saveTrip(g.route!, g.date!, {}); addResource('lorry', e.target.value) }} className="border rounded px-2 py-1 w-28" />
+                      <input list="dr-driver" value={trip?.driver || ''} placeholder="Driver" onChange={e => setTripField(g.route!, g.date!, 'driver', e.target.value)} onBlur={e => { saveTrip(g.route!, g.date!, {}); addResource('driver', e.target.value) }} className="border rounded px-2 py-1 w-28" />
+                      <input list="dr-kelindan" value={trip?.kelindan || ''} placeholder="Kelindan" onChange={e => setTripField(g.route!, g.date!, 'kelindan', e.target.value)} onBlur={e => { saveTrip(g.route!, g.date!, {}); addResource('kelindan', e.target.value) }} className="border rounded px-2 py-1 w-28" />
                     </div>
                     {/* Print-only: show only the filled-in trip details, no empty boxes */}
                     <div className="hidden print:block text-xs text-gray-700">{[trip?.category && `Type: ${trip.category}`, trip?.remark && `For: ${trip.remark}`, trip?.lorry_no && `Lorry: ${trip.lorry_no}`, trip?.driver && `Driver: ${trip.driver}`, trip?.kelindan && `Kelindan: ${trip.kelindan}`].filter(Boolean).join('   ·   ')}</div>

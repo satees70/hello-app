@@ -553,3 +553,22 @@ create policy dli_write on public.delivery_line_info for all using (true) with c
 alter table public.delivery_trips add column if not exists remark text;
 
 alter table public.delivery_trips add column if not exists category text;
+
+-- Master list of lorries / drivers / kelindan (saved once, picked from a dropdown on each trip;
+-- also the source the future driver app will read from).
+create table if not exists public.delivery_resources (
+  id uuid primary key default gen_random_uuid(),
+  kind text not null check (kind in ('lorry', 'driver', 'kelindan')),
+  name text not null,
+  phone text,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists delivery_resources_kind_name_uq on public.delivery_resources (kind, lower(name));
+grant select, insert, update, delete on public.delivery_resources to authenticated;
+grant all on public.delivery_resources to service_role;
+alter table public.delivery_resources enable row level security;
+drop policy if exists dr_read on public.delivery_resources;
+create policy dr_read on public.delivery_resources for select using (true);
+drop policy if exists dr_write on public.delivery_resources;
+create policy dr_write on public.delivery_resources for all using (true) with check (true);
