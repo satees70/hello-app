@@ -225,13 +225,13 @@ export default function DeliverySchedulePage() {
     } catch { setError('Could not read that file. Make sure it is an Excel or CSV export.') }
   }
 
-  // SOs already scheduled, and which dates. We hide scheduled orders EXCEPT ones whose
-  // only schedule was yesterday (those show in green so you can carry them over). We look
-  // back exactly 1 day — older scheduled orders stay hidden.
-  const yesterdayISO = useMemo(() => { const d = new Date(); d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }, [])
+  // SOs already scheduled, and which dates. We hide scheduled orders EXCEPT ones whose only
+  // schedule was the day BEFORE the date you're planning (those show in green so you can carry
+  // them over). e.g. planning 30/06 → orders sitting on 29/06 reappear so you can re-assign them.
+  const carryDate = useMemo(() => { const d = new Date((date || tomorrowISO()) + 'T00:00:00'); d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }, [date])
   const scheduledSOs = useMemo(() => new Set(sched.map(s => s.so_number)), [sched])
   const schedDatesBySO = useMemo(() => { const m = new Map<string, Set<string>>(); sched.forEach(s => { if (!s.so_number) return; const set = m.get(s.so_number) || new Set<string>(); if (s.delivery_date) set.add(s.delivery_date); m.set(s.so_number, set) }); return m }, [sched])
-  const onlyScheduledYesterday = (so: string) => { if (!scheduledSOs.has(so)) return false; const dates = schedDatesBySO.get(so) || new Set(); return dates.size > 0 && [...dates].every(d => d === yesterdayISO) }
+  const onlyScheduledYesterday = (so: string) => { if (!scheduledSOs.has(so)) return false; const dates = schedDatesBySO.get(so) || new Set(); return dates.size > 0 && [...dates].every(d => d === carryDate) }
   // Rows to show: pending (not scheduled) + ones scheduled only yesterday (green).
   const mapped = useMemo(() => rows.map((r, idx) => {
     const data: Record<string, string> = {}
@@ -242,7 +242,7 @@ export default function DeliverySchedulePage() {
       customer: colCust !== '' ? String(r[Number(colCust)] ?? '').trim() : '',
       data,
     }
-  }).filter(m => m.so && (showScheduled || !scheduledSOs.has(m.so) || onlyScheduledYesterday(m.so))), [rows, headers, colSO, colCust, scheduledSOs, schedDatesBySO, showScheduled])
+  }).filter(m => m.so && (showScheduled || !scheduledSOs.has(m.so) || onlyScheduledYesterday(m.so))), [rows, headers, colSO, colCust, scheduledSOs, schedDatesBySO, showScheduled, carryDate])
   const pendingCount = mapped.filter(m => !scheduledSOs.has(m.so)).length
   const yesterdayCount = mapped.length - pendingCount
 
@@ -328,7 +328,7 @@ export default function DeliverySchedulePage() {
             📄 Choose Excel / CSV file
             <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={e => onFile(e.target.files?.[0])} />
           </label>
-          {fileName && <span className="ml-2 text-sm text-gray-500">{fileName} · <strong>{pendingCount}</strong> pending{yesterdayCount ? ` · ${yesterdayCount} scheduled yesterday (green)` : ''}</span>}
+          {fileName && <span className="ml-2 text-sm text-gray-500">{fileName} · <strong>{pendingCount}</strong> pending{yesterdayCount ? ` · ${yesterdayCount} carried over from the day before (green)` : ''}</span>}
           {headers.length > 0 && <label className="ml-3 inline-flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer"><input type="checkbox" checked={showScheduled} onChange={e => setShowScheduled(e.target.checked)} className="h-4 w-4" /> Show already-scheduled too</label>}
 
           {headers.length > 0 && (
