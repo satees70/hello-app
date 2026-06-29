@@ -57,10 +57,12 @@ export default function DispatchPage() {
   const [reason, setReason] = useState('')
   const [returnCart, setReturnCart] = useState<CartReturn[]>([])
   const [salesLines, setSalesLines] = useState<SLine[]>([])
-  const [directCart, setDirectCart] = useState<{ lineId: string; so: string; itemCode: string; description: string; qty: number; factory: string; factoryName: string }[]>([])
+  const [directCart, setDirectCart] = useState<{ lineId: string; so: string; itemCode: string; description: string; qty: number; batchNo: string; expDate: string; factory: string; factoryName: string }[]>([])
   const [dSo, setDSo] = useState('')
   const [dLineId, setDLineId] = useState('')
   const [dQty, setDQty] = useState('')
+  const [dBatch, setDBatch] = useState('')
+  const [dExp, setDExp] = useState('')
   // Edit-a-return modal (needs HO approval)
   const [editRet, setEditRet] = useState<MReturn | null>(null)
   const [editQty, setEditQty] = useState('')
@@ -166,8 +168,8 @@ export default function DispatchPage() {
     if (!(n > 0)) { setError('Enter a quantity greater than zero.'); return }
     const left = remainingOf(line) - directCart.filter(c => c.lineId === line.id).reduce((s, c) => s + c.qty, 0)
     if (n > left) { setError(`Only ${left} left to deliver on this line.`); return }
-    setDirectCart(c => [...c, { lineId: line.id, so: line.so_number, itemCode: line.item_code, description: line.description || '', qty: n, factory: line.factory_code, factoryName: factoryName(line.factory_code) }])
-    setDLineId(''); setDQty('')
+    setDirectCart(c => [...c, { lineId: line.id, so: line.so_number, itemCode: line.item_code, description: line.description || '', qty: n, batchNo: dBatch.trim(), expDate: dExp, factory: line.factory_code, factoryName: factoryName(line.factory_code) }])
+    setDLineId(''); setDQty(''); setDBatch(''); setDExp('')
   }
   async function createDirect() {
     if (directCart.length === 0) return
@@ -176,7 +178,7 @@ export default function DispatchPage() {
     const facs = [...new Set(directCart.map(c => c.factory))]
     const dos: string[] = []
     for (const fac of facs) {
-      const lines = directCart.filter(c => c.factory === fac).map(c => ({ line_id: c.lineId, qty: c.qty }))
+      const lines = directCart.filter(c => c.factory === fac).map(c => ({ line_id: c.lineId, qty: c.qty, batch_no: c.batchNo || null, exp_date: c.expDate || null }))
       const { data, error: e } = await supabase.rpc('create_direct_delivery', { p_lines: lines })
       if (e) { setError(e.message); setBusy(false); return }
       dos.push(data as string)
@@ -385,8 +387,12 @@ export default function DispatchPage() {
                       {linesForSO.map(l => <option key={l.id} value={l.id}>{l.item_code} — {l.description} · {remainingOf(l)} left · {factoryName(l.factory_code)}</option>)}
                     </select></div>
                 )}
-                <div className="flex flex-col gap-1 w-28"><span className="text-xs font-medium text-gray-600">Quantity</span>
+                <div className="flex flex-col gap-1 w-24"><span className="text-xs font-medium text-gray-600">Quantity</span>
                   <input type="number" step="any" min="0" value={dQty} onChange={e => setDQty(e.target.value)} className="border rounded px-2 py-1.5 text-sm" /></div>
+                <div className="flex flex-col gap-1 w-32"><span className="text-xs font-medium text-gray-600">Batch (optional)</span>
+                  <input value={dBatch} onChange={e => setDBatch(e.target.value)} placeholder="Batch no" className="border rounded px-2 py-1.5 text-sm" /></div>
+                <div className="flex flex-col gap-1 w-36"><span className="text-xs font-medium text-gray-600">Expiry (optional)</span>
+                  <input type="date" value={dExp} onChange={e => setDExp(e.target.value)} className="border rounded px-2 py-1.5 text-sm" /></div>
                 <button className="bg-orange-600 text-white px-5 py-2 rounded-lg hover:bg-orange-700 text-sm font-medium">Add</button>
               </div>
             </form>
@@ -396,7 +402,7 @@ export default function DispatchPage() {
                 <ul className="space-y-1 mb-3">
                   {directCart.map((c, i) => (
                     <li key={i} className="flex items-center justify-between gap-2 text-sm border-b border-amber-100 py-1">
-                      <span><span className="font-mono">{c.itemCode}</span> {c.description && <span className="text-gray-500">{c.description}</span>} · {c.qty} · {c.so} · {c.factoryName}</span>
+                      <span><span className="font-mono">{c.itemCode}</span> {c.description && <span className="text-gray-500">{c.description}</span>} · {c.qty} · {c.so} · {c.factoryName}{c.batchNo && <span className="text-gray-500"> · batch {c.batchNo}</span>}{c.expDate && <span className="text-gray-500"> · exp {c.expDate.split('-').reverse().join('/')}</span>}</span>
                       <button onClick={() => setDirectCart(cart => cart.filter((_, j) => j !== i))} className="text-red-500 hover:text-red-700 text-xs shrink-0">Remove</button>
                     </li>
                   ))}

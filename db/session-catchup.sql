@@ -656,6 +656,8 @@ alter table public.sales_order_lines add column if not exists delivered_qty nume
 alter table public.sales_order_lines add column if not exists delivered_do text;
 alter table public.sales_order_lines add column if not exists delivered_at timestamptz;
 alter table public.dispatch_order_lines add column if not exists source text;
+alter table public.dispatch_order_lines add column if not exists batch_no text;
+alter table public.dispatch_order_lines add column if not exists exp_date date;
 
 create or replace function public.create_direct_delivery(p_lines jsonb) returns text
 language plpgsql security definer set search_path = public as $$
@@ -683,8 +685,8 @@ begin
     if v_line.factory_code <> v_fac then raise exception 'All items must be from the same factory'; end if;
     v_qty := (r->>'qty')::numeric;
     if v_qty is null or v_qty <= 0 then raise exception 'Quantity must be greater than zero'; end if;
-    insert into public.dispatch_order_lines (dispatch_id, batch_id, item_code, description, quantity, source)
-    values (v_id, null, v_line.item_code, v_line.description, v_qty, 'sales-direct');
+    insert into public.dispatch_order_lines (dispatch_id, batch_id, item_code, description, quantity, source, batch_no, exp_date)
+    values (v_id, null, v_line.item_code, v_line.description, v_qty, 'sales-direct', nullif(r->>'batch_no', ''), nullif(r->>'exp_date', '')::date);
     select * into v_item from public.items where code = v_line.item_code limit 1;
     if v_item.id is not null then
       update public.item_stock set quantity = quantity - v_qty, updated_at = now() where item_id = v_item.id and factory_code = v_fac;
