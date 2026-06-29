@@ -426,7 +426,9 @@ export default function DeliverySchedulePage() {
         {shownSched.length === 0 ? <p className="text-gray-400 text-sm">No scheduled deliveries.</p> : (() => {
           const allKeys: string[] = []
           shownSched.forEach(s => { if (s.data) Object.keys(s.data).forEach(k => { if (!allKeys.includes(k)) allKeys.push(k) }) })
-          const poKey = allKeys.find(c => /podel/i.test(c)) || ''
+          const podelKeyS = allKeys.find(c => /podel/i.test(c)) || ''                         // PO delivery date
+          const orderDateKey = allKeys.find(c => c.trim().toLowerCase() === 'date') || allKeys.find(c => /order\s*date/i.test(c)) || ''   // order/PO date
+          const cancelKey = allKeys.find(c => /cancel/i.test(c)) || ''                          // PO expired / cancel date
           const custKey = allKeys.find(c => /company|customer/i.test(c)) || ''
           const linkKey = allKeys.find(c => /drive|link/i.test(c)) || ''
           const holdKeyS = allKeys.find(c => /hold/i.test(c)) || ''
@@ -506,10 +508,12 @@ export default function DeliverySchedulePage() {
                         <th className="px-3 py-2">Location</th>
                         <th className="px-3 py-2 status-col">Pending</th>
                         <th className="px-3 py-2">PO date</th>
+                        <th className="px-3 py-2">Delivery date</th>
+                        <th className="px-3 py-2">PO expired</th>
                         <th className="px-3 py-2">Customer</th>
                         <th className="px-3 py-2 text-center inv-col">Invoice ✓</th>
                         <th className="px-3 py-2 no-print">Doc</th>
-                        <th className="px-3 py-2 no-print">Delivery date</th>
+                        <th className="px-3 py-2 no-print">Scheduled</th>
                         <th className="px-3 py-2 no-print">Move to</th><th className="no-print"></th>
                       </tr>
                     </thead>
@@ -530,7 +534,9 @@ export default function DeliverySchedulePage() {
                               : !pend.length ? <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Completed ({its.length}/{its.length})</span>
                               : <button type="button" onClick={() => toggleExpand(s.id)} className="inline-flex items-center gap-1 no-print"><span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">{pend.length} of {its.length} item(s) pending</span><span className="text-gray-400 text-[10px]">{open ? '▲' : '▼'}</span></button>
                             }</td>
-                            <td className="px-3 py-1.5 text-gray-700">{poKey ? cellView(s.data?.[poKey] ?? '') : '—'}</td>
+                            <td className="px-3 py-1.5 text-gray-700">{orderDateKey ? cellView(s.data?.[orderDateKey] ?? '') : '—'}</td>
+                            <td className="px-3 py-1.5 text-gray-700">{podelKeyS ? cellView(s.data?.[podelKeyS] ?? '') : '—'}</td>
+                            <td className="px-3 py-1.5 text-gray-700">{cancelKey ? cellView(s.data?.[cancelKey] ?? '') : '—'}</td>
                             <td className="px-3 py-1.5 text-gray-700">{(custKey && s.data?.[custKey]) || s.customer_name || '—'}</td>
                             <td className="px-3 py-1.5 text-center inv-col"><input type="checkbox" checked={s.invoiced} onChange={e => updateSched(s.id, { invoiced: e.target.checked })} className="h-4 w-4" /></td>
                             <td className="px-3 py-1.5 no-print">{linkKey && s.data?.[linkKey] ? cellView(s.data[linkKey]) : '—'}</td>
@@ -549,7 +555,7 @@ export default function DeliverySchedulePage() {
                           </tr>
                           {pend.length > 0 && (
                             <tr className={open ? 'bg-amber-50/40' : 'hidden print:table-row'}>
-                              <td colSpan={10} className="px-4 pb-3 pt-1 whitespace-normal">
+                              <td colSpan={12} className="px-4 pb-3 pt-1 whitespace-normal">
                                 <div className="text-xs font-semibold text-gray-600 mb-1">{s.so_number} — {pend.length} item(s) pending</div>
                                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-8 gap-y-1">
                                   {pend.map((i, k) => (
