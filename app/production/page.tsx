@@ -90,6 +90,7 @@ export default function ProductionPage() {
   const [search, setSearch] = useState('')
   const [grindingMode, setGrindingMode] = useState(false)   // false = Order Board, true = Grinding Board
   const [grindingLineIds, setGrindingLineIds] = useState<Set<string>>(new Set())
+  const [recipeProducts, setRecipeProducts] = useState<Set<string>>(new Set())   // products that have a grinding recipe
   const [consumption, setConsumption] = useState<Record<string, ConsRow[]>>({}) // batch id -> consumed lots
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -110,6 +111,8 @@ export default function ProductionPage() {
     setBatches(((b as Batch[]) || []).filter(x => x.status !== 'Bypassed'))   // bypassed = marked completed by hand → off the board
     const { data: gl } = await supabase.from('sales_order_lines').select('id').eq('is_grinding', true)
     setGrindingLineIds(new Set((gl || []).map(x => x.id)))
+    const { data: gr } = await supabase.from('grinding_recipes').select('product, active').eq('active', true)
+    setRecipeProducts(new Set((gr || []).map(r => (r.product || '').trim().toLowerCase()).filter(Boolean)))
     setFactories(f || [])
     setItems(it)
     setBoms(bc)
@@ -140,6 +143,17 @@ export default function ProductionPage() {
   // Flag batches whose item can't be exploded into materials, with HO quick-actions
   function bomBadge(itemCode: string) {
     const it = items.find(i => i.code === itemCode)
+    // Grinding items use a Recipe (not a BOM).
+    if (grindingMode) {
+      const has = recipeProducts.has(itemCode.trim().toLowerCase()) || (it && recipeProducts.has((it.description || '').trim().toLowerCase()))
+      if (has) return null
+      return (
+        <span className="mt-0.5 inline-flex items-center gap-2">
+          <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[11px] font-medium">⚠ No recipe set</span>
+          {can(profile, 'grinding_recipe', 'edit') && <a href="/grinding" className="text-blue-600 hover:underline text-[11px]">Create recipe →</a>}
+        </span>
+      )
+    }
     if (!it) return <span className="inline-block mt-0.5 bg-red-100 text-red-700 px-1.5 py-0.5 rounded text-[11px] font-medium">⚠ Not in Items Master</span>
     if (it.type !== 'Manufactured') {
       if (!can(profile, 'items', 'edit')) return null
