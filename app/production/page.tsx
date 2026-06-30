@@ -8,9 +8,10 @@ import { can, hasCap } from '@/lib/permissions'
 import { fetchTomorrowDeliverySOs } from '@/lib/delivery'
 import ItemPicker from '@/components/ItemPicker'
 
-interface BatchItem { id: string; customer_name: string; so_number: string; quantity: number }
+interface BatchItem { id: string; customer_name: string; so_number: string; quantity: number; line_id: string | null }
 interface Batch {
   id: string
+  is_grinding?: boolean
   batch_no: string
   item_code: string
   description: string
@@ -87,6 +88,8 @@ export default function ProductionPage() {
   const [tomorrowOnly, setTomorrowOnly] = useState(false)
   const [sortBy, setSortBy] = useState<'due_asc' | 'due_desc' | 'batch'>('due_asc')
   const [search, setSearch] = useState('')
+  const [grindingMode, setGrindingMode] = useState(false)   // false = Order Board, true = Grinding Board
+  const [grindingLineIds, setGrindingLineIds] = useState<Set<string>>(new Set())
   const [consumption, setConsumption] = useState<Record<string, ConsRow[]>>({}) // batch id -> consumed lots
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -97,13 +100,15 @@ export default function ProductionPage() {
 
   async function loadAll() {
     const [{ data: b }, { data: f }, it, bc, { data: st }] = await Promise.all([
-      supabase.from('production_batches').select('*, production_batch_items(id, customer_name, so_number, quantity)').order('created_at', { ascending: false }),
+      supabase.from('production_batches').select('*, production_batch_items(id, customer_name, so_number, quantity, line_id)').order('created_at', { ascending: false }),
       supabase.from('factories').select('code, name').order('code'),
       fetchAll<Item>('items', 'id, code, description, unit, type, supplied_by_factory'),
       fetchAll<BomComp>('bom_components', 'parent_item_id, component_item_id, quantity, apply_allowance, use_mode'),
       supabase.from('item_stock').select('item_id, factory_code, quantity'),
     ])
     setBatches(((b as Batch[]) || []).filter(x => x.status !== 'Bypassed'))   // bypassed = marked completed by hand → off the board
+    const { data: gl } = await supabase.from('sales_order_lines').select('id').eq('is_grinding', true)
+    setGrindingLineIds(new Set((gl || []).map(x => x.id)))
     setFactories(f || [])
     setItems(it)
     setBoms(bc)
@@ -302,7 +307,11 @@ export default function ProductionPage() {
   }
   const fromTs = dateFrom ? new Date(dateFrom + 'T00:00:00').getTime() : null
   const toTs = dateTo ? new Date(dateTo + 'T00:00:00').getTime() : null
-  let shown = filter === 'All' ? batches : batches.filter(b => derivedStatus(b) === filter)
+  // A batch belongs to grinding if its line is tagged grinding (or the batch itself is flagged).
+  const isGrindingBatch = (b: Batch) => !!b.is_grinding || (b.production_batch_items || []).some(it => it.line_id && grindingLineIds.has(it.line_id))
+  // Each board sees only its own batches: Grinding board = grinding ones; Order Board = the rest.
+  const boardBatches = batches.filter(b => grindingMode ? isGrindingBatch(b) : !isGrindingBatch(b))
+  let shown = filter === 'All' ? boardBatches : boardBatches.filter(b => derivedStatus(b) === filter)
   if (fromTs !== null) shown = shown.filter(b => { const k = dateKey(b.delivery_date); return k !== Number.MAX_SAFE_INTEGER && k >= fromTs })
   if (toTs !== null) shown = shown.filter(b => { const k = dateKey(b.delivery_date); return k !== Number.MAX_SAFE_INTEGER && k <= toTs })
   if (isHO && factoryFilter) shown = shown.filter(b => b.factory_code === factoryFilter)
@@ -313,9 +322,10 @@ export default function ProductionPage() {
     (b.description || '').toLowerCase().includes(sq) ||
     (b.batch_no || '').toLowerCase().includes(sq) ||
     (b.production_batch_items || []).some(it => (it.so_number || '').toLowerCase().includes(sq) || (it.customer_name || '').toLowerCase().includes(sq)))
-  const tomorrowCount = batches.filter(dueTomorrow).length
+  const tomorrowCount = boardBatches.filter(dueTomorrow).length
   const counts: Record<string, number> = { Planned: 0, Requested: 0, 'In Progress': 0, Completed: 0 }
-  batches.forEach(b => { const st = derivedStatus(b); counts[st] = (counts[st] || 0) + 1 })
+  boardBatches.forEach(b => { const st = derivedStatus(b); counts[st] = (counts[st] || 0) + 1 })
+  const grindingCount = batches.filter(isGrindingBatch).length
 
   const extraN = Math.max(0, Number(extra) || 0)
   const exploded = selected ? explode(selected.item_code, selected.factory_code, selected.total + extraN, selected.mode) : null
@@ -352,11 +362,17 @@ export default function ProductionPage() {
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        <h1 className="text-2xl font-bold mb-1">Order Board</h1>
+        <h1 className="text-2xl font-bold mb-1">{grindingMode ? '🌀 Grinding Board' : 'Order Board'}</h1>
         <p className="text-gray-500 text-sm mb-3">
-          Orders from confirmed sales orders. Once materials are received, plan which line packs each item and when.
+          {grindingMode
+            ? 'Sales-order lines tagged for grinding. Plan, request materials and produce — separate from the normal packing line.'
+            : 'Orders from confirmed sales orders. Once materials are received, plan which line packs each item and when.'}
           {isHO ? ' Showing all factories.' : ` Showing factory ${profile.factory_code}.`}
         </p>
+        <div className="flex items-center gap-2 mb-4">
+          <button onClick={() => { setGrindingMode(false); setFilter('All') }} className={`px-4 py-1.5 rounded-lg text-sm font-medium border ${!grindingMode ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}>Order Board</button>
+          <button onClick={() => { setGrindingMode(true); setFilter('All') }} className={`px-4 py-1.5 rounded-lg text-sm font-medium border ${grindingMode ? 'bg-purple-600 text-white border-purple-600' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}>🌀 Grinding Board{grindingCount ? ` (${grindingCount})` : ''}</button>
+        </div>
 
         {/* Summary — click to filter */}
         <div className="flex flex-wrap gap-2 mb-4 text-sm">
