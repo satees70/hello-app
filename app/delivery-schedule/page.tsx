@@ -298,7 +298,8 @@ export default function DeliverySchedulePage() {
   // schedule was the day BEFORE the date you're planning (those show in green so you can carry
   // them over). e.g. planning 30/06 → orders sitting on 29/06 reappear so you can re-assign them.
   const carryDate = useMemo(() => { const d = new Date((date || tomorrowISO()) + 'T00:00:00'); d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }, [date])
-  const scheduledSOs = useMemo(() => new Set(sched.map(s => s.so_number)), [sched])
+  // Only orders actually placed on a LINE count as scheduled. Ones with no line go back to the upload list.
+  const scheduledSOs = useMemo(() => new Set(sched.filter(s => s.route).map(s => s.so_number)), [sched])
   const schedDatesBySO = useMemo(() => { const m = new Map<string, Set<string>>(); sched.forEach(s => { if (!s.so_number) return; const set = m.get(s.so_number) || new Set<string>(); if (s.delivery_date) set.add(s.delivery_date); m.set(s.so_number, set) }); return m }, [sched])
   const onlyScheduledYesterday = (so: string) => { if (!scheduledSOs.has(so)) return false; const dates = schedDatesBySO.get(so) || new Set(); return dates.size > 0 && [...dates].every(d => d === carryDate) }
   // Rows to show: pending (not scheduled) + ones scheduled only yesterday (green).
@@ -329,6 +330,8 @@ export default function DeliverySchedulePage() {
     if (chosen.length === 0) { setError('Tick the orders you want to assign first.'); return }
     if (!date) { setError('Pick the delivery date.'); return }
     setBusy('assign'); setError(''); setSuccess('')
+    // Clear any prior schedule rows for these SOs (incl. unassigned ones) so re-assigning never duplicates.
+    await supabase.from('delivery_schedule').delete().in('so_number', chosen.map(m => m.so))
     const ins = chosen.map(m => ({ so_number: m.so, customer_name: m.customer || null, route: assignLine, delivery_date: date, data: m.data, created_by: profile?.id, created_by_name: profile?.full_name }))
     const { error: e } = await supabase.from('delivery_schedule').insert(ins)
     setBusy('')
@@ -345,6 +348,7 @@ export default function DeliverySchedulePage() {
 
   const schedDates = useMemo(() => [...new Set(sched.map(s => s.delivery_date).filter(Boolean) as string[])].sort(), [sched])
   const shownSched = useMemo(() => sched.filter(s =>
+    !!s.route &&   // unassigned orders live in the upload list, not here
     (routeFilter === 'all' || (s.route || '') === routeFilter) &&
     // Always surface rows with no delivery date (otherwise they hide behind the date filter); else match the chosen day.
     (dateFilter === 'all' || !s.delivery_date || s.delivery_date === dateFilter)
@@ -660,15 +664,13 @@ export default function DeliverySchedulePage() {
                             <td className="px-3 py-1.5 no-print">{linkKey && s.data?.[linkKey] ? cellView(s.data[linkKey]) : '—'}</td>
                             <td className="px-3 py-1.5 no-print"><input type="date" value={s.delivery_date || ''} onChange={e => updateSched(s.id, { delivery_date: e.target.value || null })} className="border rounded px-2 py-1 text-xs" />{isTomorrow && <span className="ml-1 bg-yellow-200 text-yellow-900 px-1 rounded text-[10px] font-semibold">TOMORROW</span>}</td>
                             <td className="px-3 py-1.5 no-print">
-                              <select value={s.route || ''} onChange={e => updateSched(s.id, { route: e.target.value || null })} className="border rounded px-2 py-1 text-xs">
-                                <option value="">—</option>
+                              <select value={s.route || ''} onChange={e => { if (e.target.value) updateSched(s.id, { route: e.target.value }); else removeSched(s.id) }} className="border rounded px-2 py-1 text-xs">
+                                <option value="">— (back to upload list)</option>
                                 {LINES.map(l => <option key={l} value={l}>{lineLabel(l, s.delivery_date)}</option>)}
                               </select>
                             </td>
                             <td className="px-3 py-1.5 text-right no-print">
-                              {s.route
-                                ? <button onClick={() => updateSched(s.id, { route: null })} className="text-amber-600 hover:underline text-xs" title="Take off this line — it moves to the Unassigned box so you can re-assign it">Unassign</button>
-                                : <button onClick={() => { if (confirm('Delete this order from the schedule for good?')) removeSched(s.id) }} className="text-red-600 hover:underline text-xs">Delete</button>}
+                              <button onClick={() => { if (confirm('Take this order off the schedule? It goes back to the upload list so you can re-assign it.')) removeSched(s.id) }} className="text-amber-600 hover:underline text-xs" title="Take off the schedule — it returns to the upload list to re-assign">Unassign</button>
                             </td>
                           </tr>
                           {pend.length > 0 && (
