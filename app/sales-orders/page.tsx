@@ -33,6 +33,7 @@ interface SalesLine {
   factory_code: string
   delivered_qty?: number | null
   delivered_do?: string | null
+  is_grinding?: boolean | null
 }
 
 interface ChangeRequest {
@@ -580,6 +581,15 @@ export default function SalesOrdersPage() {
     setSuccess(fac ? `${line.item_code} assigned to ${factoryName(fac)} for packing.` : `${line.item_code} set back to open.`)
     await viewLines(linesFor); loadSummary()
   }
+  // Tag/untag a line as a GRINDING process — routes it to the Grinding board instead of normal production.
+  async function toggleGrinding(line: SalesLine) {
+    if (!linesFor) return
+    setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('set_line_grinding', { p_line_id: line.id, p_on: !line.is_grinding })
+    if (e) { setError(e.message); return }
+    setSuccess(`${line.item_code} ${line.is_grinding ? 'removed from grinding' : 'tagged for grinding'}.`)
+    await viewLines(linesFor); loadSummary()
+  }
   async function submitBulkDelete() {
     if (!profile || !linesFor || selectedIds.size === 0) return
     const sel = lines.filter(l => selectedIds.has(l.id) && pendingForLine(l.id) === 0)
@@ -1123,7 +1133,9 @@ export default function SalesOrdersPage() {
                           ) : null}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">
-                          {Number(line.delivered_qty || 0) > 0
+                          {line.is_grinding
+                            ? <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700" title="Routed to the Grinding board">🌀 Grinding</span>
+                            : Number(line.delivered_qty || 0) > 0
                             ? <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700" title={line.delivered_do ? `Bypassed production · ${line.delivered_do}` : 'Bypassed production'}>Bypass Delivered{line.delivered_do ? ` · ${line.delivered_do}` : ''}</span>
                             : lineStatuses[line.id] ? <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${LINE_STATUS_STYLE[lineStatuses[line.id]] || 'bg-gray-100 text-gray-600'}`}>{lineStatuses[line.id]}</span> : <span className="text-gray-300 text-xs">—</span>}
                         </td>
@@ -1135,6 +1147,7 @@ export default function SalesOrdersPage() {
                               : <>
                                 <button onClick={() => openRequest(line)} className="text-blue-600 hover:underline">{isFactoryConfirmed(line.factory_code || '') ? 'Request change' : 'Edit'}</button>
                                 <button onClick={() => openDelete(line)} className="text-red-600 hover:underline ml-3">{isFactoryConfirmed(line.factory_code || '') ? 'Request delete' : 'Delete'}</button>
+                                <button onClick={() => toggleGrinding(line)} className={`hover:underline ml-3 ${line.is_grinding ? 'text-gray-500' : 'text-purple-600'}`} title="Route this line to the Grinding board">{line.is_grinding ? 'Untag grinding' : '🌀 Grinding'}</button>
                               </>}
                         </td>
                       </tr>

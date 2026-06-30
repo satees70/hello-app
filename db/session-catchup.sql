@@ -717,3 +717,23 @@ begin
    where id = p_batch_id;
 end $$;
 grant execute on function public.mark_batch_completed(uuid) to authenticated;
+
+-- ─── Grinding as a process tagged on a sales-order line ─────────────────────
+-- Tick a line as "grinding" → it routes to the Grinding board instead of normal production.
+alter table public.sales_order_lines add column if not exists is_grinding boolean not null default false;
+alter table public.production_batches add column if not exists is_grinding boolean not null default false;
+
+create or replace function public.set_line_grinding(p_line_id uuid, p_on boolean) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_line public.sales_order_lines;
+begin
+  select * into v_line from public.sales_order_lines where id = p_line_id;
+  if not found then raise exception 'Sales line not found'; end if;
+  if not has_perm('sales', 'edit') then raise exception 'Not allowed'; end if;
+  update public.sales_order_lines set is_grinding = coalesce(p_on, false) where id = p_line_id;
+  -- keep any existing production batch for this line in sync, so the boards route it correctly
+  update public.production_batches b set is_grinding = coalesce(p_on, false)
+    from public.production_batch_items i
+   where i.batch_id = b.id and i.line_id = p_line_id;
+end $$;
+grant execute on function public.set_line_grinding(uuid, boolean) to authenticated;
