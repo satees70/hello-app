@@ -90,7 +90,8 @@ export default function ProductionPage() {
   const [search, setSearch] = useState('')
   const [grindingMode, setGrindingMode] = useState(false)   // false = Order Board, true = Grinding Board
   const [grindingLineIds, setGrindingLineIds] = useState<Set<string>>(new Set())
-  const [recipeProducts, setRecipeProducts] = useState<Set<string>>(new Set())   // products that have a grinding recipe
+  const [recipes, setRecipes] = useState<{ id: string; product: string; factory_code: string }[]>([])   // grinding recipes
+  const [recipeComps, setRecipeComps] = useState<Record<string, { code: string; description: string; qty_per_lot: number }[]>>({})
   const [consumption, setConsumption] = useState<Record<string, ConsRow[]>>({}) // batch id -> consumed lots
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -111,8 +112,15 @@ export default function ProductionPage() {
     setBatches(((b as Batch[]) || []).filter(x => x.status !== 'Bypassed'))   // bypassed = marked completed by hand → off the board
     const { data: gl } = await supabase.from('sales_order_lines').select('id').eq('is_grinding', true)
     setGrindingLineIds(new Set((gl || []).map(x => x.id)))
-    const { data: gr } = await supabase.from('grinding_recipes').select('product, active').eq('active', true)
-    setRecipeProducts(new Set((gr || []).map(r => (r.product || '').trim().toLowerCase()).filter(Boolean)))
+    const { data: gr } = await supabase.from('grinding_recipes').select('id, product, factory_code, active').eq('active', true)
+    setRecipes((gr || []).map(r => ({ id: r.id, product: r.product, factory_code: r.factory_code })))
+    const rids = (gr || []).map(r => r.id)
+    if (rids.length) {
+      const { data: gc } = await supabase.from('grinding_recipe_components').select('recipe_id, item, qty_per_lot').in('recipe_id', rids)
+      const m: Record<string, { code: string; description: string; qty_per_lot: number }[]> = {}
+      ;(gc || []).forEach(c => { const code = String(c.item || '').split(' — ')[0].trim(); const desc = String(c.item || '').split(' — ').slice(1).join(' — ').trim(); (m[c.recipe_id] = m[c.recipe_id] || []).push({ code, description: desc, qty_per_lot: Number(c.qty_per_lot || 0) }) })
+      setRecipeComps(m)
+    } else setRecipeComps({})
     setFactories(f || [])
     setItems(it)
     setBoms(bc)
@@ -145,8 +153,7 @@ export default function ProductionPage() {
     const it = items.find(i => i.code === itemCode)
     // Grinding items use a Recipe (not a BOM).
     if (grindingMode) {
-      const has = recipeProducts.has(itemCode.trim().toLowerCase()) || (it && recipeProducts.has((it.description || '').trim().toLowerCase()))
-      if (has) return null
+      if (recipeFor(itemCode, it?.description)) return null
       return (
         <span className="mt-0.5 inline-flex items-center gap-2">
           <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[11px] font-medium">⚠ No recipe set</span>
@@ -178,8 +185,35 @@ export default function ProductionPage() {
     return 'Planned'
   }
 
+  // Find the grinding recipe for an item (match by the product's code or description; prefer same factory).
+  function recipeFor(itemCode: string, description: string | undefined, factory?: string) {
+    const ic = (itemCode || '').trim().toLowerCase(), dc = (description || '').trim().toLowerCase()
+    const codeOf = (s: string) => (s || '').split(' — ')[0].trim().toLowerCase()
+    const descOf = (s: string) => (s || '').split(' — ').slice(1).join(' — ').trim().toLowerCase()
+    const m = (r: { product: string }) => codeOf(r.product) === ic || (!!dc && descOf(r.product) === dc) || (r.product || '').trim().toLowerCase() === ic
+    return (factory && recipes.find(r => r.factory_code === factory && m(r))) || recipes.find(m) || null
+  }
+
   // Explode a BOM for a given item/factory/quantity
   function explode(itemCode: string, factoryCode: string, total: number, mode = 'auto') {
+    // Grinding items are driven by their RECIPE (qty per lot × quantity), not a BOM.
+    if (grindingMode) {
+      const parent = items.find(i => i.code === itemCode)
+      const rec = recipeFor(itemCode, parent?.description, factoryCode)
+      if (!rec) return { note: 'No grinding recipe for this item — create one in Grinding → Recipes.', rows: [], labels: [] as { code: string; description: string; unit: string; required: number }[] }
+      const comps = recipeComps[rec.id] || []
+      if (!comps.length) return { note: 'This grinding recipe has no materials.', rows: [], labels: [] as { code: string; description: string; unit: string; required: number }[] }
+      const rows = comps.map((c, i) => {
+        const ci = items.find(x => x.code === c.code)
+        const required = c.qty_per_lot * total
+        const id = ci?.id || c.code
+        const key = `${id}|${factoryCode}`
+        const st = ci?.id ? (stock[key] ?? 0) : 0
+        const shortfall = Math.max(required - st, 0)
+        return { item_id: id, key: `${key}|${i}`, code: c.code, description: ci?.description || c.description, unit: ci?.unit || '', required, stock: st, shortfall, requested: clean(shortfall) }
+      })
+      return { note: '', rows, labels: [] as { code: string; description: string; unit: string; required: number }[] }
+    }
     const parent = items.find(i => i.code === itemCode)
     if (!parent) return { note: `Item ${itemCode} is not in Items Master.`, rows: [], labels: [] as { code: string; description: string; unit: string; required: number }[] }
     const all = boms.filter(b => b.parent_item_id === parent.id)
@@ -645,7 +679,7 @@ export default function ProductionPage() {
                 {' '}= <strong>{selected.total}</strong> total
               </div>
             )}
-            <div className="flex flex-wrap items-center gap-2 mb-4 text-sm">
+            {!grindingMode && <div className="flex flex-wrap items-center gap-2 mb-4 text-sm">
               <span className="font-medium text-gray-700">Run mode:</span>
               {hasRequest ? (
                 <span className="px-2 py-1 rounded bg-gray-100 text-gray-700">{selected.mode === 'manual' ? 'Manual' : 'Auto machine'} <span className="text-gray-400">(locked — request already open)</span></span>
@@ -656,7 +690,7 @@ export default function ProductionPage() {
                 </select>
               )}
               <span className="text-gray-400 text-xs">decides which materials are needed (auto = roll, manual = pieces)</span>
-            </div>
+            </div>}
 
             {!hasRequest && (
               <div className="flex flex-wrap items-center gap-2 text-sm mb-3">
@@ -768,6 +802,7 @@ export default function ProductionPage() {
                     <div className="flex items-end gap-3">
                       <button onClick={() => {
                         if (adhoc) raiseExt(selected, customRows.map(r => ({ code: r.code, description: r.description, unit: r.unit, qty: Number(r.qty) })), extraN, extraN > 0 ? `Ad-hoc · +${extraN} for stock` : 'Ad-hoc')
+                        else if (grindingMode) raiseExt(selected, exploded.rows.filter(r => r.shortfall > 0).map(r => ({ code: r.code, description: r.description, unit: r.unit, qty: r.requested })), 0, `Ad-hoc · Grinding recipe${extraN > 0 ? ` (+${extraN} for stock)` : ''}`)
                         else if (extraN > 0) raiseExt(selected, exploded.rows.map(r => ({ code: r.code, description: r.description, unit: r.unit, qty: r.shortfall > 0 ? r.requested : 0 })), extraN, `+${extraN} extra for stock`)
                         else raiseTarget(selected)
                       }} disabled={raising || hasRequest || (adhoc ? customRows.filter(r => Number(r.qty) > 0).length === 0 : totalShortfall <= 0)}
