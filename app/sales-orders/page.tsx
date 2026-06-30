@@ -97,6 +97,7 @@ export default function SalesOrdersPage() {
   const [docSearch, setDocSearch] = useState('')
   const [docTomorrow, setDocTomorrow] = useState(false)
   const [docUrgent, setDocUrgent] = useState(false)
+  const [docTab, setDocTab] = useState<'pending' | 'completed'>('pending')
   const [docLineText, setDocLineText] = useState<Record<string, string>>({})   // import -> item codes + descriptions inside it
   const [importSos, setImportSos] = useState<Record<string, string[]>>({})   // import -> its SO numbers
   const [discSo, setDiscSo] = useState<Record<string, number>>({})   // SO number -> discussion message count
@@ -210,8 +211,8 @@ export default function SalesOrdersPage() {
     const [{ data: crs }, { data: confs }, allLines] = await Promise.all([
       supabase.from('change_requests').select('import_id, status'),
       supabase.from('document_confirmations').select('import_id, factory_code'),
-      fetchAll<{ import_id: string; so_number: string | null; item_code: string | null; description: string | null; location_code: string | null; factory_code: string | null }>(
-        'sales_order_lines', 'import_id, so_number, item_code, description, location_code, factory_code'),
+      fetchAll<{ import_id: string; so_number: string | null; item_code: string | null; description: string | null; location_code: string | null; factory_code: string | null; delivered_qty: number | null }>(
+        'sales_order_lines', 'import_id, so_number, item_code, description, location_code, factory_code, delivered_qty'),
     ])
     const pending: Record<string, number> = {}
     ;(crs || []).forEach(c => { if (c.status === 'Pending') pending[c.import_id] = (pending[c.import_id] || 0) + 1 })
@@ -266,7 +267,9 @@ export default function SalesOrdersPage() {
       const m = (locStats[l.import_id] = locStats[l.import_id] || {})
       const g = (m[l.location_code] = m[l.location_code] || { total: 0, done: 0 })
       g.total++
-      if (statusMap[`${l.factory_code}|${l.item_code}|${l.so_number}`] === LINE_DONE) g.done++
+      // A line counts as done when delivered directly (bypass), or production is completed / delivered.
+      const st = statusMap[`${l.factory_code}|${l.item_code}|${l.so_number}`]
+      if (Number(l.delivered_qty || 0) > 0 || st === 'Production completed' || st === LINE_DONE) g.done++
     })
     const summary: Record<string, { pending: number; dup: number; locations: string[]; locFactory: Record<string, string>; confirmed: string[]; locStats: Record<string, { total: number; done: number }> }> = {}
     new Set([...Object.keys(pending), ...Object.keys(dup), ...Object.keys(locs), ...Object.keys(conf)]).forEach(id => {
@@ -754,6 +757,10 @@ export default function SalesOrdersPage() {
   const docMine = (d: SalesImport) => myFacs.size > 0 && (
     (!!d.factory_code && myFacs.has(d.factory_code)) ||
     Object.values(docSummary[d.id]?.locFactory || {}).some(f => myFacs.has(f)))
+  // A document is "completed" once every one of its lines is done (delivered/bypass/produced).
+  const docComplete = (d: SalesImport) => { const e = Object.values(docSummary[d.id]?.locStats || {}); const total = e.reduce((s, x) => s + x.total, 0); const done = e.reduce((s, x) => s + x.done, 0); return total > 0 && done >= total }
+  const completedDocCount = imports.filter(docComplete).length
+  const pendingDocCount = imports.length - completedDocCount
   const docIsTomorrow = (d: SalesImport) => (importSos[d.id] || []).some(so => tomorrowSOs.has(so))
   const tomorrowDocCount = imports.filter(docIsTomorrow).length
   const urgentDocCount = imports.filter(d => d.urgent).length
@@ -763,7 +770,8 @@ export default function SalesOrdersPage() {
     docPass(docFilters.locations, docSummary[d.id]?.locations || []) &&
     docPass(docFilters.issues, docIssueTags(d)) &&
     (!docTomorrow || docIsTomorrow(d)) &&
-    (!docUrgent || !!d.urgent))
+    (!docUrgent || !!d.urgent) &&
+    (docTab === 'completed' ? docComplete(d) : !docComplete(d)))
     .sort((a, b) => (docMine(a) ? 0 : 1) - (docMine(b) ? 0 : 1))  // my location's documents first
   const anyDocFilter = ['status', 'locations', 'issues'].some(k => docFilters[k]?.size) || docTomorrow || docUrgent
 
@@ -788,6 +796,10 @@ export default function SalesOrdersPage() {
         </form>
 
         <h2 className="font-semibold text-lg mb-3">Uploaded Documents</h2>
+        <div className="flex items-center gap-2 mb-3">
+          <button onClick={() => setDocTab('pending')} className={`px-4 py-1.5 rounded-lg text-sm font-medium border ${docTab === 'pending' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}>Pending ({pendingDocCount})</button>
+          <button onClick={() => setDocTab('completed')} className={`px-4 py-1.5 rounded-lg text-sm font-medium border ${docTab === 'completed' ? 'bg-green-600 text-white border-green-600' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}>✓ Completed ({completedDocCount})</button>
+        </div>
         <div className="flex flex-wrap items-center gap-2 mb-2 text-sm relative z-20">
           <input value={docSearch} onChange={e => setDocSearch(e.target.value)} placeholder="🔍 Search file or item…" className="border rounded-lg px-3 py-1.5 text-sm w-52" />
           <div className="w-44"><span className="text-xs text-gray-500">Location</span><MultiFilter values={docDistinct('locations')} selected={docFilters.locations || new Set()} onChange={s => setDocFilters(p => ({ ...p, locations: s }))} /></div>
