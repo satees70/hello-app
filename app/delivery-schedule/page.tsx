@@ -346,7 +346,8 @@ export default function DeliverySchedulePage() {
   const schedDates = useMemo(() => [...new Set(sched.map(s => s.delivery_date).filter(Boolean) as string[])].sort(), [sched])
   const shownSched = useMemo(() => sched.filter(s =>
     (routeFilter === 'all' || (s.route || '') === routeFilter) &&
-    (dateFilter === 'all' || s.delivery_date === dateFilter)
+    // Always surface rows with no delivery date (otherwise they hide behind the date filter); else match the chosen day.
+    (dateFilter === 'all' || !s.delivery_date || s.delivery_date === dateFilter)
   ), [sched, routeFilter, dateFilter])
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
