@@ -694,7 +694,12 @@ export default function ProductionPage() {
                       <tbody>
                         {exploded.rows.map(r => (
                           <tr key={r.key} className={`border-b last:border-0 ${r.shortfall > 0 ? '' : 'bg-green-50/40'}`}>
-                            <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{r.code}</td>
+                            <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{r.code}
+                              {r.shortfall > 0 && (() => {
+                                const others = factories.filter(f => f.code !== selected.factory_code && (stock[`${r.item_id}|${f.code}`] || 0) > 0)
+                                return others.length ? <div className="font-sans font-normal text-[11px] text-purple-700 mt-0.5 whitespace-normal">Also in stock at: {others.map(f => `${factoryName(f.code)} (${clean(stock[`${r.item_id}|${f.code}`])})`).join(', ')} — consider a transfer</div> : null
+                              })()}
+                            </td>
                             <td className="px-3 py-2 text-gray-600">{r.description}</td>
                             <td className="px-3 py-2 text-gray-500">{r.unit}</td>
                             <td className="px-3 py-2 text-right">{clean(r.required)}</td>
