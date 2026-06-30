@@ -247,6 +247,17 @@ export default function ProductionPage() {
     alert(`Requested to run ${m.batch_no} on its own.\nGo to Pending Changes → Batch splits for Head Office to approve.`)
   }
 
+  // Shortcut for old orders: mark a batch produced/completed, bypassing material-request & inspection steps.
+  async function markCompleted(b: Batch) {
+    if (!canEditFac(b.factory_code)) { setError("You have view-only access at this factory."); return }
+    if (!confirm(`Mark ${b.batch_no} (${b.item_code} · qty ${b.total_quantity}) as COMPLETED, skipping the material request and inspection steps?\n\nUse this only for old orders that were handled outside the system.`)) return
+    setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('mark_batch_completed', { p_batch_id: b.id })
+    if (e) { setError(e.message); return }
+    setSuccess(`${b.batch_no} marked as completed.`)
+    loadAll()
+  }
+
   async function recombine(b: Batch) {
     if (!canEditFac(b.factory_code)) { setError("You have view-only access at this factory."); return }
     if (!confirm(`Re-combine ${b.batch_no} back into its group for material picking?`)) return
@@ -459,8 +470,11 @@ export default function ProductionPage() {
                                         <div key={m.id} className="border rounded-lg bg-white p-2">
                                           <div className="flex justify-between items-center mb-1">
                                             <span className="text-xs"><span className="font-mono font-semibold">{m.batch_no}</span> · due {m.delivery_date || '—'} · qty <strong>{m.total_quantity}</strong></span>
-                                            {hasCap(profile, 'request_split') && <button onClick={() => requestUncombine(m)}
-                                              title="Request to run this batch on its own — Head Office must approve" className="text-red-600 hover:underline text-xs font-medium whitespace-nowrap">✕ Run on its own (needs approval)</button>}
+                                            <span className="flex items-center gap-3">
+                                              {derivedStatus(m) !== 'Completed' && canEditFac(m.factory_code) && <button onClick={() => markCompleted(m)} title="Mark this batch completed, skipping the steps (for old orders)" className="text-green-700 hover:underline text-xs font-medium whitespace-nowrap">✓ Mark completed</button>}
+                                              {hasCap(profile, 'request_split') && <button onClick={() => requestUncombine(m)}
+                                                title="Request to run this batch on its own — Head Office must approve" className="text-red-600 hover:underline text-xs font-medium whitespace-nowrap">✕ Run on its own (needs approval)</button>}
+                                            </span>
                                           </div>
                                           <ul className="space-y-0.5 pl-1">
                                             {m.production_batch_items?.map(it => (
@@ -535,6 +549,7 @@ export default function ProductionPage() {
                                       <span className="text-gray-500">Planned: <strong className="text-gray-800">{b.total_quantity}</strong></span>
                                       <span className="text-gray-500">Produced: <strong className="text-green-700">{clean(b.produced_qty || 0)}</strong></span>
                                       <span className="text-gray-500">Backorder: <strong className={b.total_quantity - (b.produced_qty || 0) > 0 ? 'text-red-600' : 'text-green-600'}>{clean(Math.max(0, b.total_quantity - (b.produced_qty || 0)))}</strong></span>
+                                      {derivedStatus(b) !== 'Completed' && canEditFac(b.factory_code) && <button onClick={() => markCompleted(b)} className="text-green-700 border border-green-600 hover:bg-green-50 px-3 py-1 rounded-lg text-xs font-medium">✓ Mark completed (bypass)</button>}
                                     </div>
                                     <p className="text-gray-400 text-xs mb-3">Production is recorded in the <strong>Inspection Record</strong> (start/end + actual quantity produced). Recording there consumes raw materials (earliest expiry / oldest batch first) from {factoryName(b.factory_code)} stock.</p>
                                     {consumption[b.id] && consumption[b.id].length > 0 && (

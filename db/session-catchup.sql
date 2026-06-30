@@ -698,3 +698,22 @@ begin
   return v_no;
 end $$;
 grant execute on function public.create_direct_delivery(jsonb) to authenticated;
+
+-- ─── Mark a production batch completed (bypass material request & inspection) ──
+-- A shortcut for old orders that were handled outside the system: set produced = planned
+-- so the batch reads "Completed" without going through the normal steps.
+create or replace function public.mark_batch_completed(p_batch_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_b public.production_batches;
+begin
+  select * into v_b from public.production_batches where id = p_batch_id;
+  if not found then raise exception 'Batch not found'; end if;
+  if not has_perm('order_board', 'edit') then raise exception 'Not allowed'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_b.factory_code = any (my_factory_codes())) then
+    raise exception 'Not allowed for this factory'; end if;
+  update public.production_batches
+     set produced_qty = total_quantity,
+         status = 'Completed'
+   where id = p_batch_id;
+end $$;
+grant execute on function public.mark_batch_completed(uuid) to authenticated;
