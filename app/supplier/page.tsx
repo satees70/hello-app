@@ -6,6 +6,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import ItemPicker from '@/components/ItemPicker'
+import { fetchTomorrowDeliverySOs } from '@/lib/delivery'
 
 interface Line {
   id: string; customer_name: string; so_number: string; item_code: string; description: string
@@ -22,6 +23,8 @@ export default function SupplierPage() {
   const [orders, setOrders] = useState<PO[]>([])
   const [q, setQ] = useState('')
   const [pendingOnly, setPendingOnly] = useState(true)
+  const [tomorrowOnly, setTomorrowOnly] = useState(false)
+  const [tomorrowSOs, setTomorrowSOs] = useState<Set<string>>(new Set())
   const [open, setOpen] = useState<Set<string>>(new Set())
   const toggle = (code: string) => setOpen(p => { const n = new Set(p); n.has(code) ? n.delete(code) : n.add(code); return n })
   // Place-order basket
@@ -50,6 +53,7 @@ export default function SupplierPage() {
     setLines(rows)
     setOrders((pos as PO[]) || [])
     setItemsMaster(master)
+    setTomorrowSOs(await fetchTomorrowDeliverySOs())
   }
   function addManualItem() {
     if (!addItem) { setError('Pick an item to add.'); return }
@@ -85,6 +89,9 @@ export default function SupplierPage() {
   const toOrderOf = (code: string, outstanding: number) => Math.max(0, outstanding - (openOrdered[code] || 0))
   let list = Object.values(groups)
   if (pendingOnly) list = list.filter(g => toOrderOf(g.code, g.outstanding) > 0)
+  const isTomorrowGroup = (g: { lines: Line[] }) => g.lines.some(l => l.so_number && tomorrowSOs.has(l.so_number))
+  const tomorrowCount = list.filter(isTomorrowGroup).length
+  if (tomorrowOnly) list = list.filter(isTomorrowGroup)
   list.sort((a, b) => (a.next || '9999').localeCompare(b.next || '9999') || toOrderOf(b.code, b.outstanding) - toOrderOf(a.code, a.outstanding))
 
   const toggleSel = (code: string, suggested: number) => setSel(p => {
@@ -187,6 +194,7 @@ export default function SupplierPage() {
           <div className="flex flex-wrap items-center gap-3 mb-4 text-sm">
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search item code or description…" className="w-full sm:w-72 border rounded-lg px-3 py-2 text-sm" />
             <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={pendingOnly} onChange={e => setPendingOnly(e.target.checked)} className="h-4 w-4" /> Still to order</label>
+            <button onClick={() => setTomorrowOnly(v => !v)} className={`text-xs px-3 py-1.5 rounded-full font-medium border ${tomorrowOnly ? 'bg-yellow-300 border-yellow-400 text-yellow-900' : 'bg-white border-gray-300 text-gray-600 hover:bg-yellow-50'}`}>🚚 Tomorrow{tomorrowCount ? ` (${tomorrowCount})` : ''}</button>
             <button onClick={selectAll} className="text-blue-600 hover:underline text-xs">Select all shown</button>
             <span className="text-gray-400 text-xs">{list.length} item(s)</span>
           </div>
