@@ -689,6 +689,7 @@ export default function ProductionPage() {
             {grindingMode && (() => { const gi = exploded as { lots?: number; orderKg?: number; lotYield?: number }; return gi.lots ? (
               <div className="mb-3 text-sm bg-purple-50 border border-purple-200 rounded-lg p-2 text-purple-800">
                 🌀 Order ≈ <strong>{gi.orderKg}</strong> kg → <strong>{gi.lots}</strong> lot{gi.lots > 1 ? 's' : ''} (1 lot ≈ {gi.lotYield} kg usable after {Math.round(GRIND_LOSS * 100)}% loss). Materials below are for {gi.lots} full lot{gi.lots > 1 ? 's' : ''}.
+                <span className="block text-purple-500 text-xs mt-0.5">Planning estimate (average) — the actual materials used are recorded when grinding is done.</span>
               </div>
             ) : null })()}
             {selected.batchIds.length > 1 && (
