@@ -1094,7 +1094,7 @@ export default function SalesOrdersPage() {
                     const pend = pendingForLine(line.id)
                     return (
                       <tr key={line.id} className={`border-b last:border-0 align-top ${selectedIds.has(line.id) ? 'bg-blue-50' : isDuplicate(line) ? 'bg-amber-50' : 'hover:bg-gray-50'}`}>
-                        <td className="px-3 py-2"><input type="checkbox" checked={selectedIds.has(line.id)} onChange={() => toggleSel(line.id)} className="h-4 w-4" /></td>
+                        <td className="px-3 py-2"><input type="checkbox" checked={selectedIds.has(line.id)} onChange={() => toggleSel(line.id)} className="h-4 w-4" />{can(profile, 'sales', 'edit', line.factory_code) && <button onClick={() => toggleGrinding(line)} title={line.is_grinding ? 'Untag grinding' : 'Tag this line for grinding'} className={`block mt-1 text-[11px] whitespace-nowrap ${line.is_grinding ? 'text-purple-600 font-semibold' : 'text-gray-400 hover:text-purple-600'}`}>{line.is_grinding ? '🌀 grinding' : '🌀 tag'}</button>}</td>
                         <td className="px-3 py-2 text-gray-700 min-w-[160px]">{line.customer_name}</td>
                         <td className="px-3 py-2 font-mono whitespace-nowrap">
                           {line.so_number
@@ -1147,7 +1147,6 @@ export default function SalesOrdersPage() {
                               : <>
                                 <button onClick={() => openRequest(line)} className="text-blue-600 hover:underline">{isFactoryConfirmed(line.factory_code || '') ? 'Request change' : 'Edit'}</button>
                                 <button onClick={() => openDelete(line)} className="text-red-600 hover:underline ml-3">{isFactoryConfirmed(line.factory_code || '') ? 'Request delete' : 'Delete'}</button>
-                                <button onClick={() => toggleGrinding(line)} className={`hover:underline ml-3 ${line.is_grinding ? 'text-gray-500' : 'text-purple-600'}`} title="Route this line to the Grinding board">{line.is_grinding ? 'Untag grinding' : '🌀 Grinding'}</button>
                               </>}
                         </td>
                       </tr>
