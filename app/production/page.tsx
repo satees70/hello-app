@@ -141,6 +141,7 @@ export default function ProductionPage() {
   const factoryName = (code: string) => factories.find(f => f.code === code)?.name || code || '—'
   const clean = (n: number) => Number(n.toFixed(3))
   const BUFFER = 1.1
+  const GRIND_LOSS = 0.10   // ~10% loss per grinding lot, so 1 lot yields 90% of the recipe input
 
   async function makeManufactured(it: Item) {
     if (!can(profile, 'items', 'edit')) { setError("You have view-only access to Items."); return }
@@ -212,16 +213,20 @@ export default function ProductionPage() {
       if (!rec) return { note: `No grinding recipe for ${loose} — create one in Grinding → Recipes.`, rows: [], labels: [] as { code: string; description: string; unit: string; required: number }[] }
       const comps = recipeComps[rec.id] || []
       if (!comps.length) return { note: 'This grinding recipe has no materials.', rows: [], labels: [] as { code: string; description: string; unit: string; required: number }[] }
-      const effQty = total * factor   // bags × kg-per-bag
+      // One lot uses the full recipe; its usable yield is the recipe input minus 10% loss.
+      const lotInput = comps.reduce((s, c) => s + (c.qty_per_lot || 0), 0)   // e.g. 100 + 50 = 150
+      const lotYield = lotInput * (1 - GRIND_LOSS)                            // 150 × 0.9 = 135 kg
+      const orderKg = total * factor                                         // bags × kg-per-bag (incl. extra)
+      const lots = lotYield > 0 ? Math.max(1, Math.ceil(orderKg / lotYield)) : 1
       const rows = comps.map((c, i) => {
         const ci = items.find(x => x.code === c.code)
-        const required = c.qty_per_lot * effQty
+        const required = c.qty_per_lot * lots                                // whole lots × recipe
         const id = ci?.id || c.code
         const st = ci?.id ? (stock[`${id}|${factoryCode}`] ?? 0) : 0
         const shortfall = Math.max(required - st, 0)
         return { item_id: id, key: `${id}|${factoryCode}|${i}`, code: c.code, description: ci?.description || c.description, unit: ci?.unit || '', required, stock: st, shortfall, requested: clean(shortfall) }
       })
-      return { note: '', rows, labels: [] as { code: string; description: string; unit: string; required: number }[] }
+      return { note: '', rows, labels: [] as { code: string; description: string; unit: string; required: number }[], lots, orderKg: clean(orderKg), lotYield: clean(lotYield) }
     }
     const parent = items.find(i => i.code === itemCode)
     if (!parent) return { note: `Item ${itemCode} is not in Items Master.`, rows: [], labels: [] as { code: string; description: string; unit: string; required: number }[] }
@@ -681,6 +686,11 @@ export default function ProductionPage() {
               To make <strong>{selected.total}</strong> of {selected.item_code} at {isHO ? factoryName(selected.factory_code) : (selected.factory_code || 'this factory')}.
               {selected.batchIds.length > 1 && ` (combined from ${selected.batchIds.length} batches)`} Stock shown is the live system on-hand; the shortfall is worked out for you.
             </p>
+            {grindingMode && (() => { const gi = exploded as { lots?: number; orderKg?: number; lotYield?: number }; return gi.lots ? (
+              <div className="mb-3 text-sm bg-purple-50 border border-purple-200 rounded-lg p-2 text-purple-800">
+                🌀 Order ≈ <strong>{gi.orderKg}</strong> kg → <strong>{gi.lots}</strong> lot{gi.lots > 1 ? 's' : ''} (1 lot ≈ {gi.lotYield} kg usable after {Math.round(GRIND_LOSS * 100)}% loss). Materials below are for {gi.lots} full lot{gi.lots > 1 ? 's' : ''}.
+              </div>
+            ) : null })()}
             {selected.batchIds.length > 1 && (
               <div className="mb-4 text-xs bg-amber-50 border border-amber-200 rounded-lg p-2">
                 <span className="font-medium text-amber-800">Requesting for {selected.batchIds.length} combined batches:</span>{' '}
