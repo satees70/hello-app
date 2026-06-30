@@ -122,11 +122,8 @@ export default function DeliverySchedulePage() {
   async function load() {
     const { data: s } = await supabase.from('delivery_schedule').select('id, so_number, customer_name, route, delivery_date, created_by_name, data, invoiced').order('route', { ascending: true, nullsFirst: false }).order('delivery_date', { ascending: true, nullsFirst: false })
     setSched((s as Sched[]) || [])
-    // On first load, default the Date filter to the latest scheduled day.
-    if (!didInitDate.current) {
-      const dates = [...new Set(((s as Sched[]) || []).map(x => x.delivery_date).filter(Boolean) as string[])].sort()
-      if (dates.length) { setDateFilter(dates[dates.length - 1]); didInitDate.current = true }
-    }
+    // Default the Date filter to "All dates" so nothing is hidden behind a single day.
+    if (!didInitDate.current) { setDateFilter('all'); didInitDate.current = true }
     const { data: t } = await supabase.from('delivery_trips').select('route, delivery_date, lorry_no, driver, kelindan, remark, category')
     const tm: Record<string, Trip> = {}; (t as Trip[] || []).forEach(x => { tm[`${x.route}|${x.delivery_date}`] = x }); setTrips(tm)
     // Each SO's production location (factory) + its ordered items (the fallback detail for SOs with no batch yet).
