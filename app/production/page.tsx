@@ -86,6 +86,7 @@ export default function ProductionPage() {
   const [combineOn, setCombineOn] = useState(true)
   const [tomorrowOnly, setTomorrowOnly] = useState(false)
   const [sortBy, setSortBy] = useState<'due_asc' | 'due_desc' | 'batch'>('due_asc')
+  const [search, setSearch] = useState('')
   const [consumption, setConsumption] = useState<Record<string, ConsRow[]>>({}) // batch id -> consumed lots
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -306,6 +307,12 @@ export default function ProductionPage() {
   if (toTs !== null) shown = shown.filter(b => { const k = dateKey(b.delivery_date); return k !== Number.MAX_SAFE_INTEGER && k <= toTs })
   if (isHO && factoryFilter) shown = shown.filter(b => b.factory_code === factoryFilter)
   if (tomorrowOnly) shown = shown.filter(dueTomorrow)
+  const sq = search.trim().toLowerCase()
+  if (sq) shown = shown.filter(b =>
+    (b.item_code || '').toLowerCase().includes(sq) ||
+    (b.description || '').toLowerCase().includes(sq) ||
+    (b.batch_no || '').toLowerCase().includes(sq) ||
+    (b.production_batch_items || []).some(it => (it.so_number || '').toLowerCase().includes(sq) || (it.customer_name || '').toLowerCase().includes(sq)))
   const tomorrowCount = batches.filter(dueTomorrow).length
   const counts: Record<string, number> = { Planned: 0, Requested: 0, 'In Progress': 0, Completed: 0 }
   batches.forEach(b => { const st = derivedStatus(b); counts[st] = (counts[st] || 0) + 1 })
@@ -369,6 +376,7 @@ export default function ProductionPage() {
         </div>
 
         <div className="flex flex-wrap gap-2 items-center mb-4 text-sm">
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Search item or SO number…" className="border rounded-lg px-3 py-1 w-60 bg-white" />
           <span className="text-gray-500">Status:</span>
           <select value={filter} onChange={e => setFilter(e.target.value as Filter)} className="border rounded-lg px-2 py-1 bg-white">
             {FILTERS.map(f => <option key={f} value={f}>{f}{f !== 'All' && counts[f] ? ` (${counts[f]})` : ''}</option>)}
