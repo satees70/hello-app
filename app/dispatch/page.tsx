@@ -158,8 +158,10 @@ export default function DispatchPage() {
 
   // ---- Direct delivery from a sales order (bypass production) ----
   const remainingOf = (l: SLine) => Math.max(0, Number(l.outstanding_qty ?? l.quantity ?? 0) - Number(l.delivered_qty || 0))
-  const openSOs = [...new Set(salesLines.filter(remainingOf).map(l => l.so_number))].sort()
-  const linesForSO = salesLines.filter(l => l.so_number === dSo && remainingOf(l) > 0)
+  const cartLineIds = new Set(directCart.map(c => c.lineId))   // already added → drop from the picker
+  const availLine = (l: SLine) => remainingOf(l) > 0 && !cartLineIds.has(l.id)
+  const openSOs = [...new Set(salesLines.filter(availLine).map(l => l.so_number))].sort()
+  const linesForSO = salesLines.filter(l => l.so_number === dSo && availLine(l))
   function addDirect(e: React.FormEvent) {
     e.preventDefault(); setError(''); setSuccess('')
     const line = salesLines.find(l => l.id === dLineId)
@@ -167,6 +169,7 @@ export default function DispatchPage() {
     if (!line.factory_code) { setError('This line has no factory/location set — set it on the Sales Orders page first.'); return }
     const n = Number(dQty)
     if (!(n > 0)) { setError('Enter a quantity greater than zero.'); return }
+    if (!dBatch.trim() && !dExp) { setError('Enter a batch number or an expiry date (at least one).'); return }
     const left = remainingOf(line) - directCart.filter(c => c.lineId === line.id).reduce((s, c) => s + c.qty, 0)
     if (n > left) { setError(`Only ${left} left to deliver on this line.`); return }
     setDirectCart(c => [...c, { lineId: line.id, so: line.so_number, itemCode: line.item_code, description: line.description || '', qty: n, batchNo: dBatch.trim(), expDate: dExp, factory: line.factory_code, factoryName: factoryName(line.factory_code) }])
@@ -390,9 +393,9 @@ export default function DispatchPage() {
                 )}
                 <div className="flex flex-col gap-1 w-24"><span className="text-xs font-medium text-gray-600">Quantity</span>
                   <input type="number" step="any" min="0" value={dQty} onChange={e => setDQty(e.target.value)} className="border rounded px-2 py-1.5 text-sm" /></div>
-                <div className="flex flex-col gap-1 w-32"><span className="text-xs font-medium text-gray-600">Batch (optional)</span>
+                <div className="flex flex-col gap-1 w-32"><span className="text-xs font-medium text-gray-600">Batch <span className="text-gray-400 font-normal">or expiry</span></span>
                   <input value={dBatch} onChange={e => setDBatch(e.target.value)} placeholder="Batch no" className="border rounded px-2 py-1.5 text-sm" /></div>
-                <div className="flex flex-col gap-1 w-36"><span className="text-xs font-medium text-gray-600">Expiry (optional)</span>
+                <div className="flex flex-col gap-1 w-36"><span className="text-xs font-medium text-gray-600">Expiry <span className="text-gray-400 font-normal">or batch</span></span>
                   <input type="date" value={dExp} onChange={e => setDExp(e.target.value)} className="border rounded px-2 py-1.5 text-sm" /></div>
                 <button className="bg-orange-600 text-white px-5 py-2 rounded-lg hover:bg-orange-700 text-sm font-medium">Add</button>
               </div>
