@@ -65,13 +65,14 @@ export default function ProductionPage() {
 
   const [selected, setSelected] = useState<MatTarget | null>(null)
   const [reqCreator, setReqCreator] = useState('')   // who raised the open request for the selected batch
+  const [reqNo, setReqNo] = useState('')             // its request number (for easy lookup)
   useEffect(() => {
-    setReqCreator('')
+    setReqCreator(''); setReqNo('')
     if (!selected) return
     const b = batches.find(x => selected.batchIds.includes(x.id) && x.material_request_id)
     if (!b?.material_request_id) return
-    supabase.from('material_requests').select('created_by_name').eq('id', b.material_request_id).maybeSingle()
-      .then(({ data }) => setReqCreator((data?.created_by_name as string) || ''))
+    supabase.from('material_requests').select('created_by_name, request_no, pick_run_no').eq('id', b.material_request_id).maybeSingle()
+      .then(({ data }) => { setReqCreator((data?.created_by_name as string) || ''); setReqNo((data?.pick_run_no as string) || (data?.request_no as string) || '') })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected])
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -812,7 +813,7 @@ export default function ProductionPage() {
                   <div className="flex flex-wrap items-end justify-between gap-3 mt-4">
                     <div className="text-sm">
                       {hasRequest
-                        ? <span className="text-purple-700">A material request is already open{reqCreator ? ` (raised by ${reqCreator})` : ''} — see Material Requests.</span>
+                        ? <span className="text-purple-700">Material request {reqNo ? <strong className="font-mono">{reqNo}</strong> : ''} is already open{reqCreator ? ` (raised by ${reqCreator})` : ''} — see Material Requests.</span>
                         : adhoc
                           ? <span className="text-gray-600">Ad-hoc: requesting exactly the materials & quantities listed above.</span>
                           : totalShortfall > 0
