@@ -94,6 +94,8 @@ export default function ProductionPage() {
   const [search, setSearch] = useState('')
   const [grindingMode, setGrindingMode] = useState(false)   // false = Order Board, true = Grinding Board
   const [grindingLineIds, setGrindingLineIds] = useState<Set<string>>(new Set())
+  const [recipes, setRecipes] = useState<{ id: string; product: string; factory_code: string }[]>([])
+  const [recipeComps, setRecipeComps] = useState<Record<string, { code: string; description: string; qty_per_lot: number }[]>>({})
   const [consumption, setConsumption] = useState<Record<string, ConsRow[]>>({}) // batch id -> consumed lots
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -114,6 +116,15 @@ export default function ProductionPage() {
     setBatches(((b as Batch[]) || []).filter(x => x.status !== 'Bypassed'))   // bypassed = marked completed by hand → off the board
     const { data: gl } = await supabase.from('sales_order_lines').select('id').eq('is_grinding', true)
     setGrindingLineIds(new Set((gl || []).map(x => x.id)))
+    const { data: gr } = await supabase.from('grinding_recipes').select('id, product, factory_code, active').eq('active', true)
+    setRecipes((gr || []).map(r => ({ id: r.id, product: r.product, factory_code: r.factory_code })))
+    const rids = (gr || []).map(r => r.id)
+    if (rids.length) {
+      const { data: gc } = await supabase.from('grinding_recipe_components').select('recipe_id, item, qty_per_lot').in('recipe_id', rids)
+      const m: Record<string, { code: string; description: string; qty_per_lot: number }[]> = {}
+      ;(gc || []).forEach(c => { const code = String(c.item || '').split(' — ')[0].trim(); const desc = String(c.item || '').split(' — ').slice(1).join(' — ').trim(); (m[c.recipe_id] = m[c.recipe_id] || []).push({ code, description: desc, qty_per_lot: Number(c.qty_per_lot || 0) }) })
+      setRecipeComps(m)
+    } else setRecipeComps({})
     setFactories(f || [])
     setItems(it)
     setBoms(bc)
@@ -143,10 +154,20 @@ export default function ProductionPage() {
 
   // Flag batches whose item can't be exploded into materials, with HO quick-actions
   function bomBadge(itemCode: string) {
-    // Grinding: the formula lives on the loose code, so check/create the BOM there.
-    if (grindingMode) itemCode = looseCode(itemCode)
+    // Grinding: the formula is a RECIPE on the loose code.
+    if (grindingMode) {
+      const loose = looseCode(itemCode)
+      const li = items.find(i => i.code === loose)
+      if (recipeFor(loose, li?.description)) return null
+      return (
+        <span className="mt-0.5 inline-flex items-center gap-2">
+          <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[11px] font-medium">⚠ No recipe set ({loose})</span>
+          {can(profile, 'grinding_recipe', 'edit') && <a href="/grinding" className="text-blue-600 hover:underline text-[11px]">Create recipe →</a>}
+        </span>
+      )
+    }
     const it = items.find(i => i.code === itemCode)
-    if (!it) return <span className="inline-block mt-0.5 bg-red-100 text-red-700 px-1.5 py-0.5 rounded text-[11px] font-medium">⚠ Not in Items Master{grindingMode ? ` (${itemCode})` : ''}</span>
+    if (!it) return <span className="inline-block mt-0.5 bg-red-100 text-red-700 px-1.5 py-0.5 rounded text-[11px] font-medium">⚠ Not in Items Master</span>
     if (it.type !== 'Manufactured') {
       if (!can(profile, 'items', 'edit')) return null
       return <button onClick={() => makeManufactured(it)} className="mt-0.5 inline-block text-blue-600 hover:underline text-[11px]">Set as Manufactured</button>
@@ -170,14 +191,37 @@ export default function ProductionPage() {
     return 'Planned'
   }
 
+  // Find the grinding recipe for a (loose) product — match by product code/description; prefer same factory.
+  function recipeFor(code: string, description: string | undefined, factory?: string) {
+    const ic = (code || '').trim().toLowerCase(), dc = (description || '').trim().toLowerCase()
+    const codeOf = (s: string) => (s || '').split(' — ')[0].trim().toLowerCase()
+    const descOf = (s: string) => (s || '').split(' — ').slice(1).join(' — ').trim().toLowerCase()
+    const m = (r: { product: string }) => codeOf(r.product) === ic || (!!dc && descOf(r.product) === dc) || (r.product || '').trim().toLowerCase() === ic
+    return (factory && recipes.find(r => r.factory_code === factory && m(r))) || recipes.find(m) || null
+  }
+
   // Explode a BOM for a given item/factory/quantity
   function explode(itemCode: string, factoryCode: string, total: number, mode = 'auto') {
-    // Grinding: a bag SKU uses its LOOSE code's BOM × the bag weight (e.g. 4 × 20KG/BAG = 80kg of S852-K).
+    // Grinding: a bag SKU uses its LOOSE code's RECIPE × the bag weight (e.g. 1 × 25KG/BAG = 25kg of S246).
     if (grindingMode) {
       const bag = items.find(i => i.code === itemCode)
       const factor = kgPerBagOf(itemCode, bag?.description || '') ?? 1
-      itemCode = looseCode(itemCode)   // S852-K-20KG/BAG → S852-K
-      total = total * factor
+      const loose = looseCode(itemCode)
+      const li = items.find(i => i.code === loose)
+      const rec = recipeFor(loose, li?.description, factoryCode)
+      if (!rec) return { note: `No grinding recipe for ${loose} — create one in Grinding → Recipes.`, rows: [], labels: [] as { code: string; description: string; unit: string; required: number }[] }
+      const comps = recipeComps[rec.id] || []
+      if (!comps.length) return { note: 'This grinding recipe has no materials.', rows: [], labels: [] as { code: string; description: string; unit: string; required: number }[] }
+      const effQty = total * factor   // bags × kg-per-bag
+      const rows = comps.map((c, i) => {
+        const ci = items.find(x => x.code === c.code)
+        const required = c.qty_per_lot * effQty
+        const id = ci?.id || c.code
+        const st = ci?.id ? (stock[`${id}|${factoryCode}`] ?? 0) : 0
+        const shortfall = Math.max(required - st, 0)
+        return { item_id: id, key: `${id}|${factoryCode}|${i}`, code: c.code, description: ci?.description || c.description, unit: ci?.unit || '', required, stock: st, shortfall, requested: clean(shortfall) }
+      })
+      return { note: '', rows, labels: [] as { code: string; description: string; unit: string; required: number }[] }
     }
     const parent = items.find(i => i.code === itemCode)
     if (!parent) return { note: `Item ${itemCode} is not in Items Master.`, rows: [], labels: [] as { code: string; description: string; unit: string; required: number }[] }
