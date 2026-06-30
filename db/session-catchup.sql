@@ -762,3 +762,83 @@ begin
   return v_id;
 end $$;
 grant execute on function public.create_material_transfer(text, text, text, jsonb) to authenticated;
+
+-- ─── Batch-level material transfers (carry the same batch no + expiry) ───────
+alter table public.material_transfer_items add column if not exists batch_no text;
+alter table public.material_transfer_items add column if not exists exp_date date;
+alter table public.material_transfer_items add column if not exists lot_id uuid;
+
+-- create: items now carry { code, qty, batch_no, exp_date, lot_id }
+create or replace function public.create_material_transfer(p_from text, p_to text, p_reason text, p_items jsonb) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare v_id uuid; v_name text; r jsonb; v_item public.items; v_qty numeric; v_count int := 0;
+begin
+  if nullif(p_from, '') is null or nullif(p_to, '') is null then raise exception 'Pick both the from and to factory'; end if;
+  if p_from = p_to then raise exception 'From and To must be different factories'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (p_from = any (my_factory_codes())) then
+    raise exception 'You can only send from your own factory'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  insert into public.material_transfers (from_factory, to_factory, reason, status, created_by, created_by_name)
+  values (p_from, p_to, nullif(btrim(coalesce(p_reason, '')), ''), 'Pending', auth.uid(), v_name) returning id into v_id;
+  for r in select value from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) as e(value) loop
+    v_qty := coalesce((r->>'qty')::numeric, 0);
+    if v_qty <= 0 then continue; end if;
+    select * into v_item from public.items where code = r->>'code' limit 1;
+    insert into public.material_transfer_items (transfer_id, item_code, description, unit, qty, batch_no, exp_date, lot_id)
+    values (v_id, coalesce(v_item.code, r->>'code'), coalesce(v_item.description, r->>'description'), coalesce(v_item.unit, r->>'unit'),
+            v_qty, nullif(r->>'batch_no', ''), nullif(r->>'exp_date', '')::date, nullif(r->>'lot_id', '')::uuid);
+    v_count := v_count + 1;
+  end loop;
+  if v_count = 0 then delete from public.material_transfers where id = v_id; raise exception 'Add at least one item with a quantity'; end if;
+  return v_id;
+end $$;
+grant execute on function public.create_material_transfer(text, text, text, jsonb) to authenticated;
+
+-- send: deduct from the specific lot (if given) + the factory total
+create or replace function public.confirm_transfer_send(p_id uuid)
+ returns void language plpgsql security definer set search_path to 'public' as $function$
+declare v_t public.material_transfers; r record; v_item public.items; v_name text;
+begin
+  select * into v_t from public.material_transfers where id = p_id;
+  if not found then raise exception 'Transfer not found'; end if;
+  if v_t.status <> 'Pending' then raise exception 'This transfer is already %', v_t.status; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_t.from_factory = any (my_factory_codes())) then
+    raise exception 'Only the sending factory (%) can confirm dispatch', v_t.from_factory; end if;
+  for r in select * from public.material_transfer_items where transfer_id = p_id loop
+    select * into v_item from public.items where code = r.item_code limit 1;
+    if v_item.id is null then continue; end if;
+    if r.lot_id is not null then
+      update public.stock_lots set qty_remaining = greatest(qty_remaining - coalesce(r.qty,0), 0) where id = r.lot_id;
+    end if;
+    update public.item_stock set quantity = greatest(quantity - coalesce(r.qty,0), 0), updated_at = now()
+     where item_id = v_item.id and factory_code = v_t.from_factory;
+  end loop;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.material_transfers set status = 'Sent', sent_by = auth.uid(), sent_by_name = v_name, sent_at = now() where id = p_id;
+end; $function$;
+grant execute on function public.confirm_transfer_send(uuid) to authenticated;
+
+-- receive: create the lot at the destination with the SAME batch no + expiry
+create or replace function public.confirm_transfer_receive(p_id uuid)
+ returns void language plpgsql security definer set search_path to 'public' as $function$
+declare v_t public.material_transfers; r record; v_item public.items; v_name text;
+begin
+  select * into v_t from public.material_transfers where id = p_id;
+  if not found then raise exception 'Transfer not found'; end if;
+  if v_t.status <> 'Sent' then raise exception 'The sending factory must confirm dispatch first (status: %)', v_t.status; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_t.to_factory = any (my_factory_codes())) then
+    raise exception 'Only the receiving factory (%) can confirm receipt', v_t.to_factory; end if;
+  for r in select * from public.material_transfer_items where transfer_id = p_id loop
+    select * into v_item from public.items where code = r.item_code limit 1;
+    if v_item.id is null or coalesce(r.qty,0) <= 0 then continue; end if;
+    insert into public.stock_lots (item_id, item_code, description, factory_code, batch_no, exp_date, qty_received, qty_remaining)
+    values (v_item.id, v_item.code, v_item.description, v_t.to_factory,
+            coalesce(nullif(r.batch_no,''), 'TRF-' || to_char(now(),'YYMMDD')), r.exp_date, r.qty, r.qty);
+    insert into public.item_stock (item_id, factory_code, quantity, updated_at)
+    values (v_item.id, v_t.to_factory, r.qty, now())
+    on conflict (item_id, factory_code) do update set quantity = item_stock.quantity + r.qty, updated_at = now();
+  end loop;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.material_transfers set status = 'Received', received_by = auth.uid(), received_by_name = v_name, received_at = now() where id = p_id;
+end; $function$;
+grant execute on function public.confirm_transfer_receive(uuid) to authenticated;
