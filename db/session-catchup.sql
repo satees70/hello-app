@@ -737,3 +737,28 @@ begin
    where i.batch_id = b.id and i.line_id = p_line_id;
 end $$;
 grant execute on function public.set_line_grinding(uuid, boolean) to authenticated;
+
+-- ─── Create a material transfer by hand (standalone, not via factory-change) ──
+create or replace function public.create_material_transfer(p_from text, p_to text, p_reason text, p_items jsonb) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare v_id uuid; v_name text; r jsonb; v_item public.items; v_qty numeric; v_count int := 0;
+begin
+  if nullif(p_from, '') is null or nullif(p_to, '') is null then raise exception 'Pick both the from and to factory'; end if;
+  if p_from = p_to then raise exception 'From and To must be different factories'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (p_from = any (my_factory_codes())) then
+    raise exception 'You can only send from your own factory'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  insert into public.material_transfers (from_factory, to_factory, reason, status, created_by, created_by_name)
+  values (p_from, p_to, nullif(btrim(coalesce(p_reason, '')), ''), 'Pending', auth.uid(), v_name) returning id into v_id;
+  for r in select value from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) as e(value) loop
+    v_qty := coalesce((r->>'qty')::numeric, 0);
+    if v_qty <= 0 then continue; end if;
+    select * into v_item from public.items where code = r->>'code' limit 1;
+    insert into public.material_transfer_items (transfer_id, item_code, description, unit, qty)
+    values (v_id, coalesce(v_item.code, r->>'code'), coalesce(v_item.description, r->>'description'), coalesce(v_item.unit, r->>'unit'), v_qty);
+    v_count := v_count + 1;
+  end loop;
+  if v_count = 0 then delete from public.material_transfers where id = v_id; raise exception 'Add at least one item with a quantity'; end if;
+  return v_id;
+end $$;
+grant execute on function public.create_material_transfer(text, text, text, jsonb) to authenticated;

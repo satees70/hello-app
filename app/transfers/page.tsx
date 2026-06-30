@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
-import { supabase } from '@/lib/supabase'
+import { supabase, fetchAll } from '@/lib/supabase'
+import ItemPicker from '@/components/ItemPicker'
 
 interface TItem { item_code: string; description: string | null; unit: string | null; qty: number | null }
 interface Transfer {
@@ -27,6 +28,14 @@ export default function TransfersPage() {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  // New-transfer form
+  const [itemsMaster, setItemsMaster] = useState<{ code: string; description: string; unit: string }[]>([])
+  const [fromF, setFromF] = useState('')
+  const [toF, setToF] = useState('')
+  const [reason, setReason] = useState('')
+  const [cart, setCart] = useState<{ code: string; description: string; unit: string; qty: number }[]>([])
+  const [pickItem, setPickItem] = useState<{ code: string; description: string; unit: string } | null>(null)
+  const [pickQty, setPickQty] = useState('')
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
   const myFacs = new Set(isHO ? [] : (profile?.factory_codes?.length ? profile.factory_codes : (profile?.factory_code ? [profile.factory_code] : [])))
@@ -49,6 +58,26 @@ export default function TransfersPage() {
       ;(its || []).forEach(it => { (itemsByT[it.transfer_id] = itemsByT[it.transfer_id] || []).push(it) })
     }
     setTransfers((t || []).map(x => ({ ...x, items: itemsByT[x.id] || [] })))
+    if (itemsMaster.length === 0) setItemsMaster(await fetchAll<{ code: string; description: string; unit: string }>('items', 'code, description, unit', qb => qb.order('code')))
+  }
+  function addCartItem() {
+    if (!pickItem) { setError('Pick an item.'); return }
+    const q = Number(pickQty)
+    if (!(q > 0)) { setError('Enter a quantity.'); return }
+    setError('')
+    setCart(c => [...c.filter(x => x.code !== pickItem.code), { code: pickItem.code, description: pickItem.description, unit: pickItem.unit, qty: q }])
+    setPickItem(null); setPickQty('')
+  }
+  async function createTransfer() {
+    if (!fromF || !toF) { setError('Pick the from and to factory.'); return }
+    if (fromF === toF) { setError('From and To must be different.'); return }
+    if (cart.length === 0) { setError('Add at least one item.'); return }
+    setBusy('new'); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('create_material_transfer', { p_from: fromF, p_to: toF, p_reason: reason || null, p_items: cart.map(c => ({ code: c.code, qty: c.qty })) })
+    setBusy('')
+    if (e) { setError(e.message); return }
+    setSuccess(`Transfer created — ${factoryName(fromF)} → ${factoryName(toF)}. Now confirm dispatch.`)
+    setFromF(''); setToF(''); setReason(''); setCart([]); load()
   }
 
   async function act(rpc: 'confirm_transfer_send' | 'confirm_transfer_receive', id: string, msg: string) {
@@ -82,6 +111,41 @@ export default function TransfersPage() {
 
         {error && <div className="mb-4 p-3 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>}
         {success && <div className="mb-4 p-3 rounded-lg bg-green-50 text-green-700 text-sm">{success}</div>}
+
+        {/* New transfer */}
+        <div className="border rounded-2xl p-4 sm:p-5 bg-white shadow-sm mb-8">
+          <h2 className="font-semibold mb-3">New transfer</h2>
+          <div className="grid sm:grid-cols-2 gap-3 mb-3">
+            <label className="block"><span className="text-xs text-gray-500">From factory (stock leaves here)</span>
+              <select value={fromF} onChange={e => setFromF(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-white">
+                <option value="">Choose…</option>
+                {factories.filter(f => isHO || myFacs.has(f.code)).map(f => <option key={f.code} value={f.code}>{f.name}</option>)}
+              </select></label>
+            <label className="block"><span className="text-xs text-gray-500">To factory (stock arrives here)</span>
+              <select value={toF} onChange={e => setToF(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-white">
+                <option value="">Choose…</option>
+                {factories.filter(f => f.code !== fromF).map(f => <option key={f.code} value={f.code}>{f.name}</option>)}
+              </select></label>
+          </div>
+          <div className="flex flex-wrap items-end gap-2 mb-3">
+            <div className="flex-1 min-w-[220px]"><span className="text-xs text-gray-500">Item</span><ItemPicker items={itemsMaster} value={pickItem ? `${pickItem.code} — ${pickItem.description}` : ''} onPick={it => setPickItem(it)} /></div>
+            <div className="w-28"><span className="text-xs text-gray-500">Qty</span><input type="number" step="any" min="0" value={pickQty} onChange={e => setPickQty(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+            <button onClick={addCartItem} className="px-4 py-2 rounded-lg border border-blue-600 text-blue-600 text-sm font-medium hover:bg-blue-50">+ Add item</button>
+          </div>
+          {cart.length > 0 && (
+            <ul className="mb-3 space-y-1">
+              {cart.map((c, i) => (
+                <li key={i} className="flex items-center justify-between gap-2 text-sm border-b border-gray-100 py-1">
+                  <span><span className="font-mono">{c.code}</span> <span className="text-gray-500">{c.description}</span> · {c.qty} {c.unit}</span>
+                  <button onClick={() => setCart(x => x.filter((_, j) => j !== i))} className="text-red-500 hover:text-red-700 text-xs">Remove</button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <input value={reason} onChange={e => setReason(e.target.value)} placeholder="Reason (optional)" className="w-full border rounded-lg px-3 py-2 text-sm mb-3" />
+          <button onClick={createTransfer} disabled={busy === 'new'} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-50">{busy === 'new' ? 'Creating…' : 'Create transfer'}</button>
+          <p className="text-xs text-gray-400 mt-2">After creating, the sending factory confirms dispatch (stock leaves), then the receiving factory confirms receipt (stock arrives).</p>
+        </div>
 
         {shown.length === 0 && <p className="text-gray-400 text-sm">No transfers.</p>}
         <div className="space-y-3">
