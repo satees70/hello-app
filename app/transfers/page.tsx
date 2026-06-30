@@ -36,6 +36,7 @@ export default function TransfersPage() {
   const [cart, setCart] = useState<{ code: string; description: string; unit: string; qty: number }[]>([])
   const [pickItem, setPickItem] = useState<{ code: string; description: string; unit: string } | null>(null)
   const [pickQty, setPickQty] = useState('')
+  const [stockByCodeFac, setStockByCodeFac] = useState<Record<string, number>>({})
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
   const myFacs = new Set(isHO ? [] : (profile?.factory_codes?.length ? profile.factory_codes : (profile?.factory_code ? [profile.factory_code] : [])))
@@ -59,11 +60,20 @@ export default function TransfersPage() {
     }
     setTransfers((t || []).map(x => ({ ...x, items: itemsByT[x.id] || [] })))
     if (itemsMaster.length === 0) setItemsMaster(await fetchAll<{ code: string; description: string; unit: string }>('items', 'code, description, unit', qb => qb.order('code')))
+    // Stock on hand per item-code per factory (to show availability & block over-transfer).
+    const sm: Record<string, number> = {}
+    const rows = await fetchAll<{ factory_code: string; quantity: number; items: { code: string } | null }>('item_stock', 'factory_code, quantity, items!inner(code)')
+    rows.forEach(r => { if (r.items?.code) sm[`${r.items.code}|${r.factory_code}`] = Number(r.quantity || 0) })
+    setStockByCodeFac(sm)
   }
+  const availOf = (code: string, fac: string) => stockByCodeFac[`${code}|${fac}`] ?? 0
   function addCartItem() {
     if (!pickItem) { setError('Pick an item.'); return }
     const q = Number(pickQty)
     if (!(q > 0)) { setError('Enter a quantity.'); return }
+    if (!fromF) { setError('Pick the From factory first.'); return }
+    const avail = availOf(pickItem.code, fromF)
+    if (q > avail) { setError(`Only ${avail} ${pickItem.unit || ''} of ${pickItem.code} available at ${factoryName(fromF)}.`); return }
     setError('')
     setCart(c => [...c.filter(x => x.code !== pickItem.code), { code: pickItem.code, description: pickItem.description, unit: pickItem.unit, qty: q }])
     setPickItem(null); setPickQty('')
@@ -72,6 +82,8 @@ export default function TransfersPage() {
     if (!fromF || !toF) { setError('Pick the from and to factory.'); return }
     if (fromF === toF) { setError('From and To must be different.'); return }
     if (cart.length === 0) { setError('Add at least one item.'); return }
+    const over = cart.find(c => c.qty > availOf(c.code, fromF))
+    if (over) { setError(`Only ${availOf(over.code, fromF)} ${over.unit || ''} of ${over.code} available at ${factoryName(fromF)} — reduce the quantity.`); return }
     setBusy('new'); setError(''); setSuccess('')
     const { error: e } = await supabase.rpc('create_material_transfer', { p_from: fromF, p_to: toF, p_reason: reason || null, p_items: cart.map(c => ({ code: c.code, qty: c.qty })) })
     setBusy('')
@@ -128,15 +140,16 @@ export default function TransfersPage() {
               </select></label>
           </div>
           <div className="flex flex-wrap items-end gap-2 mb-3">
-            <div className="flex-1 min-w-[220px]"><span className="text-xs text-gray-500">Item</span><ItemPicker items={itemsMaster} value={pickItem ? `${pickItem.code} — ${pickItem.description}` : ''} onPick={it => setPickItem(it)} /></div>
-            <div className="w-28"><span className="text-xs text-gray-500">Qty</span><input type="number" step="any" min="0" value={pickQty} onChange={e => setPickQty(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+            <div className="flex-1 min-w-[220px]"><span className="text-xs text-gray-500">Item</span><ItemPicker items={itemsMaster} value={pickItem ? `${pickItem.code} — ${pickItem.description}` : ''} onPick={it => setPickItem(it)} />
+              {pickItem && fromF && <span className={`text-[11px] ${availOf(pickItem.code, fromF) > 0 ? 'text-gray-500' : 'text-red-600'}`}>Available at {factoryName(fromF)}: <strong>{availOf(pickItem.code, fromF)}</strong> {pickItem.unit}</span>}</div>
+            <div className="w-28"><span className="text-xs text-gray-500">Qty</span><input type="number" step="any" min="0" max={pickItem && fromF ? availOf(pickItem.code, fromF) : undefined} value={pickQty} onChange={e => setPickQty(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
             <button onClick={addCartItem} className="px-4 py-2 rounded-lg border border-blue-600 text-blue-600 text-sm font-medium hover:bg-blue-50">+ Add item</button>
           </div>
           {cart.length > 0 && (
             <ul className="mb-3 space-y-1">
               {cart.map((c, i) => (
                 <li key={i} className="flex items-center justify-between gap-2 text-sm border-b border-gray-100 py-1">
-                  <span><span className="font-mono">{c.code}</span> <span className="text-gray-500">{c.description}</span> · {c.qty} {c.unit}</span>
+                  <span><span className="font-mono">{c.code}</span> <span className="text-gray-500">{c.description}</span> · {c.qty} {c.unit}{fromF && c.qty > availOf(c.code, fromF) && <span className="text-red-600 ml-1">⚠ only {availOf(c.code, fromF)} at {factoryName(fromF)}</span>}</span>
                   <button onClick={() => setCart(x => x.filter((_, j) => j !== i))} className="text-red-500 hover:text-red-700 text-xs">Remove</button>
                 </li>
               ))}
