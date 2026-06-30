@@ -97,6 +97,7 @@ export default function ProductionPage() {
   const [tomorrowSOs, setTomorrowSOs] = useState<Set<string>>(new Set())
   const dueTomorrow = (b: Batch) => (b.production_batch_items || []).some(it => it.so_number && tomorrowSOs.has(it.so_number))
   useEffect(() => { if (profile) { loadAll(); fetchTomorrowDeliverySOs().then(setTomorrowSOs) } }, [profile])
+  useEffect(() => { if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('board') === 'grinding') setGrindingMode(true) }, [])
 
   async function loadAll() {
     const [{ data: b }, { data: f }, it, bc, { data: st }] = await Promise.all([
