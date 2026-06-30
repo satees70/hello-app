@@ -5,6 +5,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can, hasCap } from '@/lib/permissions'
+import ItemPicker from '@/components/ItemPicker'
 
 interface Item { id: string; code: string; description: string; unit: string }
 interface Lot { id: string; item_code: string; factory_code: string; batch_no: string | null; exp_date: string | null; qty_remaining: number }
@@ -328,10 +329,7 @@ export default function DispatchPage() {
                   <label className="font-normal text-[11px] text-blue-600 inline-flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={manual} onChange={e => { setManual(e.target.checked); setCode(''); setLotId(''); setManBatch('') }} className="h-3.5 w-3.5" /> Not in stock? Pick from all items</label>
                 </span>
                 {manual ? (
-                  <select value={code} onChange={e => setCode(e.target.value)} className="border rounded px-2 py-1.5 text-sm bg-white">
-                    <option value="">Choose any item…</option>
-                    {items.map(i => <option key={i.id} value={i.code}>{i.code} — {i.description}</option>)}
-                  </select>
+                  <ItemPicker items={items} value={item ? `${item.code} — ${item.description}` : ''} onPick={it => setCode(it.code)} placeholder="Type a code or name…" />
                 ) : inStock.length > 0 ? (
                   <select value={code} onChange={e => { setCode(e.target.value); setLotId('') }} className="border rounded px-2 py-1.5 text-sm bg-white">
                     <option value="">Choose a material…</option>
