@@ -140,7 +140,7 @@ export default function DispatchPage() {
     if (manual) {
       // Item not in stock — keyed in by hand. No batch check (there's no lot in the system).
       const mc = code.trim()
-      if (!mc) { setError('Enter the item code.'); return }
+      if (!mc) { setError('Pick an item from the list.'); return }
       const known = resolve(mc)
       setReturnCart(c => [...c, { lotId: '', itemCode: known?.code || mc.toUpperCase(), description: known?.description || '', unit: known?.unit || '', batchNo: manBatch.trim() || null, qty: num, reason: note, factory, factoryName: factoryName(factory), manual: true }])
       setCode(''); setManBatch(''); setQty(''); setIssue('no'); setReason('')
@@ -325,10 +325,13 @@ export default function DispatchPage() {
               )}
               <div className="flex flex-col gap-1 min-w-[220px] flex-1">
                 <span className="text-xs font-medium text-gray-600 flex items-center justify-between gap-2">Material
-                  <label className="font-normal text-[11px] text-blue-600 inline-flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={manual} onChange={e => { setManual(e.target.checked); setCode(''); setLotId(''); setManBatch('') }} className="h-3.5 w-3.5" /> Not listed? Enter manually</label>
+                  <label className="font-normal text-[11px] text-blue-600 inline-flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={manual} onChange={e => { setManual(e.target.checked); setCode(''); setLotId(''); setManBatch('') }} className="h-3.5 w-3.5" /> Not in stock? Pick from all items</label>
                 </span>
                 {manual ? (
-                  <input value={code} onChange={e => setCode(e.target.value)} placeholder="Item code (e.g. D955)" className="border rounded px-2 py-1.5 text-sm" />
+                  <select value={code} onChange={e => setCode(e.target.value)} className="border rounded px-2 py-1.5 text-sm bg-white">
+                    <option value="">Choose any item…</option>
+                    {items.map(i => <option key={i.id} value={i.code}>{i.code} — {i.description}</option>)}
+                  </select>
                 ) : inStock.length > 0 ? (
                   <select value={code} onChange={e => { setCode(e.target.value); setLotId('') }} className="border rounded px-2 py-1.5 text-sm bg-white">
                     <option value="">Choose a material…</option>
