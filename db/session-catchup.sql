@@ -713,7 +713,7 @@ begin
     raise exception 'Not allowed for this factory'; end if;
   update public.production_batches
      set produced_qty = total_quantity,
-         status = 'Completed'
+         status = 'Bypassed'   -- distinct from normal 'Completed' so the board can hide it
    where id = p_batch_id;
 end $$;
 grant execute on function public.mark_batch_completed(uuid) to authenticated;

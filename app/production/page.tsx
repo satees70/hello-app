@@ -102,7 +102,7 @@ export default function ProductionPage() {
       fetchAll<BomComp>('bom_components', 'parent_item_id, component_item_id, quantity, apply_allowance, use_mode'),
       supabase.from('item_stock').select('item_id, factory_code, quantity'),
     ])
-    setBatches((b as Batch[]) || [])
+    setBatches(((b as Batch[]) || []).filter(x => x.status !== 'Bypassed'))   // bypassed = marked completed by hand → off the board
     setFactories(f || [])
     setItems(it)
     setBoms(bc)
@@ -254,7 +254,7 @@ export default function ProductionPage() {
     setError(''); setSuccess('')
     const { error: e } = await supabase.rpc('mark_batch_completed', { p_batch_id: b.id })
     if (e) { setError(e.message); return }
-    setSuccess(`${b.batch_no} marked as completed.`)
+    setSuccess(`${b.batch_no} marked completed (bypass) — removed from the board.`)
     loadAll()
   }
 

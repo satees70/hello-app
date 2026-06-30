@@ -90,7 +90,7 @@ export default function DispatchPage() {
     setLots((lt as Lot[]) || [])
     const { data: b } = await supabase.from('production_batches')
       .select('id, batch_no, item_code, description, factory_code, total_quantity, produced_qty, dispatched_at, delivery_date')
-      .is('dispatched_at', null).gt('produced_qty', 0).order('delivery_date')
+      .is('dispatched_at', null).gt('produced_qty', 0).neq('status', 'Bypassed').order('delivery_date')
     setBatches((b as Batch[]) || [])
     const { data: o } = await supabase.from('dispatch_orders')
       .select('id, do_number, factory_code, status, created_by_name, created_at, dispatch_order_lines(item_code, description, quantity), material_returns(item_code, description, quantity, batch_no)')
