@@ -842,3 +842,42 @@ begin
   update public.material_transfers set status = 'Received', received_by = auth.uid(), received_by_name = v_name, received_at = now() where id = p_id;
 end; $function$;
 grant execute on function public.confirm_transfer_receive(uuid) to authenticated;
+
+-- ─── Grinding recipes are factory-independent formulas (location chosen at production) ──
+alter table public.grinding_recipes alter column factory_code drop not null;
+alter table public.grinding_recipe_components alter column factory_code drop not null;
+-- Recipes visible to all; editable by anyone with the grinding_recipe permission (not per-factory).
+drop policy if exists grec_read on public.grinding_recipes;
+create policy grec_read on public.grinding_recipes for select using (true);
+drop policy if exists grec_write on public.grinding_recipes;
+create policy grec_write on public.grinding_recipes for all using (has_perm('grinding_recipe', 'edit')) with check (has_perm('grinding_recipe', 'edit'));
+drop policy if exists grc_read on public.grinding_recipe_components;
+create policy grc_read on public.grinding_recipe_components for select using (true);
+drop policy if exists grc_write on public.grinding_recipe_components;
+create policy grc_write on public.grinding_recipe_components for all using (has_perm('grinding_recipe', 'edit')) with check (has_perm('grinding_recipe', 'edit'));
+
+-- Produce now takes the factory (decided at production), since the recipe no longer carries one.
+drop function if exists public.produce_grinding(uuid, numeric);
+create or replace function public.produce_grinding(p_recipe_id uuid, p_lots numeric, p_factory text)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare v_rec public.grinding_recipes; v_id uuid; c record;
+begin
+  if not has_perm('grinding', 'edit') then raise exception 'Not allowed to record grinding'; end if;
+  if p_lots is null or p_lots <= 0 then raise exception 'Number of lots must be greater than zero'; end if;
+  if nullif(p_factory, '') is null then raise exception 'Pick the factory producing this'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (p_factory = any (my_factory_codes())) then
+    raise exception 'Not allowed for this factory'; end if;
+  select * into v_rec from public.grinding_recipes where id = p_recipe_id;
+  if not found then raise exception 'Recipe not found'; end if;
+  insert into public.grinding_records (factory_code, product, recipe_id, lots, recipe_type, record_date, month_year, created_by)
+  values (p_factory, v_rec.product, p_recipe_id, p_lots, v_rec.recipe_type,
+          (now() at time zone 'Asia/Kuala_Lumpur')::date,
+          to_char(now() at time zone 'Asia/Kuala_Lumpur', 'MM/YYYY'), auth.uid())
+  returning id into v_id;
+  for c in select item, qty_per_lot from public.grinding_recipe_components where recipe_id = p_recipe_id loop
+    insert into public.grinding_materials (grinding_record_id, factory_code, item, qty)
+    values (v_id, p_factory, c.item, (c.qty_per_lot * p_lots)::text);
+  end loop;
+  return v_id;
+end $$;
+grant execute on function public.produce_grinding(uuid, numeric, text) to authenticated;

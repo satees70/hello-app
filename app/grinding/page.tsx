@@ -52,7 +52,7 @@ export default function GrindingPage() {
   const [error, setError] = useState('')
 
   // Produce panel
-  const [prodSearch, setProdSearch] = useState(''); const [prodLots, setProdLots] = useState(''); const [producing, setProducing] = useState(false)
+  const [prodSearch, setProdSearch] = useState(''); const [prodLots, setProdLots] = useState(''); const [producing, setProducing] = useState(false); const [prodFactory, setProdFactory] = useState('')
   // Record (inspection) modal
   const [openRec, setOpenRec] = useState<GrindingRecord | null>(null)
   // Recipe editor modal
@@ -73,8 +73,8 @@ export default function GrindingPage() {
   const recRecipeEdit = openRec ? canRecipeEditFac(openRec.factory_code) : false
   const myFactoryOptions = isHO ? factories.map(f => f.code)
     : (profile?.factory_codes?.length ? profile.factory_codes : (profile?.factory_code ? [profile.factory_code] : []))
-  // Can this user create a recipe at any of their factories? (drives the New recipe button)
-  const canCreateRecipe = myFactoryOptions.some(fc => canRecipeEditFac(fc))
+  // Recipes are factory-independent formulas — any recipe-editor can create/edit them.
+  const canCreateRecipe = canRecipeEdit
 
   useEffect(() => { if (profile) { loadFactories(); load() } }, [profile])
   // Items master for the recipe pick-lists (only the mixer needs it)
@@ -130,12 +130,14 @@ export default function GrindingPage() {
     setError('')
     const r = recipes.filter(x => x.active).find(x => x.product === prodSearch.trim())
     if (!r) { setError('Pick a product from the list (it must have a saved recipe).'); return }
-    if (!canEditFac(r.factory_code)) { setError("You have view-only access at this factory."); return }
+    const fac = prodFactory || myFactoryOptions[0] || ''
+    if (!fac) { setError('Pick the factory producing this.'); return }
+    if (!canEditFac(fac)) { setError("You have view-only access at this factory."); return }
     setProducing(true)
-    const { error } = await supabase.rpc('produce_grinding', { p_recipe_id: r.id, p_lots: Number(prodLots) })
+    const { error } = await supabase.rpc('produce_grinding', { p_recipe_id: r.id, p_lots: Number(prodLots), p_factory: fac })
     setProducing(false)
     if (error) { setError(error.message); return }
-    setProdSearch(''); setProdLots(''); load()
+    setProdSearch(''); setProdLots(''); setProdFactory(''); load()
   }
 
   // ---- inspection modal ----
@@ -228,17 +230,17 @@ export default function GrindingPage() {
   }
 
   // ---- recipe editor ----
-  function newRecipe() { setError(''); setEditRecipe('new'); setRecipeForm({ factory_code: myFactoryOptions[0] || '', product: '', recipe_type: 'mixing', active: true, components: [{ item: '', qty_per_lot: '' }] }) }
+  function newRecipe() { setError(''); setEditRecipe('new'); setRecipeForm({ factory_code: '', product: '', recipe_type: 'mixing', active: true, components: [{ item: '', qty_per_lot: '' }] }) }
   function openRecipe(r: Recipe) { setError(''); setEditRecipe(r); setRecipeForm({ factory_code: r.factory_code, product: r.product, recipe_type: r.recipe_type, active: r.active, components: compByRecipe[r.id]?.length ? compByRecipe[r.id] : [{ item: '', qty_per_lot: '' }] }) }
   const setComp = (i: number, k: keyof Component, v: string) => setRecipeForm(p => { if (!p) return p; const c = [...p.components]; c[i] = { ...c[i], [k]: v }; return { ...p, components: c } })
   async function saveRecipe() {
-    if (!recipeForm || !canRecipeEditFac(recipeForm.factory_code)) { setError("You have view-only access to recipes at this factory."); return }
+    if (!recipeForm || !canRecipeEdit) { setError("You don't have access to edit recipes."); return }
     setSaving(true); setError('')
     try {
       let rid: string
       if (editRecipe === 'new') {
         const { data: sess } = await supabase.auth.getSession()
-        const { data, error } = await supabase.from('grinding_recipes').insert({ factory_code: recipeForm.factory_code, product: recipeForm.product, recipe_type: recipeForm.recipe_type, active: recipeForm.active, created_by: sess.session?.user.id || null }).select('id').single()
+        const { data, error } = await supabase.from('grinding_recipes').insert({ product: recipeForm.product, recipe_type: recipeForm.recipe_type, active: recipeForm.active, created_by: sess.session?.user.id || null }).select('id').single()
         if (error) throw error; rid = data.id
       } else {
         rid = (editRecipe as Recipe).id
@@ -246,13 +248,13 @@ export default function GrindingPage() {
         if (error) throw error
       }
       await supabase.from('grinding_recipe_components').delete().eq('recipe_id', rid)
-      const rows = recipeForm.components.filter(c => c.item.trim()).map(c => ({ recipe_id: rid, factory_code: recipeForm.factory_code, item: c.item.trim(), qty_per_lot: c.qty_per_lot === '' ? 0 : Number(c.qty_per_lot) }))
+      const rows = recipeForm.components.filter(c => c.item.trim()).map(c => ({ recipe_id: rid, item: c.item.trim(), qty_per_lot: c.qty_per_lot === '' ? 0 : Number(c.qty_per_lot) }))
       if (rows.length) { const { error } = await supabase.from('grinding_recipe_components').insert(rows); if (error) throw error }
       setEditRecipe(null); setRecipeForm(null); load()
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not save') } finally { setSaving(false) }
   }
   async function deleteRecipe(r: Recipe) {
-    if (!canRecipeEditFac(r.factory_code)) { setError("You have view-only access to recipes at this factory."); return }
+    if (!canRecipeEdit) { setError("You don't have access to edit recipes."); return }
     setError('')
     // A recipe that has been used in production can't be deleted (its records
     // must stay for traceability) — deactivate it instead so it's hidden from
@@ -309,8 +311,15 @@ export default function GrindingPage() {
                   <label className="block text-xs text-gray-500 mb-1">Product to produce</label>
                   <input list="produce-products" value={prodSearch} onChange={e => setProdSearch(e.target.value)} placeholder="Type to search product…" className="border rounded-lg px-3 py-2 text-sm w-64" />
                   <datalist id="produce-products">
-                    {activeRecipes.map(r => <option key={r.id} value={r.product}>{r.recipe_type}{isHO ? ` · ${r.factory_code}` : ''}</option>)}
+                    {activeRecipes.map(r => <option key={r.id} value={r.product}>{r.recipe_type}</option>)}
                   </datalist>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Factory (where it's ground)</label>
+                  <select value={prodFactory} onChange={e => setProdFactory(e.target.value)} className="border rounded-lg px-3 py-2 text-sm bg-white">
+                    {myFactoryOptions.length !== 1 && <option value="">Choose…</option>}
+                    {myFactoryOptions.map(c => <option key={c} value={c}>{factoryName(c)}</option>)}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Number of lots</label>
@@ -388,7 +397,7 @@ export default function GrindingPage() {
             <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem]">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b sticky top-0 z-10">
-                  <tr>{['Product', 'Type', ...(isHO ? ['Factory'] : []), 'Ingredients (per lot)', 'Active', ''].map(h => (
+                  <tr>{['Product', 'Type', 'Ingredients (per lot)', 'Active', ''].map(h => (
                     <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
                 </thead>
                 <tbody>
@@ -397,11 +406,10 @@ export default function GrindingPage() {
                     <tr key={r.id} className="border-b last:border-0 align-top hover:bg-gray-50">
                       <td className="px-3 py-2 font-medium">{r.product}</td>
                       <td className="px-3 py-2 capitalize">{r.recipe_type}</td>
-                      {isHO && <td className="px-3 py-2">{factoryName(r.factory_code)}</td>}
                       <td className="px-3 py-2 text-xs">{(compByRecipe[r.id] || []).map((c, i) => <div key={i}>{c.item} — {c.qty_per_lot}</div>)}{!(compByRecipe[r.id]?.length) && '—'}</td>
                       <td className="px-3 py-2">{r.active ? 'Yes' : 'No'}</td>
                       <td className="px-3 py-2 text-right whitespace-nowrap">
-                        {canRecipeEditFac(r.factory_code) && <><button onClick={() => openRecipe(r)} className="text-blue-600 hover:underline">Edit</button><button onClick={() => deleteRecipe(r)} className="text-red-600 hover:underline ml-3">Delete</button></>}
+                        {canRecipeEdit && <><button onClick={() => openRecipe(r)} className="text-blue-600 hover:underline">Edit</button><button onClick={() => deleteRecipe(r)} className="text-red-600 hover:underline ml-3">Delete</button></>}
                       </td>
                     </tr>
                   ))}
@@ -547,11 +555,8 @@ export default function GrindingPage() {
               {items.map(it => <option key={it.code} value={`${it.code}${it.description ? ' — ' + it.description : ''}`} />)}
             </datalist>
             <h2 className="font-semibold text-lg mb-4">{editRecipe === 'new' ? 'New recipe' : 'Edit recipe'}</h2>
+            <p className="text-gray-500 text-xs mb-3">A recipe is the formula only — the factory is chosen later when grinding is produced.</p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-              {editRecipe === 'new' && myFactoryOptions.length > 1 && (
-                <div><label className="block text-sm font-medium mb-1">Factory</label>
-                  <select value={recipeForm.factory_code} onChange={e => setRecipeForm({ ...recipeForm, factory_code: e.target.value })} className="w-full border rounded-lg px-3 py-2">{myFactoryOptions.map(c => <option key={c} value={c}>{factoryName(c)}</option>)}</select></div>
-              )}
               <div><label className="block text-sm font-medium mb-1">Product</label><input list="grind-items" value={recipeForm.product} onChange={e => setRecipeForm({ ...recipeForm, product: e.target.value })} placeholder="Search code or name…" className="w-full border rounded-lg px-3 py-2" /></div>
               <div><label className="block text-sm font-medium mb-1">Type</label>
                 <select value={recipeForm.recipe_type} onChange={e => setRecipeForm({ ...recipeForm, recipe_type: e.target.value })} className="w-full border rounded-lg px-3 py-2"><option value="direct">Direct</option><option value="mixing">Mixing</option></select></div>
