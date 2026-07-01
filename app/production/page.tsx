@@ -292,6 +292,21 @@ export default function ProductionPage() {
     setSuccess(`Material request raised for ${t.label}${extraQty > 0 ? ` (+${extraQty} extra for stock)` : ''}.`)
     setRaising(false); closeMatModal(); await loadAll()
   }
+  // Grinding: start the grind for this order → creates a Grinding & Mixing record (produce_grinding).
+  async function proceedGrinding(t: MatTarget, lots: number) {
+    if (!canEditFac(t.factory_code)) { setError("You have view-only access at this factory."); return }
+    const loose = grindProductCode(t.item_code)
+    const li = items.find(i => i.code === loose)
+    const rec = recipeFor(loose, li?.description, t.factory_code)
+    if (!rec) { setError(`No grinding recipe for ${loose} — create one in Grinding → Recipes.`); return }
+    if (!(lots > 0)) { setError('Could not work out the number of lots.'); return }
+    setRaising(true); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('produce_grinding', { p_recipe_id: rec.id, p_lots: lots, p_factory: t.factory_code })
+    setRaising(false)
+    if (e) { setError(e.message); return }
+    setSuccess(`Grinding started for ${loose} · ${lots} lot(s) at ${factoryName(t.factory_code)} — now in Grinding & Mixing (open it there to record the actual mix & output).`)
+    closeMatModal(); await loadAll()
+  }
   function addCustomRow() {
     if (!addMat) { setError('Pick a material to add.'); return }
     const q = Number(addMatQty)
@@ -821,7 +836,7 @@ export default function ProductionPage() {
                         : adhoc
                           ? <span className="text-gray-600">Ad-hoc: requesting exactly the materials & quantities listed above.</span>
                           : grindingMode
-                            ? <span className={totalShortfall > 0 ? 'text-amber-600' : 'text-green-600'}>{totalShortfall > 0 ? 'Some raw material short — you can still proceed; the request books the full recipe.' : 'Enough raw material — ready to grind. The request books the full recipe.'}</span>
+                            ? <span className={totalShortfall > 0 ? 'text-amber-600' : 'text-green-600'}>{totalShortfall > 0 ? 'Some raw material short — you can still start; it opens in Grinding & Mixing to record the actual mix.' : 'Enough raw material — start the grind; it opens in Grinding & Mixing to record the actual mix.'}</span>
                           : totalShortfall > 0
                             ? <span className="text-red-600">Total shortfall across {exploded.rows.filter(r => r.shortfall > 0).length} material(s).</span>
                             : <span className="text-green-600">Enough stock on hand — no shortfall.</span>}
@@ -829,8 +844,8 @@ export default function ProductionPage() {
                     <div className="flex items-end gap-3">
                       <button onClick={() => {
                         if (adhoc) raiseExt(selected, customRows.map(r => ({ code: r.code, description: r.description, unit: r.unit, qty: Number(r.qty) })), extraN, extraN > 0 ? `Ad-hoc · +${extraN} for stock` : 'Ad-hoc')
-                        // Grinding issues the WHOLE recipe for the grind (not just the shortfall) — proceed even when stock is enough.
-                        else if (grindingMode) raiseExt(selected, exploded.rows.filter(r => r.required > 0).map(r => ({ code: r.code, description: r.description, unit: r.unit, qty: r.required })), 0, `Ad-hoc · Grinding${extraN > 0 ? ` (+${extraN} for stock)` : ''}`)
+                        // Grinding: start the grind → creates the Grinding & Mixing record for this order's lots.
+                        else if (grindingMode) proceedGrinding(selected, (exploded as { lots?: number }).lots || 1)
                         else if (extraN > 0) raiseExt(selected, exploded.rows.map(r => ({ code: r.code, description: r.description, unit: r.unit, qty: r.shortfall > 0 ? r.requested : 0 })), extraN, `+${extraN} extra for stock`)
                         else raiseTarget(selected)
                       }} disabled={raising || hasRequest || (adhoc ? customRows.filter(r => Number(r.qty) > 0).length === 0 : grindingMode ? !exploded.rows.some(r => r.required > 0) : totalShortfall <= 0)}
