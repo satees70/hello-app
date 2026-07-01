@@ -15,7 +15,8 @@ interface DayRow { dateKey: string; result: DayResult; trip: string | null; manu
 interface EmpBlock {
   code: string; name: string; department: string | null; profile: ShiftProfile | null; deliveryName: string | null
   days: DayRow[]; punches: number; totalWorked: number; totalOt: number; totalLate: number; totalEarlyOut: number
-  totalRestDays: number; totalHolidayDays: number; totalPresentDays: number; totalOutstation: number; needsReview: number
+  totalRestDays: number; totalHolidayDays: number; totalPresentDays: number; totalOutstation: number
+  workDays: number; leaveDays: number; needsReview: number
 }
 
 // Add one day to a 'yyyy-MM-dd' date string (UTC-stable).
@@ -111,6 +112,10 @@ export default function AttendancePage() {
       if (!deptByCode.has(row.employee_code)) deptByCode.set(row.employee_code, row.department_name)
     }
 
+    // Every calendar date in the range (for counting scheduled work vs leave days).
+    const rangeDates: string[] = []
+    for (let d = from; d <= to; d = addDay(d)) rangeDates.push(d)
+
     const out: EmpBlock[] = []
     for (const [code, days] of grouped) {
       const emp = empByCode.get(code)
@@ -147,9 +152,22 @@ export default function AttendancePage() {
         if (result.presentDay) totalPresentDays++
         dayRows.push({ dateKey, result, trip, manualTime, outstationId: null })
       }
+      // Work vs leave days: over the scheduled working days (per the shift's weekly
+      // schedule, minus holidays), how many did they attend vs miss?
+      let workDays = 0, leaveDays = 0
+      const ws = prof?.week_schedule
+      if (ws) {
+        const attended = new Set<string>([...days.keys(), ...osDates.keys()])
+        for (const d of rangeDates) {
+          if (holidaySet.has(d)) continue
+          const e = ws[String(weekdayOf(d))]
+          if (!(e && e.start && e.end)) continue   // rest day / off — not a work day
+          if (attended.has(d)) workDays++; else leaveDays++
+        }
+      }
       out.push({
         code, name: emp?.name || code, department: deptByCode.get(code) ?? null,
-        profile: prof, deliveryName, days: dayRows, punches, totalWorked, totalOt, totalLate, totalEarlyOut, totalRestDays, totalHolidayDays, totalPresentDays, totalOutstation, needsReview,
+        profile: prof, deliveryName, days: dayRows, punches, totalWorked, totalOt, totalLate, totalEarlyOut, totalRestDays, totalHolidayDays, totalPresentDays, totalOutstation, workDays, leaveDays, needsReview,
       })
     }
     out.sort((a, b) => a.name.localeCompare(b.name))
@@ -299,6 +317,8 @@ export default function AttendancePage() {
               <div className="text-sm text-gray-600">
                 {b.profile ? <span>{b.profile.name} · OT &gt; {b.profile.normal_hours}h · {b.profile.lunch_rule}</span>
                   : <span className="text-amber-600">no shift profile</span>}
+                {b.profile && <span className="ml-3 font-medium text-gray-800">Work {b.workDays}d</span>}
+                {b.leaveDays > 0 && <span className="ml-3 text-rose-600">Leave {b.leaveDays}d</span>}
                 <span className="ml-3">Worked {fmtMinutes(b.totalWorked)}</span>
                 <span className="ml-3 font-medium text-gray-800">OT {fmtMinutes(b.totalOt)}</span>
                 {b.totalLate > 0 && <span className="ml-3 text-rose-600">Late {fmtMinutes(b.totalLate)}</span>}
