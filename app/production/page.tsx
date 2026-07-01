@@ -158,7 +158,7 @@ export default function ProductionPage() {
   function bomBadge(itemCode: string) {
     // Grinding: the formula is a RECIPE on the loose code.
     if (grindingMode) {
-      const loose = looseCode(itemCode)
+      const loose = grindProductCode(itemCode)
       const li = items.find(i => i.code === loose)
       if (recipeFor(loose, li?.description)) return null
       return (
@@ -212,7 +212,7 @@ export default function ProductionPage() {
     if (grindingMode) {
       const bag = items.find(i => i.code === itemCode)
       const factor = kgPerBagOf(itemCode, bag?.description || '') ?? 1
-      const loose = looseCode(itemCode)
+      const loose = grindProductCode(itemCode)
       const li = items.find(i => i.code === loose)
       const rec = recipeFor(loose, li?.description, factoryCode)
       if (!rec) return { note: `No grinding recipe for ${loose} — create one in Grinding → Recipes.`, rows: [], labels: [] as { code: string; description: string; unit: string; required: number }[] }
