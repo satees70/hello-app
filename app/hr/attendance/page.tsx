@@ -9,9 +9,9 @@ import {
 interface ShiftProfile extends ShiftProfileLite { id: string; name: string }
 interface Employee { employee_code: string; name: string | null; shift_profile_id: string | null; delivery_name: string | null }
 interface Punch { employee_code: string; punch_time: string; department_name: string | null }
-interface Review extends ReviewLite { employee_code: string; work_date: string }
+interface Review extends ReviewLite { employee_code: string; work_date: string; manual_time: string | null }
 
-interface DayRow { dateKey: string; result: DayResult; trip: string | null }
+interface DayRow { dateKey: string; result: DayResult; trip: string | null; manualTime: string | null }
 interface EmpBlock {
   code: string; name: string; department: string | null; profile: ShiftProfile | null; deliveryName: string | null
   days: DayRow[]; punches: number; totalWorked: number; totalOt: number; totalLate: number; totalEarlyOut: number
@@ -28,6 +28,7 @@ const DOW_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 export default function AttendancePage() {
   const [from, setFrom] = useState('2026-06-01')
   const [to, setTo] = useState(() => klDateKey(new Date()))
+  const [onlyReview, setOnlyReview] = useState(false)
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -46,7 +47,7 @@ export default function AttendancePage() {
         q => q.gte('punch_time', fromUtc).lte('punch_time', toUtc).order('punch_time')),
       supabase.from('employees').select('employee_code, name, shift_profile_id, delivery_name'),
       supabase.from('shift_profiles').select('id, name, normal_hours, lunch_rule, lunch_minutes, shift_start, shift_end, week_schedule, attendance_mode'),
-      supabase.from('attendance_reviews').select('employee_code, work_date, lunch_decision, manual_minutes')
+      supabase.from('attendance_reviews').select('employee_code, work_date, lunch_decision, manual_minutes, manual_time')
         .gte('work_date', from).lte('work_date', to),
     ])
     const { data: hols } = await supabase.from('public_holidays').select('holiday_date').gte('holiday_date', from).lte('holiday_date', to)
@@ -83,7 +84,10 @@ export default function AttendancePage() {
       for (const [dateKey, times] of [...days].sort((a, b) => a[0].localeCompare(b[0]))) {
         punches += times.length
         const review = reviewByKey.get(`${code}|${dateKey}`) ?? null
-        const result = computeDay(times, prof, review, { weekday: weekdayOf(dateKey), isHoliday: holidaySet.has(dateKey) })
+        // A manually-entered missing punch (HH:mm) is injected before pairing.
+        const manualTime = review?.lunch_decision === 'manual_time' ? (review.manual_time ?? null) : null
+        const dayTimes = manualTime ? [...times, new Date(`${dateKey}T${manualTime}:00+08:00`)] : times
+        const result = computeDay(dayTimes, prof, review, { weekday: weekdayOf(dateKey), isHoliday: holidaySet.has(dateKey) })
         if (result.needsReview) needsReview++
         totalWorked += result.workedMinutes
         totalOt += result.otMinutes
@@ -93,7 +97,7 @@ export default function AttendancePage() {
         if (result.dayType === 'holiday') totalHolidayDays += result.dayUnits
         if (result.presentDay) totalPresentDays++
         const trip = deliveryName ? (tripByKey.get(`${deliveryName}|${dateKey}`) ?? null) : null
-        dayRows.push({ dateKey, result, trip })
+        dayRows.push({ dateKey, result, trip, manualTime })
       }
       out.push({
         code, name: emp?.name || code, department: deptByCode.get(code) ?? null,
@@ -139,9 +143,22 @@ export default function AttendancePage() {
     if (v == null || v.trim() === '') return
     saveReview(code, date, 'manual', Number(v))
   }
+  async function reviewTime(code: string, date: string) {
+    const v = prompt('Enter the missing clock time (24-hour, e.g. 19:00):')
+    if (v == null || v.trim() === '') return
+    const m = /^(\d{1,2}):(\d{2})/.exec(v.trim())
+    if (!m) { setError('Please enter the time as HH:mm, e.g. 19:00'); return }
+    const time = `${m[1].padStart(2, '0')}:${m[2]}`
+    const res = await fetch('/api/attendance/review', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employee_code: code, work_date: date, lunch_decision: 'manual_time', manual_time: time }),
+    })
+    if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') } else await load()
+  }
 
   const fmtDate = (k: string) => { const [y, m, d] = k.split('-'); return `${d}/${m}/${y}` }
   const grandOt = blocks.reduce((s, b) => s + b.totalOt, 0)
+  const totalToReview = blocks.reduce((s, b) => s + b.needsReview, 0)
 
   return (
     <main className="max-w-6xl mx-auto p-4 sm:p-6">
@@ -170,6 +187,10 @@ export default function AttendancePage() {
         <label className="text-sm">From<input type="date" lang="en-GB" value={from} onChange={e => setFrom(e.target.value)} className="block mt-1 rounded border border-gray-300 px-2 py-1" /></label>
         <label className="text-sm">To<input type="date" lang="en-GB" value={to} onChange={e => setTo(e.target.value)} className="block mt-1 rounded border border-gray-300 px-2 py-1" /></label>
         <button onClick={load} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">Refresh</button>
+        <label className={`flex items-center gap-1.5 text-sm cursor-pointer rounded-md border px-3 py-1.5 ${onlyReview ? 'border-amber-400 bg-amber-50 text-amber-800' : 'border-gray-300'}`}>
+          <input type="checkbox" checked={onlyReview} onChange={e => setOnlyReview(e.target.checked)} />
+          Only needs review{totalToReview > 0 ? ` (${totalToReview})` : ''}
+        </label>
       </div>
 
       {msg && <div className="mb-4 rounded-md bg-green-50 border border-green-200 px-3 py-2 text-sm text-green-800">{msg}</div>}
@@ -186,7 +207,7 @@ export default function AttendancePage() {
       )}
 
       <div className="space-y-6">
-        {blocks.map(b => (
+        {blocks.filter(b => !onlyReview || b.needsReview > 0).map(b => (
           <section key={b.code} className="rounded-lg border border-gray-200 overflow-hidden">
             <header className="flex flex-wrap items-center justify-between gap-2 bg-gray-50 px-4 py-2 border-b border-gray-200">
               <div>
@@ -228,7 +249,7 @@ export default function AttendancePage() {
                 </tr>
               </thead>
               <tbody>
-                {b.days.map(({ dateKey, result, trip }) => (
+                {(onlyReview ? b.days.filter(d => d.result.needsReview) : b.days).map(({ dateKey, result, trip, manualTime }) => (
                   <tr key={dateKey} className={`border-b border-gray-50 align-top ${result.needsReview ? 'bg-amber-50' : ''}`}>
                     <td className="px-4 py-2 whitespace-nowrap">
                       {fmtDate(dateKey)} <span className={`ml-1 ${[0, 6].includes(weekdayOf(dateKey)) ? 'text-rose-500' : 'text-gray-400'}`}>{DOW_SHORT[weekdayOf(dateKey)]}</span>
@@ -258,14 +279,17 @@ export default function AttendancePage() {
                         <div>
                           <div className="text-xs text-amber-700 mb-1">{result.reviewReason}</div>
                           <div className="flex flex-wrap gap-1">
+                            <button onClick={() => reviewTime(b.code, dateKey)} className="rounded border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs text-blue-700 hover:bg-blue-100">Enter time…</button>
                             <button onClick={() => saveReview(b.code, dateKey, 'deduct')} className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50">Deduct lunch</button>
                             <button onClick={() => saveReview(b.code, dateKey, 'worked_through')} className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50">Worked through</button>
-                            <button onClick={() => reviewManual(b.code, dateKey)} className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50">Manual…</button>
+                            <button onClick={() => reviewManual(b.code, dateKey)} className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50">Manual mins…</button>
                           </div>
                         </div>
                       ) : result.reviewed ? (
                         <span className="inline-flex items-center gap-2">
-                          <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800">reviewed</span>
+                          {manualTime
+                            ? <span className="rounded bg-orange-100 px-2 py-0.5 text-xs text-orange-800" title="A clock time was entered manually">✎ manual ({manualTime})</span>
+                            : <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800">reviewed</span>}
                           <button onClick={() => clearReview(b.code, dateKey)} className="text-xs text-gray-400 underline">clear</button>
                         </span>
                       ) : result.presentDay ? (

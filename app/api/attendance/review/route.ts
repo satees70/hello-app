@@ -27,10 +27,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true })
   }
 
-  const valid = ['deduct', 'worked_through', 'manual']
+  const valid = ['deduct', 'worked_through', 'manual', 'manual_time']
   if (!valid.includes(body.lunch_decision)) {
     return NextResponse.json({ error: 'Invalid lunch_decision' }, { status: 400 })
   }
+
+  // manual_time = the missing punch typed in by hand (HH:mm) — the day is then
+  // paired with it and shown as manually edited.
+  const mt = (body.manual_time ?? '').toString().trim()
+  const manual_time = body.lunch_decision === 'manual_time' && /^\d{1,2}:\d{2}/.test(mt) ? mt.slice(0, 5) : null
 
   const row = {
     employee_code,
@@ -39,6 +44,7 @@ export async function POST(request: Request) {
     manual_minutes: body.lunch_decision === 'manual'
       ? (body.manual_minutes != null && body.manual_minutes !== '' ? Number(body.manual_minutes) : 0)
       : null,
+    manual_time,
     reviewed_by_name: (body.reviewed_by_name ?? '').trim() || null,
     reviewed_at: new Date().toISOString(),
   }
