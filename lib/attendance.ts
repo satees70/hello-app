@@ -166,6 +166,10 @@ function presentResult(pairing: DayPairing): DayResult {
 export function outstationResult(times: Date[]): DayResult {
   return { pairing: pairDay(times), dayType: 'normal', dayUnits: 0, presentDay: false, outstation: true, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false }
 }
+// A day with no attendance (off / holiday / absent) — all zero.
+export function emptyDay(): DayResult {
+  return { pairing: pairDay([]), dayType: 'normal', dayUnits: 0, presentDay: false, outstation: false, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false }
+}
 
 export function computeDay(times: Date[], profile: ShiftProfileLite | null, review: ReviewLite | null, ctx?: DayContext): DayResult {
   const pairing = pairDay(times)

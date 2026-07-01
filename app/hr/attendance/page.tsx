@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase, fetchAll } from '@/lib/supabase'
 import {
-  computeDay, outstationResult, klDateKey, klTime, fmtMinutes,
+  computeDay, outstationResult, emptyDay, klDateKey, klTime, fmtMinutes,
   type DayResult, type ShiftProfileLite, type ReviewLite,
 } from '@/lib/attendance'
 
@@ -11,7 +11,9 @@ interface Employee { employee_code: string; name: string | null; shift_profile_i
 interface Punch { employee_code: string; punch_time: string; department_name: string | null }
 interface Review extends ReviewLite { employee_code: string; work_date: string; manual_time: string | null }
 
-interface DayRow { dateKey: string; result: DayResult; trip: string | null; manualTime: string | null; outstationId: string | null }
+type DayKind = 'worked' | 'outstation' | 'holiday' | 'off' | 'absent'
+interface DayRow { dateKey: string; result: DayResult; trip: string | null; manualTime: string | null; outstationId: string | null; kind: DayKind; leaveType: string | null }
+const LEAVE_TYPES = ['AL', 'MC', 'EL', 'Unpaid']
 interface EmpBlock {
   code: string; name: string; department: string | null; profile: ShiftProfile | null; deliveryName: string | null
   days: DayRow[]; punches: number; totalWorked: number; totalOt: number; totalLate: number; totalEarlyOut: number
@@ -83,6 +85,10 @@ export default function AttendancePage() {
     for (const t of trips || []) if (t.category) opts.add(t.category)
     for (const o of tripOv || []) if (o.trip_type) opts.add(o.trip_type)
     setTripOptions([...opts].sort())
+    // Leave types set on absent days: (employee_code | date) → leave_type.
+    const { data: leaves } = await supabase.from('leave_days').select('employee_code, work_date, leave_type').gte('work_date', from).lte('work_date', to)
+    const leaveByKey = new Map<string, string>()
+    for (const l of leaves || []) if (l.leave_type) leaveByKey.set(`${l.employee_code}|${l.work_date}`, l.leave_type)
     // Outstation trips overlapping the range → per-employee map of dateKey → trip id.
     const { data: ostrips } = await supabase.from('outstation_trips').select('id, employee_code, start_date, end_date')
       .lte('start_date', to).gte('end_date', from)
@@ -124,46 +130,64 @@ export default function AttendancePage() {
       const osDates = outstationByEmp.get(code) ?? new Map<string, string>()
       const dayRows: DayRow[] = []
       let punches = 0, totalWorked = 0, totalOt = 0, totalLate = 0, totalEarlyOut = 0, totalRestDays = 0, totalHolidayDays = 0, totalPresentDays = 0, totalOutstation = 0, needsReview = 0
-      // Show every day that has punches OR falls inside an outstation trip.
-      const allDateKeys = [...new Set([...days.keys(), ...osDates.keys()])].sort()
-      for (const dateKey of allDateKeys) {
+      let workDays = 0, leaveDays = 0
+      const ws = prof?.week_schedule ?? null
+      // Walk every calendar day in the range, so absent (leave) days show as rows too.
+      for (const dateKey of rangeDates) {
         const times = days.get(dateKey) ?? []
-        punches += times.length
+        const isHol = holidaySet.has(dateKey)
+        const win = ws ? ws[String(weekdayOf(dateKey))] : null
+        // true = scheduled work day, false = rest/off, null = unknown (no profile).
+        const scheduledWorking = ws ? !!(win && win.start && win.end) : null
         const autoTrip = deliveryName ? (tripByKey.get(`${deliveryName}|${dateKey}`) ?? null) : null
         const trip = overrideByKey.get(`${code}|${dateKey}`) ?? autoTrip
+        const leaveType = leaveByKey.get(`${code}|${dateKey}`) ?? null
+
         // Outstation day → present, no OT, no review (punches still shown).
         if (osDates.has(dateKey)) {
+          punches += times.length
           totalOutstation++
-          dayRows.push({ dateKey, result: outstationResult(times), trip, manualTime: null, outstationId: osDates.get(dateKey)! })
+          if (scheduledWorking && !isHol) workDays++
+          dayRows.push({ dateKey, result: outstationResult(times), trip, manualTime: null, outstationId: osDates.get(dateKey)!, kind: 'outstation', leaveType: null })
           continue
         }
-        const review = reviewByKey.get(`${code}|${dateKey}`) ?? null
-        // A manually-entered missing punch (HH:mm) is injected before pairing.
-        const manualTime = review?.lunch_decision === 'manual_time' ? (review.manual_time ?? null) : null
-        const dayTimes = manualTime ? [...times, new Date(`${dateKey}T${manualTime}:00+08:00`)] : times
-        const result = computeDay(dayTimes, prof, review, { weekday: weekdayOf(dateKey), isHoliday: holidaySet.has(dateKey) })
-        if (result.needsReview) needsReview++
-        totalWorked += result.workedMinutes
-        totalOt += result.otMinutes
-        totalLate += result.lateMinutes
-        totalEarlyOut += result.earlyOutMinutes
-        if (result.dayType === 'rest') totalRestDays += result.dayUnits
-        if (result.dayType === 'holiday') totalHolidayDays += result.dayUnits
-        if (result.presentDay) totalPresentDays++
-        dayRows.push({ dateKey, result, trip, manualTime, outstationId: null })
-      }
-      // Work vs leave days: over the scheduled working days (per the shift's weekly
-      // schedule, minus holidays), how many did they attend vs miss?
-      let workDays = 0, leaveDays = 0
-      const ws = prof?.week_schedule
-      if (ws) {
-        const attended = new Set<string>([...days.keys(), ...osDates.keys()])
-        for (const d of rangeDates) {
-          if (holidaySet.has(d)) continue
-          const e = ws[String(weekdayOf(d))]
-          if (!(e && e.start && e.end)) continue   // rest day / off — not a work day
-          if (attended.has(d)) workDays++; else leaveDays++
+        // A day with punches → the normal computed row.
+        if (times.length > 0) {
+          punches += times.length
+          const review = reviewByKey.get(`${code}|${dateKey}`) ?? null
+          // A manually-entered missing punch (HH:mm) is injected before pairing.
+          const manualTime = review?.lunch_decision === 'manual_time' ? (review.manual_time ?? null) : null
+          const dayTimes = manualTime ? [...times, new Date(`${dateKey}T${manualTime}:00+08:00`)] : times
+          const result = computeDay(dayTimes, prof, review, { weekday: weekdayOf(dateKey), isHoliday: isHol })
+          if (result.needsReview) needsReview++
+          totalWorked += result.workedMinutes
+          totalOt += result.otMinutes
+          totalLate += result.lateMinutes
+          totalEarlyOut += result.earlyOutMinutes
+          if (result.dayType === 'rest') totalRestDays += result.dayUnits
+          if (result.dayType === 'holiday') totalHolidayDays += result.dayUnits
+          if (result.presentDay) totalPresentDays++
+          if (scheduledWorking && !isHol) workDays++
+          dayRows.push({ dateKey, result, trip, manualTime, outstationId: null, kind: 'worked', leaveType: null })
+          continue
         }
+        // No punches. Public holiday → shown, counted, not leave.
+        if (isHol) {
+          totalHolidayDays += 1
+          dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'holiday', leaveType: null })
+          continue
+        }
+        // No profile → we can't tell work day from rest day, so skip empty days.
+        if (scheduledWorking === null) continue
+        // Rest / off day.
+        if (!scheduledWorking) {
+          totalRestDays += 1
+          dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'off', leaveType: null })
+          continue
+        }
+        // Scheduled work day with no attendance → absent / leave.
+        leaveDays++
+        dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'absent', leaveType })
       }
       out.push({
         code, name: emp?.name || code, department: deptByCode.get(code) ?? null,
@@ -254,6 +278,17 @@ export default function AttendancePage() {
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Trip save failed') }
   }
 
+  // Set the leave type on an absent day (optimistic — no full reload).
+  async function saveLeave(code: string, date: string, leaveType: string) {
+    setBlocks(bs => bs.map(b => b.code === code
+      ? { ...b, days: b.days.map(d => d.dateKey === date ? { ...d, leaveType: leaveType || null } : d) } : b))
+    const res = await fetch('/api/attendance/leave', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employee_code: code, work_date: date, leave_type: leaveType }),
+    })
+    if (!res.ok) { const j = await res.json(); setError(j.error || 'Leave save failed') }
+  }
+
   const fmtDate = (k: string) => { const [y, m, d] = k.split('-'); return `${d}/${m}/${y}` }
   const grandOt = blocks.reduce((s, b) => s + b.totalOt, 0)
   const totalToReview = blocks.reduce((s, b) => s + b.needsReview, 0)
@@ -318,7 +353,12 @@ export default function AttendancePage() {
                 {b.profile ? <span>{b.profile.name} · OT &gt; {b.profile.normal_hours}h · {b.profile.lunch_rule}</span>
                   : <span className="text-amber-600">no shift profile</span>}
                 {b.profile && <span className="ml-3 font-medium text-gray-800">Work {b.workDays}d</span>}
-                {b.leaveDays > 0 && <span className="ml-3 text-rose-600">Leave {b.leaveDays}d</span>}
+                {b.leaveDays > 0 && (() => {
+                  const lc: Record<string, number> = {}
+                  for (const d of b.days) if (d.kind === 'absent' && d.leaveType) lc[d.leaveType] = (lc[d.leaveType] || 0) + 1
+                  const parts = Object.entries(lc).map(([k, v]) => `${k} ${v}`)
+                  return <span className="ml-3 text-rose-600">Leave {b.leaveDays}d{parts.length ? ` (${parts.join(', ')})` : ''}</span>
+                })()}
                 <span className="ml-3">Worked {fmtMinutes(b.totalWorked)}</span>
                 <span className="ml-3 font-medium text-gray-800">OT {fmtMinutes(b.totalOt)}</span>
                 {b.totalLate > 0 && <span className="ml-3 text-rose-600">Late {fmtMinutes(b.totalLate)}</span>}
@@ -350,8 +390,8 @@ export default function AttendancePage() {
                 </tr>
               </thead>
               <tbody>
-                {(onlyReview ? b.days.filter(d => d.result.needsReview) : b.days).map(({ dateKey, result, trip, manualTime, outstationId }) => (
-                  <tr key={dateKey} className={`border-b border-gray-50 align-top ${result.needsReview ? 'bg-amber-50' : ''}`}>
+                {(onlyReview ? b.days.filter(d => d.result.needsReview) : b.days).map(({ dateKey, result, trip, manualTime, outstationId, kind, leaveType }) => (
+                  <tr key={dateKey} className={`border-b border-gray-50 align-top ${result.needsReview ? 'bg-amber-50' : kind === 'absent' ? 'bg-rose-50' : kind === 'off' || kind === 'holiday' ? 'text-gray-400' : ''}`}>
                     <td className="px-4 py-2 whitespace-nowrap">
                       {fmtDate(dateKey)} <span className={`ml-1 ${[0, 6].includes(weekdayOf(dateKey)) ? 'text-rose-500' : 'text-gray-400'}`}>{DOW_SHORT[weekdayOf(dateKey)]}</span>
                     </td>
@@ -367,15 +407,17 @@ export default function AttendancePage() {
                         <div key={i} className="text-xs">{klTime(s.in)} → {s.out ? klTime(s.out) : <span className="text-red-600">??</span>}</div>
                       ))}
                     </td>
-                    <td className="px-4 py-2 whitespace-nowrap">{result.needsReview ? '—' : fmtMinutes(result.workedMinutes)}</td>
-                    <td className="px-4 py-2 whitespace-nowrap">{result.needsReview ? '—' : (result.otMinutes > 0 ? <span className="font-medium">{fmtMinutes(result.otMinutes)}</span> : '—')}</td>
+                    <td className="px-4 py-2 whitespace-nowrap">{kind === 'worked' ? (result.needsReview ? '—' : fmtMinutes(result.workedMinutes)) : '—'}</td>
+                    <td className="px-4 py-2 whitespace-nowrap">{kind === 'worked' && !result.needsReview && result.otMinutes > 0 ? <span className="font-medium">{fmtMinutes(result.otMinutes)}</span> : '—'}</td>
                     {b.deliveryName && (
                       <td className="px-4 py-2 whitespace-nowrap">
-                        <select value={trip ?? ''} onChange={e => saveTrip(b.code, dateKey, e.target.value)}
-                          className={`rounded border px-1 py-0.5 text-xs ${trip ? 'border-indigo-200 bg-indigo-50 text-indigo-800' : 'border-gray-200 text-gray-400'}`}>
-                          <option value="">—</option>
-                          {tripOptions.map(t => <option key={t} value={t}>{t}</option>)}
-                        </select>
+                        {kind === 'worked' || kind === 'outstation' ? (
+                          <select value={trip ?? ''} onChange={e => saveTrip(b.code, dateKey, e.target.value)}
+                            className={`rounded border px-1 py-0.5 text-xs ${trip ? 'border-indigo-200 bg-indigo-50 text-indigo-800' : 'border-gray-200 text-gray-400'}`}>
+                            <option value="">—</option>
+                            {tripOptions.map(t => <option key={t} value={t}>{t}</option>)}
+                          </select>
+                        ) : <span className="text-gray-300">—</span>}
                       </td>
                     )}
                     <td className="px-4 py-2 whitespace-nowrap text-xs text-rose-600">
@@ -384,7 +426,20 @@ export default function AttendancePage() {
                       {result.earlyOutMinutes > 0 && <span>early {fmtMinutes(result.earlyOutMinutes)}</span>}
                     </td>
                     <td className="px-4 py-2">
-                      {result.needsReview ? (
+                      {kind === 'off' ? (
+                        <span className="rounded bg-purple-100 px-2 py-0.5 text-xs text-purple-800">Rest day</span>
+                      ) : kind === 'holiday' ? (
+                        <span className="rounded bg-purple-100 px-2 py-0.5 text-xs text-purple-800">Public holiday</span>
+                      ) : kind === 'absent' ? (
+                        <span className="inline-flex items-center gap-2">
+                          <span className="rounded bg-rose-100 px-2 py-0.5 text-xs text-rose-800">absent</span>
+                          <select value={leaveType ?? ''} onChange={e => saveLeave(b.code, dateKey, e.target.value)}
+                            className={`rounded border px-1 py-0.5 text-xs ${leaveType ? 'border-rose-300 bg-rose-50 text-rose-800' : 'border-gray-200 text-gray-400'}`}>
+                            <option value="">leave type…</option>
+                            {LEAVE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                          </select>
+                        </span>
+                      ) : result.needsReview ? (
                         <div>
                           <div className="text-xs text-amber-700 mb-1">{result.reviewReason}</div>
                           <div className="flex flex-wrap gap-1">

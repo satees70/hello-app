@@ -3507,6 +3507,22 @@ create policy dto_read on public.driver_trip_overrides for select using (true);
 drop policy if exists dto_write on public.driver_trip_overrides;
 create policy dto_write on public.driver_trip_overrides for all using (true) with check (true);
 
+-- Leave: the type of leave on an absent (scheduled but not attended) day.
+create table if not exists public.leave_days (
+  employee_code text not null,
+  work_date date not null,
+  leave_type text,
+  updated_at timestamptz not null default now(),
+  primary key (employee_code, work_date)
+);
+grant select, insert, update, delete on public.leave_days to authenticated;
+grant all on public.leave_days to service_role;
+alter table public.leave_days enable row level security;
+drop policy if exists lv_read on public.leave_days;
+create policy lv_read on public.leave_days for select using (true);
+drop policy if exists lv_write on public.leave_days;
+create policy lv_write on public.leave_days for all using (true) with check (true);
+
 -- 2026-07 · Weekly schedule + day types. week_schedule jsonb keyed '0'(Sun)..'6'(Sat)
 -- → {start,end} for a working day, null/absent = day off (rest day). Rest-day &
 -- public-holiday work is counted in DAYS (full→1, >half→1, half-or-less→½).
