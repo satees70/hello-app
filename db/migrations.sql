@@ -3490,6 +3490,23 @@ create policy ost_read on public.outstation_trips for select using (true);
 drop policy if exists ost_write on public.outstation_trips;
 create policy ost_write on public.outstation_trips for all using (true) with check (true);
 
+-- Manual per-day driver trip type (for months the delivery schedule didn't
+-- record). Overrides the auto value from delivery_trips.category on that day.
+create table if not exists public.driver_trip_overrides (
+  employee_code text not null,
+  work_date date not null,
+  trip_type text,
+  updated_at timestamptz not null default now(),
+  primary key (employee_code, work_date)
+);
+grant select, insert, update, delete on public.driver_trip_overrides to authenticated;
+grant all on public.driver_trip_overrides to service_role;
+alter table public.driver_trip_overrides enable row level security;
+drop policy if exists dto_read on public.driver_trip_overrides;
+create policy dto_read on public.driver_trip_overrides for select using (true);
+drop policy if exists dto_write on public.driver_trip_overrides;
+create policy dto_write on public.driver_trip_overrides for all using (true) with check (true);
+
 -- 2026-07 · Weekly schedule + day types. week_schedule jsonb keyed '0'(Sun)..'6'(Sat)
 -- → {start,end} for a working day, null/absent = day off (rest day). Rest-day &
 -- public-holiday work is counted in DAYS (full→1, >half→1, half-or-less→½).

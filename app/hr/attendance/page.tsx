@@ -45,6 +45,7 @@ export default function AttendancePage() {
   const [from, setFrom] = useState(() => prevMonthRange().from)
   const [to, setTo] = useState(() => prevMonthRange().to)
   const [onlyReview, setOnlyReview] = useState(false)
+  const [tripOptions, setTripOptions] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -72,6 +73,15 @@ export default function AttendancePage() {
     const { data: trips } = await supabase.from('delivery_trips').select('driver, delivery_date, category').gte('delivery_date', from).lte('delivery_date', to)
     const tripByKey = new Map<string, string>()
     for (const t of trips || []) if (t.driver && t.category) tripByKey.set(`${t.driver}|${t.delivery_date}`, t.category)
+    // Manual per-day trip overrides (employee_code | date) → trip_type.
+    const { data: tripOv } = await supabase.from('driver_trip_overrides').select('employee_code, work_date, trip_type').gte('work_date', from).lte('work_date', to)
+    const overrideByKey = new Map<string, string>()
+    for (const o of tripOv || []) if (o.trip_type) overrideByKey.set(`${o.employee_code}|${o.work_date}`, o.trip_type)
+    // Trip-type options for the dropdown = the schedule's categories + overrides.
+    const opts = new Set<string>(['LOCAL', 'GCH', 'OS1', 'OS2'])
+    for (const t of trips || []) if (t.category) opts.add(t.category)
+    for (const o of tripOv || []) if (o.trip_type) opts.add(o.trip_type)
+    setTripOptions([...opts].sort())
     // Outstation trips overlapping the range → per-employee map of dateKey → trip id.
     const { data: ostrips } = await supabase.from('outstation_trips').select('id, employee_code, start_date, end_date')
       .lte('start_date', to).gte('end_date', from)
@@ -114,7 +124,8 @@ export default function AttendancePage() {
       for (const dateKey of allDateKeys) {
         const times = days.get(dateKey) ?? []
         punches += times.length
-        const trip = deliveryName ? (tripByKey.get(`${deliveryName}|${dateKey}`) ?? null) : null
+        const autoTrip = deliveryName ? (tripByKey.get(`${deliveryName}|${dateKey}`) ?? null) : null
+        const trip = overrideByKey.get(`${code}|${dateKey}`) ?? autoTrip
         // Outstation day → present, no OT, no review (punches still shown).
         if (osDates.has(dateKey)) {
           totalOutstation++
@@ -212,6 +223,17 @@ export default function AttendancePage() {
       body: JSON.stringify({ action: 'delete', id }),
     })
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Failed') } else await load()
+  }
+
+  // Set a driver's trip type for a day (optimistic — no full reload).
+  async function saveTrip(code: string, date: string, tripType: string) {
+    setBlocks(bs => bs.map(b => b.code === code
+      ? { ...b, days: b.days.map(d => d.dateKey === date ? { ...d, trip: tripType || null } : d) } : b))
+    const res = await fetch('/api/attendance/driver-trip', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employee_code: code, work_date: date, trip_type: tripType }),
+    })
+    if (!res.ok) { const j = await res.json(); setError(j.error || 'Trip save failed') }
   }
 
   const fmtDate = (k: string) => { const [y, m, d] = k.split('-'); return `${d}/${m}/${y}` }
@@ -327,7 +349,15 @@ export default function AttendancePage() {
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap">{result.needsReview ? '—' : fmtMinutes(result.workedMinutes)}</td>
                     <td className="px-4 py-2 whitespace-nowrap">{result.needsReview ? '—' : (result.otMinutes > 0 ? <span className="font-medium">{fmtMinutes(result.otMinutes)}</span> : '—')}</td>
-                    {b.deliveryName && <td className="px-4 py-2 whitespace-nowrap">{trip ? <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs text-indigo-800">{trip}</span> : <span className="text-gray-300">—</span>}</td>}
+                    {b.deliveryName && (
+                      <td className="px-4 py-2 whitespace-nowrap">
+                        <select value={trip ?? ''} onChange={e => saveTrip(b.code, dateKey, e.target.value)}
+                          className={`rounded border px-1 py-0.5 text-xs ${trip ? 'border-indigo-200 bg-indigo-50 text-indigo-800' : 'border-gray-200 text-gray-400'}`}>
+                          <option value="">—</option>
+                          {tripOptions.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </td>
+                    )}
                     <td className="px-4 py-2 whitespace-nowrap text-xs text-rose-600">
                       {result.lateMinutes > 0 && <span>late {fmtMinutes(result.lateMinutes)}</span>}
                       {result.lateMinutes > 0 && result.earlyOutMinutes > 0 && <span> · </span>}
