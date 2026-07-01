@@ -13,7 +13,10 @@ interface Review extends ReviewLite { employee_code: string; work_date: string; 
 
 type DayKind = 'worked' | 'outstation' | 'holiday' | 'off' | 'absent'
 interface DayRow { dateKey: string; result: DayResult; trip: string | null; manualTime: string | null; outstationId: string | null; kind: DayKind; leaveType: string | null }
-const LEAVE_TYPES = ['AL', 'MC', 'EL', 'Unpaid']
+const LEAVE_TYPES = ['AL', 'MC', 'EL', 'Unpaid', 'Half']
+// How much of a scheduled day a leave type consumes. A half-day is 0.5 leave +
+// 0.5 work; every other type (and an untyped absence) is a full day off.
+const leaveWeight = (t: string | null) => (t === 'Half' ? 0.5 : 1)
 interface EmpBlock {
   code: string; name: string; department: string | null; profile: ShiftProfile | null; deliveryName: string | null
   days: DayRow[]; punches: number; totalWorked: number; totalOt: number; totalLate: number; totalEarlyOut: number
@@ -185,8 +188,10 @@ export default function AttendancePage() {
           dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'off', leaveType: null })
           continue
         }
-        // Scheduled work day with no attendance → absent / leave.
-        leaveDays++
+        // Scheduled work day with no attendance → absent / leave (half-day = 0.5).
+        const w = leaveWeight(leaveType)
+        leaveDays += w
+        workDays += 1 - w
         dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'absent', leaveType })
       }
       out.push({
@@ -280,8 +285,18 @@ export default function AttendancePage() {
 
   // Set the leave type on an absent day (optimistic — no full reload).
   async function saveLeave(code: string, date: string, leaveType: string) {
-    setBlocks(bs => bs.map(b => b.code === code
-      ? { ...b, days: b.days.map(d => d.dateKey === date ? { ...d, leaveType: leaveType || null } : d) } : b))
+    setBlocks(bs => bs.map(b => {
+      if (b.code !== code) return b
+      const old = b.days.find(d => d.dateKey === date)
+      if (!old || old.kind !== 'absent') return b
+      const oldW = leaveWeight(old.leaveType), newW = leaveWeight(leaveType || null)
+      return {
+        ...b,
+        days: b.days.map(d => d.dateKey === date ? { ...d, leaveType: leaveType || null } : d),
+        leaveDays: b.leaveDays - oldW + newW,
+        workDays: b.workDays - (1 - oldW) + (1 - newW),
+      }
+    }))
     const res = await fetch('/api/attendance/leave', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ employee_code: code, work_date: date, leave_type: leaveType }),
