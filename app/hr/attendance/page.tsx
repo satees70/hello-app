@@ -17,6 +17,9 @@ const LEAVE_TYPES = ['AL', 'MC', 'EL', 'Unpaid', 'Half']
 // How much of a scheduled day a leave type consumes. A half-day is 0.5 leave +
 // 0.5 work; every other type (and an untyped absence) is a full day off.
 const leaveWeight = (t: string | null) => (t === 'Half' ? 0.5 : 1)
+// A day still needing a human: a missing clock-out, or an absence with no leave
+// type picked yet. These are what the "Only needs review" filter shows.
+const dayNeedsAttn = (d: DayRow) => d.result.needsReview || (d.kind === 'absent' && !d.leaveType)
 interface EmpBlock {
   code: string; name: string; department: string | null; profile: ShiftProfile | null; deliveryName: string | null
   days: DayRow[]; punches: number; totalWorked: number; totalOt: number; totalLate: number; totalEarlyOut: number
@@ -154,13 +157,22 @@ export default function AttendancePage() {
           dayRows.push({ dateKey, result: outstationResult(times), trip, manualTime: null, outstationId: osDates.get(dateKey)!, kind: 'outstation', leaveType: null })
           continue
         }
-        // A day with punches → the normal computed row.
-        if (times.length > 0) {
+        // Resolve any human review + hand-entered time. A single "HH:mm" fills a
+        // missing punch; a full "HH:mm-HH:mm" span sets the whole day (so an absent
+        // day can be turned into a worked day with OT — e.g. they worked until 19:00).
+        const review = reviewByKey.get(`${code}|${dateKey}`) ?? null
+        const manualTime = review?.lunch_decision === 'manual_time' ? (review.manual_time ?? null) : null
+        let dayTimes = times
+        if (manualTime) {
+          const range = /^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/.exec(manualTime)
+          dayTimes = range
+            ? [new Date(`${dateKey}T${range[1]}:00+08:00`), new Date(`${dateKey}T${range[2]}:00+08:00`)]
+            : [...times, new Date(`${dateKey}T${manualTime}:00+08:00`)]
+        }
+
+        // A day with punches (real or hand-entered) → the normal computed row.
+        if (dayTimes.length > 0) {
           punches += times.length
-          const review = reviewByKey.get(`${code}|${dateKey}`) ?? null
-          // A manually-entered missing punch (HH:mm) is injected before pairing.
-          const manualTime = review?.lunch_decision === 'manual_time' ? (review.manual_time ?? null) : null
-          const dayTimes = manualTime ? [...times, new Date(`${dateKey}T${manualTime}:00+08:00`)] : times
           const result = computeDay(dayTimes, prof, review, { weekday: weekdayOf(dateKey), isHoliday: isHol })
           if (result.needsReview) needsReview++
           totalWorked += result.workedMinutes
@@ -253,6 +265,20 @@ export default function AttendancePage() {
     })
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') } else await load()
   }
+  // Enter a full worked span (start-end), e.g. they actually worked 08:30–19:00.
+  // Sets the whole day so OT is computed from the shift window.
+  async function reviewSession(code: string, date: string) {
+    const v = prompt('Enter the worked time as start-end (24-hour), e.g. 08:30-19:00:')
+    if (v == null || v.trim() === '') return
+    const m = /^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/.exec(v.trim())
+    if (!m) { setError('Enter it as start-end, e.g. 08:30-19:00'); return }
+    const span = `${m[1].padStart(2, '0')}:${m[2]}-${m[3].padStart(2, '0')}:${m[4]}`
+    const res = await fetch('/api/attendance/review', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employee_code: code, work_date: date, lunch_decision: 'manual_time', manual_time: span }),
+    })
+    if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') } else await load()
+  }
 
   async function markOutstation(code: string, departure: string) {
     const v = prompt(`Outstation from ${fmtDate(departure)}.\nEnter the RETURN date (dd/mm/yyyy):`)
@@ -309,7 +335,7 @@ export default function AttendancePage() {
 
   const fmtDate = (k: string) => { const [y, m, d] = k.split('-'); return `${d}/${m}/${y}` }
   const grandOt = blocks.reduce((s, b) => s + b.totalOt, 0)
-  const totalToReview = blocks.reduce((s, b) => s + b.needsReview, 0)
+  const totalToReview = blocks.reduce((s, b) => s + b.days.filter(dayNeedsAttn).length, 0)
 
   return (
     <main className="max-w-6xl mx-auto p-4 sm:p-6">
@@ -358,7 +384,7 @@ export default function AttendancePage() {
       )}
 
       <div className="space-y-6">
-        {blocks.filter(b => !onlyReview || b.needsReview > 0).map(b => (
+        {blocks.filter(b => !onlyReview || b.days.some(dayNeedsAttn)).map(b => (
           <section key={b.code} className="rounded-lg border border-gray-200 overflow-hidden">
             <header className="flex flex-wrap items-center justify-between gap-2 bg-gray-50 px-4 py-2 border-b border-gray-200">
               <div>
@@ -411,7 +437,7 @@ export default function AttendancePage() {
                 </tr>
               </thead>
               <tbody>
-                {(onlyReview ? b.days.filter(d => d.result.needsReview) : b.days).map(({ dateKey, result, trip, manualTime, outstationId, kind, leaveType }) => (
+                {(onlyReview ? b.days.filter(dayNeedsAttn) : b.days).map(({ dateKey, result, trip, manualTime, outstationId, kind, leaveType }) => (
                   <tr key={dateKey} className={`border-b border-gray-50 align-top ${result.needsReview ? 'bg-amber-50' : kind === 'absent' ? 'bg-rose-50' : kind === 'off' || kind === 'holiday' ? 'text-gray-400' : ''}`}>
                     <td className="px-4 py-2 whitespace-nowrap">
                       {fmtDate(dateKey)} <span className={`ml-1 ${[0, 6].includes(weekdayOf(dateKey)) ? 'text-rose-500' : 'text-gray-400'}`}>{DOW_SHORT[weekdayOf(dateKey)]}</span>
@@ -459,6 +485,7 @@ export default function AttendancePage() {
                             <option value="">leave type…</option>
                             {LEAVE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                           </select>
+                          <button onClick={() => reviewSession(b.code, dateKey)} className="text-xs text-blue-600 underline">enter times…</button>
                         </span>
                       ) : result.needsReview ? (
                         <div>
@@ -484,7 +511,10 @@ export default function AttendancePage() {
                           <button onClick={() => clearReview(b.code, dateKey)} className="text-xs text-gray-400 underline">clear</button>
                         </span>
                       ) : result.halfDay ? (
-                        <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">½ day</span>
+                        <span className="inline-flex items-center gap-2">
+                          <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">½ day</span>
+                          <button onClick={() => reviewSession(b.code, dateKey)} className="text-xs text-blue-600 underline">enter times…</button>
+                        </span>
                       ) : result.presentDay ? (
                         <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-800">present</span>
                       ) : result.dayType !== 'normal' ? (
