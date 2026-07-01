@@ -969,19 +969,15 @@ begin
     select * into v_item from public.items where code = v_ret.item_code limit 1;
     if found then update public.item_stock set quantity = quantity + v_ret.quantity, updated_at = now() where item_id = v_item.id and factory_code = v_ret.factory_code; end if;
 
-    -- 2) Deduct the new qty of the new item from a lot at the same factory (FIFO).
+    -- 2) Deduct the new qty of the new item; stock may go negative (same as direct delivery).
     select * into v_new_item from public.items where code = v_newcode limit 1;
     if not found then raise exception 'The new item does not exist'; end if;
+    -- prefer a batch that has enough, else earliest-expiry batch, else none
     select * into v_new_lot from public.stock_lots where item_code = v_newcode and factory_code = v_ret.factory_code
-      and qty_remaining >= v_newqty order by exp_date asc nulls last, received_at asc limit 1;
-    if not found then
-      select * into v_new_lot from public.stock_lots where item_code = v_newcode and factory_code = v_ret.factory_code
-        order by qty_remaining desc, exp_date asc nulls last limit 1;
-    end if;
-    if not found then raise exception 'No stock batch found for % at this factory to deduct', v_newcode; end if;
-    if v_newqty > v_new_lot.qty_remaining then raise exception 'Not enough stock of % — only % left in that batch', v_newcode, v_new_lot.qty_remaining; end if;
-    update public.stock_lots set qty_remaining = qty_remaining - v_newqty where id = v_new_lot.id;
+      order by (qty_remaining >= v_newqty) desc, exp_date asc nulls last, received_at asc limit 1;
+    if found then update public.stock_lots set qty_remaining = qty_remaining - v_newqty where id = v_new_lot.id; end if;
     update public.item_stock set quantity = quantity - v_newqty, updated_at = now() where item_id = v_new_item.id and factory_code = v_ret.factory_code;
+    if not found then insert into public.item_stock (item_id, factory_code, quantity, updated_at) values (v_new_item.id, v_ret.factory_code, -v_newqty, now()); end if;
 
     -- 3) Point the return at the new item / lot / qty.
     update public.material_returns
@@ -997,9 +993,7 @@ begin
         select * into v_lot from public.stock_lots where item_code = v_ret.item_code and factory_code = v_ret.factory_code
           and coalesce(batch_no,'') = coalesce(v_ret.batch_no,'') order by exp_date asc nulls last, received_at asc limit 1;
       end if;
-      if not found then raise exception 'Cannot find the stock batch to adjust'; end if;
-      if v_delta > v_lot.qty_remaining then raise exception 'Not enough stock to increase the return — only % left in that batch', v_lot.qty_remaining; end if;
-      update public.stock_lots set qty_remaining = qty_remaining - v_delta where id = v_lot.id;
+      if found then update public.stock_lots set qty_remaining = qty_remaining - v_delta where id = v_lot.id; end if;  -- stock may go negative
       select * into v_item from public.items where code = v_ret.item_code limit 1;
       if found then update public.item_stock set quantity = quantity - v_delta, updated_at = now() where item_id = v_item.id and factory_code = v_ret.factory_code; end if;
     end if;
