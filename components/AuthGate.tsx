@@ -8,7 +8,7 @@ import { can, type ModuleKey } from '@/lib/permissions'
 // (useProfile bounces to /login if there's no session), and shows a slim bar
 // with who's signed in + a sign-out button. When `requireModule` is given, the
 // user must also have that permission (admins always pass).
-export default function AuthGate({ children, requireModule }: { children: ReactNode; requireModule?: ModuleKey }) {
+export default function AuthGate({ children, requireModule, hideBar }: { children: ReactNode; requireModule?: ModuleKey; hideBar?: boolean }) {
   const { profile, loading, error } = useProfile()
 
   if (loading) return <div className="p-6 text-sm text-gray-500">Checking sign-in…</div>
@@ -27,10 +27,12 @@ export default function AuthGate({ children, requireModule }: { children: ReactN
 
   return (
     <>
-      <div className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-2 text-sm">
-        <span className="text-gray-500">Signed in as <b className="text-gray-800">{profile.full_name || profile.username}</b></span>
-        <button onClick={() => supabase.auth.signOut()} className="text-blue-600 hover:underline">Sign out</button>
-      </div>
+      {!hideBar && (
+        <div className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-2 text-sm">
+          <span className="text-gray-500">Signed in as <b className="text-gray-800">{profile.full_name || profile.username}</b></span>
+          <button onClick={() => supabase.auth.signOut()} className="text-blue-600 hover:underline">Sign out</button>
+        </div>
+      )}
       {children}
     </>
   )
