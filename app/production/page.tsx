@@ -831,26 +831,25 @@ export default function ProductionPage() {
                 {(adhoc || !exploded.note) && (
                   <div className="flex flex-wrap items-end justify-between gap-3 mt-4">
                     <div className="text-sm">
-                      {hasRequest
+                      {grindingMode
+                        ? <span className={totalShortfall > 0 ? 'text-amber-600' : 'text-green-600'}>{totalShortfall > 0 ? 'Some raw material short — you can still start; raw material is consumed from stock when you record the mix in Grinding & Mixing.' : 'Enough raw material — no material request needed; it consumes from stock when you record the mix in Grinding & Mixing.'}</span>
+                        : hasRequest
                         ? <span className="text-purple-700">Material request {reqNo ? <strong className="font-mono">{reqNo}</strong> : ''} is already open{reqCreator ? ` (raised by ${reqCreator})` : ''} — see Material Requests.</span>
                         : adhoc
                           ? <span className="text-gray-600">Ad-hoc: requesting exactly the materials & quantities listed above.</span>
-                          : grindingMode
-                            ? <span className={totalShortfall > 0 ? 'text-amber-600' : 'text-green-600'}>{totalShortfall > 0 ? 'Some raw material short — you can still start; it opens in Grinding & Mixing to record the actual mix.' : 'Enough raw material — start the grind; it opens in Grinding & Mixing to record the actual mix.'}</span>
                           : totalShortfall > 0
                             ? <span className="text-red-600">Total shortfall across {exploded.rows.filter(r => r.shortfall > 0).length} material(s).</span>
                             : <span className="text-green-600">Enough stock on hand — no shortfall.</span>}
                     </div>
                     <div className="flex items-end gap-3">
                       <button onClick={() => {
-                        if (adhoc) raiseExt(selected, customRows.map(r => ({ code: r.code, description: r.description, unit: r.unit, qty: Number(r.qty) })), extraN, extraN > 0 ? `Ad-hoc · +${extraN} for stock` : 'Ad-hoc')
-                        // Grinding: start the grind → creates the Grinding & Mixing record for this order's lots.
-                        else if (grindingMode) proceedGrinding(selected, (exploded as { lots?: number }).lots || 1)
+                        if (grindingMode) proceedGrinding(selected, (exploded as { lots?: number }).lots || 1)
+                        else if (adhoc) raiseExt(selected, customRows.map(r => ({ code: r.code, description: r.description, unit: r.unit, qty: Number(r.qty) })), extraN, extraN > 0 ? `Ad-hoc · +${extraN} for stock` : 'Ad-hoc')
                         else if (extraN > 0) raiseExt(selected, exploded.rows.map(r => ({ code: r.code, description: r.description, unit: r.unit, qty: r.shortfall > 0 ? r.requested : 0 })), extraN, `+${extraN} extra for stock`)
                         else raiseTarget(selected)
-                      }} disabled={raising || hasRequest || (adhoc ? customRows.filter(r => Number(r.qty) > 0).length === 0 : grindingMode ? !exploded.rows.some(r => r.required > 0) : totalShortfall <= 0)}
+                      }} disabled={raising || (grindingMode ? !exploded.rows.some(r => r.required > 0) : (hasRequest || (adhoc ? customRows.filter(r => Number(r.qty) > 0).length === 0 : totalShortfall <= 0)))}
                         className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
-                        {raising ? 'Raising…' : adhoc ? 'Raise ad-hoc request' : grindingMode ? 'Proceed to grinding' : extraN > 0 ? 'Raise request (+ stock)' : 'Raise Material Request'}
+                        {raising ? 'Raising…' : grindingMode ? 'Proceed to grinding' : adhoc ? 'Raise ad-hoc request' : extraN > 0 ? 'Raise request (+ stock)' : 'Raise Material Request'}
                       </button>
                     </div>
                   </div>
