@@ -111,6 +111,7 @@ export interface DayResult {
   dayType: 'normal' | 'rest' | 'holiday'
   dayUnits: number              // rest/holiday work counted in days (0, 0.5, 1)
   presentDay: boolean           // salesman single-punch mode: present that day
+  outstation: boolean           // day is part of a multi-day outstation trip
   workedMinutes: number         // regular + OT (normal day); raw worked (rest/holiday)
   regularMinutes: number
   otMinutes: number
@@ -145,20 +146,25 @@ const overlap = (a: number, b: number, c: number, d: number) => Math.max(0, Math
 
 function result(regular: number, ot: number, late: number, earlyOut: number, pairing: DayPairing, reviewed: boolean): DayResult {
   const r = Math.max(0, Math.round(regular)), o = Math.max(0, Math.round(ot))
-  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: false, workedMinutes: r + o, regularMinutes: r, otMinutes: o, lateMinutes: Math.max(0, Math.round(late)), earlyOutMinutes: Math.max(0, Math.round(earlyOut)), needsReview: false, reviewReason: null, reviewed }
+  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: false, outstation: false, workedMinutes: r + o, regularMinutes: r, otMinutes: o, lateMinutes: Math.max(0, Math.round(late)), earlyOutMinutes: Math.max(0, Math.round(earlyOut)), needsReview: false, reviewReason: null, reviewed }
 }
 function flag(pairing: DayPairing, reason: string): DayResult {
-  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: false, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: true, reviewReason: reason, reviewed: false }
+  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: false, outstation: false, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: true, reviewReason: reason, reviewed: false }
 }
 // Rest-day / public-holiday work, counted in days: full shift → 1, >half → 1,
 // half or less → ½. (SQL Payroll applies the day-rate from the bucket.)
 function dayCount(dayType: 'rest' | 'holiday', worked: number, fullNormalMin: number, pairing: DayPairing): DayResult {
   const units = worked <= 0 ? 0 : (worked > fullNormalMin / 2 ? 1 : 0.5)
-  return { pairing, dayType, dayUnits: units, presentDay: false, workedMinutes: Math.round(worked), regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false }
+  return { pairing, dayType, dayUnits: units, presentDay: false, outstation: false, workedMinutes: Math.round(worked), regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false }
 }
 // Salesman single-punch mode: any punch that day = present (no hours/OT/review).
 function presentResult(pairing: DayPairing): DayResult {
-  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: true, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false }
+  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: true, outstation: false, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false }
+}
+// A day inside a multi-day outstation trip: present, no OT, no review; the
+// punches (departure / return) are still shown but don't flag.
+export function outstationResult(times: Date[]): DayResult {
+  return { pairing: pairDay(times), dayType: 'normal', dayUnits: 0, presentDay: false, outstation: true, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false }
 }
 
 export function computeDay(times: Date[], profile: ShiftProfileLite | null, review: ReviewLite | null, ctx?: DayContext): DayResult {

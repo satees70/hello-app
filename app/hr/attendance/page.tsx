@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase, fetchAll } from '@/lib/supabase'
 import {
-  computeDay, klDateKey, klTime, fmtMinutes,
+  computeDay, outstationResult, klDateKey, klTime, fmtMinutes,
   type DayResult, type ShiftProfileLite, type ReviewLite,
 } from '@/lib/attendance'
 
@@ -11,11 +11,17 @@ interface Employee { employee_code: string; name: string | null; shift_profile_i
 interface Punch { employee_code: string; punch_time: string; department_name: string | null }
 interface Review extends ReviewLite { employee_code: string; work_date: string; manual_time: string | null }
 
-interface DayRow { dateKey: string; result: DayResult; trip: string | null; manualTime: string | null }
+interface DayRow { dateKey: string; result: DayResult; trip: string | null; manualTime: string | null; outstationId: string | null }
 interface EmpBlock {
   code: string; name: string; department: string | null; profile: ShiftProfile | null; deliveryName: string | null
   days: DayRow[]; punches: number; totalWorked: number; totalOt: number; totalLate: number; totalEarlyOut: number
-  totalRestDays: number; totalHolidayDays: number; totalPresentDays: number; needsReview: number
+  totalRestDays: number; totalHolidayDays: number; totalPresentDays: number; totalOutstation: number; needsReview: number
+}
+
+// Add one day to a 'yyyy-MM-dd' date string (UTC-stable).
+function addDay(dk: string): string {
+  const [y, m, d] = dk.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10)
 }
 
 // JS weekday (0=Sun..6=Sat) for a yyyy-MM-dd calendar date (tz-stable via UTC).
@@ -66,6 +72,17 @@ export default function AttendancePage() {
     const { data: trips } = await supabase.from('delivery_trips').select('driver, delivery_date, category').gte('delivery_date', from).lte('delivery_date', to)
     const tripByKey = new Map<string, string>()
     for (const t of trips || []) if (t.driver && t.category) tripByKey.set(`${t.driver}|${t.delivery_date}`, t.category)
+    // Outstation trips overlapping the range → per-employee map of dateKey → trip id.
+    const { data: ostrips } = await supabase.from('outstation_trips').select('id, employee_code, start_date, end_date')
+      .lte('start_date', to).gte('end_date', from)
+    const outstationByEmp = new Map<string, Map<string, string>>()
+    for (const t of ostrips || []) {
+      const m = outstationByEmp.get(t.employee_code) ?? new Map<string, string>()
+      let d = t.start_date < from ? from : t.start_date
+      const end = t.end_date > to ? to : t.end_date
+      while (d <= end) { m.set(d, t.id); d = addDay(d) }
+      outstationByEmp.set(t.employee_code, m)
+    }
 
     const empByCode = new Map<string, Employee>((emps || []).map(e => [e.employee_code, e as Employee]))
     const profById = new Map<string, ShiftProfile>((profs || []).map(p => [p.id, p as ShiftProfile]))
@@ -89,10 +106,21 @@ export default function AttendancePage() {
       const emp = empByCode.get(code)
       const prof = emp?.shift_profile_id ? profById.get(emp.shift_profile_id) ?? null : null
       const deliveryName = emp?.delivery_name ?? null
+      const osDates = outstationByEmp.get(code) ?? new Map<string, string>()
       const dayRows: DayRow[] = []
-      let punches = 0, totalWorked = 0, totalOt = 0, totalLate = 0, totalEarlyOut = 0, totalRestDays = 0, totalHolidayDays = 0, totalPresentDays = 0, needsReview = 0
-      for (const [dateKey, times] of [...days].sort((a, b) => a[0].localeCompare(b[0]))) {
+      let punches = 0, totalWorked = 0, totalOt = 0, totalLate = 0, totalEarlyOut = 0, totalRestDays = 0, totalHolidayDays = 0, totalPresentDays = 0, totalOutstation = 0, needsReview = 0
+      // Show every day that has punches OR falls inside an outstation trip.
+      const allDateKeys = [...new Set([...days.keys(), ...osDates.keys()])].sort()
+      for (const dateKey of allDateKeys) {
+        const times = days.get(dateKey) ?? []
         punches += times.length
+        const trip = deliveryName ? (tripByKey.get(`${deliveryName}|${dateKey}`) ?? null) : null
+        // Outstation day → present, no OT, no review (punches still shown).
+        if (osDates.has(dateKey)) {
+          totalOutstation++
+          dayRows.push({ dateKey, result: outstationResult(times), trip, manualTime: null, outstationId: osDates.get(dateKey)! })
+          continue
+        }
         const review = reviewByKey.get(`${code}|${dateKey}`) ?? null
         // A manually-entered missing punch (HH:mm) is injected before pairing.
         const manualTime = review?.lunch_decision === 'manual_time' ? (review.manual_time ?? null) : null
@@ -106,12 +134,11 @@ export default function AttendancePage() {
         if (result.dayType === 'rest') totalRestDays += result.dayUnits
         if (result.dayType === 'holiday') totalHolidayDays += result.dayUnits
         if (result.presentDay) totalPresentDays++
-        const trip = deliveryName ? (tripByKey.get(`${deliveryName}|${dateKey}`) ?? null) : null
-        dayRows.push({ dateKey, result, trip, manualTime })
+        dayRows.push({ dateKey, result, trip, manualTime, outstationId: null })
       }
       out.push({
         code, name: emp?.name || code, department: deptByCode.get(code) ?? null,
-        profile: prof, deliveryName, days: dayRows, punches, totalWorked, totalOt, totalLate, totalEarlyOut, totalRestDays, totalHolidayDays, totalPresentDays, needsReview,
+        profile: prof, deliveryName, days: dayRows, punches, totalWorked, totalOt, totalLate, totalEarlyOut, totalRestDays, totalHolidayDays, totalPresentDays, totalOutstation, needsReview,
       })
     }
     out.sort((a, b) => a.name.localeCompare(b.name))
@@ -164,6 +191,27 @@ export default function AttendancePage() {
       body: JSON.stringify({ employee_code: code, work_date: date, lunch_decision: 'manual_time', manual_time: time }),
     })
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') } else await load()
+  }
+
+  async function markOutstation(code: string, departure: string) {
+    const v = prompt(`Outstation from ${fmtDate(departure)}.\nEnter the RETURN date (dd/mm/yyyy):`)
+    if (v == null || v.trim() === '') return
+    const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(v.trim())
+    if (!m) { setError('Enter the return date as dd/mm/yyyy'); return }
+    const end = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+    const res = await fetch('/api/attendance/outstation', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employee_code: code, start_date: departure, end_date: end }),
+    })
+    if (!res.ok) { const j = await res.json(); setError(j.error || 'Failed') } else await load()
+  }
+  async function removeOutstation(id: string) {
+    if (!confirm('Remove this outstation trip?')) return
+    const res = await fetch('/api/attendance/outstation', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete', id }),
+    })
+    if (!res.ok) { const j = await res.json(); setError(j.error || 'Failed') } else await load()
   }
 
   const fmtDate = (k: string) => { const [y, m, d] = k.split('-'); return `${d}/${m}/${y}` }
@@ -236,6 +284,7 @@ export default function AttendancePage() {
                 {b.totalRestDays > 0 && <span className="ml-3 text-purple-700">Rest {b.totalRestDays}d</span>}
                 {b.totalHolidayDays > 0 && <span className="ml-3 text-purple-700">PH {b.totalHolidayDays}d</span>}
                 {b.totalPresentDays > 0 && <span className="ml-3 font-medium text-gray-800">Present {b.totalPresentDays}d</span>}
+                {b.totalOutstation > 0 && <span className="ml-3 text-teal-700">Outstation {b.totalOutstation}d</span>}
                 {b.needsReview > 0 && <span className="ml-3 text-amber-700">{b.needsReview} to review</span>}
                 {b.deliveryName && (() => {
                   const tc: Record<string, number> = {}
@@ -259,7 +308,7 @@ export default function AttendancePage() {
                 </tr>
               </thead>
               <tbody>
-                {(onlyReview ? b.days.filter(d => d.result.needsReview) : b.days).map(({ dateKey, result, trip, manualTime }) => (
+                {(onlyReview ? b.days.filter(d => d.result.needsReview) : b.days).map(({ dateKey, result, trip, manualTime, outstationId }) => (
                   <tr key={dateKey} className={`border-b border-gray-50 align-top ${result.needsReview ? 'bg-amber-50' : ''}`}>
                     <td className="px-4 py-2 whitespace-nowrap">
                       {fmtDate(dateKey)} <span className={`ml-1 ${[0, 6].includes(weekdayOf(dateKey)) ? 'text-rose-500' : 'text-gray-400'}`}>{DOW_SHORT[weekdayOf(dateKey)]}</span>
@@ -293,8 +342,14 @@ export default function AttendancePage() {
                             <button onClick={() => saveReview(b.code, dateKey, 'deduct')} className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50">Deduct lunch</button>
                             <button onClick={() => saveReview(b.code, dateKey, 'worked_through')} className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50">Worked through</button>
                             <button onClick={() => reviewManual(b.code, dateKey)} className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50">Manual mins…</button>
+                            <button onClick={() => markOutstation(b.code, dateKey)} className="rounded border border-teal-300 bg-teal-50 px-2 py-0.5 text-xs text-teal-700 hover:bg-teal-100">Outstation…</button>
                           </div>
                         </div>
+                      ) : result.outstation ? (
+                        <span className="inline-flex items-center gap-2">
+                          <span className="rounded bg-teal-100 px-2 py-0.5 text-xs text-teal-800">outstation</span>
+                          {outstationId && <button onClick={() => removeOutstation(outstationId)} className="text-xs text-gray-400 underline">remove</button>}
+                        </span>
                       ) : result.reviewed ? (
                         <span className="inline-flex items-center gap-2">
                           {manualTime

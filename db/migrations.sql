@@ -3471,6 +3471,25 @@ alter table public.employees add column if not exists delivery_name text;
 -- the day is paired with it and shown as manually edited.
 alter table public.attendance_reviews add column if not exists manual_time text;
 
+-- Outstation trips (multi-day driver trips): each day in [start_date, end_date]
+-- is shown as "outstation" (present, no OT, no missing-punch flag). Pay comes
+-- from the OS trip allowance in the delivery schedule.
+create table if not exists public.outstation_trips (
+  id uuid primary key default gen_random_uuid(),
+  employee_code text not null,
+  start_date date not null,
+  end_date date not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists ot_emp_idx on public.outstation_trips(employee_code);
+grant select, insert, update, delete on public.outstation_trips to authenticated;
+grant all on public.outstation_trips to service_role;
+alter table public.outstation_trips enable row level security;
+drop policy if exists ost_read on public.outstation_trips;
+create policy ost_read on public.outstation_trips for select using (true);
+drop policy if exists ost_write on public.outstation_trips;
+create policy ost_write on public.outstation_trips for all using (true) with check (true);
+
 -- 2026-07 · Weekly schedule + day types. week_schedule jsonb keyed '0'(Sun)..'6'(Sat)
 -- → {start,end} for a working day, null/absent = day off (rest day). Rest-day &
 -- public-holiday work is counted in DAYS (full→1, >half→1, half-or-less→½).
