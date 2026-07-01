@@ -25,7 +25,7 @@ interface CartReturn { lotId: string; itemCode: string; description: string; uni
 interface SLine { id: string; so_number: string; item_code: string; description: string | null; quantity: number | null; outstanding_qty: number | null; factory_code: string; delivered_qty: number | null }
 interface MReturn {
   id: string; factory_code: string; item_code: string; description: string | null
-  batch_no: string | null; quantity: number; reason: string | null; created_by_name: string | null; created_at: string
+  batch_no: string | null; exp_date: string | null; quantity: number; reason: string | null; created_by_name: string | null; created_at: string
 }
 
 export default function DispatchPage() {
@@ -69,6 +69,8 @@ export default function DispatchPage() {
   const [editRet, setEditRet] = useState<MReturn | null>(null)
   const [editQty, setEditQty] = useState('')
   const [editNewItem, setEditNewItem] = useState('')   // '' = keep same item; otherwise the new item code
+  const [editBatch, setEditBatch] = useState('')
+  const [editExp, setEditExp] = useState('')
   const [editNewReason, setEditNewReason] = useState('')
   const [editWhy, setEditWhy] = useState('')
   const [editPending, setEditPending] = useState<Set<string>>(new Set())
@@ -217,7 +219,7 @@ export default function DispatchPage() {
   }
 
   function openRetEdit(r: MReturn) {
-    setEditRet(r); setEditQty(String(r.quantity)); setEditNewItem(''); setEditNewReason(r.reason || ''); setEditWhy(''); setError(''); setSuccess('')
+    setEditRet(r); setEditQty(String(r.quantity)); setEditNewItem(''); setEditBatch(r.batch_no || ''); setEditExp(r.exp_date || ''); setEditNewReason(r.reason || ''); setEditWhy(''); setError(''); setSuccess('')
   }
   // Request an edit to a past return (qty/reason). HO approval applies the stock change.
   async function submitRetEdit() {
@@ -233,10 +235,14 @@ export default function DispatchPage() {
       reason: editWhy.trim(), requested_by: profile.id, requested_by_name: profile.full_name || null,
     }
     if (newItem) payload.new_item_code = newItem   // only sent when the item is actually changed
+    const newBatch = editBatch.trim() || null
+    const newExp = editExp || null
+    if (newBatch !== (editRet.batch_no || null)) payload.new_batch_no = newBatch
+    if (newExp !== (editRet.exp_date || null)) payload.new_exp_date = newExp
     const { data, error: e } = await supabase.from('return_edit_requests').insert(payload).select('id').single()
     if (e || !data) {
       const msg = e?.message || 'Could not send request'
-      setError(/new_item_code/.test(msg) ? 'Changing the item needs a database update — run the latest catch-up SQL first.' : msg)
+      setError(/new_item_code|new_batch_no|new_exp_date/.test(msg) ? 'This edit needs a database update — run the latest catch-up SQL first.' : msg)
       setBusy(false); return
     }
     // Head Office applies immediately; others wait for approval.
@@ -502,14 +508,15 @@ export default function DispatchPage() {
         <h2 className="text-lg font-semibold mb-2">Recent material returns</h2>
         <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[20rem]">
           <table className="w-full text-xs">
-            <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{[...(multiFac ? ['Factory'] : []), 'Material', 'Batch', 'Qty', 'Reason', 'By', 'When', ''].map((h, i) => <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
+            <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{[...(multiFac ? ['Factory'] : []), 'Material', 'Batch', 'Exp', 'Qty', 'Reason', 'By', 'When', ''].map((h, i) => <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
             <tbody>
-              {returns.length === 0 && <tr><td colSpan={8} className="text-center py-8 text-gray-400">No returns yet.</td></tr>}
+              {returns.length === 0 && <tr><td colSpan={10} className="text-center py-8 text-gray-400">No returns yet.</td></tr>}
               {returns.map(r => (
                 <tr key={r.id} className="border-b last:border-0 align-top hover:bg-gray-50">
                   {multiFac && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(r.factory_code)}</td>}
                   <td className="px-3 py-2"><span className="font-mono font-medium">{r.item_code}</span><span className="block text-gray-400">{r.description}</span></td>
                   <td className="px-3 py-2 whitespace-nowrap">{r.batch_no || '—'}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-500">{r.exp_date ? fmtD(r.exp_date) : '—'}</td>
                   <td className="px-3 py-2 text-right font-semibold">{r.quantity}</td>
                   <td className="px-3 py-2 text-gray-600 min-w-[120px]">{r.reason || '—'}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-600">{r.created_by_name || '—'}</td>
@@ -541,6 +548,12 @@ export default function DispatchPage() {
               <div><label className="block text-sm font-medium mb-1">Quantity returned</label>
                 <input type="number" step="any" min="0" value={editQty} onChange={e => setEditQty(e.target.value)} className="w-full border rounded-lg px-3 py-2" />
                 <span className="text-xs text-gray-500">Was {editRet.quantity}. Increasing returns more (reduces stock further); decreasing adds stock back.</span></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="block text-sm font-medium mb-1">Batch <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input value={editBatch} onChange={e => setEditBatch(e.target.value)} placeholder="Batch no." className="w-full border rounded-lg px-3 py-2" /></div>
+                <div><label className="block text-sm font-medium mb-1">Expiry <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input type="date" value={editExp} onChange={e => setEditExp(e.target.value)} className="w-full border rounded-lg px-3 py-2" /></div>
+              </div>
               <div><label className="block text-sm font-medium mb-1">Reason on the return <span className="text-gray-400 font-normal">(optional)</span></label>
                 <input value={editNewReason} onChange={e => setEditNewReason(e.target.value)} className="w-full border rounded-lg px-3 py-2" /></div>
               <div><label className="block text-sm font-medium mb-1">Reason for this edit</label>

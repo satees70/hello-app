@@ -939,6 +939,9 @@ grant execute on function public.produce_grinding(uuid, numeric, text, text, tex
 -- 2026-07 · Edit item on a material return (reverse old item, apply new item)
 -- ============================================================================
 alter table public.return_edit_requests add column if not exists new_item_code text;
+alter table public.return_edit_requests add column if not exists new_batch_no text;
+alter table public.return_edit_requests add column if not exists new_exp_date date;
+alter table public.material_returns add column if not exists exp_date date;
 
 create or replace function public.approve_return_edit(p_id uuid) returns void
 language plpgsql security definer set search_path = public as $$
@@ -982,7 +985,9 @@ begin
     -- 3) Point the return at the new item / lot / qty.
     update public.material_returns
       set item_code = v_newcode, description = v_new_item.description, quantity = v_newqty,
-          reason = v_req.new_reason, lot_id = v_new_lot.id, batch_no = v_new_lot.batch_no
+          reason = v_req.new_reason, lot_id = v_new_lot.id,
+          batch_no = coalesce(v_req.new_batch_no, v_new_lot.batch_no, batch_no),
+          exp_date = coalesce(v_req.new_exp_date, v_new_lot.exp_date, exp_date)
       where id = v_ret.id;
   else
     -- QTY / REASON ONLY (same item): adjust by the delta.
@@ -997,7 +1002,11 @@ begin
       select * into v_item from public.items where code = v_ret.item_code limit 1;
       if found then update public.item_stock set quantity = quantity - v_delta, updated_at = now() where item_id = v_item.id and factory_code = v_ret.factory_code; end if;
     end if;
-    update public.material_returns set quantity = v_newqty, reason = v_req.new_reason where id = v_ret.id;
+    update public.material_returns
+      set quantity = v_newqty, reason = v_req.new_reason,
+          batch_no = coalesce(v_req.new_batch_no, batch_no),
+          exp_date = coalesce(v_req.new_exp_date, exp_date)
+      where id = v_ret.id;
   end if;
 
   select full_name into v_name from public.profiles where id = auth.uid();
