@@ -25,7 +25,7 @@ export async function GET() {
 
   const rows = emps
     .filter(e => e.employee_code && e.name)
-    .map(e => ({ employee_code: e.employee_code, name: e.name }))
+    .map(e => ({ employee_code: e.employee_code, name: e.name, department: e.department_name ?? null }))
 
   let upserted = 0
   if (rows.length) {

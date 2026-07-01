@@ -28,7 +28,7 @@ interface Batch {
   production_batch_items: BatchItem[]
 }
 interface ConsRow { id: string; item_code: string; description: string | null; batch_no: string | null; exp_date: string | null; qty_consumed: number; consumed_at: string }
-interface Item { id: string; code: string; description: string; unit: string; type: string; supplied_by_factory?: boolean }
+interface Item { id: string; code: string; description: string; unit: string; type: string; supplied_by_factory?: boolean; stock_code?: string | null }
 interface BomComp { parent_item_id: string; component_item_id: string; quantity: number; apply_allowance: boolean; use_mode: string }
 
 // A materials target: a single batch or a combined group of batches (same item + factory)
@@ -110,7 +110,7 @@ export default function ProductionPage() {
     const [{ data: b }, { data: f }, it, bc, { data: st }] = await Promise.all([
       supabase.from('production_batches').select('*, production_batch_items(id, customer_name, so_number, quantity, line_id)').order('created_at', { ascending: false }),
       supabase.from('factories').select('code, name').order('code'),
-      fetchAll<Item>('items', 'id, code, description, unit, type, supplied_by_factory'),
+      fetchAll<Item>('items', 'id, code, description, unit, type, supplied_by_factory, stock_code'),
       fetchAll<BomComp>('bom_components', 'parent_item_id, component_item_id, quantity, apply_allowance, use_mode'),
       supabase.from('item_stock').select('item_id, factory_code, quantity'),
     ])
@@ -192,6 +192,10 @@ export default function ProductionPage() {
     if (b.material_request_id) return 'Requested'
     return 'Planned'
   }
+
+  // The loose/recipe code for a grinding item: the item's Stock code if set (e.g. S246-WP → S246),
+  // otherwise strip the bag suffix (S852-K-20KG/BAG → S852-K). Same mapping Goods Received uses.
+  const grindProductCode = (itemCode: string) => { const it = items.find(i => i.code === itemCode); return (it?.stock_code && it.stock_code.trim()) || looseCode(itemCode) }
 
   // Find the grinding recipe for a (loose) product — match by product code/description; prefer same factory.
   function recipeFor(code: string, description: string | undefined, factory?: string) {

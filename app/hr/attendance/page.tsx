@@ -15,7 +15,7 @@ interface DayRow { dateKey: string; result: DayResult }
 interface EmpBlock {
   code: string; name: string; department: string | null; profile: ShiftProfile | null
   days: DayRow[]; totalWorked: number; totalOt: number; totalLate: number; totalEarlyOut: number
-  totalRestDays: number; totalHolidayDays: number; needsReview: number
+  totalRestDays: number; totalHolidayDays: number; totalPresentDays: number; needsReview: number
 }
 
 // JS weekday (0=Sun..6=Sat) for a yyyy-MM-dd calendar date (tz-stable via UTC).
@@ -43,7 +43,7 @@ export default function AttendancePage() {
       supabase.from('attendance_punches').select('employee_code, punch_time, department_name')
         .gte('punch_time', fromUtc).lte('punch_time', toUtc).order('punch_time'),
       supabase.from('employees').select('employee_code, name, shift_profile_id'),
-      supabase.from('shift_profiles').select('id, name, normal_hours, lunch_rule, lunch_minutes, shift_start, shift_end, week_schedule'),
+      supabase.from('shift_profiles').select('id, name, normal_hours, lunch_rule, lunch_minutes, shift_start, shift_end, week_schedule, attendance_mode'),
       supabase.from('attendance_reviews').select('employee_code, work_date, lunch_decision, manual_minutes')
         .gte('work_date', from).lte('work_date', to),
     ])
@@ -73,7 +73,7 @@ export default function AttendancePage() {
       const emp = empByCode.get(code)
       const prof = emp?.shift_profile_id ? profById.get(emp.shift_profile_id) ?? null : null
       const dayRows: DayRow[] = []
-      let totalWorked = 0, totalOt = 0, totalLate = 0, totalEarlyOut = 0, totalRestDays = 0, totalHolidayDays = 0, needsReview = 0
+      let totalWorked = 0, totalOt = 0, totalLate = 0, totalEarlyOut = 0, totalRestDays = 0, totalHolidayDays = 0, totalPresentDays = 0, needsReview = 0
       for (const [dateKey, times] of [...days].sort((a, b) => a[0].localeCompare(b[0]))) {
         const review = reviewByKey.get(`${code}|${dateKey}`) ?? null
         const result = computeDay(times, prof, review, { weekday: weekdayOf(dateKey), isHoliday: holidaySet.has(dateKey) })
@@ -84,11 +84,12 @@ export default function AttendancePage() {
         totalEarlyOut += result.earlyOutMinutes
         if (result.dayType === 'rest') totalRestDays += result.dayUnits
         if (result.dayType === 'holiday') totalHolidayDays += result.dayUnits
+        if (result.presentDay) totalPresentDays++
         dayRows.push({ dateKey, result })
       }
       out.push({
         code, name: emp?.name || code, department: deptByCode.get(code) ?? null,
-        profile: prof, days: dayRows, totalWorked, totalOt, totalLate, totalEarlyOut, totalRestDays, totalHolidayDays, needsReview,
+        profile: prof, days: dayRows, totalWorked, totalOt, totalLate, totalEarlyOut, totalRestDays, totalHolidayDays, totalPresentDays, needsReview,
       })
     }
     out.sort((a, b) => a.name.localeCompare(b.name))
@@ -184,6 +185,7 @@ export default function AttendancePage() {
                 {b.totalEarlyOut > 0 && <span className="ml-3 text-rose-600">Early-out {fmtMinutes(b.totalEarlyOut)}</span>}
                 {b.totalRestDays > 0 && <span className="ml-3 text-purple-700">Rest {b.totalRestDays}d</span>}
                 {b.totalHolidayDays > 0 && <span className="ml-3 text-purple-700">PH {b.totalHolidayDays}d</span>}
+                {b.totalPresentDays > 0 && <span className="ml-3 font-medium text-gray-800">Present {b.totalPresentDays}d</span>}
                 {b.needsReview > 0 && <span className="ml-3 text-amber-700">{b.needsReview} to review</span>}
               </div>
             </header>
@@ -237,6 +239,8 @@ export default function AttendancePage() {
                           <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800">reviewed</span>
                           <button onClick={() => clearReview(b.code, dateKey)} className="text-xs text-gray-400 underline">clear</button>
                         </span>
+                      ) : result.presentDay ? (
+                        <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-800">present</span>
                       ) : result.dayType !== 'normal' ? (
                         <span className="rounded bg-purple-100 px-2 py-0.5 text-xs text-purple-800">
                           {result.dayType === 'holiday' ? 'Public holiday' : 'Rest day'} · {result.dayUnits}d

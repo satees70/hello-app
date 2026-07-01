@@ -3457,6 +3457,10 @@ alter table public.shift_profiles add column if not exists ot_before text;
 -- ot_after: explicit evening OT cutoff (work after it = OT); blank → end + 15min grace.
 alter table public.shift_profiles add column if not exists ot_after text;
 
+-- attendance_mode: 'pair' (default) = in/out pairing + OT; 'single' = salesman mode
+-- (any punch that day = present; no pairing, OT, or review).
+alter table public.shift_profiles add column if not exists attendance_mode text not null default 'pair';
+
 -- 2026-07 · Weekly schedule + day types. week_schedule jsonb keyed '0'(Sun)..'6'(Sat)
 -- → {start,end} for a working day, null/absent = day off (rest day). Rest-day &
 -- public-holiday work is counted in DAYS (full→1, >half→1, half-or-less→½).

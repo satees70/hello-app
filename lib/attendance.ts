@@ -99,6 +99,9 @@ export interface ShiftProfileLite {
   // or null/absent = day off (rest day). When set, this governs each day's hours;
   // when absent, shift_start/shift_end apply to every day.
   week_schedule?: Record<string, { start: string; end: string } | null> | null
+  // 'pair' (default) = normal in/out pairing + OT. 'single' = salesman mode:
+  // any punch on a day counts as PRESENT for that day (no pairing, OT, or review).
+  attendance_mode?: string | null
 }
 export interface ReviewLite { lunch_decision: string | null; manual_minutes: number | null }
 export interface DayContext { weekday?: number; isHoliday?: boolean }   // weekday: 0=Sun..6=Sat
@@ -107,6 +110,7 @@ export interface DayResult {
   pairing: DayPairing
   dayType: 'normal' | 'rest' | 'holiday'
   dayUnits: number              // rest/holiday work counted in days (0, 0.5, 1)
+  presentDay: boolean           // salesman single-punch mode: present that day
   workedMinutes: number         // regular + OT (normal day); raw worked (rest/holiday)
   regularMinutes: number
   otMinutes: number
@@ -141,16 +145,20 @@ const overlap = (a: number, b: number, c: number, d: number) => Math.max(0, Math
 
 function result(regular: number, ot: number, late: number, earlyOut: number, pairing: DayPairing, reviewed: boolean): DayResult {
   const r = Math.max(0, Math.round(regular)), o = Math.max(0, Math.round(ot))
-  return { pairing, dayType: 'normal', dayUnits: 0, workedMinutes: r + o, regularMinutes: r, otMinutes: o, lateMinutes: Math.max(0, Math.round(late)), earlyOutMinutes: Math.max(0, Math.round(earlyOut)), needsReview: false, reviewReason: null, reviewed }
+  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: false, workedMinutes: r + o, regularMinutes: r, otMinutes: o, lateMinutes: Math.max(0, Math.round(late)), earlyOutMinutes: Math.max(0, Math.round(earlyOut)), needsReview: false, reviewReason: null, reviewed }
 }
 function flag(pairing: DayPairing, reason: string): DayResult {
-  return { pairing, dayType: 'normal', dayUnits: 0, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: true, reviewReason: reason, reviewed: false }
+  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: false, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: true, reviewReason: reason, reviewed: false }
 }
 // Rest-day / public-holiday work, counted in days: full shift → 1, >half → 1,
 // half or less → ½. (SQL Payroll applies the day-rate from the bucket.)
 function dayCount(dayType: 'rest' | 'holiday', worked: number, fullNormalMin: number, pairing: DayPairing): DayResult {
   const units = worked <= 0 ? 0 : (worked > fullNormalMin / 2 ? 1 : 0.5)
-  return { pairing, dayType, dayUnits: units, workedMinutes: Math.round(worked), regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false }
+  return { pairing, dayType, dayUnits: units, presentDay: false, workedMinutes: Math.round(worked), regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false }
+}
+// Salesman single-punch mode: any punch that day = present (no hours/OT/review).
+function presentResult(pairing: DayPairing): DayResult {
+  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: true, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false }
 }
 
 export function computeDay(times: Date[], profile: ShiftProfileLite | null, review: ReviewLite | null, ctx?: DayContext): DayResult {
@@ -177,6 +185,9 @@ export function computeDay(times: Date[], profile: ShiftProfileLite | null, revi
   if (review && review.lunch_decision === 'manual') return result(review.manual_minutes ?? 0, 0, 0, 0, pairing, true)
 
   if (pairing.sessions.length === 0) return result(0, 0, 0, 0, pairing, false)
+
+  // Salesman: any punch that day = present. No pairing / OT / review.
+  if (profile?.attendance_mode === 'single') return presentResult(pairing)
 
   // Missing clock-out — never invent a time (applies to every day type).
   if (pairing.needsReview) return flag(pairing, pairing.reviewReason || 'Missing a clock-out')

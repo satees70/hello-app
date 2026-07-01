@@ -107,8 +107,23 @@ export type ZkEmployee = { employee_code: string; name: string; department_name?
 // Pull the employee master from ZKLink (org/v1/employees/search). Requires the
 // app to have the Employee/Organization read permission granted in the console.
 // Field names are matched defensively since the response shape may vary.
+// departmentId → department name (needs the Department-Read permission).
+async function fetchDepartments(token: string): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  const res = await fetch(`${BASE}/open-apis/org/v1/departments/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept-Language': 'en-US', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ pageNumber: 1, pageSize: 100 }),
+  })
+  const json = await res.json()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const d of (json.data?.depts ?? []) as any[]) if (d.id) map.set(d.id, d.name)
+  return map
+}
+
 export async function fetchEmployees(): Promise<ZkEmployee[]> {
   const token = await getTenantToken()
+  const deptById = await fetchDepartments(token).catch(() => new Map<string, string>())
   const pageSize = 100
   const all: ZkEmployee[] = []
   let pageNumber = 1
@@ -133,7 +148,8 @@ export async function fetchEmployees(): Promise<ZkEmployee[]> {
     for (const e of list) {
       const code = e.employeeCode || e.code || e.pin || e.empCode || ''
       const name = e.name || [e.firstName, e.lastName].filter(Boolean).join(' ') || e.fullName || ''
-      if (code) all.push({ employee_code: String(code), name: String(name || code), department_name: e.departmentName || e.deptName })
+      const department_name = e.departmentName || e.deptName || (e.departmentId ? deptById.get(e.departmentId) : undefined)
+      if (code) all.push({ employee_code: String(code), name: String(name || code), department_name })
     }
 
     const totalPages = Number(json.data?.totalPages) || 1

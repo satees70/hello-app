@@ -28,6 +28,7 @@ export async function POST(request: Request) {
     normal_hours: body.normal_hours != null && body.normal_hours !== '' ? Number(body.normal_hours) : 7.5,
     lunch_rule: body.lunch_rule === 'auto_deduct' ? 'auto_deduct' : 'punch',
     lunch_minutes: body.lunch_minutes != null && body.lunch_minutes !== '' ? Number(body.lunch_minutes) : 60,
+    attendance_mode: body.attendance_mode === 'single' ? 'single' : 'pair',
     shift_start: cleanTime(body.shift_start),
     shift_end: cleanTime(body.shift_end),
     ot_before: cleanTime(body.ot_before),

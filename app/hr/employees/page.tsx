@@ -3,8 +3,8 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { supabase, fetchAll } from '@/lib/supabase'
 
 type DayWin = { start: string; end: string } | null
-interface ShiftProfile { id: string; name: string; normal_hours: number; lunch_rule: string; lunch_minutes: number; week_schedule: Record<string, DayWin> | null }
-interface Employee { employee_code: string; name: string | null; shift_profile_id: string | null; is_driver: boolean; active: boolean }
+interface ShiftProfile { id: string; name: string; normal_hours: number; lunch_rule: string; lunch_minutes: number; week_schedule: Record<string, DayWin> | null; attendance_mode: string | null }
+interface Employee { employee_code: string; name: string | null; shift_profile_id: string | null; is_driver: boolean; active: boolean; department: string | null }
 interface Row extends Employee { seenInPunches: boolean }
 interface Holiday { holiday_date: string; name: string | null }
 
@@ -27,7 +27,7 @@ export default function EmployeesSetupPage() {
   const [error, setError] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [pulling, setPulling] = useState(false)
-  const [newProf, setNewProf] = useState({ name: '', normal_hours: '7.5', lunch_rule: 'punch', lunch_minutes: '60' })
+  const [newProf, setNewProf] = useState({ name: '', normal_hours: '7.5', lunch_rule: 'punch', lunch_minutes: '60', attendance_mode: 'pair' })
   const [week, setWeek] = useState<WeekEdit>(defaultWeek())
   const [holidays, setHolidays] = useState<Holiday[]>([])
   const [newHol, setNewHol] = useState({ holiday_date: '', name: '' })
@@ -35,8 +35,8 @@ export default function EmployeesSetupPage() {
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     const [{ data: profs }, { data: emps }, codes, { data: hols }] = await Promise.all([
-      supabase.from('shift_profiles').select('id, name, normal_hours, lunch_rule, lunch_minutes, week_schedule').order('name'),
-      supabase.from('employees').select('employee_code, name, shift_profile_id, is_driver, active'),
+      supabase.from('shift_profiles').select('id, name, normal_hours, lunch_rule, lunch_minutes, week_schedule, attendance_mode').order('name'),
+      supabase.from('employees').select('employee_code, name, shift_profile_id, is_driver, active, department'),
       fetchAll<{ employee_code: string }>('attendance_punches', 'employee_code'),
       supabase.from('public_holidays').select('holiday_date, name').order('holiday_date'),
     ])
@@ -53,9 +53,12 @@ export default function EmployeesSetupPage() {
         shift_profile_id: e?.shift_profile_id ?? null,
         is_driver: e?.is_driver ?? false,
         active: e?.active ?? true,
+        department: e?.department ?? null,
         seenInPunches: punchCodes.has(code),
       }
     })
+    // Group people by their ZKLink department so profiles are easy to assign in runs.
+    list.sort((a, b) => (a.department || '~').localeCompare(b.department || '~') || a.employee_code.localeCompare(b.employee_code))
     setProfiles((profs as ShiftProfile[]) || [])
     setRows(list)
     setLoading(false)
@@ -92,7 +95,7 @@ export default function EmployeesSetupPage() {
       body: JSON.stringify({ ...newProf, week_schedule, shift_start: fb?.start || '', shift_end: fb?.end || '' }),
     })
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') }
-    else { setNewProf({ name: '', normal_hours: '7.5', lunch_rule: 'punch', lunch_minutes: '60' }); setWeek(defaultWeek()); await load() }
+    else { setNewProf({ name: '', normal_hours: '7.5', lunch_rule: 'punch', lunch_minutes: '60', attendance_mode: 'pair' }); setWeek(defaultWeek()); await load() }
   }
 
   async function addHoliday(e: FormEvent) {
@@ -157,8 +160,9 @@ export default function EmployeesSetupPage() {
               <span className="text-gray-500">
                 {ws ? work.join(', ') : `OT > ${p.normal_hours}h (every day)`}
                 {off.length > 0 && <span className="text-gray-400"> · off: {off.join('/')}</span>}
-                {' · OT 30m grace, nearest 15m'}
-                {' · lunch '}{p.lunch_rule}{p.lunch_rule === 'auto_deduct' ? ` ${p.lunch_minutes}m` : ''}
+                {p.attendance_mode === 'single'
+                  ? ' · 1 punch = present (no OT)'
+                  : <>{' · OT 30m grace, nearest 15m · lunch '}{p.lunch_rule}{p.lunch_rule === 'auto_deduct' ? ` ${p.lunch_minutes}m` : ''}</>}
               </span>
               <button onClick={() => deleteProfile(p.id)} className="text-xs text-red-600 hover:underline whitespace-nowrap">delete</button>
             </div>
@@ -185,6 +189,11 @@ export default function EmployeesSetupPage() {
             <label className="text-xs">Full day (h)
               <input type="number" step="0.5" value={newProf.normal_hours} onChange={e => setNewProf({ ...newProf, normal_hours: e.target.value })}
                 title="A normal day's hours — used to count rest-day work as full vs half day" className="block mt-0.5 w-20 rounded border border-gray-300 px-2 py-1 text-sm" />
+            </label>
+            <label className="text-xs flex items-center gap-1.5 pb-1.5 self-end">
+              <input type="checkbox" checked={newProf.attendance_mode === 'single'}
+                onChange={e => setNewProf({ ...newProf, attendance_mode: e.target.checked ? 'single' : 'pair' })} />
+              Salesman (1 punch = present)
             </label>
           </div>
 
@@ -259,6 +268,7 @@ export default function EmployeesSetupPage() {
               <tr className="border-b border-gray-100">
                 <th className="px-3 py-2 font-medium">Code</th>
                 <th className="px-3 py-2 font-medium">Name</th>
+                <th className="px-3 py-2 font-medium">Department</th>
                 <th className="px-3 py-2 font-medium">Shift profile</th>
                 <th className="px-3 py-2 font-medium">Driver</th>
                 <th className="px-3 py-2 font-medium">Active</th>
@@ -276,6 +286,7 @@ export default function EmployeesSetupPage() {
                       onBlur={e => { if (e.target.value !== (r.name ?? '')) saveEmployee(r, { name: e.target.value }) }}
                       className="w-full rounded border border-gray-200 px-2 py-1" />
                   </td>
+                  <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500">{r.department || '—'}</td>
                   <td className="px-3 py-2">
                     <select value={r.shift_profile_id ?? ''} onChange={e => saveEmployee(r, { shift_profile_id: e.target.value || null })}
                       className="rounded border border-gray-200 px-2 py-1">
