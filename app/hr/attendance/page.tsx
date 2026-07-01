@@ -1,0 +1,257 @@
+'use client'
+import { useCallback, useEffect, useState } from 'react'
+import { supabase } from '@/lib/supabase'
+import {
+  computeDay, klDateKey, klTime, fmtMinutes,
+  type DayResult, type ShiftProfileLite, type ReviewLite,
+} from '@/lib/attendance'
+
+interface ShiftProfile extends ShiftProfileLite { id: string; name: string }
+interface Employee { employee_code: string; name: string | null; shift_profile_id: string | null }
+interface Punch { employee_code: string; punch_time: string; department_name: string | null }
+interface Review extends ReviewLite { employee_code: string; work_date: string }
+
+interface DayRow { dateKey: string; result: DayResult }
+interface EmpBlock {
+  code: string; name: string; department: string | null; profile: ShiftProfile | null
+  days: DayRow[]; totalWorked: number; totalOt: number; totalLate: number; totalEarlyOut: number
+  totalRestDays: number; totalHolidayDays: number; needsReview: number
+}
+
+// JS weekday (0=Sun..6=Sat) for a yyyy-MM-dd calendar date (tz-stable via UTC).
+function weekdayOf(dateKey: string): number {
+  const [y, m, d] = dateKey.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay()
+}
+
+export default function AttendancePage() {
+  const [from, setFrom] = useState('2026-06-01')
+  const [to, setTo] = useState(() => klDateKey(new Date()))
+  const [loading, setLoading] = useState(true)
+  const [syncing, setSyncing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [msg, setMsg] = useState<string | null>(null)
+  const [punchCount, setPunchCount] = useState(0)
+  const [blocks, setBlocks] = useState<EmpBlock[]>([])
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null)
+    const fromUtc = `${from}T00:00:00+08:00`
+    const toUtc = `${to}T23:59:59+08:00`
+
+    const [{ data: punches, error: pErr }, { data: emps }, { data: profs }, { data: reviews }] = await Promise.all([
+      supabase.from('attendance_punches').select('employee_code, punch_time, department_name')
+        .gte('punch_time', fromUtc).lte('punch_time', toUtc).order('punch_time'),
+      supabase.from('employees').select('employee_code, name, shift_profile_id'),
+      supabase.from('shift_profiles').select('id, name, normal_hours, lunch_rule, lunch_minutes, shift_start, shift_end, week_schedule'),
+      supabase.from('attendance_reviews').select('employee_code, work_date, lunch_decision, manual_minutes')
+        .gte('work_date', from).lte('work_date', to),
+    ])
+    const { data: hols } = await supabase.from('public_holidays').select('holiday_date').gte('holiday_date', from).lte('holiday_date', to)
+    const holidaySet = new Set((hols || []).map(h => h.holiday_date))
+    if (pErr) { setError(pErr.message); setLoading(false); return }
+
+    const empByCode = new Map<string, Employee>((emps || []).map(e => [e.employee_code, e as Employee]))
+    const profById = new Map<string, ShiftProfile>((profs || []).map(p => [p.id, p as ShiftProfile]))
+    const reviewByKey = new Map<string, Review>((reviews || []).map(r => [`${r.employee_code}|${r.work_date}`, r as Review]))
+
+    // Group punches: code -> dateKey -> Date[]
+    const grouped = new Map<string, Map<string, Date[]>>()
+    const deptByCode = new Map<string, string | null>()
+    for (const row of (punches || []) as Punch[]) {
+      const d = new Date(row.punch_time)
+      const key = klDateKey(d)
+      if (!grouped.has(row.employee_code)) grouped.set(row.employee_code, new Map())
+      const days = grouped.get(row.employee_code)!
+      if (!days.has(key)) days.set(key, [])
+      days.get(key)!.push(d)
+      if (!deptByCode.has(row.employee_code)) deptByCode.set(row.employee_code, row.department_name)
+    }
+
+    const out: EmpBlock[] = []
+    for (const [code, days] of grouped) {
+      const emp = empByCode.get(code)
+      const prof = emp?.shift_profile_id ? profById.get(emp.shift_profile_id) ?? null : null
+      const dayRows: DayRow[] = []
+      let totalWorked = 0, totalOt = 0, totalLate = 0, totalEarlyOut = 0, totalRestDays = 0, totalHolidayDays = 0, needsReview = 0
+      for (const [dateKey, times] of [...days].sort((a, b) => a[0].localeCompare(b[0]))) {
+        const review = reviewByKey.get(`${code}|${dateKey}`) ?? null
+        const result = computeDay(times, prof, review, { weekday: weekdayOf(dateKey), isHoliday: holidaySet.has(dateKey) })
+        if (result.needsReview) needsReview++
+        totalWorked += result.workedMinutes
+        totalOt += result.otMinutes
+        totalLate += result.lateMinutes
+        totalEarlyOut += result.earlyOutMinutes
+        if (result.dayType === 'rest') totalRestDays += result.dayUnits
+        if (result.dayType === 'holiday') totalHolidayDays += result.dayUnits
+        dayRows.push({ dateKey, result })
+      }
+      out.push({
+        code, name: emp?.name || code, department: deptByCode.get(code) ?? null,
+        profile: prof, days: dayRows, totalWorked, totalOt, totalLate, totalEarlyOut, totalRestDays, totalHolidayDays, needsReview,
+      })
+    }
+    out.sort((a, b) => a.name.localeCompare(b.name))
+
+    setBlocks(out)
+    setPunchCount((punches || []).length)
+    setLoading(false)
+  }, [from, to])
+
+  useEffect(() => { load() }, [load])
+
+  async function syncNow() {
+    setSyncing(true); setMsg(null); setError(null)
+    try {
+      const res = await fetch('/api/attendance/sync')
+      const json = await res.json()
+      if (!res.ok) setError(json.error || 'Sync failed')
+      else { setMsg(`Synced ${json.range?.from} → ${json.range?.to}: pulled ${json.pulled}, added ${json.inserted}.`); await load() }
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    finally { setSyncing(false) }
+  }
+
+  async function saveReview(code: string, date: string, decision: string, manual_minutes?: number) {
+    const res = await fetch('/api/attendance/review', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employee_code: code, work_date: date, lunch_decision: decision, manual_minutes }),
+    })
+    if (!res.ok) { const j = await res.json(); setError(j.error || 'Review save failed') } else await load()
+  }
+  async function clearReview(code: string, date: string) {
+    const res = await fetch('/api/attendance/review', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employee_code: code, work_date: date, action: 'clear' }),
+    })
+    if (!res.ok) { const j = await res.json(); setError(j.error || 'Clear failed') } else await load()
+  }
+  function reviewManual(code: string, date: string) {
+    const v = prompt('Worked minutes for this day (e.g. 450 = 7h 30m):')
+    if (v == null || v.trim() === '') return
+    saveReview(code, date, 'manual', Number(v))
+  }
+
+  const fmtDate = (k: string) => { const [y, m, d] = k.split('-'); return `${d}/${m}/${y}` }
+  const grandOt = blocks.reduce((s, b) => s + b.totalOt, 0)
+
+  return (
+    <main className="max-w-6xl mx-auto p-4 sm:p-6">
+      <div className="flex flex-wrap items-end justify-between gap-3 mb-4">
+        <div>
+          <h1 className="text-2xl font-semibold">Attendance &amp; OT</h1>
+          <p className="text-sm text-gray-500">Worked hours and overtime (over each shift&apos;s threshold). Kuala Lumpur time.</p>
+        </div>
+        <button onClick={syncNow} disabled={syncing}
+          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+          {syncing ? 'Syncing…' : 'Sync now'}
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-3 mb-4">
+        <label className="text-sm">From<input type="date" value={from} onChange={e => setFrom(e.target.value)} className="block mt-1 rounded border border-gray-300 px-2 py-1" /></label>
+        <label className="text-sm">To<input type="date" value={to} onChange={e => setTo(e.target.value)} className="block mt-1 rounded border border-gray-300 px-2 py-1" /></label>
+        <button onClick={load} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">Refresh</button>
+      </div>
+
+      {msg && <div className="mb-4 rounded-md bg-green-50 border border-green-200 px-3 py-2 text-sm text-green-800">{msg}</div>}
+      {error && <div className="mb-4 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{error}</div>}
+
+      <p className="text-sm text-gray-500 mb-4">
+        {loading ? 'Loading…' : `${punchCount} punches · ${blocks.length} people · OT total ${fmtMinutes(grandOt)} · ${fmtDate(from)} – ${fmtDate(to)}`}
+      </p>
+
+      {!loading && punchCount === 0 && (
+        <div className="rounded-lg border border-dashed border-gray-300 p-8 text-center text-gray-500">
+          No punches yet. Hit <b>Sync now</b> to pull from ZKLink.
+        </div>
+      )}
+
+      <div className="space-y-6">
+        {blocks.map(b => (
+          <section key={b.code} className="rounded-lg border border-gray-200 overflow-hidden">
+            <header className="flex flex-wrap items-center justify-between gap-2 bg-gray-50 px-4 py-2 border-b border-gray-200">
+              <div>
+                <span className="font-medium">{b.name}</span>
+                <span className="text-gray-400 text-sm ml-2">{b.code}</span>
+                {b.department && <span className="text-gray-400 text-sm ml-2">· {b.department}</span>}
+              </div>
+              <div className="text-sm text-gray-600">
+                {b.profile ? <span>{b.profile.name} · OT &gt; {b.profile.normal_hours}h · {b.profile.lunch_rule}</span>
+                  : <span className="text-amber-600">no shift profile</span>}
+                <span className="ml-3">Worked {fmtMinutes(b.totalWorked)}</span>
+                <span className="ml-3 font-medium text-gray-800">OT {fmtMinutes(b.totalOt)}</span>
+                {b.totalLate > 0 && <span className="ml-3 text-rose-600">Late {fmtMinutes(b.totalLate)}</span>}
+                {b.totalEarlyOut > 0 && <span className="ml-3 text-rose-600">Early-out {fmtMinutes(b.totalEarlyOut)}</span>}
+                {b.totalRestDays > 0 && <span className="ml-3 text-purple-700">Rest {b.totalRestDays}d</span>}
+                {b.totalHolidayDays > 0 && <span className="ml-3 text-purple-700">PH {b.totalHolidayDays}d</span>}
+                {b.needsReview > 0 && <span className="ml-3 text-amber-700">{b.needsReview} to review</span>}
+              </div>
+            </header>
+            <table className="w-full text-sm">
+              <thead className="text-left text-gray-500">
+                <tr className="border-b border-gray-100">
+                  <th className="px-4 py-2 font-medium">Date</th>
+                  <th className="px-4 py-2 font-medium">Punches</th>
+                  <th className="px-4 py-2 font-medium">Sessions</th>
+                  <th className="px-4 py-2 font-medium">Worked</th>
+                  <th className="px-4 py-2 font-medium">OT</th>
+                  <th className="px-4 py-2 font-medium">Late / early</th>
+                  <th className="px-4 py-2 font-medium">Status / review</th>
+                </tr>
+              </thead>
+              <tbody>
+                {b.days.map(({ dateKey, result }) => (
+                  <tr key={dateKey} className={`border-b border-gray-50 align-top ${result.needsReview ? 'bg-amber-50' : ''}`}>
+                    <td className="px-4 py-2 whitespace-nowrap">{fmtDate(dateKey)}</td>
+                    <td className="px-4 py-2">
+                      <div className="flex flex-wrap gap-1">
+                        {result.pairing.sessions.flatMap(s => [s.in, s.out].filter(Boolean) as Date[]).map((t, i) => (
+                          <span key={i} className="rounded bg-gray-100 px-1.5 py-0.5 text-xs">{klTime(t)}</span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2">
+                      {result.pairing.sessions.map((s, i) => (
+                        <div key={i} className="text-xs">{klTime(s.in)} → {s.out ? klTime(s.out) : <span className="text-red-600">??</span>}</div>
+                      ))}
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap">{result.needsReview ? '—' : fmtMinutes(result.workedMinutes)}</td>
+                    <td className="px-4 py-2 whitespace-nowrap">{result.needsReview ? '—' : (result.otMinutes > 0 ? <span className="font-medium">{fmtMinutes(result.otMinutes)}</span> : '—')}</td>
+                    <td className="px-4 py-2 whitespace-nowrap text-xs text-rose-600">
+                      {result.lateMinutes > 0 && <span>late {fmtMinutes(result.lateMinutes)}</span>}
+                      {result.lateMinutes > 0 && result.earlyOutMinutes > 0 && <span> · </span>}
+                      {result.earlyOutMinutes > 0 && <span>early {fmtMinutes(result.earlyOutMinutes)}</span>}
+                    </td>
+                    <td className="px-4 py-2">
+                      {result.needsReview ? (
+                        <div>
+                          <div className="text-xs text-amber-700 mb-1">{result.reviewReason}</div>
+                          <div className="flex flex-wrap gap-1">
+                            <button onClick={() => saveReview(b.code, dateKey, 'deduct')} className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50">Deduct lunch</button>
+                            <button onClick={() => saveReview(b.code, dateKey, 'worked_through')} className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50">Worked through</button>
+                            <button onClick={() => reviewManual(b.code, dateKey)} className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50">Manual…</button>
+                          </div>
+                        </div>
+                      ) : result.reviewed ? (
+                        <span className="inline-flex items-center gap-2">
+                          <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800">reviewed</span>
+                          <button onClick={() => clearReview(b.code, dateKey)} className="text-xs text-gray-400 underline">clear</button>
+                        </span>
+                      ) : result.dayType !== 'normal' ? (
+                        <span className="rounded bg-purple-100 px-2 py-0.5 text-xs text-purple-800">
+                          {result.dayType === 'holiday' ? 'Public holiday' : 'Rest day'} · {result.dayUnits}d
+                        </span>
+                      ) : (
+                        <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-800">OK</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        ))}
+      </div>
+    </main>
+  )
+}
