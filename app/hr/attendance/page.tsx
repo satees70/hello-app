@@ -170,7 +170,10 @@ export default function AttendancePage() {
           if (result.dayType === 'rest') totalRestDays += result.dayUnits
           if (result.dayType === 'holiday') totalHolidayDays += result.dayUnits
           if (result.presentDay) totalPresentDays++
-          if (scheduledWorking && !isHol) workDays++
+          if (scheduledWorking && !isHol) {
+            if (result.halfDay) { workDays += 0.5; leaveDays += 0.5 }
+            else workDays++
+          }
           dayRows.push({ dateKey, result, trip, manualTime, outstationId: null, kind: 'worked', leaveType: null })
           continue
         }
@@ -370,7 +373,10 @@ export default function AttendancePage() {
                 {b.profile && <span className="ml-3 font-medium text-gray-800">Work {b.workDays}d</span>}
                 {b.leaveDays > 0 && (() => {
                   const lc: Record<string, number> = {}
-                  for (const d of b.days) if (d.kind === 'absent' && d.leaveType) lc[d.leaveType] = (lc[d.leaveType] || 0) + 1
+                  for (const d of b.days) {
+                    if (d.kind === 'absent' && d.leaveType) lc[d.leaveType] = (lc[d.leaveType] || 0) + 1
+                    else if (d.kind === 'worked' && d.result.halfDay) lc['Half'] = (lc['Half'] || 0) + 1
+                  }
                   const parts = Object.entries(lc).map(([k, v]) => `${k} ${v}`)
                   return <span className="ml-3 text-rose-600">Leave {b.leaveDays}d{parts.length ? ` (${parts.join(', ')})` : ''}</span>
                 })()}
@@ -477,6 +483,8 @@ export default function AttendancePage() {
                             : <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800">reviewed</span>}
                           <button onClick={() => clearReview(b.code, dateKey)} className="text-xs text-gray-400 underline">clear</button>
                         </span>
+                      ) : result.halfDay ? (
+                        <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">½ day</span>
                       ) : result.presentDay ? (
                         <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-800">present</span>
                       ) : result.dayType !== 'normal' ? (

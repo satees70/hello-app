@@ -1,9 +1,10 @@
 // Attendance pairing — turns a day's raw ZKLink punches into IN/OUT sessions.
 // ----------------------------------------------------------------------------
 // Punches carry NO in/out tag, so we: sort the day ascending, collapse
-// double-taps (two punches within 60s — someone tapping twice), then alternate
-// 1st = IN, 2nd = OUT, 3rd = IN, ... An ODD count after collapsing means a
-// clock-out is missing → the day needs human review (never invent a time).
+// duplicate punches (two punches within 15 min — someone tapping twice, or the
+// reader double-reading), then alternate 1st = IN, 2nd = OUT, 3rd = IN, ... An
+// ODD count after collapsing means a clock-out is missing → the day needs human
+// review (never invent a time).
 //
 // This module only PAIRS and sums worked minutes. Lunch auto-deduct and OT
 // thresholds are deliberately NOT applied here — that's the step-5 OT engine,
@@ -11,7 +12,7 @@
 
 export const KL_TZ = 'Asia/Kuala_Lumpur'
 
-const DOUBLE_TAP_MS = 60_000
+const DOUBLE_TAP_MS = 15 * 60_000   // punches within 15 min are the same event
 
 export type Session = { in: Date; out: Date | null }
 
@@ -28,7 +29,7 @@ export type DayPairing = {
 export function pairDay(times: Date[]): DayPairing {
   const sorted = [...times].sort((a, b) => a.getTime() - b.getTime())
 
-  // Collapse double-taps: drop any punch within 60s of the previous kept one.
+  // Collapse duplicates: drop any punch within 15 min of the previous kept one.
   const kept: Date[] = []
   let collapsed = 0
   for (const t of sorted) {
@@ -120,6 +121,7 @@ export interface DayResult {
   needsReview: boolean
   reviewReason: string | null
   reviewed: boolean             // a human review was applied
+  halfDay: boolean              // worked ~half the scheduled hours (morning or afternoon only)
 }
 
 const DEFAULT_NORMAL_HOURS = 7.5
@@ -146,29 +148,29 @@ const overlap = (a: number, b: number, c: number, d: number) => Math.max(0, Math
 
 function result(regular: number, ot: number, late: number, earlyOut: number, pairing: DayPairing, reviewed: boolean): DayResult {
   const r = Math.max(0, Math.round(regular)), o = Math.max(0, Math.round(ot))
-  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: false, outstation: false, workedMinutes: r + o, regularMinutes: r, otMinutes: o, lateMinutes: Math.max(0, Math.round(late)), earlyOutMinutes: Math.max(0, Math.round(earlyOut)), needsReview: false, reviewReason: null, reviewed }
+  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: false, outstation: false, workedMinutes: r + o, regularMinutes: r, otMinutes: o, lateMinutes: Math.max(0, Math.round(late)), earlyOutMinutes: Math.max(0, Math.round(earlyOut)), needsReview: false, reviewReason: null, reviewed, halfDay: false }
 }
 function flag(pairing: DayPairing, reason: string): DayResult {
-  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: false, outstation: false, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: true, reviewReason: reason, reviewed: false }
+  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: false, outstation: false, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: true, reviewReason: reason, reviewed: false, halfDay: false }
 }
 // Rest-day / public-holiday work, counted in days: full shift → 1, >half → 1,
 // half or less → ½. (SQL Payroll applies the day-rate from the bucket.)
 function dayCount(dayType: 'rest' | 'holiday', worked: number, fullNormalMin: number, pairing: DayPairing): DayResult {
   const units = worked <= 0 ? 0 : (worked > fullNormalMin / 2 ? 1 : 0.5)
-  return { pairing, dayType, dayUnits: units, presentDay: false, outstation: false, workedMinutes: Math.round(worked), regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false }
+  return { pairing, dayType, dayUnits: units, presentDay: false, outstation: false, workedMinutes: Math.round(worked), regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false, halfDay: false }
 }
 // Salesman single-punch mode: any punch that day = present (no hours/OT/review).
 function presentResult(pairing: DayPairing): DayResult {
-  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: true, outstation: false, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false }
+  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: true, outstation: false, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false, halfDay: false }
 }
 // A day inside a multi-day outstation trip: present, no OT, no review; the
 // punches (departure / return) are still shown but don't flag.
 export function outstationResult(times: Date[]): DayResult {
-  return { pairing: pairDay(times), dayType: 'normal', dayUnits: 0, presentDay: false, outstation: true, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false }
+  return { pairing: pairDay(times), dayType: 'normal', dayUnits: 0, presentDay: false, outstation: true, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false, halfDay: false }
 }
 // A day with no attendance (off / holiday / absent) — all zero.
 export function emptyDay(): DayResult {
-  return { pairing: pairDay([]), dayType: 'normal', dayUnits: 0, presentDay: false, outstation: false, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false }
+  return { pairing: pairDay([]), dayType: 'normal', dayUnits: 0, presentDay: false, outstation: false, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false, halfDay: false }
 }
 
 export function computeDay(times: Date[], profile: ShiftProfileLite | null, review: ReviewLite | null, ctx?: DayContext): DayResult {
@@ -243,5 +245,11 @@ export function computeDay(times: Date[], profile: ShiftProfileLite | null, revi
   const lateMinutes = Math.max(0, firstIn - shiftStart!)
   const earlyOutMinutes = lastOut != null ? Math.max(0, shiftEnd! - lastOut) : 0
 
-  return result(normal, ot, lateMinutes, earlyOutMinutes, pairing, !!review)
+  // Half day: worked only about half the scheduled hours — e.g. a 08:30–17:00
+  // shift where they were present 08:30–13:00 (morning) or 14:00–17:00 (afternoon).
+  // Then it's a planned half, not lateness/early-out, so those flags are dropped.
+  const halfDay = normal > 0 && normal >= normalMin * 0.3 && normal <= normalMin * 0.7
+  const r = result(normal, ot, halfDay ? 0 : lateMinutes, halfDay ? 0 : earlyOutMinutes, pairing, !!review)
+  r.halfDay = halfDay
+  return r
 }
