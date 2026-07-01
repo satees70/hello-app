@@ -10,7 +10,7 @@ const admin = createClient(
 )
 
 export async function POST(request: Request) {
-  const { employee_code, name, shift_profile_id, is_driver, active } = await request.json()
+  const { employee_code, name, shift_profile_id, is_driver, active, delivery_name } = await request.json()
   if (!employee_code) return NextResponse.json({ error: 'Missing employee_code' }, { status: 400 })
 
   const row: Record<string, unknown> = { employee_code }
@@ -18,6 +18,7 @@ export async function POST(request: Request) {
   if (shift_profile_id !== undefined) row.shift_profile_id = shift_profile_id || null
   if (is_driver !== undefined) row.is_driver = !!is_driver
   if (active !== undefined) row.active = !!active
+  if (delivery_name !== undefined) row.delivery_name = (delivery_name ?? '').trim() || null
 
   const { error } = await admin.from('employees').upsert(row, { onConflict: 'employee_code' })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

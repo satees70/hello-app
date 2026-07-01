@@ -4,7 +4,7 @@ import { supabase, fetchAll } from '@/lib/supabase'
 
 type DayWin = { start: string; end: string } | null
 interface ShiftProfile { id: string; name: string; normal_hours: number; lunch_rule: string; lunch_minutes: number; week_schedule: Record<string, DayWin> | null; attendance_mode: string | null }
-interface Employee { employee_code: string; name: string | null; shift_profile_id: string | null; is_driver: boolean; active: boolean; department: string | null }
+interface Employee { employee_code: string; name: string | null; shift_profile_id: string | null; is_driver: boolean; active: boolean; department: string | null; delivery_name: string | null }
 interface Row extends Employee { seenInPunches: boolean; lastSeen: string | null }
 interface Holiday { holiday_date: string; name: string | null }
 
@@ -35,16 +35,19 @@ export default function EmployeesSetupPage() {
   const [filterDept, setFilterDept] = useState('')
   const [filterProfile, setFilterProfile] = useState('')   // '' all · 'none' unassigned · <id>
   const [search, setSearch] = useState('')
+  const [deliveryDrivers, setDeliveryDrivers] = useState<string[]>([])
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
-    const [{ data: profs }, { data: emps }, codes, { data: hols }] = await Promise.all([
+    const [{ data: profs }, { data: emps }, codes, { data: hols }, { data: drv }] = await Promise.all([
       supabase.from('shift_profiles').select('id, name, normal_hours, lunch_rule, lunch_minutes, week_schedule, attendance_mode').order('name'),
-      supabase.from('employees').select('employee_code, name, shift_profile_id, is_driver, active, department'),
+      supabase.from('employees').select('employee_code, name, shift_profile_id, is_driver, active, department, delivery_name'),
       fetchAll<{ employee_code: string; punch_time: string }>('attendance_punches', 'employee_code, punch_time'),
       supabase.from('public_holidays').select('holiday_date, name').order('holiday_date'),
+      supabase.from('delivery_resources').select('name').eq('kind', 'driver').eq('active', true).order('name'),
     ])
     setHolidays((hols as Holiday[]) || [])
+    setDeliveryDrivers((drv || []).map(d => d.name))
     const empByCode = new Map<string, Employee>((emps || []).map(e => [e.employee_code, e as Employee]))
     // Last punch per person (for the "Last seen" column).
     const lastByCode = new Map<string, string>()
@@ -61,6 +64,7 @@ export default function EmployeesSetupPage() {
         is_driver: e?.is_driver ?? false,
         active: e?.active ?? true,
         department: e?.department ?? null,
+        delivery_name: e?.delivery_name ?? null,
         seenInPunches: punchCodes.has(code),
         lastSeen: lastByCode.get(code) ?? null,
       }
@@ -82,6 +86,7 @@ export default function EmployeesSetupPage() {
       body: JSON.stringify({
         employee_code: r.employee_code, name: next.name,
         shift_profile_id: next.shift_profile_id, is_driver: next.is_driver, active: next.active,
+        delivery_name: next.delivery_name,
       }),
     })
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') }
@@ -335,6 +340,7 @@ export default function EmployeesSetupPage() {
                 <th className="px-3 py-2 font-medium">Department</th>
                 <th className="px-3 py-2 font-medium">Shift profile</th>
                 <th className="px-3 py-2 font-medium">Driver</th>
+                <th className="px-3 py-2 font-medium">Delivery link</th>
                 <th className="px-3 py-2 font-medium">Last seen</th>
                 <th className="px-3 py-2 font-medium">Active</th>
               </tr>
@@ -361,6 +367,15 @@ export default function EmployeesSetupPage() {
                   </td>
                   <td className="px-3 py-2 text-center">
                     <input type="checkbox" checked={r.is_driver} onChange={e => saveEmployee(r, { is_driver: e.target.checked })} />
+                  </td>
+                  <td className="px-3 py-2">
+                    {r.is_driver ? (
+                      <select value={r.delivery_name ?? ''} onChange={e => saveEmployee(r, { delivery_name: e.target.value || null })}
+                        className="rounded border border-gray-200 px-2 py-1 text-xs" title="Which name this driver uses in the delivery schedule">
+                        <option value="">— link —</option>
+                        {deliveryDrivers.map(d => <option key={d} value={d}>{d}</option>)}
+                      </select>
+                    ) : <span className="text-gray-300 text-xs">—</span>}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500">
                     {r.lastSeen ? new Date(r.lastSeen).toLocaleDateString('en-GB', { timeZone: 'Asia/Kuala_Lumpur', day: '2-digit', month: '2-digit' }) : <span className="text-gray-300">never</span>}

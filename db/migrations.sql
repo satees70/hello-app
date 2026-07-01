@@ -3461,6 +3461,12 @@ alter table public.shift_profiles add column if not exists ot_after text;
 -- (any punch that day = present; no pairing, OT, or review).
 alter table public.shift_profiles add column if not exists attendance_mode text not null default 'pair';
 
+-- employees.department (from ZKLink) + delivery_name (short name in the delivery
+-- schedule, e.g. 'HAKIM') so a driver's daily trip type can be looked up from
+-- delivery_trips.category on the Attendance page.
+alter table public.employees add column if not exists department text;
+alter table public.employees add column if not exists delivery_name text;
+
 -- 2026-07 · Weekly schedule + day types. week_schedule jsonb keyed '0'(Sun)..'6'(Sat)
 -- → {start,end} for a working day, null/absent = day off (rest day). Rest-day &
 -- public-holiday work is counted in DAYS (full→1, >half→1, half-or-less→½).

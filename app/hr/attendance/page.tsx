@@ -7,13 +7,13 @@ import {
 } from '@/lib/attendance'
 
 interface ShiftProfile extends ShiftProfileLite { id: string; name: string }
-interface Employee { employee_code: string; name: string | null; shift_profile_id: string | null }
+interface Employee { employee_code: string; name: string | null; shift_profile_id: string | null; delivery_name: string | null }
 interface Punch { employee_code: string; punch_time: string; department_name: string | null }
 interface Review extends ReviewLite { employee_code: string; work_date: string }
 
-interface DayRow { dateKey: string; result: DayResult }
+interface DayRow { dateKey: string; result: DayResult; trip: string | null }
 interface EmpBlock {
-  code: string; name: string; department: string | null; profile: ShiftProfile | null
+  code: string; name: string; department: string | null; profile: ShiftProfile | null; deliveryName: string | null
   days: DayRow[]; punches: number; totalWorked: number; totalOt: number; totalLate: number; totalEarlyOut: number
   totalRestDays: number; totalHolidayDays: number; totalPresentDays: number; needsReview: number
 }
@@ -44,13 +44,17 @@ export default function AttendancePage() {
     const [punches, { data: emps }, { data: profs }, { data: reviews }] = await Promise.all([
       fetchAll<Punch>('attendance_punches', 'employee_code, punch_time, department_name',
         q => q.gte('punch_time', fromUtc).lte('punch_time', toUtc).order('punch_time')),
-      supabase.from('employees').select('employee_code, name, shift_profile_id'),
+      supabase.from('employees').select('employee_code, name, shift_profile_id, delivery_name'),
       supabase.from('shift_profiles').select('id, name, normal_hours, lunch_rule, lunch_minutes, shift_start, shift_end, week_schedule, attendance_mode'),
       supabase.from('attendance_reviews').select('employee_code, work_date, lunch_decision, manual_minutes')
         .gte('work_date', from).lte('work_date', to),
     ])
     const { data: hols } = await supabase.from('public_holidays').select('holiday_date').gte('holiday_date', from).lte('holiday_date', to)
     const holidaySet = new Set((hols || []).map(h => h.holiday_date))
+    // Driver trips from the delivery schedule: (driver name | date) → category.
+    const { data: trips } = await supabase.from('delivery_trips').select('driver, delivery_date, category').gte('delivery_date', from).lte('delivery_date', to)
+    const tripByKey = new Map<string, string>()
+    for (const t of trips || []) if (t.driver && t.category) tripByKey.set(`${t.driver}|${t.delivery_date}`, t.category)
 
     const empByCode = new Map<string, Employee>((emps || []).map(e => [e.employee_code, e as Employee]))
     const profById = new Map<string, ShiftProfile>((profs || []).map(p => [p.id, p as ShiftProfile]))
@@ -73,6 +77,7 @@ export default function AttendancePage() {
     for (const [code, days] of grouped) {
       const emp = empByCode.get(code)
       const prof = emp?.shift_profile_id ? profById.get(emp.shift_profile_id) ?? null : null
+      const deliveryName = emp?.delivery_name ?? null
       const dayRows: DayRow[] = []
       let punches = 0, totalWorked = 0, totalOt = 0, totalLate = 0, totalEarlyOut = 0, totalRestDays = 0, totalHolidayDays = 0, totalPresentDays = 0, needsReview = 0
       for (const [dateKey, times] of [...days].sort((a, b) => a[0].localeCompare(b[0]))) {
@@ -87,11 +92,12 @@ export default function AttendancePage() {
         if (result.dayType === 'rest') totalRestDays += result.dayUnits
         if (result.dayType === 'holiday') totalHolidayDays += result.dayUnits
         if (result.presentDay) totalPresentDays++
-        dayRows.push({ dateKey, result })
+        const trip = deliveryName ? (tripByKey.get(`${deliveryName}|${dateKey}`) ?? null) : null
+        dayRows.push({ dateKey, result, trip })
       }
       out.push({
         code, name: emp?.name || code, department: deptByCode.get(code) ?? null,
-        profile: prof, days: dayRows, punches, totalWorked, totalOt, totalLate, totalEarlyOut, totalRestDays, totalHolidayDays, totalPresentDays, needsReview,
+        profile: prof, deliveryName, days: dayRows, punches, totalWorked, totalOt, totalLate, totalEarlyOut, totalRestDays, totalHolidayDays, totalPresentDays, needsReview,
       })
     }
     out.sort((a, b) => a.name.localeCompare(b.name))
@@ -200,6 +206,12 @@ export default function AttendancePage() {
                 {b.totalHolidayDays > 0 && <span className="ml-3 text-purple-700">PH {b.totalHolidayDays}d</span>}
                 {b.totalPresentDays > 0 && <span className="ml-3 font-medium text-gray-800">Present {b.totalPresentDays}d</span>}
                 {b.needsReview > 0 && <span className="ml-3 text-amber-700">{b.needsReview} to review</span>}
+                {b.deliveryName && (() => {
+                  const tc: Record<string, number> = {}
+                  for (const d of b.days) if (d.trip) tc[d.trip] = (tc[d.trip] || 0) + 1
+                  const parts = Object.entries(tc).map(([k, v]) => `${k} ${v}`)
+                  return <span className="ml-3 text-indigo-700">Trips ({b.deliveryName}): {parts.length ? parts.join(', ') : '0'}</span>
+                })()}
               </div>
             </header>
             <table className="w-full text-sm">
@@ -210,12 +222,13 @@ export default function AttendancePage() {
                   <th className="px-4 py-2 font-medium">Sessions</th>
                   <th className="px-4 py-2 font-medium">Worked</th>
                   <th className="px-4 py-2 font-medium">OT</th>
+                  {b.deliveryName && <th className="px-4 py-2 font-medium">Trip</th>}
                   <th className="px-4 py-2 font-medium">Late / early</th>
                   <th className="px-4 py-2 font-medium">Status / review</th>
                 </tr>
               </thead>
               <tbody>
-                {b.days.map(({ dateKey, result }) => (
+                {b.days.map(({ dateKey, result, trip }) => (
                   <tr key={dateKey} className={`border-b border-gray-50 align-top ${result.needsReview ? 'bg-amber-50' : ''}`}>
                     <td className="px-4 py-2 whitespace-nowrap">
                       {fmtDate(dateKey)} <span className={`ml-1 ${[0, 6].includes(weekdayOf(dateKey)) ? 'text-rose-500' : 'text-gray-400'}`}>{DOW_SHORT[weekdayOf(dateKey)]}</span>
@@ -234,6 +247,7 @@ export default function AttendancePage() {
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap">{result.needsReview ? '—' : fmtMinutes(result.workedMinutes)}</td>
                     <td className="px-4 py-2 whitespace-nowrap">{result.needsReview ? '—' : (result.otMinutes > 0 ? <span className="font-medium">{fmtMinutes(result.otMinutes)}</span> : '—')}</td>
+                    {b.deliveryName && <td className="px-4 py-2 whitespace-nowrap">{trip ? <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs text-indigo-800">{trip}</span> : <span className="text-gray-300">—</span>}</td>}
                     <td className="px-4 py-2 whitespace-nowrap text-xs text-rose-600">
                       {result.lateMinutes > 0 && <span>late {fmtMinutes(result.lateMinutes)}</span>}
                       {result.lateMinutes > 0 && result.earlyOutMinutes > 0 && <span> · </span>}
