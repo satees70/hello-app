@@ -9,19 +9,28 @@ import type { NextRequest } from 'next/server'
 // (/hr/*, /driver/*, /login, /api, production.srrieaswari.com) is untouched.
 export function proxy(request: NextRequest) {
   const host = request.headers.get('host') || ''
-  const url = request.nextUrl.clone()
+  const { pathname } = request.nextUrl
+  const isHr = host.startsWith('hr.')
+  const isDriver = host.startsWith('driver.')
+  if (!isHr && !isDriver) return NextResponse.next()
 
-  if (host.startsWith('hr.')) {
-    url.pathname = '/hr/attendance'
+  const appHome = isHr ? '/hr/attendance' : '/driver/today'
+
+  // Root → serve the app (clean URL via rewrite).
+  if (pathname === '/') {
+    const url = request.nextUrl.clone()
+    url.pathname = appHome
     return NextResponse.rewrite(url)
   }
-  if (host.startsWith('driver.')) {
-    url.pathname = '/driver/today'
-    return NextResponse.rewrite(url)
+  // Portal home/dashboard on a subdomain → bounce to the app.
+  if (pathname === '/dashboard') {
+    const url = request.nextUrl.clone()
+    url.pathname = appHome
+    return NextResponse.redirect(url)
   }
   return NextResponse.next()
 }
 
 export const config = {
-  matcher: '/',
+  matcher: ['/', '/dashboard'],
 }
