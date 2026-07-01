@@ -195,11 +195,14 @@ export function computeDay(times: Date[], profile: ShiftProfileLite | null, revi
   // Rest day / public holiday with work → counted in days, not hours.
   if (dayType !== 'normal') return dayCount(dayType, pairing.workedMinutes, normalMin, pairing)
 
-  // auto_deduct, single long session, no lunch punch → don't guess until reviewed.
-  const singleNoLunch = lunchRule === 'auto_deduct' && pairing.sessions.length <= 1 && pairing.punchCount >= 2
-  const decided = review && (review.lunch_decision === 'deduct' || review.lunch_decision === 'worked_through')
-  if (singleNoLunch && !decided) return flag(pairing, 'Auto-deduct: no lunch punch — confirm lunch')
-  const deductLunch = singleNoLunch && review?.lunch_decision === 'deduct'
+  // auto_deduct + a single session (no lunch punch) → deduct the fixed lunch
+  // AUTOMATICALLY (that's the point of the auto_deduct profile — e.g. drivers who
+  // never clock lunch). Punched-lunch days already exclude lunch via their gaps,
+  // so no deduction there. A 'worked_through' review can cancel the deduction.
+  // (Missing clock-outs / odd punches still flag above.)
+  const deductLunch = lunchRule === 'auto_deduct'
+    && pairing.sessions.length <= 1 && pairing.punchCount >= 2
+    && review?.lunch_decision !== 'worked_through'
 
   // Flat fallback when no shift window is set: OT over the daily threshold.
   if (!windowMode) {

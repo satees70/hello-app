@@ -14,7 +14,7 @@ interface Review extends ReviewLite { employee_code: string; work_date: string }
 interface DayRow { dateKey: string; result: DayResult }
 interface EmpBlock {
   code: string; name: string; department: string | null; profile: ShiftProfile | null
-  days: DayRow[]; totalWorked: number; totalOt: number; totalLate: number; totalEarlyOut: number
+  days: DayRow[]; punches: number; totalWorked: number; totalOt: number; totalLate: number; totalEarlyOut: number
   totalRestDays: number; totalHolidayDays: number; totalPresentDays: number; needsReview: number
 }
 
@@ -74,8 +74,9 @@ export default function AttendancePage() {
       const emp = empByCode.get(code)
       const prof = emp?.shift_profile_id ? profById.get(emp.shift_profile_id) ?? null : null
       const dayRows: DayRow[] = []
-      let totalWorked = 0, totalOt = 0, totalLate = 0, totalEarlyOut = 0, totalRestDays = 0, totalHolidayDays = 0, totalPresentDays = 0, needsReview = 0
+      let punches = 0, totalWorked = 0, totalOt = 0, totalLate = 0, totalEarlyOut = 0, totalRestDays = 0, totalHolidayDays = 0, totalPresentDays = 0, needsReview = 0
       for (const [dateKey, times] of [...days].sort((a, b) => a[0].localeCompare(b[0]))) {
+        punches += times.length
         const review = reviewByKey.get(`${code}|${dateKey}`) ?? null
         const result = computeDay(times, prof, review, { weekday: weekdayOf(dateKey), isHoliday: holidaySet.has(dateKey) })
         if (result.needsReview) needsReview++
@@ -90,7 +91,7 @@ export default function AttendancePage() {
       }
       out.push({
         code, name: emp?.name || code, department: deptByCode.get(code) ?? null,
-        profile: prof, days: dayRows, totalWorked, totalOt, totalLate, totalEarlyOut, totalRestDays, totalHolidayDays, totalPresentDays, needsReview,
+        profile: prof, days: dayRows, punches, totalWorked, totalOt, totalLate, totalEarlyOut, totalRestDays, totalHolidayDays, totalPresentDays, needsReview,
       })
     }
     out.sort((a, b) => a.name.localeCompare(b.name))
@@ -150,6 +151,16 @@ export default function AttendancePage() {
       </div>
 
       <div className="flex flex-wrap items-end gap-3 mb-4">
+        <label className="text-sm">Month
+          <input type="month" lang="en-GB" value={from.slice(0, 7)}
+            onChange={e => {
+              const v = e.target.value; if (!v) return
+              const [y, m] = v.split('-').map(Number)
+              const last = new Date(y, m, 0).getDate()
+              setFrom(`${v}-01`); setTo(`${v}-${String(last).padStart(2, '0')}`)
+            }}
+            className="block mt-1 rounded border border-gray-300 px-2 py-1" />
+        </label>
         <label className="text-sm">From<input type="date" lang="en-GB" value={from} onChange={e => setFrom(e.target.value)} className="block mt-1 rounded border border-gray-300 px-2 py-1" /></label>
         <label className="text-sm">To<input type="date" lang="en-GB" value={to} onChange={e => setTo(e.target.value)} className="block mt-1 rounded border border-gray-300 px-2 py-1" /></label>
         <button onClick={load} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">Refresh</button>
@@ -176,6 +187,7 @@ export default function AttendancePage() {
                 <span className="font-medium">{b.name}</span>
                 <span className="text-gray-400 text-sm ml-2">{b.code}</span>
                 {b.department && <span className="text-gray-400 text-sm ml-2">· {b.department}</span>}
+                <span className="text-gray-400 text-sm ml-2">· {b.punches} punches · {b.days.length} days</span>
               </div>
               <div className="text-sm text-gray-600">
                 {b.profile ? <span>{b.profile.name} · OT &gt; {b.profile.normal_hours}h · {b.profile.lunch_rule}</span>
