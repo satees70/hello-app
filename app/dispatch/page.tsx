@@ -227,12 +227,18 @@ export default function DispatchPage() {
     if (!editWhy.trim()) { setError('Please give a reason for the edit.'); return }
     setBusy(true); setError(''); setSuccess('')
     const newItem = editNewItem && editNewItem !== editRet.item_code ? editNewItem : null
-    const { data, error: e } = await supabase.from('return_edit_requests').insert({
+    const payload: Record<string, unknown> = {
       return_id: editRet.id, factory_code: editRet.factory_code, item_code: editRet.item_code, batch_no: editRet.batch_no,
-      old_qty: editRet.quantity, new_qty: nq, new_item_code: newItem, old_reason: editRet.reason, new_reason: editNewReason.trim() || null,
+      old_qty: editRet.quantity, new_qty: nq, old_reason: editRet.reason, new_reason: editNewReason.trim() || null,
       reason: editWhy.trim(), requested_by: profile.id, requested_by_name: profile.full_name || null,
-    }).select('id').single()
-    if (e || !data) { setError(e?.message || 'Could not send request'); setBusy(false); return }
+    }
+    if (newItem) payload.new_item_code = newItem   // only sent when the item is actually changed
+    const { data, error: e } = await supabase.from('return_edit_requests').insert(payload).select('id').single()
+    if (e || !data) {
+      const msg = e?.message || 'Could not send request'
+      setError(/new_item_code/.test(msg) ? 'Changing the item needs a database update — run the latest catch-up SQL first.' : msg)
+      setBusy(false); return
+    }
     // Head Office applies immediately; others wait for approval.
     if (isHO) {
       const { error: apErr } = await supabase.rpc('approve_return_edit', { p_id: data.id })
