@@ -26,7 +26,11 @@ export default function LoginPage() {
     // Verify session is actually stored before redirecting
     const { data: { session: stored } } = await supabase.auth.getSession()
     if (!stored) { setError('Session was not saved to browser storage. Try disabling browser privacy extensions.'); setLoading(false); return }
-    window.location.href = '/dashboard'
+    // Land on the right app for the subdomain (hr. / driver. / portal).
+    const host = window.location.hostname
+    window.location.href = host.startsWith('hr.') ? '/hr/attendance'
+      : host.startsWith('driver.') ? '/driver/today'
+      : '/dashboard'
   }
 
   return (
