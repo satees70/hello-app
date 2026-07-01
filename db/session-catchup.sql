@@ -934,3 +934,79 @@ begin
 end $$;
 grant execute on function public.produce_grinding(uuid, numeric, text) to authenticated;
 grant execute on function public.produce_grinding(uuid, numeric, text, text, text) to authenticated;
+
+-- ============================================================================
+-- 2026-07 · Edit item on a material return (reverse old item, apply new item)
+-- ============================================================================
+alter table public.return_edit_requests add column if not exists new_item_code text;
+
+create or replace function public.approve_return_edit(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_req public.return_edit_requests; v_ret public.material_returns;
+  v_lot public.stock_lots; v_item public.items;
+  v_new_item public.items; v_new_lot public.stock_lots;
+  v_delta numeric; v_name text; v_newqty numeric; v_newcode text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can approve return edits'; end if;
+  select * into v_req from public.return_edit_requests where id = p_id and status = 'Pending';
+  if not found then raise exception 'Request not found or already reviewed'; end if;
+  select * into v_ret from public.material_returns where id = v_req.return_id;
+  if not found then raise exception 'The material return no longer exists'; end if;
+
+  v_newqty := coalesce(v_req.new_qty, v_ret.quantity);
+  v_newcode := nullif(v_req.new_item_code, '');
+
+  if v_newcode is not null and v_newcode <> v_ret.item_code then
+    -- ITEM CHANGE: reverse the old item fully, then apply the new item.
+    -- 1) Add the old item's returned qty back to its lot + item_stock.
+    select * into v_lot from public.stock_lots where id = v_ret.lot_id;
+    if not found then
+      select * into v_lot from public.stock_lots where item_code = v_ret.item_code and factory_code = v_ret.factory_code
+        and coalesce(batch_no,'') = coalesce(v_ret.batch_no,'') order by exp_date asc nulls last, received_at asc limit 1;
+    end if;
+    if found then update public.stock_lots set qty_remaining = qty_remaining + v_ret.quantity where id = v_lot.id; end if;
+    select * into v_item from public.items where code = v_ret.item_code limit 1;
+    if found then update public.item_stock set quantity = quantity + v_ret.quantity, updated_at = now() where item_id = v_item.id and factory_code = v_ret.factory_code; end if;
+
+    -- 2) Deduct the new qty of the new item from a lot at the same factory (FIFO).
+    select * into v_new_item from public.items where code = v_newcode limit 1;
+    if not found then raise exception 'The new item does not exist'; end if;
+    select * into v_new_lot from public.stock_lots where item_code = v_newcode and factory_code = v_ret.factory_code
+      and qty_remaining >= v_newqty order by exp_date asc nulls last, received_at asc limit 1;
+    if not found then
+      select * into v_new_lot from public.stock_lots where item_code = v_newcode and factory_code = v_ret.factory_code
+        order by qty_remaining desc, exp_date asc nulls last limit 1;
+    end if;
+    if not found then raise exception 'No stock batch found for % at this factory to deduct', v_newcode; end if;
+    if v_newqty > v_new_lot.qty_remaining then raise exception 'Not enough stock of % — only % left in that batch', v_newcode, v_new_lot.qty_remaining; end if;
+    update public.stock_lots set qty_remaining = qty_remaining - v_newqty where id = v_new_lot.id;
+    update public.item_stock set quantity = quantity - v_newqty, updated_at = now() where item_id = v_new_item.id and factory_code = v_ret.factory_code;
+
+    -- 3) Point the return at the new item / lot / qty.
+    update public.material_returns
+      set item_code = v_newcode, description = v_new_item.description, quantity = v_newqty,
+          reason = v_req.new_reason, lot_id = v_new_lot.id, batch_no = v_new_lot.batch_no
+      where id = v_ret.id;
+  else
+    -- QTY / REASON ONLY (same item): adjust by the delta.
+    v_delta := v_newqty - v_ret.quantity;
+    if v_delta <> 0 then
+      select * into v_lot from public.stock_lots where id = v_ret.lot_id;
+      if not found then
+        select * into v_lot from public.stock_lots where item_code = v_ret.item_code and factory_code = v_ret.factory_code
+          and coalesce(batch_no,'') = coalesce(v_ret.batch_no,'') order by exp_date asc nulls last, received_at asc limit 1;
+      end if;
+      if not found then raise exception 'Cannot find the stock batch to adjust'; end if;
+      if v_delta > v_lot.qty_remaining then raise exception 'Not enough stock to increase the return — only % left in that batch', v_lot.qty_remaining; end if;
+      update public.stock_lots set qty_remaining = qty_remaining - v_delta where id = v_lot.id;
+      select * into v_item from public.items where code = v_ret.item_code limit 1;
+      if found then update public.item_stock set quantity = quantity - v_delta, updated_at = now() where item_id = v_item.id and factory_code = v_ret.factory_code; end if;
+    end if;
+    update public.material_returns set quantity = v_newqty, reason = v_req.new_reason where id = v_ret.id;
+  end if;
+
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.return_edit_requests set status = 'Approved', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id;
+end $$;
+grant execute on function public.approve_return_edit(uuid) to authenticated;

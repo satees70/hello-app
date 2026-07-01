@@ -68,6 +68,7 @@ export default function DispatchPage() {
   // Edit-a-return modal (needs HO approval)
   const [editRet, setEditRet] = useState<MReturn | null>(null)
   const [editQty, setEditQty] = useState('')
+  const [editNewItem, setEditNewItem] = useState('')   // '' = keep same item; otherwise the new item code
   const [editNewReason, setEditNewReason] = useState('')
   const [editWhy, setEditWhy] = useState('')
   const [editPending, setEditPending] = useState<Set<string>>(new Set())
@@ -216,7 +217,7 @@ export default function DispatchPage() {
   }
 
   function openRetEdit(r: MReturn) {
-    setEditRet(r); setEditQty(String(r.quantity)); setEditNewReason(r.reason || ''); setEditWhy(''); setError(''); setSuccess('')
+    setEditRet(r); setEditQty(String(r.quantity)); setEditNewItem(''); setEditNewReason(r.reason || ''); setEditWhy(''); setError(''); setSuccess('')
   }
   // Request an edit to a past return (qty/reason). HO approval applies the stock change.
   async function submitRetEdit() {
@@ -225,9 +226,10 @@ export default function DispatchPage() {
     if (!(nq > 0)) { setError('Enter a quantity greater than zero.'); return }
     if (!editWhy.trim()) { setError('Please give a reason for the edit.'); return }
     setBusy(true); setError(''); setSuccess('')
+    const newItem = editNewItem && editNewItem !== editRet.item_code ? editNewItem : null
     const { data, error: e } = await supabase.from('return_edit_requests').insert({
       return_id: editRet.id, factory_code: editRet.factory_code, item_code: editRet.item_code, batch_no: editRet.batch_no,
-      old_qty: editRet.quantity, new_qty: nq, old_reason: editRet.reason, new_reason: editNewReason.trim() || null,
+      old_qty: editRet.quantity, new_qty: nq, new_item_code: newItem, old_reason: editRet.reason, new_reason: editNewReason.trim() || null,
       reason: editWhy.trim(), requested_by: profile.id, requested_by_name: profile.full_name || null,
     }).select('id').single()
     if (e || !data) { setError(e?.message || 'Could not send request'); setBusy(false); return }
@@ -515,6 +517,11 @@ export default function DispatchPage() {
             <h2 className="font-semibold text-lg mb-1">Edit return</h2>
             <p className="text-gray-500 text-sm mb-4"><span className="font-mono">{editRet.item_code}</span> · batch {editRet.batch_no || '—'} · {factoryName(editRet.factory_code)}. {isHO ? 'Applies immediately and adjusts stock.' : 'Goes to Head Office for approval; stock changes when approved.'}</p>
             <div className="space-y-3">
+              <div><label className="block text-sm font-medium mb-1">Item</label>
+                <ItemPicker items={items} value={editNewItem ? (() => { const it = items.find(i => i.code === editNewItem); return it ? `${it.code} — ${it.description}` : editNewItem })() : `${editRet.item_code}${editRet.description ? ' — ' + editRet.description : ''}`} onPick={it => setEditNewItem(it.code)} placeholder="Type a code or name…" />
+                {editNewItem && editNewItem !== editRet.item_code
+                  ? <span className="text-xs text-amber-600">Changing item: <span className="font-mono">{editRet.item_code}</span> qty goes back to stock, new item is deducted.</span>
+                  : <span className="text-xs text-gray-500">Leave as-is to keep the same item.</span>}</div>
               <div><label className="block text-sm font-medium mb-1">Quantity returned</label>
                 <input type="number" step="any" min="0" value={editQty} onChange={e => setEditQty(e.target.value)} className="w-full border rounded-lg px-3 py-2" />
                 <span className="text-xs text-gray-500">Was {editRet.quantity}. Increasing returns more (reduces stock further); decreasing adds stock back.</span></div>
