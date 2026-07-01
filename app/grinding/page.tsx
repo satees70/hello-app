@@ -31,6 +31,7 @@ interface GrindingRecord {
   crusher_before: string | null; crusher_after: string | null; qty_rework: number | null; qty_rejection: number | null
   correction_action: string | null; prepared_by: string | null; verified_by: string | null; remark: string | null
   machine_id: string | null; grind_by: string | null
+  source_batch_no: string | null; so_number: string | null
 }
 
 const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
@@ -352,7 +353,7 @@ export default function GrindingPage() {
                   {!isHO && visibleRecords.map(r => (
                     <tr key={r.id} className="border-b last:border-0 hover:bg-gray-50">
                       <td className="px-3 py-2 whitespace-nowrap">{fmt(r.record_date)}</td>
-                      <td className="px-3 py-2">{r.product || '—'}</td>
+                      <td className="px-3 py-2">{r.product || '—'}{(r.source_batch_no || r.so_number) && <span className="block text-gray-400 text-xs font-mono">{[r.source_batch_no, r.so_number].filter(Boolean).join(' · ')}</span>}</td>
                       <td className="px-3 py-2 capitalize">{r.recipe_type || '—'}</td>
                       <td className="px-3 py-2 text-right">{r.lots ?? '—'}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{r.machine_id || '—'}</td>
@@ -373,7 +374,7 @@ export default function GrindingPage() {
                           <tr key={r.id} className="border-b last:border-0 hover:bg-gray-50">
                             <td className="px-3 py-2 whitespace-nowrap">{fmt(r.record_date)}</td>
                             <td className="px-3 py-2 whitespace-nowrap">{factoryName(r.factory_code)}</td>
-                            <td className="px-3 py-2">{r.product || '—'}</td>
+                            <td className="px-3 py-2">{r.product || '—'}{(r.source_batch_no || r.so_number) && <span className="block text-gray-400 text-xs font-mono">{[r.source_batch_no, r.so_number].filter(Boolean).join(' · ')}</span>}</td>
                             <td className="px-3 py-2 capitalize">{r.recipe_type || '—'}</td>
                             <td className="px-3 py-2 text-right">{r.lots ?? '—'}</td>
                             <td className="px-3 py-2 whitespace-nowrap">{r.machine_id || '—'}</td>

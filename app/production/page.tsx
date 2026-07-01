@@ -300,8 +300,12 @@ export default function ProductionPage() {
     const rec = recipeFor(loose, li?.description, t.factory_code)
     if (!rec) { setError(`No grinding recipe for ${loose} — create one in Grinding → Recipes.`); return }
     if (!(lots > 0)) { setError('Could not work out the number of lots.'); return }
+    // Carry the source PB batch no + SO numbers onto the grind record for traceability.
+    const bs = batches.filter(b => t.batchIds.includes(b.id))
+    const sourceBatch = bs.map(b => b.batch_no).filter(Boolean).join(', ')
+    const soNos = [...new Set(bs.flatMap(b => (b.production_batch_items || []).map(i => i.so_number).filter(Boolean)))].join(', ')
     setRaising(true); setError(''); setSuccess('')
-    const { error: e } = await supabase.rpc('produce_grinding', { p_recipe_id: rec.id, p_lots: lots, p_factory: t.factory_code })
+    const { error: e } = await supabase.rpc('produce_grinding', { p_recipe_id: rec.id, p_lots: lots, p_factory: t.factory_code, p_source_batch: sourceBatch || null, p_so_number: soNos || null })
     setRaising(false)
     if (e) { setError(e.message); return }
     setSuccess(`Grinding started for ${loose} · ${lots} lot(s) at ${factoryName(t.factory_code)} — now in Grinding & Mixing (open it there to record the actual mix & output).`)
