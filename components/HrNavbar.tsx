@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
+import { can } from '@/lib/permissions'
 
 const LINKS = [
   { href: '/hr/attendance', label: 'Attendance & OT' },
@@ -13,11 +14,13 @@ const LINKS = [
 export default function HrNavbar() {
   const { profile } = useProfile()
   const pathname = usePathname()
+  const canUsers = !!profile && (profile.role === 'admin' || can(profile, 'users', 'view'))
+  const links = canUsers ? [...LINKS, { href: '/hr/users', label: 'Users' }] : LINKS
   return (
     <nav className="bg-blue-600 text-white">
       <div className="max-w-6xl mx-auto px-4 flex flex-wrap items-center gap-1 min-h-14 py-1">
         <span className="font-bold text-lg mr-4">EASWARI <span className="font-normal text-blue-200">HR</span></span>
-        {LINKS.map(l => {
+        {links.map(l => {
           const active = pathname === l.href
           return (
             <Link key={l.href} href={l.href}
