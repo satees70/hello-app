@@ -12,7 +12,7 @@ interface Lot { id: string; item_code: string; factory_code: string; batch_no: s
 interface Batch {
   id: string; batch_no: string | null; item_code: string; description: string | null
   factory_code: string; total_quantity: number; produced_qty: number | null
-  dispatched_at: string | null; delivery_date: string | null
+  dispatched_at: string | null; delivery_date: string | null; exp_date: string | null
   production_batch_items?: { so_number: string | null }[]
 }
 interface DOrder {
@@ -90,7 +90,7 @@ export default function DispatchPage() {
       .gt('qty_remaining', 0).order('exp_date', { ascending: true, nullsFirst: false }).order('received_at', { ascending: true })
     setLots((lt as Lot[]) || [])
     const { data: b } = await supabase.from('production_batches')
-      .select('id, batch_no, item_code, description, factory_code, total_quantity, produced_qty, dispatched_at, delivery_date, production_batch_items(so_number)')
+      .select('id, batch_no, item_code, description, factory_code, total_quantity, produced_qty, dispatched_at, delivery_date, exp_date, production_batch_items(so_number)')
       .is('dispatched_at', null).gt('produced_qty', 0).neq('status', 'Bypassed').order('delivery_date')
     setBatches((b as Batch[]) || [])
     const { data: o } = await supabase.from('dispatch_orders')
@@ -300,7 +300,7 @@ export default function DispatchPage() {
                     <tr key={b.id} className="border-b last:border-0 hover:bg-gray-50">
                       <td className="px-3 py-2">{canEdit && canFac(b.factory_code) && <input type="checkbox" checked={picked.has(b.id)} onChange={() => toggle(b.id)} className="h-4 w-4" />}</td>
                       <td className="px-3 py-2"><span className="font-mono font-medium">{b.item_code}</span><span className="block text-gray-400">{b.description}</span>{(() => { const sos = [...new Set((b.production_batch_items || []).map(i => i.so_number).filter(Boolean))]; return sos.length ? <span className="block text-gray-400 text-xs font-mono">{sos.join(', ')}</span> : null })()}</td>
-                      <td className="px-3 py-2 whitespace-nowrap">{b.batch_no || '—'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{b.batch_no || '—'}{b.exp_date && <span className="block text-gray-400 text-xs">exp {fmtD(b.exp_date)}</span>}</td>
                       <td className="px-3 py-2 text-right font-semibold">{b.produced_qty}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{status(b) === 'Completed' ? <span className="text-green-700 font-medium">Completed</span> : <span className="text-amber-600">In Progress</span>}</td>
                       {multiFac && <td className="px-3 py-2 whitespace-nowrap text-gray-600">{factoryName(b.factory_code)}</td>}
