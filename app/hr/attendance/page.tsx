@@ -157,18 +157,16 @@ export default function AttendancePage() {
           dayRows.push({ dateKey, result: outstationResult(times), trip, manualTime: null, outstationId: osDates.get(dateKey)!, kind: 'outstation', leaveType: null })
           continue
         }
-        // Resolve any human review + hand-entered time. A single "HH:mm" fills a
-        // missing punch; a full "HH:mm-HH:mm" span sets the whole day (so an absent
-        // day can be turned into a worked day with OT — e.g. they worked until 19:00).
+        // Resolve any human review + hand-entered times. Each HH:mm in manual_time
+        // is ADDED to the day's real punches, then re-paired — so one time fills a
+        // missing punch, and a pair (e.g. 08:30 19:00) turns an absent day into a
+        // worked day with OT. Existing punches are kept, not replaced.
         const review = reviewByKey.get(`${code}|${dateKey}`) ?? null
         const manualTime = review?.lunch_decision === 'manual_time' ? (review.manual_time ?? null) : null
-        let dayTimes = times
-        if (manualTime) {
-          const range = /^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/.exec(manualTime)
-          dayTimes = range
-            ? [new Date(`${dateKey}T${range[1]}:00+08:00`), new Date(`${dateKey}T${range[2]}:00+08:00`)]
-            : [...times, new Date(`${dateKey}T${manualTime}:00+08:00`)]
-        }
+        const extra = manualTime
+          ? (manualTime.match(/\d{1,2}:\d{2}/g) || []).map(t => new Date(`${dateKey}T${t.padStart(5, '0')}:00+08:00`))
+          : []
+        const dayTimes = extra.length ? [...times, ...extra] : times
 
         // A day with punches (real or hand-entered) → the normal computed row.
         if (dayTimes.length > 0) {
@@ -265,14 +263,15 @@ export default function AttendancePage() {
     })
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') } else await load()
   }
-  // Enter a full worked span (start-end), e.g. they actually worked 08:30–19:00.
-  // Sets the whole day so OT is computed from the shift window.
+  // Enter one or more worked clock times (24-hour). They're ADDED to the day's
+  // existing punches and re-paired, so OT is computed from the shift window —
+  // e.g. entering 08:30 19:00 gives a full day plus OT after 17:00.
   async function reviewSession(code: string, date: string) {
-    const v = prompt('Enter the worked time as start-end (24-hour), e.g. 08:30-19:00:')
+    const v = prompt('Enter the worked clock times (24-hour) — one or more, e.g. 08:30 19:00.\nThese are ADDED to any existing punches:')
     if (v == null || v.trim() === '') return
-    const m = /^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/.exec(v.trim())
-    if (!m) { setError('Enter it as start-end, e.g. 08:30-19:00'); return }
-    const span = `${m[1].padStart(2, '0')}:${m[2]}-${m[3].padStart(2, '0')}:${m[4]}`
+    const toks = v.match(/\d{1,2}:\d{2}/g)
+    if (!toks || toks.length === 0) { setError('Enter times as HH:mm, e.g. 08:30 19:00'); return }
+    const span = toks.map(t => t.padStart(5, '0')).join(', ')
     const res = await fetch('/api/attendance/review', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ employee_code: code, work_date: date, lunch_decision: 'manual_time', manual_time: span }),
