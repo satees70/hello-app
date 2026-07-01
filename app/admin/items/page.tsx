@@ -6,6 +6,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can, hasCap } from '@/lib/permissions'
+import ItemPicker from '@/components/ItemPicker'
 
 interface Item { id: string; code: string; description: string; unit: string; type: string; stock_group: string; supplied_by_factory: boolean; kg_per_bag: number | null; pcs_per_roll: number | null; stock_code: string | null }
 const EMPTY = { code: '', description: '', unit: '', type: 'Material', stock_group: '', supplied_by_factory: false, kg_per_bag: '', pcs_per_roll: '', stock_code: '' }
@@ -308,9 +309,8 @@ export default function ItemsPage() {
                 <p className="text-xs text-gray-400 mt-1">For roll plastics: how many pieces are in one roll (e.g. 500m = 1600 pc → enter 1600). Stock is counted in pieces, but received and requested in whole rolls.</p>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Stock code <span className="text-gray-400 font-normal">(optional)</span></label>
-                <input value={form.stock_code} onChange={e => setForm({ ...form, stock_code: e.target.value })}
-                  className="w-full border rounded-lg px-3 py-2 font-mono" placeholder="e.g. S035" />
+                <label className="block text-sm font-medium mb-1 flex items-center justify-between">Stock code <span className="text-gray-400 font-normal">(optional)</span>{form.stock_code && <button type="button" onClick={() => setForm({ ...form, stock_code: '' })} className="text-red-500 hover:underline text-xs font-normal">Clear</button>}</label>
+                <ItemPicker items={items} value={form.stock_code ? `${form.stock_code}${items.find(i => i.code === form.stock_code)?.description ? ' — ' + items.find(i => i.code === form.stock_code)!.description : ''}` : ''} onPick={it => setForm({ ...form, stock_code: it.code })} placeholder="Search item code or name…" />
                 <p className="text-xs text-gray-400 mt-1">Only when this code differs from the loose/recipe code. On a bag SKU (e.g. <span className="font-mono">E035-25KG/BAG</span>) set this to the loose code (<span className="font-mono">S035</span>); Goods Received will convert and book stock into that code and match its material request.</p>
               </div>
             </div>

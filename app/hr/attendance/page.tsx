@@ -25,9 +25,19 @@ function weekdayOf(dateKey: string): number {
 }
 const DOW_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
+// The previous complete month (payroll is usually run for the month just ended).
+function prevMonthRange(): { from: string; to: string } {
+  const [y, m] = klDateKey(new Date()).split('-').map(Number)
+  const py = m === 1 ? y - 1 : y
+  const pm = m === 1 ? 12 : m - 1
+  const mm = String(pm).padStart(2, '0')
+  const last = new Date(py, pm, 0).getDate()   // last day of month `pm` (1-based)
+  return { from: `${py}-${mm}-01`, to: `${py}-${mm}-${String(last).padStart(2, '0')}` }
+}
+
 export default function AttendancePage() {
-  const [from, setFrom] = useState('2026-06-01')
-  const [to, setTo] = useState(() => klDateKey(new Date()))
+  const [from, setFrom] = useState(() => prevMonthRange().from)
+  const [to, setTo] = useState(() => prevMonthRange().to)
   const [onlyReview, setOnlyReview] = useState(false)
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
