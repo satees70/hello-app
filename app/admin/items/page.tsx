@@ -18,6 +18,7 @@ const ITEM_FIELDS = [
   { key: 'supplied_by_factory', label: 'Made at factory' },
   { key: 'kg_per_bag', label: 'KG per bag/carton' },
   { key: 'pcs_per_roll', label: 'Pieces per roll' },
+  { key: 'stock_code', label: 'Stock code' },
 ] as const
 // String form of an item's value, for comparing/recording changes
 const itemStr = (it: Item, k: string): string => {

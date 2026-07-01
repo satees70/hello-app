@@ -881,3 +881,25 @@ begin
   return v_id;
 end $$;
 grant execute on function public.produce_grinding(uuid, numeric, text) to authenticated;
+
+-- ─── Allow staff to request Stock code changes (approval RPC + change detection) ──
+create or replace function public.approve_item_change(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_req public.item_change_requests; v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can approve item changes'; end if;
+  select * into v_req from public.item_change_requests where id = p_id and status = 'Pending';
+  if not found then raise exception 'Request not found or already reviewed'; end if;
+  if v_req.field = any (array['description', 'unit', 'type', 'stock_group', 'stock_code']) then
+    execute format('update public.items set %I = $1 where id = $2', v_req.field) using nullif(v_req.new_value, ''), v_req.item_id;
+  elsif v_req.field = 'supplied_by_factory' then
+    update public.items set supplied_by_factory = (lower(coalesce(v_req.new_value, '')) in ('true', 't', 'yes', '1')) where id = v_req.item_id;
+  elsif v_req.field = any (array['kg_per_bag', 'pcs_per_roll']) then
+    execute format('update public.items set %I = $1 where id = $2', v_req.field) using nullif(v_req.new_value, '')::numeric, v_req.item_id;
+  else
+    raise exception 'Field % cannot be edited', v_req.field;
+  end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.item_change_requests set status = 'Approved', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id;
+end $$;
+grant execute on function public.approve_item_change(uuid) to authenticated;
