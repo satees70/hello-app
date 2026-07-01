@@ -19,7 +19,7 @@ export default function AuthGate({ children, requireModule }: { children: ReactN
     return (
       <div className="p-8 text-center">
         <p className="font-medium text-gray-800">No access</p>
-        <p className="text-sm text-gray-500 mt-1">Your account doesn&apos;t have the HR permission. Ask an admin to grant it.</p>
+        <p className="text-sm text-gray-500 mt-1">Your account doesn&apos;t have permission for this page. Ask an admin to grant it.</p>
         <button onClick={() => supabase.auth.signOut()} className="mt-3 text-sm text-blue-600 hover:underline">Sign out</button>
       </div>
     )

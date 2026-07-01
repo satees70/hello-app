@@ -27,12 +27,13 @@ export const PERMISSION_MODULES = [
   { key: 'packing_lines', label: 'Packing lines', desc: 'Maintain the list of packing lines', group: 'Setup', needsApproval: false },
   { key: 'users', label: 'Users', desc: 'User management', group: 'Setup', needsApproval: false },
   { key: 'hr', label: 'HR / Attendance', desc: 'Attendance, overtime & payroll hours (hr.srrieaswari.com)', group: 'HR', needsApproval: false },
+  { key: 'driver', label: 'Driver app', desc: 'Delivery driver app (driver.srrieaswari.com)', group: 'HR', needsApproval: false },
 ] as const
 
 // Sections that are HIDDEN by default — a user sees them ONLY if explicitly
 // granted (the opposite of the normal "open unless restricted" rule). Used for
 // sensitive processes like Grinding that most staff shouldn't see.
-export const RESTRICTED_MODULES: ModuleKey[] = ['grinding', 'grinding_recipe', 'hr']
+export const RESTRICTED_MODULES: ModuleKey[] = ['grinding', 'grinding_recipe', 'hr', 'driver']
 
 // Fine-grained "special" capabilities the admin can tick/untick per user, on top
 // of the section grid. Each is allowed by default (legacy behaviour) unless the
