@@ -5,7 +5,7 @@ import { supabase, fetchAll } from '@/lib/supabase'
 type DayWin = { start: string; end: string } | null
 interface ShiftProfile { id: string; name: string; normal_hours: number; lunch_rule: string; lunch_minutes: number; week_schedule: Record<string, DayWin> | null; attendance_mode: string | null }
 interface Employee { employee_code: string; name: string | null; shift_profile_id: string | null; is_driver: boolean; active: boolean; department: string | null }
-interface Row extends Employee { seenInPunches: boolean }
+interface Row extends Employee { seenInPunches: boolean; lastSeen: string | null }
 interface Holiday { holiday_date: string; name: string | null }
 
 // Weekday columns, Monday first; value = JS getDay() index (0=Sun..6=Sat).
@@ -37,12 +37,15 @@ export default function EmployeesSetupPage() {
     const [{ data: profs }, { data: emps }, codes, { data: hols }] = await Promise.all([
       supabase.from('shift_profiles').select('id, name, normal_hours, lunch_rule, lunch_minutes, week_schedule, attendance_mode').order('name'),
       supabase.from('employees').select('employee_code, name, shift_profile_id, is_driver, active, department'),
-      fetchAll<{ employee_code: string }>('attendance_punches', 'employee_code'),
+      fetchAll<{ employee_code: string; punch_time: string }>('attendance_punches', 'employee_code, punch_time'),
       supabase.from('public_holidays').select('holiday_date, name').order('holiday_date'),
     ])
     setHolidays((hols as Holiday[]) || [])
     const empByCode = new Map<string, Employee>((emps || []).map(e => [e.employee_code, e as Employee]))
-    const punchCodes = new Set(codes.map(c => c.employee_code))
+    // Last punch per person (for the "Last seen" column).
+    const lastByCode = new Map<string, string>()
+    for (const c of codes) { const cur = lastByCode.get(c.employee_code); if (!cur || c.punch_time > cur) lastByCode.set(c.employee_code, c.punch_time) }
+    const punchCodes = new Set(lastByCode.keys())
     const allCodes = new Set<string>([...empByCode.keys(), ...punchCodes])
 
     const list: Row[] = [...allCodes].sort().map(code => {
@@ -55,6 +58,7 @@ export default function EmployeesSetupPage() {
         active: e?.active ?? true,
         department: e?.department ?? null,
         seenInPunches: punchCodes.has(code),
+        lastSeen: lastByCode.get(code) ?? null,
       }
     })
     // Group people by their ZKLink department so profiles are easy to assign in runs.
@@ -132,6 +136,15 @@ export default function EmployeesSetupPage() {
       if (!res.ok) setError(j.error || 'Pull failed')
       else { setMsg(`Pulled ${j.pulled} employees from ZKLink, updated ${j.upserted}.`); await load() }
     } finally { setPulling(false) }
+  }
+
+  async function setActiveFromAttendance() {
+    if (!confirm('Set Active/Inactive from attendance? Anyone with no punch in the last 14 days is marked inactive. You can still edit each one after.')) return
+    setError(null); setMsg(null)
+    const res = await fetch('/api/attendance/employees/refresh-active', { method: 'POST' })
+    const j = await res.json()
+    if (!res.ok) setError(j.error || 'Failed')
+    else { setMsg(`Active updated: ${j.active} active, ${j.inactive} inactive (based on last ${j.windowDays} days).`); await load() }
   }
 
   const named = rows.filter(r => r.name).length
@@ -255,11 +268,17 @@ export default function EmployeesSetupPage() {
       {/* Employees */}
       <section className="rounded-lg border border-gray-200 overflow-hidden">
         <header className="flex flex-wrap items-center justify-between gap-2 bg-gray-50 px-4 py-2 border-b border-gray-200">
-          <span className="text-sm text-gray-600">{rows.length} people · {named} named · {withProfile} with a shift</span>
-          <button onClick={pullNames} disabled={pulling}
-            className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
-            {pulling ? 'Pulling…' : 'Pull names from ZKLink'}
-          </button>
+          <span className="text-sm text-gray-600">{rows.length} people · {named} named · {withProfile} with a shift · {rows.filter(r => r.active).length} active</span>
+          <div className="flex gap-2">
+            <button onClick={setActiveFromAttendance}
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50">
+              Set active from attendance
+            </button>
+            <button onClick={pullNames} disabled={pulling}
+              className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+              {pulling ? 'Pulling…' : 'Pull names from ZKLink'}
+            </button>
+          </div>
         </header>
 
         {loading ? <p className="p-4 text-sm text-gray-500">Loading…</p> : (
@@ -271,6 +290,7 @@ export default function EmployeesSetupPage() {
                 <th className="px-3 py-2 font-medium">Department</th>
                 <th className="px-3 py-2 font-medium">Shift profile</th>
                 <th className="px-3 py-2 font-medium">Driver</th>
+                <th className="px-3 py-2 font-medium">Last seen</th>
                 <th className="px-3 py-2 font-medium">Active</th>
               </tr>
             </thead>
@@ -296,6 +316,9 @@ export default function EmployeesSetupPage() {
                   </td>
                   <td className="px-3 py-2 text-center">
                     <input type="checkbox" checked={r.is_driver} onChange={e => saveEmployee(r, { is_driver: e.target.checked })} />
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500">
+                    {r.lastSeen ? new Date(r.lastSeen).toLocaleDateString('en-GB', { timeZone: 'Asia/Kuala_Lumpur', day: '2-digit', month: '2-digit' }) : <span className="text-gray-300">never</span>}
                   </td>
                   <td className="px-3 py-2 text-center">
                     <input type="checkbox" checked={r.active} onChange={e => saveEmployee(r, { active: e.target.checked })} />

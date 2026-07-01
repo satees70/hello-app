@@ -1,6 +1,6 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { supabase, fetchAll } from '@/lib/supabase'
 import {
   computeDay, klDateKey, klTime, fmtMinutes,
   type DayResult, type ShiftProfileLite, type ReviewLite,
@@ -39,9 +39,10 @@ export default function AttendancePage() {
     const fromUtc = `${from}T00:00:00+08:00`
     const toUtc = `${to}T23:59:59+08:00`
 
-    const [{ data: punches, error: pErr }, { data: emps }, { data: profs }, { data: reviews }] = await Promise.all([
-      supabase.from('attendance_punches').select('employee_code, punch_time, department_name')
-        .gte('punch_time', fromUtc).lte('punch_time', toUtc).order('punch_time'),
+    // Punches can be thousands — page past Supabase's 1000-row limit with fetchAll.
+    const [punches, { data: emps }, { data: profs }, { data: reviews }] = await Promise.all([
+      fetchAll<Punch>('attendance_punches', 'employee_code, punch_time, department_name',
+        q => q.gte('punch_time', fromUtc).lte('punch_time', toUtc).order('punch_time')),
       supabase.from('employees').select('employee_code, name, shift_profile_id'),
       supabase.from('shift_profiles').select('id, name, normal_hours, lunch_rule, lunch_minutes, shift_start, shift_end, week_schedule, attendance_mode'),
       supabase.from('attendance_reviews').select('employee_code, work_date, lunch_decision, manual_minutes')
@@ -49,7 +50,6 @@ export default function AttendancePage() {
     ])
     const { data: hols } = await supabase.from('public_holidays').select('holiday_date').gte('holiday_date', from).lte('holiday_date', to)
     const holidaySet = new Set((hols || []).map(h => h.holiday_date))
-    if (pErr) { setError(pErr.message); setLoading(false); return }
 
     const empByCode = new Map<string, Employee>((emps || []).map(e => [e.employee_code, e as Employee]))
     const profById = new Map<string, ShiftProfile>((profs || []).map(p => [p.id, p as ShiftProfile]))
