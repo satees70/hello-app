@@ -33,6 +33,7 @@ export default function EmployeesSetupPage() {
   const [newHol, setNewHol] = useState({ holiday_date: '', name: '' })
   const [filterActive, setFilterActive] = useState<'active' | 'inactive' | 'all'>('active')
   const [filterDept, setFilterDept] = useState('')
+  const [filterProfile, setFilterProfile] = useState('')   // '' all · 'none' unassigned · <id>
   const [search, setSearch] = useState('')
 
   const load = useCallback(async () => {
@@ -157,6 +158,8 @@ export default function EmployeesSetupPage() {
     if (filterActive === 'active' && !r.active) return false
     if (filterActive === 'inactive' && r.active) return false
     if (filterDept && r.department !== filterDept) return false
+    if (filterProfile === 'none' && r.shift_profile_id) return false
+    if (filterProfile && filterProfile !== 'none' && r.shift_profile_id !== filterProfile) return false
     if (search.trim()) { const s = search.toLowerCase(); if (!`${r.name} ${r.employee_code} ${r.department}`.toLowerCase().includes(s)) return false }
     return true
   })
@@ -306,6 +309,14 @@ export default function EmployeesSetupPage() {
               className="block mt-0.5 rounded border border-gray-300 px-2 py-1">
               <option value="">All departments</option>
               {depts.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </label>
+          <label>Shift profile
+            <select value={filterProfile} onChange={e => setFilterProfile(e.target.value)}
+              className="block mt-0.5 rounded border border-gray-300 px-2 py-1">
+              <option value="">All profiles</option>
+              <option value="none">No profile yet</option>
+              {profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </label>
           <label className="flex-1 min-w-[8rem]">Search
