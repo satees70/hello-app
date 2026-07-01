@@ -31,6 +31,9 @@ export default function EmployeesSetupPage() {
   const [week, setWeek] = useState<WeekEdit>(defaultWeek())
   const [holidays, setHolidays] = useState<Holiday[]>([])
   const [newHol, setNewHol] = useState({ holiday_date: '', name: '' })
+  const [filterActive, setFilterActive] = useState<'active' | 'inactive' | 'all'>('active')
+  const [filterDept, setFilterDept] = useState('')
+  const [search, setSearch] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -149,6 +152,14 @@ export default function EmployeesSetupPage() {
 
   const named = rows.filter(r => r.name).length
   const withProfile = rows.filter(r => r.shift_profile_id).length
+  const depts = [...new Set(rows.map(r => r.department).filter(Boolean))].sort() as string[]
+  const visibleRows = rows.filter(r => {
+    if (filterActive === 'active' && !r.active) return false
+    if (filterActive === 'inactive' && r.active) return false
+    if (filterDept && r.department !== filterDept) return false
+    if (search.trim()) { const s = search.toLowerCase(); if (!`${r.name} ${r.employee_code} ${r.department}`.toLowerCase().includes(s)) return false }
+    return true
+  })
 
   return (
     <main className="max-w-5xl mx-auto p-4 sm:p-6">
@@ -281,6 +292,29 @@ export default function EmployeesSetupPage() {
           </div>
         </header>
 
+        <div className="flex flex-wrap items-end gap-2 px-4 py-2 border-b border-gray-100 bg-gray-50 text-xs">
+          <label>Show
+            <select value={filterActive} onChange={e => setFilterActive(e.target.value as 'active' | 'inactive' | 'all')}
+              className="block mt-0.5 rounded border border-gray-300 px-2 py-1">
+              <option value="active">Active only</option>
+              <option value="inactive">Inactive only</option>
+              <option value="all">All</option>
+            </select>
+          </label>
+          <label>Department
+            <select value={filterDept} onChange={e => setFilterDept(e.target.value)}
+              className="block mt-0.5 rounded border border-gray-300 px-2 py-1">
+              <option value="">All departments</option>
+              {depts.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </label>
+          <label className="flex-1 min-w-[8rem]">Search
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="name or code…"
+              className="block w-full mt-0.5 rounded border border-gray-300 px-2 py-1" />
+          </label>
+          <span className="text-gray-500 pb-1">{visibleRows.length} shown</span>
+        </div>
+
         {loading ? <p className="p-4 text-sm text-gray-500">Loading…</p> : (
           <table className="w-full text-sm">
             <thead className="text-left text-gray-500">
@@ -295,7 +329,7 @@ export default function EmployeesSetupPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => (
+              {visibleRows.map(r => (
                 <tr key={r.employee_code} className="border-b border-gray-50">
                   <td className="px-3 py-2 whitespace-nowrap font-mono text-xs">
                     {r.employee_code}
