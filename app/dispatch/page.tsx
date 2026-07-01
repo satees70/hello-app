@@ -18,7 +18,7 @@ interface Batch {
 interface DOrder {
   id: string; do_number: string | null; factory_code: string; status: string
   created_by_name: string | null; created_at: string
-  dispatch_order_lines?: { item_code: string; description: string | null; quantity: number }[]
+  dispatch_order_lines?: { item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null }[]
   material_returns?: { item_code: string; description: string | null; quantity: number; batch_no: string | null }[]
 }
 interface CartReturn { lotId: string; itemCode: string; description: string; unit: string; batchNo: string | null; qty: number; reason: string; factory: string; factoryName: string; manual?: boolean }
@@ -95,7 +95,7 @@ export default function DispatchPage() {
       .is('dispatched_at', null).gt('produced_qty', 0).neq('status', 'Bypassed').order('delivery_date')
     setBatches((b as Batch[]) || [])
     const { data: o } = await supabase.from('dispatch_orders')
-      .select('id, do_number, factory_code, status, created_by_name, created_at, dispatch_order_lines(item_code, description, quantity), material_returns(item_code, description, quantity, batch_no)')
+      .select('id, do_number, factory_code, status, created_by_name, created_at, dispatch_order_lines(item_code, description, quantity, batch_no, exp_date), material_returns(item_code, description, quantity, batch_no)')
       .order('created_at', { ascending: false }).limit(50)
     setOrders((o as DOrder[]) || [])
     const { data: r } = await supabase.from('material_returns').select('*').order('created_at', { ascending: false }).limit(50)
@@ -472,8 +472,18 @@ export default function DispatchPage() {
                   <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{o.do_number}</td>
                   {multiFac && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(o.factory_code)}</td>}
                   <td className="px-3 py-2 text-gray-600">
-                    {(o.dispatch_order_lines || []).map((l, i) => <span key={`f${i}`} className="block">📦 <span className="font-mono">{l.item_code}</span> × {l.quantity}</span>)}
-                    {(o.material_returns || []).map((l, i) => <span key={`r${i}`} className="block text-orange-600">↩ <span className="font-mono">{l.item_code}</span> × {l.quantity}</span>)}
+                    {(o.dispatch_order_lines || []).map((l, i) => (
+                      <span key={`f${i}`} className="block mb-1">
+                        📦 <span className="font-mono">{l.item_code}</span>{l.description ? ` — ${l.description}` : ''} × {l.quantity}
+                        {(l.batch_no || l.exp_date) && <span className="block ml-5 text-xs text-gray-400">{l.batch_no ? `batch ${l.batch_no}` : ''}{l.batch_no && l.exp_date ? ' · ' : ''}{l.exp_date ? `exp ${fmtD(l.exp_date)}` : ''}</span>}
+                      </span>
+                    ))}
+                    {(o.material_returns || []).map((l, i) => (
+                      <span key={`r${i}`} className="block mb-1 text-orange-600">
+                        ↩ <span className="font-mono">{l.item_code}</span>{l.description ? ` — ${l.description}` : ''} × {l.quantity}
+                        {l.batch_no && <span className="block ml-5 text-xs text-orange-400">batch {l.batch_no}</span>}
+                      </span>
+                    ))}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-600">{o.created_by_name || '—'}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-400">{fmt(o.created_at)}</td>
