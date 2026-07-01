@@ -424,7 +424,8 @@ export default function DeliverySchedulePage() {
                 <span className="text-sm font-medium text-blue-900 self-center">{sel.size} selected →</span>
                 <label className="block"><span className="text-xs text-gray-500">Assign to line</span>
                   <select value={assignLine} onChange={e => setAssignLine(e.target.value)} className="block w-48 border rounded-lg px-3 py-2 text-sm mt-1">
-                    {LINES.map(l => <option key={l} value={l}>{lineLabel(l, date)}</option>)}
+                    {/* exact-date label only — a brand-new date shows blank labels (no carry-over) */}
+                    {LINES.map(l => { const r = trips[`${l}|${date}`]?.remark; return <option key={l} value={l}>{l}{r ? ' — ' + r : ''}</option> })}
                   </select></label>
                 <label className="block"><span className="text-xs text-gray-500">Delivery date (you set this)</span>
                   <input type="date" value={date} onChange={e => setDate(e.target.value)} className="block border rounded-lg px-3 py-2 text-sm mt-1" /></label>
