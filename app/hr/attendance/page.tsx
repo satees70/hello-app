@@ -20,6 +20,41 @@ const leaveWeight = (t: string | null) => (t === 'Half' ? 0.5 : 1)
 // A day still needing a human: a missing clock-out, or an absence with no leave
 // type picked yet. These are what the "Only needs review" filter shows.
 const dayNeedsAttn = (d: DayRow) => d.result.needsReview || (d.kind === 'absent' && !d.leaveType)
+
+const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
+
+// One short status label for a day on the printed card.
+function dayStatusText(d: DayRow): string {
+  if (d.kind === 'off') return 'Rest day'
+  if (d.kind === 'holiday') return 'Public holiday'
+  if (d.kind === 'absent') return 'Absent' + (d.leaveType ? ` (${d.leaveType})` : '')
+  if (d.kind === 'outstation') return 'Outstation'
+  const r = d.result
+  if (r.needsReview) return 'Needs review'
+  if (r.halfDay) return 'Half day'
+  if (r.presentDay) return 'Present'
+  if (r.dayType !== 'normal') return `${r.dayType === 'holiday' ? 'Public holiday' : 'Rest day'} ${r.dayUnits}d`
+  return 'OK'
+}
+
+// Stylesheet for the printable attendance cards — one employee per page.
+const PRINT_CSS = `
+  * { font-family: -apple-system, Segoe UI, Arial, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  @page { size: A4; margin: 12mm; }
+  body { margin: 0; color: #111; }
+  .card { page-break-after: always; }
+  .card:last-child { page-break-after: auto; }
+  h1 { font-size: 15px; margin: 0; }
+  .meta { font-size: 12px; color: #333; margin: 2px 0 6px; }
+  .summary { font-size: 11px; margin: 6px 0 8px; line-height: 1.6; }
+  .summary b { color: #000; }
+  table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+  th, td { border: 1px solid #bbb; padding: 2px 5px; text-align: left; }
+  th { background: #eee; }
+  td.n { text-align: right; white-space: nowrap; }
+  .wend { color: #b00020; }
+  .sub { color: #666; }
+`
 interface EmpBlock {
   code: string; name: string; department: string | null; profile: ShiftProfile | null; deliveryName: string | null
   days: DayRow[]; punches: number; totalWorked: number; totalOt: number; totalLate: number; totalEarlyOut: number
@@ -54,6 +89,7 @@ export default function AttendancePage() {
   const [from, setFrom] = useState(() => prevMonthRange().from)
   const [to, setTo] = useState(() => prevMonthRange().to)
   const [onlyReview, setOnlyReview] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [tripOptions, setTripOptions] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
@@ -332,9 +368,71 @@ export default function AttendancePage() {
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Leave save failed') }
   }
 
+  // Build the printable HTML for one employee's attendance card.
+  function cardHtml(b: EmpBlock): string {
+    const lc: Record<string, number> = {}
+    for (const d of b.days) {
+      if (d.kind === 'absent' && d.leaveType) lc[d.leaveType] = (lc[d.leaveType] || 0) + 1
+      else if (d.kind === 'worked' && d.result.halfDay) lc['Half'] = (lc['Half'] || 0) + 1
+    }
+    const leaveBreak = Object.entries(lc).map(([k, v]) => `${k} ${v}`).join(', ')
+    const rows = b.days.map(d => {
+      const wend = [0, 6].includes(weekdayOf(d.dateKey))
+      const sessions = d.result.pairing.sessions
+        .map(s => `${klTime(s.in)}–${s.out ? klTime(s.out) : '??'}`).join('<br>')
+      const worked = d.kind === 'worked' && !d.result.needsReview ? fmtMinutes(d.result.workedMinutes) : ''
+      const ot = d.kind === 'worked' && !d.result.needsReview && d.result.otMinutes > 0 ? fmtMinutes(d.result.otMinutes) : ''
+      const le = [d.result.lateMinutes > 0 ? `late ${fmtMinutes(d.result.lateMinutes)}` : '',
+      d.result.earlyOutMinutes > 0 ? `early ${fmtMinutes(d.result.earlyOutMinutes)}` : ''].filter(Boolean).join(', ')
+      return `<tr>
+        <td class="${wend ? 'wend' : ''}">${fmtDate(d.dateKey)} ${DOW_SHORT[weekdayOf(d.dateKey)]}</td>
+        <td>${sessions}</td>
+        <td class="n">${worked}</td>
+        <td class="n">${ot}</td>
+        ${b.deliveryName ? `<td>${esc(d.trip || '')}</td>` : ''}
+        <td class="sub">${esc(le)}</td>
+        <td>${esc(dayStatusText(d))}</td>
+      </tr>`
+    }).join('')
+    return `<div class="card">
+      <h1>Attendance Card — ${esc(b.name)}</h1>
+      <div class="meta">${esc(b.code)}${b.department ? ' · ' + esc(b.department) : ''}${b.profile ? ' · ' + esc(b.profile.name) : ''} &nbsp;|&nbsp; ${fmtDate(from)} – ${fmtDate(to)}</div>
+      <div class="summary">
+        <b>Work ${b.workDays}d</b> ·
+        Leave ${b.leaveDays}d${leaveBreak ? ` (${leaveBreak})` : ''} ·
+        Worked ${fmtMinutes(b.totalWorked)} · <b>OT ${fmtMinutes(b.totalOt)}</b> ·
+        Late ${fmtMinutes(b.totalLate)} · Early-out ${fmtMinutes(b.totalEarlyOut)} ·
+        Rest ${b.totalRestDays}d · PH ${b.totalHolidayDays}d ·
+        Present ${b.totalPresentDays}d · Outstation ${b.totalOutstation}d
+      </div>
+      <table>
+        <thead><tr>
+          <th>Date</th><th>In–Out</th><th>Worked</th><th>OT</th>
+          ${b.deliveryName ? '<th>Trip</th>' : ''}<th>Late / early</th><th>Status</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`
+  }
+
+  // Open a print window with one attendance card per selected employee (1 per page).
+  function printCards(codes: string[]) {
+    const chosen = blocks.filter(b => codes.includes(b.code))
+    if (chosen.length === 0) { setError('Select at least one person to print.'); return }
+    const win = window.open('', '_blank')
+    if (!win) { setError('Please allow pop-ups for this site to print.'); return }
+    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Attendance cards</title><style>${PRINT_CSS}</style></head><body>${chosen.map(cardHtml).join('')}</body></html>`)
+    win.document.close()
+    win.focus()
+    setTimeout(() => { win.print() }, 350)
+  }
+
   const fmtDate = (k: string) => { const [y, m, d] = k.split('-'); return `${d}/${m}/${y}` }
   const grandOt = blocks.reduce((s, b) => s + b.totalOt, 0)
   const totalToReview = blocks.reduce((s, b) => s + b.days.filter(dayNeedsAttn).length, 0)
+  const shown = blocks.filter(b => !onlyReview || b.days.some(dayNeedsAttn))
+  const toggleSelect = (code: string) => setSelected(s => { const n = new Set(s); if (n.has(code)) n.delete(code); else n.add(code); return n })
+  const selectAllShown = () => setSelected(new Set(shown.map(b => b.code)))
 
   return (
     <main className="max-w-6xl mx-auto p-4 sm:p-6">
@@ -367,6 +465,14 @@ export default function AttendancePage() {
           <input type="checkbox" checked={onlyReview} onChange={e => setOnlyReview(e.target.checked)} />
           Only needs review{totalToReview > 0 ? ` (${totalToReview})` : ''}
         </label>
+        <div className="flex items-center gap-2 ml-auto">
+          <button onClick={selectAllShown} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">Select all</button>
+          {selected.size > 0 && <button onClick={() => setSelected(new Set())} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">Clear</button>}
+          <button onClick={() => printCards([...selected])} disabled={selected.size === 0}
+            className="rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-40">
+            Print cards{selected.size > 0 ? ` (${selected.size})` : ''}
+          </button>
+        </div>
       </div>
 
       {msg && <div className="mb-4 rounded-md bg-green-50 border border-green-200 px-3 py-2 text-sm text-green-800">{msg}</div>}
@@ -383,14 +489,16 @@ export default function AttendancePage() {
       )}
 
       <div className="space-y-6">
-        {blocks.filter(b => !onlyReview || b.days.some(dayNeedsAttn)).map(b => (
+        {shown.map(b => (
           <section key={b.code} className="rounded-lg border border-gray-200 overflow-hidden">
             <header className="flex flex-wrap items-center justify-between gap-2 bg-gray-50 px-4 py-2 border-b border-gray-200">
-              <div>
+              <div className="flex items-center gap-2">
+                <input type="checkbox" checked={selected.has(b.code)} onChange={() => toggleSelect(b.code)} title="Select for printing" className="cursor-pointer" />
                 <span className="font-medium">{b.name}</span>
                 <span className="text-gray-400 text-sm ml-2">{b.code}</span>
                 {b.department && <span className="text-gray-400 text-sm ml-2">· {b.department}</span>}
                 <span className="text-gray-400 text-sm ml-2">· {b.punches} punches · {b.days.length} days</span>
+                <button onClick={() => printCards([b.code])} className="text-sm text-indigo-600 underline ml-2">print</button>
               </div>
               <div className="text-sm text-gray-600">
                 {b.profile ? <span>{b.profile.name} · OT &gt; {b.profile.normal_hours}h · {b.profile.lunch_rule}</span>
