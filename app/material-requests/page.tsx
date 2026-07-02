@@ -21,6 +21,7 @@ interface MRItem {
   label_exp_date?: string | null
   label_print_qty?: number | null
   label_photo_path?: string | null
+  label_sent_at?: string | null
   label_received_at?: string | null
 }
 interface MaterialRequest {
@@ -289,6 +290,15 @@ export default function MaterialRequestsPage() {
   }
   // Labels printable once unlocked — full requested quantity (the user can lower the Print qty)
   const labelAvail = (r: MaterialRequest, it: MRItem) => Math.floor(rawFraction(r) * it.requested_qty)
+  // Label lifecycle stage: requested → material received → printed → sent → completed
+  const labelStage = (r: MaterialRequest, it: MRItem): { key: string; label: string; cls: string } => {
+    if (it.label_received_at) return { key: 'completed', label: 'Completed', cls: 'bg-green-100 text-green-700' }
+    if (it.label_sent_at) return { key: 'sent', label: 'Sent', cls: 'bg-indigo-100 text-indigo-700' }
+    if (Number(it.label_print_qty) > 0 && (it.label_batch_no || it.label_exp_date)) return { key: 'printed', label: 'Printed', cls: 'bg-blue-100 text-blue-700' }
+    if (rawFraction(r) >= 1) return { key: 'material', label: 'Material received', cls: 'bg-amber-100 text-amber-700' }
+    return { key: 'requested', label: 'Requested', cls: 'bg-gray-100 text-gray-600' }
+  }
+  const LabelBadge = ({ r, it }: { r: MaterialRequest; it: MRItem }) => { const s = labelStage(r, it); return <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${s.cls}`}>{s.label}</span> }
   // Save a label item's batch no. / expiry / print qty (at least batch or expiry required)
   async function saveLabel(it: MRItem, r: MaterialRequest) {
     if (!canEditFac(r.factory_code)) { setError("You have view-only access at this factory."); return }
@@ -838,7 +848,7 @@ export default function MaterialRequestsPage() {
                                           return (
                                             <div key={`ml|${it.id}`} className="border rounded-lg p-2.5">
                                               <div className="flex items-baseline justify-between gap-2"><span className="font-mono font-medium text-sm">{it.item_code}</span><span className="text-xs text-gray-500">make {it.requested_qty} {it.unit}</span></div>
-                                              <div className="text-gray-600 text-xs">{it.description}</div>
+                                              <div className="flex items-center justify-between gap-2"><div className="text-gray-600 text-xs">{it.description}</div><LabelBadge r={r} it={it} /></div>
                                               {locked ? <div className="text-amber-700 text-xs mt-1">🔒 locked until GRN uploaded</div> : (
                                                 <div className="mt-2 grid grid-cols-2 gap-2">
                                                   <label className="text-xs text-gray-500">Available now<div className="font-semibold text-blue-700">{avail}</div></label>
@@ -864,7 +874,7 @@ export default function MaterialRequestsPage() {
                                       <div className="hidden md:block overflow-x-auto border rounded-lg">
                                         <table className="w-full text-sm">
                                           <thead className="bg-gray-50 border-b">
-                                            <tr>{['Material', 'Description', 'Unit', 'To make', 'Made', 'Remaining', ...(locked ? [] : ['Available now', 'Print qty', 'Batch No.', 'Expiry', ''])].map((h, hi) => <th key={hi} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr>
+                                            <tr>{['Material', 'Description', 'Unit', 'To make', 'Made', 'Remaining', 'Status', ...(locked ? [] : ['Available now', 'Print qty', 'Batch No.', 'Expiry', ''])].map((h, hi) => <th key={hi} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr>
                                           </thead>
                                           <tbody>
                                             {facItems.map(it => {
@@ -881,6 +891,7 @@ export default function MaterialRequestsPage() {
                                                   <td className="px-3 py-2 text-right font-semibold text-purple-700">{it.requested_qty}</td>
                                                   <td className="px-3 py-2 text-right text-gray-700">{it.received_qty}</td>
                                                   <td className={`px-3 py-2 text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{remaining}</td>
+                                                  <td className="px-3 py-2 whitespace-nowrap"><LabelBadge r={r} it={it} /></td>
                                                   {!locked && <>
                                                     <td className="px-3 py-2 text-right font-semibold text-blue-700">{avail}</td>
                                                     <td className="px-3 py-2"><input type="number" min="0" max={avail} value={le.qty} onChange={e => setLe({ qty: e.target.value })} className="border rounded px-2 py-1 text-xs w-20 text-right" /></td>
