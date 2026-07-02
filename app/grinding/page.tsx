@@ -6,6 +6,7 @@ import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can } from '@/lib/permissions'
 import MultiFilter from '@/components/MultiFilter'
+import ItemPicker from '@/components/ItemPicker'
 import { requestTimerCancel } from '@/lib/corrections'
 
 interface Recipe { id: string; factory_code: string; product: string; recipe_type: string; active: boolean }
@@ -502,10 +503,6 @@ export default function GrindingPage() {
               )}
             </div>
 
-            <datalist id="grind-out-items">
-              {items.map(it => <option key={it.code} value={`${it.code}${it.description ? ' — ' + it.description : ''}`} />)}
-            </datalist>
-
             {/* Machine + who ground it */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
               <div><label className="block text-sm font-medium mb-1">Grinding machine ID</label>
@@ -528,7 +525,9 @@ export default function GrindingPage() {
                   </div>
                   {outputs.map((o, i) => (
                     <div key={o.id || i} className="grid grid-cols-12 gap-2 items-center">
-                      <div className="col-span-5"><input list="grind-out-items" value={o.item} onChange={e => setOutput(i, 'item', e.target.value)} disabled={!recEdit} placeholder="Search code or name…" className="w-full border rounded px-2 py-1 text-sm disabled:bg-gray-100" /></div>
+                      <div className="col-span-5">{recEdit
+                        ? <ItemPicker items={items.map(it => ({ code: it.code, description: it.description || '', unit: '' }))} value={o.item} onPick={it => setOutput(i, 'item', `${it.code} — ${it.description}`)} placeholder="Search code or name…" />
+                        : <input value={o.item} disabled className="w-full border rounded px-2 py-1 text-sm bg-gray-100" />}</div>
                       <div className="col-span-3"><input value={o.batch_no} onChange={e => setOutput(i, 'batch_no', e.target.value)} disabled={!recEdit} placeholder="Batch no" className="w-full border rounded px-2 py-1 text-sm disabled:bg-gray-100" /></div>
                       <div className="col-span-2"><input type="date" value={o.exp_date} onChange={e => setOutput(i, 'exp_date', e.target.value)} disabled={!recEdit} className="w-full border rounded px-2 py-1 text-sm disabled:bg-gray-100" /></div>
                       <div className="col-span-2 flex items-center gap-1"><input type="number" value={o.qty} onChange={e => setOutput(i, 'qty', e.target.value)} disabled={!recEdit} placeholder="Qty" className="w-full border rounded px-2 py-1 text-sm text-right disabled:bg-gray-100" />
