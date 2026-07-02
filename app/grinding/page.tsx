@@ -200,6 +200,10 @@ export default function GrindingPage() {
   const totalInput = mixMats.reduce((s, m) => s + (Number(m.actual_qty) || Number(m.qty) || 0), 0)
   const totalOutput = outputs.reduce((s, o) => s + (Number(o.qty) || 0), 0)
   const yieldPct = totalInput > 0 ? (totalOutput / totalInput) * 100 : null
+  // Output item must be a real item from the master (picked, so it carries a code).
+  const knownCodes = new Set(items.map(i => i.code))
+  const outValid = (o: Output) => !o.item.trim() || knownCodes.has(codeOf(o.item))
+  const badOutputs = outputs.filter(o => Number(o.qty) > 0 && o.item.trim() && !knownCodes.has(codeOf(o.item)))
 
   async function saveRecord(post = false) {
     if (!openRec) return
@@ -527,7 +531,8 @@ export default function GrindingPage() {
                     <div key={o.id || i} className="grid grid-cols-12 gap-2 items-center">
                       <div className="col-span-5">{recEdit
                         ? <ItemPicker items={items.map(it => ({ code: it.code, description: it.description || '', unit: '' }))} value={o.item} onPick={it => setOutput(i, 'item', `${it.code} — ${it.description}`)} placeholder="Search code or name…" />
-                        : <input value={o.item} disabled className="w-full border rounded px-2 py-1 text-sm bg-gray-100" />}</div>
+                        : <input value={o.item} disabled className="w-full border rounded px-2 py-1 text-sm bg-gray-100" />}
+                        {recEdit && !outValid(o) && <span className="block text-[11px] text-red-600 mt-0.5">Pick this item from the list (must be a real item code).</span>}</div>
                       <div className="col-span-3"><input value={o.batch_no} onChange={e => setOutput(i, 'batch_no', e.target.value)} disabled={!recEdit} placeholder="Batch no" className="w-full border rounded px-2 py-1 text-sm disabled:bg-gray-100" /></div>
                       <div className="col-span-2"><input type="date" value={o.exp_date} onChange={e => setOutput(i, 'exp_date', e.target.value)} disabled={!recEdit} className="w-full border rounded px-2 py-1 text-sm disabled:bg-gray-100" /></div>
                       <div className="col-span-2 flex items-center gap-1"><input type="number" value={o.qty} onChange={e => setOutput(i, 'qty', e.target.value)} disabled={!recEdit} placeholder="Qty" className="w-full border rounded px-2 py-1 text-sm text-right disabled:bg-gray-100" />
@@ -548,8 +553,8 @@ export default function GrindingPage() {
               {(recEdit || recRecipeEdit) && <button onClick={() => saveRecord(false)} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{saving ? 'Saving…' : 'Save'}</button>}
               {recEdit && (openRec.posted_at
                 ? <span className="text-green-700 text-sm font-medium">✓ In finished goods</span>
-                : <button onClick={() => saveRecord(true)} disabled={saving || !outputs.some(o => o.item.trim() && Number(o.qty) > 0)}
-                    className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium" title="Save, add the output to stock, and send it to Finished goods ready to send">
+                : <button onClick={() => saveRecord(true)} disabled={saving || badOutputs.length > 0 || !outputs.some(o => o.item.trim() && Number(o.qty) > 0)}
+                    className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium" title={badOutputs.length > 0 ? 'Every output must be picked from the item list' : 'Save, add the output to stock, and send it to Finished goods ready to send'}>
                     {saving ? 'Sending…' : 'Save & send to finished goods'}</button>)}
               <button onClick={() => setOpenRec(null)} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Close</button>
             </div>
