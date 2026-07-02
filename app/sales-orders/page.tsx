@@ -459,7 +459,6 @@ export default function SalesOrdersPage() {
     { key: 'quantity', label: 'Qty', get: l => String(l.quantity ?? '') },
     { key: 'outstanding_qty', label: 'Outstanding', get: l => String(l.outstanding_qty ?? '') },
     { key: 'delivery_date', label: 'Delivery Date', get: l => l.delivery_date || '' },
-    { key: 'location_code', label: 'Location', get: l => l.location_code || '' },
     { key: 'factory', label: 'Factory', get: l => `${l.factory_code || ''} ${factoryName(l.factory_code) || ''}` },
   ]
   const anyFilter = onlyUnmapped || COLS.some(c => (colFilters[c.key]?.size || 0) > 0)
@@ -1108,7 +1107,6 @@ export default function SalesOrdersPage() {
                         <td className="px-3 py-2 text-right">{line.quantity}</td>
                         <td className="px-3 py-2 text-right">{line.outstanding_qty}</td>
                         <td className="px-3 py-2 whitespace-nowrap">{line.delivery_date}</td>
-                        <td className="px-3 py-2"><span className="font-mono">{line.location_code}</span></td>
                         <td className="px-3 py-2 min-w-[170px]">
                           {isFactoryConfirmed(line.factory_code || '')
                             ? <div>
