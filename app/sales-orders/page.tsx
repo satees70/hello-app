@@ -466,16 +466,15 @@ export default function SalesOrdersPage() {
   const lq = lineSearch.trim().toLowerCase()
   const visibleLines = lines.filter(l => {
     if (onlyUnmapped && l.factory_code) return false
-    if (locTab && (l.location_code || '') !== locTab) return false
+    if (locTab && (l.factory_code || '') !== locTab) return false
     if (lq && !(l.item_code || '').toLowerCase().includes(lq) && !(l.description || '').toLowerCase().includes(lq)) return false
     for (const c of COLS) { const sel = colFilters[c.key]; if (sel && sel.size > 0 && !sel.has(c.get(l))) return false }
     const ss = colFilters.status; if (ss && ss.size > 0 && !ss.has(lineStatuses[l.id] || '')) return false
     return true
   }).sort((a, b) => (myFacs.has(a.factory_code) ? 0 : 1) - (myFacs.has(b.factory_code) ? 0 : 1))  // own location first
-  // Distinct locations in this document, for the per-location tabs
-  const docLocations = [...new Set(lines.map(l => l.location_code || '').filter(Boolean))].sort()
-  const locFactory = (loc: string) => lines.find(l => (l.location_code || '') === loc)?.factory_code || ''
-  const locEditable = (loc: string) => { const f = locFactory(loc); return !!f && can(profile, 'sales', 'edit', f) && !isFactoryConfirmed(f) }
+  // Distinct factories in this document, for the per-factory tabs
+  const docFactories = [...new Set(lines.map(l => l.factory_code || '').filter(Boolean))].sort()
+  const facEditable = (f: string) => !!f && can(profile, 'sales', 'edit', f) && !isFactoryConfirmed(f)
   const allSelected = visibleLines.length > 0 && visibleLines.every(l => selectedIds.has(l.id))
   const toggleAll = () => setSelectedIds(allSelected ? new Set() : new Set(visibleLines.map(l => l.id)))
   const factoryOfLine = (lineId: string) => lines.find(l => l.id === lineId)?.factory_code
@@ -997,13 +996,13 @@ export default function SalesOrdersPage() {
               </div>
             )}
 
-            {docLocations.length > 1 && (
+            {docFactories.length > 1 && (
               <div className="flex flex-wrap items-center gap-2 mb-3">
-                <span className="text-xs text-gray-500">By location:</span>
+                <span className="text-xs text-gray-500">By factory:</span>
                 <button onClick={() => setLocTab('')} className={`px-3 py-1 rounded-lg text-sm font-medium border ${locTab === '' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>All ({lines.length})</button>
-                {docLocations.map(loc => { const ed = locEditable(loc); const cnt = lines.filter(l => (l.location_code || '') === loc).length; return (
-                  <button key={loc} onClick={() => setLocTab(loc)} className={`px-3 py-1 rounded-lg text-sm font-medium border ${locTab === loc ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
-                    {loc} ({cnt}){!ed && <span className={`ml-1 text-xs ${locTab === loc ? 'text-blue-100' : 'text-gray-400'}`}>· view only</span>}
+                {docFactories.map(fac => { const ed = facEditable(fac); const cnt = lines.filter(l => (l.factory_code || '') === fac).length; return (
+                  <button key={fac} onClick={() => setLocTab(fac)} className={`px-3 py-1 rounded-lg text-sm font-medium border ${locTab === fac ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                    {factoryName(fac)} ({cnt}){!ed && <span className={`ml-1 text-xs ${locTab === fac ? 'text-blue-100' : 'text-gray-400'}`}>· view only</span>}
                   </button>
                 ) })}
               </div>
