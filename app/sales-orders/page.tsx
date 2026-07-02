@@ -117,7 +117,7 @@ export default function SalesOrdersPage() {
   const [confirmingFactory, setConfirmingFactory] = useState('')
   const [dupKeys, setDupKeys] = useState<Set<string>>(new Set()) // "so_number||item_code" that appear >1 across all lines
   const [dupImports, setDupImports] = useState<Record<string, string[]>>({}) // key -> import ids that contain it
-  const [docSummary, setDocSummary] = useState<Record<string, { pending: number; dup: number; locations: string[]; locFactory: Record<string, string>; confirmed: string[]; locStats: Record<string, { total: number; done: number }> }>>({})
+  const [docSummary, setDocSummary] = useState<Record<string, { pending: number; dup: number; locations: string[]; confirmed: string[]; locStats: Record<string, { total: number; done: number }> }>>({})
   const [docDelPending, setDocDelPending] = useState<Set<string>>(new Set())
   const [lineStatuses, setLineStatuses] = useState<Record<string, string>>({}) // sales line id -> production lifecycle status
 
@@ -234,13 +234,11 @@ export default function SalesOrdersPage() {
     setImportSos(Object.fromEntries(Object.entries(isos).map(([k, v]) => [k, [...v].sort()])))
     setLineLocs([...new Set(allLines.map(l => l.location_code).filter(Boolean) as string[])])
     const dup: Record<string, number> = {}
-    const locs: Record<string, Set<string>> = {}
-    const locFac: Record<string, Record<string, string>> = {}   // import -> location_code -> factory_code
+    const locs: Record<string, Set<string>> = {}   // import -> set of factory_codes (shown in the doc list)
     allLines.forEach(l => {
       if (l.so_number && keyImports[`${l.so_number}||${l.item_code}`].size > 1) dup[l.import_id] = (dup[l.import_id] || 0) + 1
-      if (l.location_code) {
-        if (!locs[l.import_id]) locs[l.import_id] = new Set(); locs[l.import_id].add(l.location_code)
-        if (l.factory_code) { if (!locFac[l.import_id]) locFac[l.import_id] = {}; locFac[l.import_id][l.location_code] = l.factory_code }
+      if (l.factory_code) {
+        if (!locs[l.import_id]) locs[l.import_id] = new Set(); locs[l.import_id].add(l.factory_code)
       }
     })
     const conf: Record<string, Set<string>> = {}   // import -> set of confirmed factory_codes
@@ -262,19 +260,19 @@ export default function SalesOrdersPage() {
     }
     const statusMap: Record<string, string> = {}
     biRows.forEach(r => { const b = r.production_batches; if (b) statusMap[`${b.factory_code}|${b.item_code}|${r.so_number}`] = lineStatusOf(b, mrStatus2) })
-    const locStats: Record<string, Record<string, { total: number; done: number }>> = {}
+    const locStats: Record<string, Record<string, { total: number; done: number }>> = {}   // per factory_code
     allLines.forEach(l => {
-      if (!l.location_code) return
+      if (!l.factory_code) return
       const m = (locStats[l.import_id] = locStats[l.import_id] || {})
-      const g = (m[l.location_code] = m[l.location_code] || { total: 0, done: 0 })
+      const g = (m[l.factory_code] = m[l.factory_code] || { total: 0, done: 0 })
       g.total++
       // A line counts as done when delivered directly (bypass), or production is completed / delivered.
       const st = statusMap[`${l.factory_code}|${l.item_code}|${l.so_number}`]
       if (Number(l.delivered_qty || 0) > 0 || st === 'Production completed' || st === LINE_DONE) g.done++
     })
-    const summary: Record<string, { pending: number; dup: number; locations: string[]; locFactory: Record<string, string>; confirmed: string[]; locStats: Record<string, { total: number; done: number }> }> = {}
+    const summary: Record<string, { pending: number; dup: number; locations: string[]; confirmed: string[]; locStats: Record<string, { total: number; done: number }> }> = {}
     new Set([...Object.keys(pending), ...Object.keys(dup), ...Object.keys(locs), ...Object.keys(conf)]).forEach(id => {
-      summary[id] = { pending: pending[id] || 0, dup: dup[id] || 0, locations: locs[id] ? [...locs[id]].sort() : [], locFactory: locFac[id] || {}, confirmed: conf[id] ? [...conf[id]] : [], locStats: locStats[id] || {} }
+      summary[id] = { pending: pending[id] || 0, dup: dup[id] || 0, locations: locs[id] ? [...locs[id]].sort() : [], confirmed: conf[id] ? [...conf[id]] : [], locStats: locStats[id] || {} }
     })
     setDocSummary(summary)
     const { data: dels } = await supabase.from('doc_delete_requests').select('import_id').eq('status', 'Pending')
@@ -764,7 +762,7 @@ export default function SalesOrdersPage() {
   // A document is "mine" if its upload factory or any of its lines' factories is one of mine.
   const docMine = (d: SalesImport) => myFacs.size > 0 && (
     (!!d.factory_code && myFacs.has(d.factory_code)) ||
-    Object.values(docSummary[d.id]?.locFactory || {}).some(f => myFacs.has(f)))
+    (docSummary[d.id]?.locations || []).some(f => myFacs.has(f)))
   // A document is "completed" once every one of its lines is done (delivered/bypass/produced).
   const docComplete = (d: SalesImport) => { const e = Object.values(docSummary[d.id]?.locStats || {}); const total = e.reduce((s, x) => s + x.total, 0); const done = e.reduce((s, x) => s + x.done, 0); return total > 0 && done >= total }
   const completedDocCount = imports.filter(docComplete).length
@@ -810,7 +808,7 @@ export default function SalesOrdersPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2 mb-2 text-sm relative z-20">
           <input value={docSearch} onChange={e => setDocSearch(e.target.value)} placeholder="🔍 Search file or item…" className="border rounded-lg px-3 py-1.5 text-sm w-52" />
-          <div className="w-44"><span className="text-xs text-gray-500">Location</span><MultiFilter values={docDistinct('locations')} selected={docFilters.locations || new Set()} onChange={s => setDocFilters(p => ({ ...p, locations: s }))} /></div>
+          <div className="w-44"><span className="text-xs text-gray-500">Factory</span><MultiFilter values={docDistinct('locations')} selected={docFilters.locations || new Set()} onChange={s => setDocFilters(p => ({ ...p, locations: s }))} /></div>
           <div className="w-40"><span className="text-xs text-gray-500">Status</span><MultiFilter values={docDistinct('status')} selected={docFilters.status || new Set()} onChange={s => setDocFilters(p => ({ ...p, status: s }))} /></div>
           <div className="w-44"><span className="text-xs text-gray-500">Issues</span><MultiFilter values={docDistinct('issues')} selected={docFilters.issues || new Set()} onChange={s => setDocFilters(p => ({ ...p, issues: s }))} /></div>
           <button onClick={() => setDocTomorrow(v => !v)} className={`text-xs px-3 py-1.5 rounded-full font-medium border self-end ${docTomorrow ? 'bg-yellow-300 border-yellow-400 text-yellow-900' : 'bg-white border-gray-300 text-gray-600 hover:bg-yellow-50'}`}>🚚 Tomorrow{tomorrowDocCount ? ` (${tomorrowDocCount})` : ''}</button>
@@ -821,7 +819,7 @@ export default function SalesOrdersPage() {
         <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[24rem] mb-8">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b sticky top-0 z-10">
-              <tr>{['File', 'Locations', 'Status', 'Issues', 'Uploaded', 'Actions'].map(h => (
+              <tr>{['File', 'Factories', 'Status', 'Issues', 'Uploaded', 'Actions'].map(h => (
                 <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 bg-gray-50">{h}</th>))}</tr>
             </thead>
             <tbody>
@@ -839,11 +837,10 @@ export default function SalesOrdersPage() {
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-600 max-w-[220px]">
                     {docSummary[doc.id]?.locations?.length
-                      ? <span className="flex flex-wrap gap-x-2 gap-y-1">{docSummary[doc.id].locations.map(loc => {
-                          const fac = docSummary[doc.id].locFactory[loc]
-                          const ok = fac && docSummary[doc.id].confirmed.includes(fac)
-                          const st = docSummary[doc.id].locStats[loc]
-                          return <span key={loc} className={`inline-flex items-center gap-0.5 ${ok ? 'text-green-700 font-medium' : ''}`} title={ok ? 'Approved by this location' : 'Not yet approved'}>{ok && <span>✓</span>}{loc}{st ? <span className="text-gray-400 font-normal"> ({st.done}/{st.total})</span> : null}</span>
+                      ? <span className="flex flex-wrap gap-x-2 gap-y-1">{docSummary[doc.id].locations.map(fac => {
+                          const ok = docSummary[doc.id].confirmed.includes(fac)
+                          const st = docSummary[doc.id].locStats[fac]
+                          return <span key={fac} className={`inline-flex items-center gap-0.5 ${ok ? 'text-green-700 font-medium' : ''}`} title={ok ? 'Confirmed by this factory' : 'Not yet confirmed'}>{ok && <span>✓</span>}{factoryName(fac)}{st ? <span className="text-gray-400 font-normal"> ({st.done}/{st.total})</span> : null}</span>
                         })}</span>
                       : <span className="text-gray-300">—</span>}
                   </td>
