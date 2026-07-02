@@ -25,7 +25,7 @@ interface Batch {
   production_batch_items: PBItem[]
 }
 interface PackLine { factory_code: string; name: string; active: boolean; line_mode: string | null }
-interface Item { id: string; code: string; description: string; unit: string }
+interface Item { id: string; code: string; description: string; unit: string; supplied_by_factory?: boolean }
 interface BomComp { parent_item_id: string; component_item_id: string; quantity: number; use_mode: string }
 
 const STATUS_STYLE: Record<string, string> = {
@@ -76,7 +76,7 @@ export default function PackingPage() {
     setBatches((data as Batch[]) || [])
     const { data: pl } = await supabase.from('packing_lines').select('factory_code, name, active, line_mode').order('name')
     setPackLines((pl as PackLine[]) || [])
-    setItems(await fetchAll<Item>('items', 'id, code, description, unit'))
+    setItems(await fetchAll<Item>('items', 'id, code, description, unit, supplied_by_factory'))
     setBoms(await fetchAll<BomComp>('bom_components', 'parent_item_id, component_item_id, quantity, use_mode'))
     const { data: st } = await supabase.from('item_stock').select('item_id, factory_code, quantity')
     const sm: Record<string, number> = {}; (st || []).forEach(r => { sm[`${r.item_id}|${r.factory_code}`] = Number(r.quantity) })
@@ -113,7 +113,10 @@ export default function PackingPage() {
     const parent = items.find(i => i.code === b.item_code)
     if (!parent) return { hasBom: false, units: 0, comps: [] }
     const mode = b.run_mode || 'auto'
-    const comps0 = boms.filter(c => c.parent_item_id === parent.id && ((c.use_mode || 'any') === 'any' || (c.use_mode || 'any') === mode))
+    // Labels are printed at the factory (supplied_by_factory) — not warehouse stock, so exclude
+    // them from the "enough material?" check, same as the Order Board.
+    const isLabel = (id: string) => !!items.find(i => i.id === id)?.supplied_by_factory
+    const comps0 = boms.filter(c => c.parent_item_id === parent.id && !isLabel(c.component_item_id) && ((c.use_mode || 'any') === 'any' || (c.use_mode || 'any') === mode))
     if (comps0.length === 0) return { hasBom: false, units: 0, comps: [] }
     let units = Infinity
     const comps = comps0.map(c => {
