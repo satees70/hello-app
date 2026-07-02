@@ -46,7 +46,8 @@ export default function GrindingPage() {
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [compByRecipe, setCompByRecipe] = useState<Record<string, Component[]>>({})
   const [records, setRecords] = useState<GrindingRecord[]>([])
-  const [grF, setGrF] = useState<Record<string, Set<string>>>({})
+  // Default hides Completed (show New / In production / Sent); staff can add Completed back.
+  const [grF, setGrF] = useState<Record<string, Set<string>>>({ status: new Set(['New', 'In production', 'Sent']) })
   const [collapsedFacs, setCollapsedFacs] = useState<Set<string>>(new Set())
   const toggleFac = (fc: string) => setCollapsedFacs(p => { const n = new Set(p); n.has(fc) ? n.delete(fc) : n.add(fc); return n })
   const [matsByRecord, setMatsByRecord] = useState<Record<string, Material[]>>({})
@@ -292,10 +293,20 @@ export default function GrindingPage() {
   const activeRecipes = recipes.filter(r => r.active)
   // Records table column filters (Excel-style multi-select)
   const grPass = (sel: Set<string> | undefined, v: string) => !sel || !sel.size || sel.has(v)
-  const grDist = (get: (r: GrindingRecord) => string) => [...new Set(records.map(get))].filter(Boolean).sort()
-  const grVal = { factory: (r: GrindingRecord) => factoryName(r.factory_code), product: (r: GrindingRecord) => r.product || '—', type: (r: GrindingRecord) => r.recipe_type || '—', grindby: (r: GrindingRecord) => r.grind_by || '—' }
-  const visibleRecords = records.filter(r => grPass(grF.factory, grVal.factory(r)) && grPass(grF.product, grVal.product(r)) && grPass(grF.type, grVal.type(r)) && grPass(grF.grindby, grVal.grindby(r)))
   const outQty = (id: string) => (outputsByRecord[id] || []).reduce((s, o) => s + (Number(o.qty) || 0), 0)
+  // Lifecycle status of a grinding record.
+  const recStatus = (r: GrindingRecord): string =>
+    r.posted_at ? 'Sent'
+    : (outQty(r.id) > 0 || r.mix_end) ? 'Completed'
+    : r.mix_start ? 'In production'
+    : 'New'
+  const STATUS_STYLE: Record<string, string> = {
+    New: 'bg-gray-100 text-gray-700', 'In production': 'bg-amber-100 text-amber-700',
+    Completed: 'bg-green-100 text-green-700', Sent: 'bg-blue-100 text-blue-700',
+  }
+  const grDist = (get: (r: GrindingRecord) => string) => [...new Set(records.map(get))].filter(Boolean).sort()
+  const grVal = { factory: (r: GrindingRecord) => factoryName(r.factory_code), product: (r: GrindingRecord) => r.product || '—', type: (r: GrindingRecord) => r.recipe_type || '—', grindby: (r: GrindingRecord) => r.grind_by || '—', status: recStatus }
+  const visibleRecords = records.filter(r => grPass(grF.factory, grVal.factory(r)) && grPass(grF.product, grVal.product(r)) && grPass(grF.type, grVal.type(r)) && grPass(grF.grindby, grVal.grindby(r)) && grPass(grF.status, grVal.status(r)))
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -344,7 +355,7 @@ export default function GrindingPage() {
             <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem]">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b sticky top-0 z-10">
-                  <tr>{['Date', ...(isHO ? ['Factory'] : []), 'Product', 'Type', 'Lots', 'Machine', 'Grind by', 'Output', ''].map(h => (
+                  <tr>{['Date', ...(isHO ? ['Factory'] : []), 'Product', 'Type', 'Lots', 'Machine', 'Grind by', 'Output', 'Status', ''].map(h => (
                     <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
                   <tr className="border-b">
                     <th className="px-2 py-1"></th>
@@ -354,12 +365,13 @@ export default function GrindingPage() {
                     <th className="px-2 py-1"></th><th className="px-2 py-1"></th>
                     <th className="px-2 py-1 min-w-[100px]"><MultiFilter values={grDist(grVal.grindby)} selected={grF.grindby || new Set()} onChange={s => setGrF(p => ({ ...p, grindby: s }))} /></th>
                     <th className="px-2 py-1"></th>
+                    <th className="px-2 py-1 min-w-[110px]"><MultiFilter values={grDist(grVal.status)} selected={grF.status || new Set()} onChange={s => setGrF(p => ({ ...p, status: s }))} /></th>
                     <th className="px-2 py-1"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {records.length === 0 && <tr><td colSpan={11} className="text-center py-8 text-gray-400">No grinding records yet.</td></tr>}
-                  {records.length > 0 && visibleRecords.length === 0 && <tr><td colSpan={11} className="text-center py-8 text-gray-400">No records match the filter.</td></tr>}
+                  {records.length === 0 && <tr><td colSpan={12} className="text-center py-8 text-gray-400">No grinding records yet.</td></tr>}
+                  {records.length > 0 && visibleRecords.length === 0 && <tr><td colSpan={12} className="text-center py-8 text-gray-400">No records match the filter.</td></tr>}
                   {!isHO && visibleRecords.map(r => (
                     <tr key={r.id} className="border-b last:border-0 hover:bg-gray-50">
                       <td className="px-3 py-2 whitespace-nowrap">{fmt(r.record_date)}</td>
@@ -369,6 +381,7 @@ export default function GrindingPage() {
                       <td className="px-3 py-2 whitespace-nowrap">{r.machine_id || '—'}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{r.grind_by || '—'}</td>
                       <td className="px-3 py-2 text-right">{outQty(r.id) ? Number(outQty(r.id).toFixed(3)) : '—'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[recStatus(r)] || 'bg-gray-100 text-gray-700'}`}>{recStatus(r)}</span></td>
                       <td className="px-3 py-2 text-right"><button onClick={() => openRecord(r)} className="text-blue-600 hover:underline">Open</button></td>
                     </tr>
                   ))}
@@ -378,7 +391,7 @@ export default function GrindingPage() {
                     return (
                       <Fragment key={fc}>
                         <tr className="bg-gray-50 border-b cursor-pointer hover:bg-gray-100" onClick={() => toggleFac(fc)}>
-                          <td colSpan={11} className="px-3 py-1.5 font-semibold text-gray-700"><span className="text-gray-400 mr-1">{collapsed ? '▸' : '▾'}</span>🏭 {factoryName(fc)} <span className="text-gray-400 font-normal">· {grp.length}</span></td>
+                          <td colSpan={12} className="px-3 py-1.5 font-semibold text-gray-700"><span className="text-gray-400 mr-1">{collapsed ? '▸' : '▾'}</span>🏭 {factoryName(fc)} <span className="text-gray-400 font-normal">· {grp.length}</span></td>
                         </tr>
                         {!collapsed && grp.map(r => (
                           <tr key={r.id} className="border-b last:border-0 hover:bg-gray-50">
@@ -390,6 +403,7 @@ export default function GrindingPage() {
                             <td className="px-3 py-2 whitespace-nowrap">{r.machine_id || '—'}</td>
                             <td className="px-3 py-2 whitespace-nowrap">{r.grind_by || '—'}</td>
                             <td className="px-3 py-2 text-right">{outQty(r.id) ? Number(outQty(r.id).toFixed(3)) : '—'}</td>
+                            <td className="px-3 py-2 whitespace-nowrap"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[recStatus(r)] || 'bg-gray-100 text-gray-700'}`}>{recStatus(r)}</span></td>
                             <td className="px-3 py-2 text-right"><button onClick={() => openRecord(r)} className="text-blue-600 hover:underline">Open</button></td>
                           </tr>
                         ))}
