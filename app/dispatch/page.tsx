@@ -19,7 +19,7 @@ interface DOrder {
   id: string; do_number: string | null; factory_code: string; status: string
   created_by_name: string | null; created_at: string
   dispatch_order_lines?: { item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null }[]
-  material_returns?: { item_code: string; description: string | null; quantity: number; batch_no: string | null }[]
+  material_returns?: { item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null }[]
 }
 interface CartReturn { lotId: string; itemCode: string; description: string; unit: string; batchNo: string | null; qty: number; reason: string; factory: string; factoryName: string; manual?: boolean }
 interface SLine { id: string; so_number: string; item_code: string; description: string | null; quantity: number | null; outstanding_qty: number | null; factory_code: string; delivered_qty: number | null }
@@ -97,7 +97,7 @@ export default function DispatchPage() {
       .is('dispatched_at', null).gt('produced_qty', 0).neq('status', 'Bypassed').order('delivery_date')
     setBatches((b as Batch[]) || [])
     const { data: o } = await supabase.from('dispatch_orders')
-      .select('id, do_number, factory_code, status, created_by_name, created_at, dispatch_order_lines(item_code, description, quantity, batch_no, exp_date), material_returns(item_code, description, quantity, batch_no)')
+      .select('id, do_number, factory_code, status, created_by_name, created_at, dispatch_order_lines(item_code, description, quantity, batch_no, exp_date), material_returns(item_code, description, quantity, batch_no, exp_date)')
       .order('created_at', { ascending: false }).limit(50)
     setOrders((o as DOrder[]) || [])
     const { data: r } = await supabase.from('material_returns').select('*').order('created_at', { ascending: false }).limit(50)
@@ -216,6 +216,36 @@ export default function DispatchPage() {
     setPicked(p => { const n = new Set(p); batchIds.forEach(id => n.delete(id)); return n })
     setReturnCart(c => c.filter(r => r.factory !== fac))
     setBusy(false); load()
+  }
+
+  // Print a delivery order on half-A4 (A5): item code, name, qty, batch, exp — finished goods + returns.
+  async function printDO(o: DOrder) {
+    const { default: jsPDF } = await import('jspdf')
+    const { default: autoTable } = await import('jspdf-autotable')
+    const doc = new jsPDF({ format: 'a5' })
+    const W = doc.internal.pageSize.getWidth()
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold')
+    doc.text('DELIVERY ORDER', 10, 12)
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal')
+    doc.text(`DO No: ${o.do_number || '—'}`, 10, 19)
+    doc.text(`Factory: ${factoryName(o.factory_code)}`, 10, 24)
+    doc.text(`Date: ${fmt(o.created_at)}`, W - 10, 19, { align: 'right' })
+    doc.text(`By: ${o.created_by_name || '—'}`, W - 10, 24, { align: 'right' })
+    const fg = o.dispatch_order_lines || [], rt = o.material_returns || []
+    const body = [
+      ...fg.map((l, i) => [String(i + 1), l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', l.exp_date ? fmtD(l.exp_date) : '—', 'Finished']),
+      ...rt.map((l, i) => [String(fg.length + i + 1), l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', l.exp_date ? fmtD(l.exp_date) : '—', 'Return']),
+    ]
+    autoTable(doc, {
+      startY: 30, head: [['#', 'Code', 'Item name', 'Qty', 'Batch', 'Exp', 'Type']], body,
+      styles: { fontSize: 8, cellPadding: 1.4 }, headStyles: { fillColor: [30, 58, 138] },
+      columnStyles: { 0: { cellWidth: 7 }, 3: { halign: 'right' } }, margin: { left: 10, right: 10 },
+    })
+    const endY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || 40
+    doc.setFontSize(8)
+    doc.text('Received by: ______________________     Date: __________', 10, endY + 12)
+    doc.autoPrint()
+    window.open(doc.output('bloburl'), '_blank')
   }
 
   function openRetEdit(r: MReturn) {
@@ -476,9 +506,9 @@ export default function DispatchPage() {
         <h2 className="text-lg font-semibold mb-2">Recent delivery orders</h2>
         <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[20rem] mb-8">
           <table className="w-full text-xs">
-            <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{['DO No.', ...(multiFac ? ['Factory'] : []), 'Items', 'By', 'When'].map((h, i) => <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
+            <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{['DO No.', ...(multiFac ? ['Factory'] : []), 'Items', 'By', 'When', ''].map((h, i) => <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
             <tbody>
-              {orders.length === 0 && <tr><td colSpan={5} className="text-center py-8 text-gray-400">No delivery orders yet.</td></tr>}
+              {orders.length === 0 && <tr><td colSpan={6} className="text-center py-8 text-gray-400">No delivery orders yet.</td></tr>}
               {orders.map(o => (
                 <tr key={o.id} className="border-b last:border-0 align-top hover:bg-gray-50">
                   <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{o.do_number}</td>
@@ -493,12 +523,13 @@ export default function DispatchPage() {
                     {(o.material_returns || []).map((l, i) => (
                       <span key={`r${i}`} className="block mb-1 text-orange-600">
                         ↩ <span className="font-mono">{l.item_code}</span>{l.description ? ` — ${l.description}` : ''} × {l.quantity}
-                        {l.batch_no && <span className="block ml-5 text-xs text-orange-400">batch {l.batch_no}</span>}
+                        {(l.batch_no || l.exp_date) && <span className="block ml-5 text-xs text-orange-400">{l.batch_no ? `batch ${l.batch_no}` : ''}{l.batch_no && l.exp_date ? ' · ' : ''}{l.exp_date ? `exp ${fmtD(l.exp_date)}` : ''}</span>}
                       </span>
                     ))}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-600">{o.created_by_name || '—'}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-400">{fmt(o.created_at)}</td>
+                  <td className="px-3 py-2 whitespace-nowrap"><button onClick={() => printDO(o)} className="text-blue-600 hover:underline">🖨 Print</button></td>
                 </tr>
               ))}
             </tbody>
