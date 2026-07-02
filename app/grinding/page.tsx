@@ -32,6 +32,7 @@ interface GrindingRecord {
   correction_action: string | null; prepared_by: string | null; verified_by: string | null; remark: string | null
   machine_id: string | null; grind_by: string | null
   source_batch_no: string | null; so_number: string | null
+  posted_at: string | null
 }
 
 const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
@@ -199,7 +200,7 @@ export default function GrindingPage() {
   const totalOutput = outputs.reduce((s, o) => s + (Number(o.qty) || 0), 0)
   const yieldPct = totalInput > 0 ? (totalOutput / totalInput) * 100 : null
 
-  async function saveRecord() {
+  async function saveRecord(post = false) {
     if (!openRec) return
     const recEdit = canEditFac(openRec.factory_code), recRecipeEdit = canRecipeEditFac(openRec.factory_code)
     if (!recEdit && !recRecipeEdit) { setError("You have view-only access at this factory."); return }
@@ -225,6 +226,10 @@ export default function GrindingPage() {
           batch_no: o.batch_no.trim() || null, exp_date: o.exp_date || null, qty: o.qty === '' ? null : Number(o.qty),
         }))
         if (rows.length) { const { error: insErr } = await supabase.from('grinding_outputs').insert(rows); if (insErr) throw insErr }
+      }
+      if (post) {   // add output(s) to stock + create the completed finished-goods batch
+        const { error: pErr } = await supabase.rpc('post_grinding_outputs', { p_record_id: openRec.id })
+        if (pErr) throw pErr
       }
       setOpenRec(null); load()
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not save') } finally { setSaving(false) }
@@ -540,8 +545,13 @@ export default function GrindingPage() {
               </div>
             </div>
 
-            <div className="flex gap-2">
-              {(recEdit || recRecipeEdit) && <button onClick={saveRecord} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{saving ? 'Saving…' : 'Save'}</button>}
+            <div className="flex flex-wrap items-center gap-2">
+              {(recEdit || recRecipeEdit) && <button onClick={() => saveRecord(false)} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{saving ? 'Saving…' : 'Save'}</button>}
+              {recEdit && (openRec.posted_at
+                ? <span className="text-green-700 text-sm font-medium">✓ In finished goods</span>
+                : <button onClick={() => saveRecord(true)} disabled={saving || !outputs.some(o => o.item.trim() && Number(o.qty) > 0)}
+                    className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium" title="Save, add the output to stock, and send it to Finished goods ready to send">
+                    {saving ? 'Sending…' : 'Save & send to finished goods'}</button>)}
               <button onClick={() => setOpenRec(null)} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Close</button>
             </div>
           </div>

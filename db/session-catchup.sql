@@ -1012,3 +1012,77 @@ begin
   update public.return_edit_requests set status = 'Approved', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id;
 end $$;
 grant execute on function public.approve_return_edit(uuid) to authenticated;
+
+-- ============================================================================
+-- 2026-07 · Post grinding outputs to Finished Goods (stock + completed batch)
+-- ----------------------------------------------------------------------------
+-- When a Grinding & Mixing record is completed, add its output product(s) to
+-- stock and create a completed finished-goods batch so they appear in Dispatch
+-- "Finished goods ready to send". Raw material actually added is deducted from
+-- stock (may go negative). Idempotent via grinding_records.posted_at.
+-- ============================================================================
+alter table public.grinding_records add column if not exists posted_at timestamptz;
+
+create or replace function public.post_grinding_outputs(p_record_id uuid) returns integer
+language plpgsql security definer set search_path = public as $$
+declare
+  v_rec public.grinding_records; v_fac text;
+  m record; o record; v_item public.items; v_lot public.stock_lots;
+  v_qty numeric; v_code text; v_batch_id uuid; v_created int := 0;
+begin
+  select * into v_rec from public.grinding_records where id = p_record_id;
+  if not found then raise exception 'Grinding record not found'; end if;
+  v_fac := v_rec.factory_code;
+  if not has_perm('grinding', 'edit') then raise exception 'Not allowed to post grinding'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_fac = any (my_factory_codes())) then
+    raise exception 'Not allowed for this factory'; end if;
+  if v_rec.posted_at is not null then raise exception 'This grinding record is already in finished goods'; end if;
+  if not exists (select 1 from public.grinding_outputs where grinding_record_id = p_record_id and coalesce(qty,0) > 0) then
+    raise exception 'Add at least one output product with a quantity before posting'; end if;
+
+  -- 1) Deduct raw materials actually added (by batch when given); stock may go negative.
+  for m in select * from public.grinding_materials
+           where grinding_record_id = p_record_id and coalesce(added,false) and actual_qty is not null and actual_qty > 0 loop
+    v_code := btrim(split_part(m.item, ' — ', 1));
+    v_qty := m.actual_qty;
+    select * into v_lot from public.stock_lots where item_code = v_code and factory_code = v_fac
+      and (nullif(m.batch_no,'') is null or coalesce(batch_no,'') = coalesce(m.batch_no,''))
+      order by exp_date asc nulls last, received_at asc limit 1;
+    if found then update public.stock_lots set qty_remaining = qty_remaining - v_qty where id = v_lot.id; end if;
+    select * into v_item from public.items where code = v_code limit 1;
+    if found then
+      update public.item_stock set quantity = quantity - v_qty, updated_at = now()
+        where item_id = v_item.id and factory_code = v_fac;
+      if not found then insert into public.item_stock (item_id, factory_code, quantity, updated_at)
+        values (v_item.id, v_fac, -v_qty, now()); end if;
+    end if;
+  end loop;
+
+  -- 2) Each output: add to stock + create a completed finished-goods batch.
+  for o in select * from public.grinding_outputs where grinding_record_id = p_record_id and coalesce(qty,0) > 0 loop
+    v_code := btrim(split_part(o.item, ' — ', 1));
+    select * into v_item from public.items where code = v_code limit 1;
+    if not found then select * into v_item from public.items where description ilike o.item limit 1; end if;
+    if not found then select * into v_item from public.items where code = o.item limit 1; end if;
+    if not found then raise exception 'Output item "%" is not in the item list — pick it from the list first', o.item; end if;
+    v_qty := o.qty;
+    insert into public.stock_lots (item_id, item_code, description, factory_code, batch_no, exp_date, qty_received, qty_remaining)
+    values (v_item.id, v_item.code, v_item.description, v_fac, nullif(o.batch_no,''), o.exp_date, v_qty, v_qty);
+    update public.item_stock set quantity = quantity + v_qty, updated_at = now()
+      where item_id = v_item.id and factory_code = v_fac;
+    if not found then insert into public.item_stock (item_id, factory_code, quantity, updated_at)
+      values (v_item.id, v_fac, v_qty, now()); end if;
+    insert into public.production_batches (batch_no, item_code, description, factory_code, total_quantity, produced_qty, status, is_grinding, exp_date)
+    values (coalesce(nullif(o.batch_no,''), 'GR-' || left(p_record_id::text, 8)), v_item.code, v_item.description, v_fac, v_qty, v_qty, 'Completed', true, o.exp_date)
+    returning id into v_batch_id;
+    if nullif(v_rec.so_number, '') is not null then
+      insert into public.production_batch_items (batch_id, so_number, quantity, factory_code)
+      values (v_batch_id, v_rec.so_number, v_qty, v_fac);
+    end if;
+    v_created := v_created + 1;
+  end loop;
+
+  update public.grinding_records set posted_at = now() where id = p_record_id;
+  return v_created;
+end $$;
+grant execute on function public.post_grinding_outputs(uuid) to authenticated;
