@@ -932,7 +932,6 @@ begin
   end loop;
   return v_id;
 end $$;
-grant execute on function public.produce_grinding(uuid, numeric, text) to authenticated;
 grant execute on function public.produce_grinding(uuid, numeric, text, text, text) to authenticated;
 
 -- ============================================================================
