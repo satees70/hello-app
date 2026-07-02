@@ -843,9 +843,12 @@ export default function ProductionPage() {
                           ? <span className="text-gray-600">Ad-hoc: requesting exactly the materials & quantities listed above.</span>
                           : totalShortfall > 0
                             ? <span className="text-red-600">Total shortfall across {exploded.rows.filter(r => r.shortfall > 0).length} material(s).</span>
-                            : <span className="text-green-600">Enough stock on hand — no shortfall.</span>}
+                            : <span className="text-green-600">Enough stock on hand — <strong>no material request needed</strong>. Go to the Packing Schedule to set the pack line &amp; date.</span>}
                     </div>
                     <div className="flex items-end gap-3">
+                      {!grindingMode && !adhoc && !hasRequest && totalShortfall <= 0 && (
+                        <a href="/packing" className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 font-medium whitespace-nowrap">Go to Packing Schedule →</a>
+                      )}
                       <button onClick={() => {
                         if (grindingMode) proceedGrinding(selected, (exploded as { lots?: number }).lots || 1)
                         else if (adhoc) raiseExt(selected, customRows.map(r => ({ code: r.code, description: r.description, unit: r.unit, qty: Number(r.qty) })), extraN, extraN > 0 ? `Ad-hoc · +${extraN} for stock` : 'Ad-hoc')
