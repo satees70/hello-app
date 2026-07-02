@@ -1,5 +1,11 @@
 -- ============================================================================
--- ONE-TIME FIX — run this ONCE only, then delete/ignore this file.
+-- ⛔ DO NOT RUN — VERIFIED NOT NEEDED (checked 2026-07-02).
+-- Stored delivery dates already match the source Excel (e.g. SO-40792 = 19/06
+-- in both). The parser fix (deployed 2026-06-29) means all rows since are
+-- correct too. Running the blanket +1 shift below would now CORRUPT the ~79
+-- correctly-stored rows. Kept only as a historical record.
+-- ============================================================================
+-- ONE-TIME FIX — (obsolete) originally intended to run ONCE only.
 -- ----------------------------------------------------------------------------
 -- Delivery schedules saved before the date-parsing fix stored every Excel date
 -- one day too early (SheetJS timezone/float drift). This shifts every ISO date
