@@ -109,34 +109,44 @@ export default function PackingPage() {
   const n = (x: number) => Number(Number(x).toFixed(3))
   const itemOf = (id: string) => items.find(i => i.id === id)
   // How many units we can make from current system stock, plus the per-material breakdown.
-  const availability = (b: Batch): { hasBom: boolean; units: number; comps: { code: string; description: string; unit: string; required: number; avail: number; shortfall: number }[] } => {
+  type Comp = { code: string; description: string; unit: string; required: number; avail: number; shortfall: number }
+  const availability = (b: Batch): { hasBom: boolean; units: number; comps: Comp[]; labels: Comp[]; labelsReady: boolean } => {
     const parent = items.find(i => i.code === b.item_code)
-    if (!parent) return { hasBom: false, units: 0, comps: [] }
+    if (!parent) return { hasBom: false, units: 0, comps: [], labels: [], labelsReady: true }
     const mode = b.run_mode || 'auto'
-    // Labels are printed at the factory (supplied_by_factory) — not warehouse stock, so exclude
-    // them from the "enough material?" check, same as the Order Board.
     const isLabel = (id: string) => !!items.find(i => i.id === id)?.supplied_by_factory
-    const comps0 = boms.filter(c => c.parent_item_id === parent.id && !isLabel(c.component_item_id) && ((c.use_mode || 'any') === 'any' || (c.use_mode || 'any') === mode))
-    if (comps0.length === 0) return { hasBom: false, units: 0, comps: [] }
-    let units = Infinity
-    const comps = comps0.map(c => {
+    const all = boms.filter(c => c.parent_item_id === parent.id && ((c.use_mode || 'any') === 'any' || (c.use_mode || 'any') === mode))
+    if (all.length === 0) return { hasBom: false, units: 0, comps: [], labels: [], labelsReady: true }
+    const rowOf = (c: typeof all[number]): Comp => {
       const ci = itemOf(c.component_item_id)
       const avail = stock[`${c.component_item_id}|${b.factory_code}`] ?? 0
       const per = Number(c.quantity) || 0
-      if (per > 0) units = Math.min(units, Math.floor(avail / per))
       const required = per * b.total_quantity
       return { code: ci?.code || '—', description: ci?.description || '', unit: ci?.unit || '', required, avail, shortfall: Math.max(required - avail, 0) }
+    }
+    // Warehouse materials drive "units"; labels are printed at the factory and tracked separately.
+    let units = Infinity
+    const comps = all.filter(c => !isLabel(c.component_item_id)).map(c => {
+      const r = rowOf(c); const per = Number(c.quantity) || 0
+      if (per > 0) units = Math.min(units, Math.floor(r.avail / per))
+      return r
     })
-    return { hasBom: true, units: units === Infinity ? b.total_quantity : units, comps }
+    const labels = all.filter(c => isLabel(c.component_item_id)).map(rowOf)
+    const labelsReady = labels.every(l => l.shortfall <= 0)
+    return { hasBom: true, units: units === Infinity ? b.total_quantity : units, comps, labels, labelsReady }
   }
-  // Ready only when we can make at least one unit from real stock. No BOM = can't confirm = waiting.
-  const materialsReady = (b: Batch) => availability(b).units >= 1
-  const partial = (b: Batch) => { const a = availability(b); return a.units >= 1 && a.units < b.total_quantity }
+  // Ready only when there's material for ≥1 unit AND the labels are received into stock.
+  const materialsReady = (b: Batch) => { const a = availability(b); return a.units >= 1 && a.labelsReady }
+  const partial = (b: Batch) => { const a = availability(b); return a.units >= 1 && a.labelsReady && a.units < b.total_quantity }
   const waitReason = (b: Batch) => {
     const a = availability(b)
     if (!a.hasBom) return 'No BOM set — add a recipe first'
     const short = a.comps.filter(c => c.shortfall > 0)
-    return short.length ? 'Short: ' + short.map(c => `${c.code} (${n(c.avail)}/${n(c.required)})`).join(', ') : 'Not enough material in stock'
+    const lblShort = a.labels.filter(l => l.shortfall > 0)
+    const parts: string[] = []
+    if (short.length) parts.push('Short: ' + short.map(c => `${c.code} (${n(c.avail)}/${n(c.required)})`).join(', '))
+    if (lblShort.length) parts.push('Labels not ready: ' + lblShort.map(l => l.code).join(', ') + ' — print in Receiving → Labels')
+    return parts.length ? parts.join(' · ') : 'Not enough material in stock'
   }
   // The material table for a batch — same columns as the Order Board popup
   const MaterialTable = ({ b }: { b: Batch }) => {
@@ -173,6 +183,21 @@ export default function PackingPage() {
           </tbody>
         </table>
         {b.material_request_id && <p className="text-xs text-gray-500 mt-1">★ = batch allocated to this run’s material request — use these first.</p>}
+        {a.labels.length > 0 && (
+          <div className="mt-2 border-t pt-2 text-xs">
+            <div className="font-medium text-gray-600 mb-1">🏷 Labels (printed at the factory — needed before packing)</div>
+            <div className="space-y-0.5">
+              {a.labels.map(l => (
+                <div key={l.code} className="flex flex-wrap items-center gap-x-2">
+                  <span className="font-mono">{l.code}</span><span className="text-gray-500">{l.description}</span>
+                  <span className="text-gray-500">· need {n(l.required)}, have {n(l.avail)}</span>
+                  {l.shortfall > 0 ? <span className="text-red-600 font-medium">✗ not ready</span> : <span className="text-green-600 font-medium">✓ in stock</span>}
+                </div>
+              ))}
+            </div>
+            {a.labels.some(l => l.shortfall > 0) && <a href="/labels" className="text-blue-600 hover:underline">Print &amp; receive these in Receiving → Labels →</a>}
+          </div>
+        )}
       </div>
     )
   }
