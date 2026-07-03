@@ -215,12 +215,12 @@ export default function IncomingPage() {
 
   const docFacName = (d: DeliveryOrder) => isHO ? factoryName(d.factory_code) : d.factory_code
   const inc = (v: string | null | undefined, q: string) => !q || (v || '').toLowerCase().includes(q.toLowerCase())
-  // The File search also matches a document by the items inside it (codes + descriptions)
-  const fileMatch = (d: DeliveryOrder, q: string) => !q || inc(d.file_name, q) || inc(docLineText[d.id] || '', q)
+  // The File search also matches a document by its PR (pick run) number and the items inside it
+  const fileMatch = (d: DeliveryOrder, q: string) => !q || inc(d.file_name, q) || inc(d.pick_run_no, q) || inc(docLineText[d.id] || '', q)
   const colDocs = docs.filter(d =>
     fileMatch(d, docFilters.file) && inc(d.do_number, docFilters.do) && inc(docFacName(d), docFilters.factory) &&
     (!docFilters.status || d.status === docFilters.status) && inc(new Date(d.created_at).toLocaleString(), docFilters.uploaded))
-  const mobDocs = docs.filter(d => !docQ || [d.file_name, d.do_number, docFacName(d), d.status, docLineText[d.id] || ''].some(v => inc(v, docQ)))
+  const mobDocs = docs.filter(d => !docQ || [d.file_name, d.do_number, d.pick_run_no, docFacName(d), d.status, docLineText[d.id] || ''].some(v => inc(v, docQ)))
   const docStatuses = [...new Set(docs.map(d => d.status))].sort()
   const shownLines = lines.filter(l => !lineQ || inc(l.item_code, lineQ) || inc(l.description, lineQ))
 
@@ -576,7 +576,7 @@ export default function IncomingPage() {
               <tr>{['File', 'DO No.', 'Factory', 'Status', 'Uploaded', 'Actions'].map(h => (
                 <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
               <tr className="border-b">
-                <th className="px-3 py-2"><input value={docFilters.file} onChange={e => setDocFilters({ ...docFilters, file: e.target.value })} placeholder="File or item…" className="w-full border rounded px-2 py-1 text-xs font-normal" /></th>
+                <th className="px-3 py-2"><input value={docFilters.file} onChange={e => setDocFilters({ ...docFilters, file: e.target.value })} placeholder="File, item or PR…" className="w-full border rounded px-2 py-1 text-xs font-normal" /></th>
                 <th className="px-3 py-2"><input value={docFilters.do} onChange={e => setDocFilters({ ...docFilters, do: e.target.value })} placeholder="Filter…" className="w-full border rounded px-2 py-1 text-xs font-normal" /></th>
                 <th className="px-3 py-2"><input value={docFilters.factory} onChange={e => setDocFilters({ ...docFilters, factory: e.target.value })} placeholder="Filter…" className="w-full border rounded px-2 py-1 text-xs font-normal" /></th>
                 <th className="px-3 py-2"><select value={docFilters.status} onChange={e => setDocFilters({ ...docFilters, status: e.target.value })} className="w-full border rounded px-2 py-1 text-xs font-normal bg-white"><option value="">All</option>{docStatuses.map(s => <option key={s} value={s}>{s}</option>)}</select></th>
