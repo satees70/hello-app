@@ -257,7 +257,7 @@ export default function DeliverySchedulePage() {
     const v = (value || '').trim()
     const owner = v ? ownerOf(date, ownerKind, v) : undefined
     setError('')
-    setSuccess(owner && owner !== route ? `Note: ${v} (${label}) is also on ${owner} on ${dayStr(date)} — 2nd trip.` : '')
+    setSuccess(owner && owner !== route ? `Note: ${v} (${label}) is also on ${owner} on ${dayStr(date)} (multiple trips today — see Driver trips for the order).` : '')
     setTripField(route, date, field, v)
     saveTrip(route, date, { [field]: v })
   }
@@ -268,7 +268,7 @@ export default function DeliverySchedulePage() {
     if (cur.some(x => x.toLowerCase() === v.toLowerCase())) return   // already on this line
     const owner = ownerOf(date, 'crew', v)
     setError('')
-    setSuccess(owner && owner !== route ? `Note: ${v} is also on ${owner} on ${dayStr(date)} — 2nd trip.` : '')
+    setSuccess(owner && owner !== route ? `Note: ${v} is also on ${owner} on ${dayStr(date)} (multiple trips today — see Driver trips for the order).` : '')
     const next = [...cur, v].join(', ')
     setTripField(route, date, 'kelindan', next); saveTrip(route, date, { kelindan: next })
   }
@@ -596,10 +596,10 @@ export default function DeliverySchedulePage() {
           // Driver trips summary — only lines that actually have orders on the date count as a trip.
           // (A leftover driver assignment on a line with no orders is NOT a real trip.)
           const activeKeys = new Set(Object.values(groups).map(g => `${g.route}|${g.date}`))
-          const driverSum: Record<string, { total: number; lines: string[] }> = {}
+          const driverSum: Record<string, { total: number; lines: { route: string; date: string; label: string }[] }> = {}
           Object.values(trips)
             .filter(t => (dateFilter === 'all' || t.delivery_date === dateFilter) && (t.driver || '').trim() && activeKeys.has(`${t.route}|${t.delivery_date}`))
-            .forEach(t => { const d = t.driver!.trim(); const e = (driverSum[d] = driverSum[d] || { total: 0, lines: [] }); e.total++; e.lines.push(`${t.route}${t.remark ? ' — ' + t.remark : ''}${t.category ? ' · ' + t.category : ''}`) })
+            .forEach(t => { const d = t.driver!.trim(); const e = (driverSum[d] = driverSum[d] || { total: 0, lines: [] }); e.total++; e.lines.push({ route: t.route, date: t.delivery_date, label: `${t.route}${t.remark ? ' — ' + t.remark : ''}${t.category ? ' · ' + t.category : ''}` }) })
           const driverNames = Object.keys(driverSum).sort()
           return (
           <div id="delivery-print" className="space-y-5">
@@ -612,7 +612,11 @@ export default function DeliverySchedulePage() {
               <div className="mb-3 p-3 rounded-lg bg-gray-50 border text-sm">
                 <div className="font-semibold mb-1">Driver trips{dateFilter !== 'all' ? ` — ${fmtD(dateFilter)}` : ' (all dates)'}</div>
                 <div className="grid sm:grid-cols-2 gap-x-6 gap-y-0.5">
-                  {driverNames.map(d => <div key={d}><strong>{d}</strong>: {driverSum[d].total} trip(s) <span className="text-gray-500">({driverSum[d].lines.join('; ')})</span></div>)}
+                  {driverNames.map(d => {
+                    const ts = driverSum[d].lines.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '') || li(a.route) - li(b.route))
+                    const multi = ts.length > 1
+                    return <div key={d}><strong>{d}</strong>: {driverSum[d].total} trip(s) <span className="text-gray-500">{ts.map((x, i) => <span key={i}>{i > 0 ? ' · ' : ' '}{multi ? <strong className="text-gray-600">{i + 1}{i === 0 ? 'st' : i === 1 ? 'nd' : i === 2 ? 'rd' : 'th'}:</strong> : null} {x.label}</span>)}</span></div>
+                  })}
                 </div>
               </div>
             )}
