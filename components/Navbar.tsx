@@ -217,6 +217,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/production', label: 'Order Board', module: 'order_board' },
       { href: '/production?board=grinding', label: '🌀 Grinding Board', module: 'order_board' },
       { href: '/packing', label: 'Packing Schedule', module: 'packing' },
+      { href: '/inspection/records', label: 'Inspection Records', module: 'inspection' as ModuleKey },
       { href: '/grinding', label: 'Grinding', module: 'grinding' },
       { href: '/drying-roasting', label: 'Drying & Roasting', module: 'drying' },
       { href: '/moisture', label: 'Moisture', module: 'moisture' },
