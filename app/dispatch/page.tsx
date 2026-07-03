@@ -65,6 +65,10 @@ export default function DispatchPage() {
   const [reason, setReason] = useState('')
   const [returnCart, setReturnCart] = useState<CartReturn[]>([])
   const [vehicleByFac, setVehicleByFac] = useState<Record<string, string>>({})   // vehicle no. keyed by factory, set before creating each DO
+  const [lorryReqs, setLorryReqs] = useState<{ id: string; factory_code: string; lorry_type: string; note: string | null; requested_by_name: string | null; requested_at: string }[]>([])
+  const [lrFactory, setLrFactory] = useState('')     // which factory to request a lorry for
+  const [lrType, setLrType] = useState('any')        // small | big | any
+  const [lrNote, setLrNote] = useState('')
   const [salesLines, setSalesLines] = useState<SLine[]>([])
   const [directCart, setDirectCart] = useState<{ lineId: string; so: string; itemCode: string; description: string; qty: number; batchNo: string; expDate: string; factory: string; factoryName: string }[]>([])
   const [dSo, setDSo] = useState('')
@@ -116,6 +120,11 @@ export default function DispatchPage() {
       .select('id, do_number, factory_code, status, created_by_name, created_at, vehicle, driver_name, dispatch_order_lines(id, item_code, description, quantity, batch_no, exp_date, batch_id), material_returns(id, item_code, description, quantity, batch_no, exp_date, reason)')
       .order('created_at', { ascending: false }).limit(50)
     setOrders((o as DOrder[]) || [])
+    // Open lorry requests (raised before a DO exists).
+    const { data: lr } = await supabase.from('lorry_requests')
+      .select('id, factory_code, lorry_type, note, requested_by_name, requested_at').eq('status', 'open')
+      .order('requested_at', { ascending: false })
+    setLorryReqs(lr || [])
     // SO number(s) per dispatched batch, so each delivery line can show its order.
     const batchIds = [...new Set(((o as DOrder[]) || []).flatMap(d => (d.dispatch_order_lines || []).map(l => l.batch_id).filter(Boolean)))] as string[]
     const sob: Record<string, string> = {}
@@ -274,6 +283,24 @@ export default function DispatchPage() {
 
   // Create ONE delivery order for a single factory's items (finished goods + returns).
   // A multi-factory user builds a mixed cart; each factory gets its own DO.
+  async function requestLorry() {
+    const fac = lrFactory || myFactories[0]?.code
+    if (!fac) { setError('Pick a factory to request a lorry for.'); return }
+    setBusy(true); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('request_lorry', { p_factory: fac, p_type: lrType, p_note: lrNote.trim() || null })
+    setBusy(false)
+    if (e) { setError(e.message); return }
+    setLrNote(''); setLrType('any')
+    setSuccess(`Lorry requested for ${factoryName(fac)} — the warehouse has been notified.`)
+    load()
+  }
+  async function cancelLorryReq(id: string) {
+    if (!confirm('Cancel this lorry request?')) return
+    const { error: e } = await supabase.rpc('cancel_lorry_request', { p_id: id })
+    if (e) { setError(e.message); return }
+    setLorryReqs(prev => prev.filter(r => r.id !== id))
+  }
+
   async function createDO(fac: string) {
     const batchIds = batches.filter(b => picked.has(b.id) && b.factory_code === fac).map(b => b.id)
     const facReturns = returnCart.filter(r => r.factory === fac)
@@ -428,6 +455,55 @@ export default function DispatchPage() {
 
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
         {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}
+
+        {/* ---- Request a lorry (before a DO exists) ---- */}
+        {canEdit && (
+          <div className="bg-white border rounded-xl shadow-sm p-4 mb-6">
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <div className="font-medium text-sm mb-0.5">🚚 Request a lorry</div>
+                <p className="text-xs text-gray-500">Call the warehouse for a lorry before making the DO — load &amp; recheck, then create it.</p>
+              </div>
+              <div className="flex flex-wrap items-end gap-2 ml-auto">
+                {myFactories.length > 1 && (
+                  <label className="text-xs text-gray-600">Factory
+                    <select value={lrFactory || myFactories[0]?.code || ''} onChange={e => setLrFactory(e.target.value)} className="block mt-0.5 border rounded-lg px-2 py-1.5 text-sm">
+                      {myFactories.map(f => <option key={f.code} value={f.code}>{f.name}</option>)}
+                    </select>
+                  </label>
+                )}
+                <label className="text-xs text-gray-600">Lorry type
+                  <select value={lrType} onChange={e => setLrType(e.target.value)} className="block mt-0.5 border rounded-lg px-2 py-1.5 text-sm">
+                    <option value="any">Any</option>
+                    <option value="small">Small</option>
+                    <option value="big">Big</option>
+                  </select>
+                </label>
+                <label className="text-xs text-gray-600">Note (optional)
+                  <input value={lrNote} onChange={e => setLrNote(e.target.value)} placeholder="e.g. for Kelana Jaya run" className="block mt-0.5 border rounded-lg px-2 py-1.5 text-sm w-48" />
+                </label>
+                <button onClick={requestLorry} disabled={busy} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">📞 Request lorry</button>
+              </div>
+            </div>
+            {lorryReqs.length > 0 && (
+              <div className="mt-3 border-t pt-3">
+                <div className="text-xs font-medium text-gray-500 mb-1">Open lorry requests</div>
+                <ul className="space-y-1">
+                  {lorryReqs.map(r => (
+                    <li key={r.id} className="flex items-center gap-2 text-sm">
+                      <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 rounded-full px-2.5 py-0.5 text-xs">🚚 {r.lorry_type === 'any' ? 'Any' : r.lorry_type} lorry</span>
+                      <span className="text-gray-600">{factoryName(r.factory_code)}</span>
+                      {r.note && <span className="text-gray-400 text-xs truncate">· {r.note}</span>}
+                      <span className="text-gray-400 text-xs">· {r.requested_by_name || '—'}, {fmt(r.requested_at)}</span>
+                      {canFac(r.factory_code) && <button onClick={() => cancelLorryReq(r.id)} className="text-red-500 hover:underline text-xs ml-auto shrink-0">Cancel</button>}
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-[11px] text-gray-400 mt-1">The warehouse assigns the lorry to a site on the Transport page; once it&apos;s parked here you can create the DO and pick it.</p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ---- Finished goods to deliver ---- */}
         <h2 className="text-lg font-semibold mb-2">Finished goods ready to send</h2>

@@ -1740,6 +1740,10 @@ begin
            lorry_assigned_by = case when v_val is null then null else auth.uid() end,
            lorry_requested_at = case when v_val is null then lorry_requested_at else null end
      where id = p_do_id;
+    -- An assigned lorry is heading out → mark it 'on the road' so it drops off the on-site list.
+    if v_val is not null then
+      update public.delivery_resources set parked_at = null where kind = 'lorry' and lower(name) = lower(v_val);
+    end if;
   else
     update public.dispatch_orders
        set driver_name = v_val,
@@ -1767,3 +1771,77 @@ alter table public.delivery_resources add column if not exists parked_at text;
 alter table public.delivery_resources drop constraint if exists delivery_resources_kind_check;
 alter table public.delivery_resources add constraint delivery_resources_kind_check
   check (kind in ('lorry', 'driver', 'kelindan', 'crew'));
+
+-- ============================================================================
+-- 2026-07 · Request a lorry BEFORE a DO exists (production calls for a lorry,
+-- loads & rechecks, then creates the DO). Requests carry a lorry type so a
+-- small or big lorry can be asked for. Lorries can also be tagged small/big.
+-- ============================================================================
+alter table public.delivery_resources add column if not exists lorry_type text;   -- 'small' | 'big' | null (unknown)
+
+create table if not exists public.lorry_requests (
+  id uuid primary key default gen_random_uuid(),
+  factory_code text not null,
+  lorry_type text not null default 'any' check (lorry_type in ('small', 'big', 'any')),
+  note text,
+  status text not null default 'open' check (status in ('open', 'fulfilled', 'cancelled')),
+  requested_by uuid, requested_by_name text, requested_at timestamptz not null default now(),
+  fulfilled_lorry text, fulfilled_by uuid, fulfilled_at timestamptz
+);
+alter table public.lorry_requests enable row level security;
+drop policy if exists lr_read on public.lorry_requests;
+create policy lr_read on public.lorry_requests for select
+  using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()));
+
+-- Production/warehouse raises a call for a lorry at a site (no DO yet).
+create or replace function public.request_lorry(p_factory text, p_type text default 'any', p_note text default null) returns uuid
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_id uuid; v_name text;
+begin
+  if not has_perm('dispatch', 'edit') then raise exception 'Not allowed'; end if;
+  if coalesce(p_type, 'any') not in ('small', 'big', 'any') then raise exception 'Unknown lorry type'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (p_factory = any (my_factory_codes())) then raise exception 'Not your factory'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  insert into public.lorry_requests (factory_code, lorry_type, note, requested_by, requested_by_name)
+  values (p_factory, coalesce(p_type, 'any'), nullif(btrim(p_note), ''), auth.uid(), v_name)
+  returning id into v_id;
+  insert into public.notifications (factory_code, type, title, body, link, ref)
+  values (p_factory, 'transport',
+          'Lorry requested' || (case when coalesce(p_type,'any') = 'any' then '' else ' (' || p_type || ')' end),
+          coalesce(v_name, 'Production') || ' asked for a lorry.' || coalesce(' ' || nullif(btrim(p_note), ''), ''),
+          '/transport', 'lorry-req:' || v_id::text)
+  on conflict (ref) do nothing;
+  return v_id;
+end; $function$;
+grant execute on function public.request_lorry(text, text, text) to authenticated;
+
+-- Warehouse marks a lorry request done; naming the lorry parks it on-site.
+create or replace function public.fulfill_lorry_request(p_id uuid, p_lorry text default null) returns void
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_fac text; v_lorry text;
+begin
+  if not has_perm('dispatch', 'edit') then raise exception 'Not allowed'; end if;
+  select factory_code into v_fac from public.lorry_requests where id = p_id;
+  if v_fac is null then raise exception 'Request not found'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_fac = any (my_factory_codes())) then raise exception 'Not your factory'; end if;
+  v_lorry := nullif(btrim(p_lorry), '');
+  update public.lorry_requests
+     set status = 'fulfilled', fulfilled_lorry = v_lorry, fulfilled_by = auth.uid(), fulfilled_at = now()
+   where id = p_id;
+  if v_lorry is not null then
+    update public.delivery_resources set parked_at = v_fac where kind = 'lorry' and lower(name) = lower(v_lorry);
+  end if;
+end; $function$;
+grant execute on function public.fulfill_lorry_request(uuid, text) to authenticated;
+
+create or replace function public.cancel_lorry_request(p_id uuid) returns void
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_fac text;
+begin
+  if not has_perm('dispatch', 'edit') then raise exception 'Not allowed'; end if;
+  select factory_code into v_fac from public.lorry_requests where id = p_id;
+  if v_fac is null then raise exception 'Request not found'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_fac = any (my_factory_codes())) then raise exception 'Not your factory'; end if;
+  update public.lorry_requests set status = 'cancelled' where id = p_id;
+end; $function$;
+grant execute on function public.cancel_lorry_request(uuid) to authenticated;
