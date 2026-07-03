@@ -22,7 +22,7 @@ export default function TransportPage() {
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [lorries, setLorries] = useState<{ id: string; name: string; parked_at: string | null; lorry_type: string | null }[]>([])
   const [crew, setCrew] = useState<string[]>([])
-  const [lorryReqs, setLorryReqs] = useState<{ id: string; factory_code: string; lorry_type: string; note: string | null; requested_by_name: string | null; requested_at: string }[]>([])
+  const [lorryReqs, setLorryReqs] = useState<{ id: string; factory_code: string; kind: string; lorry_type: string; note: string | null; requested_by_name: string | null; requested_at: string }[]>([])
   const [search, setSearch] = useState('')
   const [facF, setFacF] = useState<Set<string>>(new Set())
   const [pendingOnly, setPendingOnly] = useState(true)
@@ -38,7 +38,7 @@ export default function TransportPage() {
       supabase.from('dispatch_orders')
         .select('id, do_number, factory_code, created_at, created_by_name, vehicle, lorry_requested_at, driver_name, driver_requested_at, dispatch_order_lines(item_code, quantity), material_returns(item_code, quantity)')
         .order('created_at', { ascending: false }).limit(100),
-      supabase.from('lorry_requests').select('id, factory_code, lorry_type, note, requested_by_name, requested_at').eq('status', 'open').order('requested_at', { ascending: false }),
+      supabase.from('lorry_requests').select('id, factory_code, kind, lorry_type, note, requested_by_name, requested_at').eq('status', 'open').order('requested_at', { ascending: false }),
     ])
     setFactories(f || [])
     setLorries((res || []).filter(r => r.kind === 'lorry').map(r => ({ id: r.id, name: r.name, parked_at: r.parked_at, lorry_type: r.lorry_type })))
@@ -122,23 +122,32 @@ export default function TransportPage() {
 
         {lorryReqs.length > 0 && (
           <div className="mb-4 bg-white rounded-xl shadow-sm border border-amber-300 p-4">
-            <h2 className="font-medium mb-2">📞 Lorry requests waiting</h2>
-            <p className="text-xs text-gray-500 mb-2">Production asked for these lorries (before a DO). Send one, then pick which lorry arrived — it gets parked at that site so production can assign it.</p>
+            <h2 className="font-medium mb-2">📞 Transport requests waiting</h2>
+            <p className="text-xs text-gray-500 mb-2">Production called for these before a DO. For a lorry, pick which one you sent — it gets parked at that site. For a driver, mark it arranged.</p>
             <ul className="space-y-2">
               {lorryReqs.map(r => {
                 const editable = canEditFac(r.factory_code)
+                const isDriver = r.kind === 'driver'
                 return (
                   <li key={r.id} className="flex flex-wrap items-center gap-2 text-sm border-b last:border-0 pb-2 last:pb-0">
-                    <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 rounded-full px-2.5 py-0.5 text-xs font-medium">🚚 {r.lorry_type === 'any' ? 'Any' : r.lorry_type} lorry</span>
+                    {isDriver
+                      ? <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 rounded-full px-2.5 py-0.5 text-xs font-medium">👤 driver</span>
+                      : <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 rounded-full px-2.5 py-0.5 text-xs font-medium">🚚 {r.lorry_type === 'any' ? 'Any' : r.lorry_type} lorry</span>}
                     <span className="text-gray-700 font-medium">{factoryName(r.factory_code)}</span>
                     {r.note && <span className="text-gray-500 text-xs">· {r.note}</span>}
                     <span className="text-gray-400 text-xs">· {r.requested_by_name || '—'}, {fmt(r.requested_at)}</span>
                     <div className="flex items-center gap-2 ml-auto">
-                      <select value="" onChange={e => fulfillLorry(r.id, e.target.value)} disabled={!editable || busy === 'lr' + r.id} className="border rounded px-2 py-1 text-xs">
-                        <option value="">Sent lorry…</option>
-                        {lorries.map(l => <option key={l.id} value={l.name}>{l.name}{l.lorry_type ? ` · ${l.lorry_type}` : ''}{l.parked_at ? ` · at ${factoryName(l.parked_at)}` : ''}</option>)}
-                      </select>
-                      <button onClick={() => fulfillLorry(r.id, '')} disabled={!editable || busy === 'lr' + r.id} className="text-xs text-gray-500 hover:underline">Done (no lorry)</button>
+                      {isDriver ? (
+                        <button onClick={() => fulfillLorry(r.id, '')} disabled={!editable || busy === 'lr' + r.id} className="text-xs bg-indigo-600 text-white px-3 py-1 rounded-lg hover:bg-indigo-700 disabled:opacity-50">✓ Driver arranged</button>
+                      ) : (
+                        <>
+                          <select value="" onChange={e => fulfillLorry(r.id, e.target.value)} disabled={!editable || busy === 'lr' + r.id} className="border rounded px-2 py-1 text-xs">
+                            <option value="">Sent lorry…</option>
+                            {lorries.map(l => <option key={l.id} value={l.name}>{l.name}{l.lorry_type ? ` · ${l.lorry_type}` : ''}{l.parked_at ? ` · at ${factoryName(l.parked_at)}` : ''}</option>)}
+                          </select>
+                          <button onClick={() => fulfillLorry(r.id, '')} disabled={!editable || busy === 'lr' + r.id} className="text-xs text-gray-500 hover:underline">Done (no lorry)</button>
+                        </>
+                      )}
                     </div>
                   </li>
                 )

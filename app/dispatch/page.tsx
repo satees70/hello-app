@@ -65,7 +65,7 @@ export default function DispatchPage() {
   const [reason, setReason] = useState('')
   const [returnCart, setReturnCart] = useState<CartReturn[]>([])
   const [vehicleByFac, setVehicleByFac] = useState<Record<string, string>>({})   // vehicle no. keyed by factory, set before creating each DO
-  const [lorryReqs, setLorryReqs] = useState<{ id: string; factory_code: string; lorry_type: string; note: string | null; requested_by_name: string | null; requested_at: string }[]>([])
+  const [lorryReqs, setLorryReqs] = useState<{ id: string; factory_code: string; kind: string; lorry_type: string; note: string | null; requested_by_name: string | null; requested_at: string }[]>([])
   const [lrFactory, setLrFactory] = useState('')     // which factory to request a lorry for
   const [lrType, setLrType] = useState('any')        // small | big | any
   const [lrNote, setLrNote] = useState('')
@@ -122,7 +122,7 @@ export default function DispatchPage() {
     setOrders((o as DOrder[]) || [])
     // Open lorry requests (raised before a DO exists).
     const { data: lr } = await supabase.from('lorry_requests')
-      .select('id, factory_code, lorry_type, note, requested_by_name, requested_at').eq('status', 'open')
+      .select('id, factory_code, kind, lorry_type, note, requested_by_name, requested_at').eq('status', 'open')
       .order('requested_at', { ascending: false })
     setLorryReqs(lr || [])
     // SO number(s) per dispatched batch, so each delivery line can show its order.
@@ -294,8 +294,19 @@ export default function DispatchPage() {
     setSuccess(`Lorry requested for ${factoryName(fac)} — the warehouse has been notified.`)
     load()
   }
+  async function requestDriver() {
+    const fac = lrFactory || myFactories[0]?.code
+    if (!fac) { setError('Pick a factory to request a driver for.'); return }
+    setBusy(true); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('request_driver', { p_factory: fac, p_note: lrNote.trim() || null })
+    setBusy(false)
+    if (e) { setError(e.message); return }
+    setLrNote('')
+    setSuccess(`Driver requested for ${factoryName(fac)} — the warehouse has been notified.`)
+    load()
+  }
   async function cancelLorryReq(id: string) {
-    if (!confirm('Cancel this lorry request?')) return
+    if (!confirm('Cancel this request?')) return
     const { error: e } = await supabase.rpc('cancel_lorry_request', { p_id: id })
     if (e) { setError(e.message); return }
     setLorryReqs(prev => prev.filter(r => r.id !== id))
@@ -461,8 +472,8 @@ export default function DispatchPage() {
           <div className="bg-white border rounded-xl shadow-sm p-4 mb-6">
             <div className="flex flex-wrap items-end gap-3">
               <div>
-                <div className="font-medium text-sm mb-0.5">🚚 Request a lorry</div>
-                <p className="text-xs text-gray-500">Call the warehouse for a lorry before making the DO — load &amp; recheck, then create it.</p>
+                <div className="font-medium text-sm mb-0.5">🚚 Request transport</div>
+                <p className="text-xs text-gray-500">Call the warehouse for a lorry (and/or a driver) before making the DO — load &amp; recheck, then create it.</p>
               </div>
               <div className="flex flex-wrap items-end gap-2 ml-auto">
                 {myFactories.length > 1 && (
@@ -483,15 +494,18 @@ export default function DispatchPage() {
                   <input value={lrNote} onChange={e => setLrNote(e.target.value)} placeholder="e.g. for Kelana Jaya run" className="block mt-0.5 border rounded-lg px-2 py-1.5 text-sm w-48" />
                 </label>
                 <button onClick={requestLorry} disabled={busy} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">📞 Request lorry</button>
+                <button onClick={requestDriver} disabled={busy} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium">👤 Request driver</button>
               </div>
             </div>
             {lorryReqs.length > 0 && (
               <div className="mt-3 border-t pt-3">
-                <div className="text-xs font-medium text-gray-500 mb-1">Open lorry requests</div>
+                <div className="text-xs font-medium text-gray-500 mb-1">Open requests</div>
                 <ul className="space-y-1">
                   {lorryReqs.map(r => (
                     <li key={r.id} className="flex items-center gap-2 text-sm">
-                      <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 rounded-full px-2.5 py-0.5 text-xs">🚚 {r.lorry_type === 'any' ? 'Any' : r.lorry_type} lorry</span>
+                      {r.kind === 'driver'
+                        ? <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 rounded-full px-2.5 py-0.5 text-xs">👤 driver</span>
+                        : <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 rounded-full px-2.5 py-0.5 text-xs">🚚 {r.lorry_type === 'any' ? 'Any' : r.lorry_type} lorry</span>}
                       <span className="text-gray-600">{factoryName(r.factory_code)}</span>
                       {r.note && <span className="text-gray-400 text-xs truncate">· {r.note}</span>}
                       <span className="text-gray-400 text-xs">· {r.requested_by_name || '—'}, {fmt(r.requested_at)}</span>
