@@ -1450,3 +1450,31 @@ begin
    where id = p_id and status <> 'Acknowledged';
 end $function$;
 grant execute on function public.ack_food_loss(uuid) to authenticated;
+
+-- ============================================================================
+-- 2026-07 · Link a delivery-order line (no SO) to a pending sales order
+-- ----------------------------------------------------------------------------
+-- Attaches the delivered batch to the chosen SO (traceability) AND marks that
+-- sales line delivered against this DO (fulfilment). Used from Dispatch.
+-- ============================================================================
+create or replace function public.link_do_line_to_so(p_line_id uuid, p_so text) returns void
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_line public.dispatch_order_lines; v_do public.dispatch_orders; v_sl public.sales_order_lines;
+begin
+  select * into v_line from public.dispatch_order_lines where id = p_line_id;
+  if not found then raise exception 'Delivery line not found'; end if;
+  select * into v_do from public.dispatch_orders where id = v_line.dispatch_id;
+  if not found then raise exception 'Delivery order not found'; end if;
+  if not has_perm('dispatch', 'edit') then raise exception 'Not allowed'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_do.factory_code = any (my_factory_codes())) then raise exception 'Not your factory'; end if;
+  select * into v_sl from public.sales_order_lines
+    where so_number = p_so and item_code = v_line.item_code and factory_code = v_do.factory_code
+      and coalesce(delivered_qty, 0) < coalesce(quantity, 0)
+    order by coalesce(delivered_qty, 0) asc limit 1;
+  if not found then raise exception 'No pending line for % / % at this factory', p_so, v_line.item_code; end if;
+  if v_line.batch_id is not null and not exists (select 1 from public.production_batch_items where batch_id = v_line.batch_id and so_number = p_so) then
+    insert into public.production_batch_items (batch_id, so_number, quantity, factory_code) values (v_line.batch_id, p_so, v_line.quantity, v_do.factory_code);
+  end if;
+  update public.sales_order_lines set delivered_qty = coalesce(delivered_qty, 0) + v_line.quantity, delivered_do = v_do.do_number, delivered_at = now() where id = v_sl.id;
+end $function$;
+grant execute on function public.link_do_line_to_so(uuid, text) to authenticated;

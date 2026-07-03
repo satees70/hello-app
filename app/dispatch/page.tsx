@@ -187,6 +187,16 @@ export default function DispatchPage() {
   const availLine = (l: SLine) => remainingOf(l) > 0 && !cartLineIds.has(l.id)
   const openSOs = [...new Set(salesLines.filter(availLine).map(l => l.so_number))].sort()
   const linesForSO = salesLines.filter(l => l.so_number === dSo && availLine(l))
+  // Pending SOs for an item at a factory — used to warn/link a delivery line that has no SO.
+  const pendingSOsForItem = (itemCode: string, factory: string) => [...new Set(salesLines.filter(l => l.item_code === itemCode && l.factory_code === factory && remainingOf(l) > 0).map(l => l.so_number))].sort()
+  async function linkDoLine(lineId: string, so: string) {
+    if (!confirm(`Link this delivery to ${so} and mark that order delivered?`)) return
+    setBusy(true); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('link_do_line_to_so', { p_line_id: lineId, p_so: so })
+    setBusy(false)
+    if (e) { setError(/link_do_line_to_so/.test(e.message) ? 'Linking needs a database update — run the latest catch-up SQL.' : e.message); return }
+    setSuccess(`Linked to ${so} and marked delivered.`); load()
+  }
   function addDirect(e: React.FormEvent) {
     e.preventDefault(); setError(''); setSuccess('')
     const line = salesLines.find(l => l.id === dLineId)
@@ -264,11 +274,11 @@ export default function DispatchPage() {
     doc.text(`By: ${o.created_by_name || '—'}`, W - 10, 44.5, { align: 'right' })
     const fg = o.dispatch_order_lines || [], rt = o.material_returns || []
     const body = [
-      ...fg.map((l, i) => [String(i + 1), (l.batch_id && soByBatch[l.batch_id]) || '—', l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', l.exp_date ? fmtD(l.exp_date) : '—', 'Finished']),
-      ...rt.map((l, i) => [String(fg.length + i + 1), '—', l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', l.exp_date ? fmtD(l.exp_date) : '—', 'Return']),
+      ...fg.map((l, i) => [String(i + 1), (l.batch_id && soByBatch[l.batch_id]) || '—', l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', l.exp_date ? fmtD(l.exp_date) : '—']),
+      ...rt.map((l, i) => [String(fg.length + i + 1), 'Return', l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', l.exp_date ? fmtD(l.exp_date) : '—']),
     ]
     autoTable(doc, {
-      startY: 48, head: [['#', 'SO', 'Code', 'Item name', 'Qty', 'Batch', 'Exp', 'Type']], body,
+      startY: 48, head: [['#', 'SO', 'Code', 'Item name', 'Qty', 'Batch', 'Exp']], body,
       styles: { fontSize: 8, cellPadding: 1.4 }, headStyles: { fillColor: [30, 58, 138] },
       columnStyles: { 0: { cellWidth: 7 }, 4: { halign: 'right' } }, margin: { left: 10, right: 10 },
     })
@@ -408,7 +418,7 @@ export default function DispatchPage() {
                   {!collapsed.has(fc) && batches.filter(b => b.factory_code === fc).map(b => (
                     <tr key={b.id} className="border-b last:border-0 hover:bg-gray-50">
                       <td className="px-3 py-2">{canEdit && canFac(b.factory_code) && <input type="checkbox" checked={picked.has(b.id)} onChange={() => toggle(b.id)} className="h-4 w-4" />}</td>
-                      <td className="px-3 py-2"><span className="font-mono font-medium">{b.item_code}</span><span className="block text-gray-400">{b.description}</span>{(() => { const sos = [...new Set((b.production_batch_items || []).map(i => i.so_number).filter(Boolean))]; return sos.length ? <span className="block text-gray-400 text-xs font-mono">{sos.join(', ')}</span> : null })()}</td>
+                      <td className="px-3 py-2"><span className="font-mono font-medium">{b.item_code}</span><span className="block text-gray-400">{b.description}</span>{(() => { const sos = [...new Set((b.production_batch_items || []).map(i => i.so_number).filter(Boolean))]; if (sos.length) return <span className="block text-gray-400 text-xs font-mono">{sos.join(', ')}</span>; const cands = pendingSOsForItem(b.item_code, b.factory_code); return cands.length ? <span className="block text-amber-700 text-xs">⚠ no SO · pending {cands.slice(0, 3).join(', ')} — link on the DO after sending</span> : null })()}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{b.batch_no || '—'}{b.exp_date && <span className="block text-gray-400 text-xs">exp {fmtD(b.exp_date)}</span>}</td>
                       <td className="px-3 py-2 text-right font-semibold">{b.produced_qty}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{status(b) === 'Completed' ? <span className="text-green-700 font-medium">Completed</span> : <span className="text-amber-600">In Progress</span>}</td>
@@ -592,6 +602,10 @@ export default function DispatchPage() {
                             ? <button onClick={() => openFgEdit(l, o)} className="ml-2 text-blue-600 hover:underline text-xs">Edit</button>
                             : null}
                         {(l.batch_no || l.exp_date || (l.batch_id && soByBatch[l.batch_id])) && <span className="block ml-5 text-xs text-gray-400">{l.batch_id && soByBatch[l.batch_id] ? `SO ${soByBatch[l.batch_id]}` : ''}{l.batch_id && soByBatch[l.batch_id] && (l.batch_no || l.exp_date) ? ' · ' : ''}{l.batch_no ? `batch ${l.batch_no}` : ''}{l.batch_no && l.exp_date ? ' · ' : ''}{l.exp_date ? `exp ${fmtD(l.exp_date)}` : ''}</span>}
+                        {!(l.batch_id && soByBatch[l.batch_id]) && canFac(o.factory_code) && (() => {
+                          const cands = pendingSOsForItem(l.item_code, o.factory_code)
+                          return cands.length ? <span className="block ml-5 text-xs text-amber-700">⚠ no SO linked · pending: {cands.slice(0, 5).map(so => <button key={so} onClick={() => linkDoLine(l.id, so)} disabled={busy} className="text-blue-600 hover:underline disabled:opacity-50 mr-2 font-medium">🔗 {so}</button>)}</span> : null
+                        })()}
                       </span>
                     ))}
                     {(o.material_returns || []).map((l, i) => (
