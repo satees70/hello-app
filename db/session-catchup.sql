@@ -1298,3 +1298,43 @@ begin
     end if;
   end loop;
 end $$;
+
+-- ============================================================================
+-- 2026-07 · Factory move notifications (new location + old location)
+-- ----------------------------------------------------------------------------
+-- Upgrades the new-order trigger: when a line's factory_code changes from one
+-- real factory to another, notify the NEW location ("moved to you — check the
+-- material request") and the OLD location ("moved away"). Genuine new orders
+-- still say "New order".
+-- ============================================================================
+create or replace function public.tg_notify_sales_line() returns trigger
+ language plpgsql security definer set search_path to 'public' as $function$
+begin
+  -- Moved between two real factories → tell both the new and the old location.
+  if TG_OP = 'UPDATE' and coalesce(OLD.factory_code, '') <> '' and coalesce(NEW.factory_code, '') <> ''
+     and NEW.factory_code is distinct from OLD.factory_code then
+    insert into public.notifications (factory_code, type, title, body, link, ref)
+    values (NEW.factory_code, 'moved_in', 'Order moved to your location · ' || coalesce(NEW.so_number, ''),
+            coalesce(NEW.so_number, 'This order') || ' was moved from ' || OLD.factory_code || ' — check the material request.', '/material-requests',
+            'movedin:' || NEW.import_id::text || ':' || NEW.factory_code)
+    on conflict (ref) do nothing;
+    insert into public.notifications (factory_code, type, title, body, link, ref)
+    values (OLD.factory_code, 'moved_out', 'Order moved away · ' || coalesce(NEW.so_number, ''),
+            coalesce(NEW.so_number, 'An order') || ' was moved from your location to ' || NEW.factory_code || '.', '/sales-orders',
+            'movedout:' || NEW.import_id::text || ':' || OLD.factory_code)
+    on conflict (ref) do nothing;
+    return NEW;
+  end if;
+  -- New order (or first time a line is assigned to a location).
+  if coalesce(NEW.factory_code, '') <> '' then
+    insert into public.notifications (factory_code, type, title, body, link, ref)
+    values (NEW.factory_code, 'order', 'New order ' || coalesce(NEW.so_number, ''),
+            'A sales order for your location was added.', '/sales-orders',
+            'neworder:' || NEW.import_id::text || ':' || NEW.factory_code)
+    on conflict (ref) do nothing;
+  end if;
+  return NEW;
+end; $function$;
+drop trigger if exists notify_sales_line on public.sales_order_lines;
+create trigger notify_sales_line after insert or update of factory_code on public.sales_order_lines
+  for each row execute function public.tg_notify_sales_line();
