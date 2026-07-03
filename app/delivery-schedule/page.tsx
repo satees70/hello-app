@@ -98,6 +98,7 @@ export default function DeliverySchedulePage() {
   const [newRes, setNewRes] = useState<Record<'lorry' | 'crew', string>>({ lorry: '', crew: '' })
   const [newPhone, setNewPhone] = useState<Record<'lorry' | 'crew', string>>({ lorry: '', crew: '' })
   const [linkedNames, setLinkedNames] = useState<Set<string>>(new Set())   // employee delivery-link names (lowercased) — crew not in here is unlinked
+  const [crewWarn, setCrewWarn] = useState('')   // post-add reminder when a new crew isn't linked to an employee yet
   const didInitDate = useRef(false)   // default the date filter to the latest day, once
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
@@ -121,7 +122,11 @@ export default function DeliverySchedulePage() {
     if (!n || resources[kind].some(r => r.name.toLowerCase() === n.toLowerCase())) return
     // Crew is stored with kind 'crew'; existing 'driver'/'kelindan' rows still count as crew.
     const { error: e } = await supabase.from('delivery_resources').insert({ kind: kind === 'lorry' ? 'lorry' : 'crew', name: n, phone: (phone || '').trim() || null })
-    if (!e) { setNewRes(p => ({ ...p, [kind]: '' })); setNewPhone(p => ({ ...p, [kind]: '' })); loadResources() }
+    if (!e) {
+      setNewRes(p => ({ ...p, [kind]: '' })); setNewPhone(p => ({ ...p, [kind]: '' })); loadResources()
+      // Added — but if this crew name isn't linked to an employee yet, warn to settle it later.
+      setCrewWarn(kind === 'crew' && !isLinked(n) ? `“${n}” added. It’s not linked to an employee yet — set their Delivery link on HR › Employees when you can.` : '')
+    }
   }
   async function removeResource(id: string) {
     await supabase.from('delivery_resources').delete().eq('id', id)
@@ -545,11 +550,11 @@ export default function DeliverySchedulePage() {
         </div>
 
         {showManage && (
-          <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 overflow-auto no-print" onClick={() => setShowManage(false)}>
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 overflow-auto no-print" onClick={() => { setShowManage(false); setCrewWarn('') }}>
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl mt-10 p-5" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-semibold text-lg">Lorries · Crew (drivers &amp; kelindan)</h3>
-                <button onClick={() => setShowManage(false)} className="text-gray-400 hover:text-gray-700 text-xl leading-none">×</button>
+                <button onClick={() => { setShowManage(false); setCrewWarn('') }} className="text-gray-400 hover:text-gray-700 text-xl leading-none">×</button>
               </div>
               <p className="text-sm text-gray-500 mb-4">Drivers and kelindan share one <strong>crew</strong> list — the same person can go as a driver on one trip and a kelindan on another. Add or remove them here. (This master list is what your future driver app will use.)</p>
               <div className="grid sm:grid-cols-2 gap-4">
@@ -563,6 +568,12 @@ export default function DeliverySchedulePage() {
                         <button onClick={() => addResource(kind, newRes[kind], newPhone[kind])} className="px-3 py-1 rounded bg-gray-800 text-white text-sm shrink-0">Add</button>
                       </div>
                     </div>
+                    {kind === 'crew' && crewWarn && (
+                      <div className="mb-2 rounded bg-amber-50 border border-amber-300 px-2 py-1.5 text-xs text-amber-800 flex items-start justify-between gap-2">
+                        <span>✅ {crewWarn}</span>
+                        <button onClick={() => setCrewWarn('')} className="text-amber-500 hover:text-amber-700 shrink-0">×</button>
+                      </div>
+                    )}
                     {kind === 'crew' && (() => { const unlinked = resources.crew.filter(r => !isLinked(r.name)).length; return unlinked > 0
                       ? <div className="mb-2 rounded bg-red-50 border border-red-200 px-2 py-1 text-xs text-red-700">⚠ {unlinked} crew member(s) not linked to an employee. Set their <strong>Delivery link</strong> on HR › Employees so attendance &amp; the driver app can match them.</div>
                       : null })()}
