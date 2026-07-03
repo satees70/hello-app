@@ -22,7 +22,7 @@ interface DOrder {
   material_returns?: { id: string; item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null; reason: string | null }[]
 }
 interface CartReturn { lotId: string; itemCode: string; description: string; unit: string; batchNo: string | null; expDate?: string | null; qty: number; reason: string; factory: string; factoryName: string; manual?: boolean }
-interface SLine { id: string; so_number: string; item_code: string; description: string | null; quantity: number | null; outstanding_qty: number | null; factory_code: string; delivered_qty: number | null }
+interface SLine { id: string; so_number: string; customer_name: string | null; item_code: string; description: string | null; quantity: number | null; outstanding_qty: number | null; factory_code: string; delivered_qty: number | null }
 interface MReturn {
   id: string; factory_code: string; item_code: string; description: string | null
   batch_no: string | null; exp_date: string | null; quantity: number; reason: string | null; created_by_name: string | null; created_at: string
@@ -145,7 +145,7 @@ export default function DispatchPage() {
     const facCodes = isHO ? null : codes
     const sLines: SLine[] = []
     for (let from = 0; ; from += 1000) {
-      let q = supabase.from('sales_order_lines').select('id, so_number, item_code, description, quantity, outstanding_qty, factory_code, delivered_qty')
+      let q = supabase.from('sales_order_lines').select('id, so_number, customer_name, item_code, description, quantity, outstanding_qty, factory_code, delivered_qty')
       if (facCodes) q = q.in('factory_code', facCodes)
       const { data: sl } = await q.range(from, from + 999)
       const page = (sl as SLine[]) || []
@@ -207,6 +207,15 @@ export default function DispatchPage() {
   const linesForSO = salesLines.filter(l => l.so_number === dSo && availLine(l))
   // Pending SOs for an item at a factory — used to warn/link a delivery line that has no SO.
   const pendingSOsForItem = (itemCode: string, factory: string) => [...new Set(salesLines.filter(l => l.item_code === itemCode && l.factory_code === factory && remainingOf(l) > 0).map(l => l.so_number))].sort()
+  // Detailed pending orders for an item: SO + customer + how much is still needed.
+  const pendingDetailForItem = (itemCode: string, factory: string) => {
+    const m = new Map<string, { so: string; customer: string | null; remaining: number }>()
+    salesLines.filter(l => l.item_code === itemCode && l.factory_code === factory && remainingOf(l) > 0).forEach(l => {
+      const e = m.get(l.so_number) || { so: l.so_number, customer: l.customer_name, remaining: 0 }
+      e.remaining += remainingOf(l); if (!e.customer) e.customer = l.customer_name; m.set(l.so_number, e)
+    })
+    return [...m.values()].sort((a, b) => a.so.localeCompare(b.so))
+  }
   async function linkDoLine(lineId: string, so: string) {
     if (!confirm(`Link this delivery to ${so} and mark that order delivered?`)) return
     setBusy(true); setError(''); setSuccess('')
@@ -436,7 +445,7 @@ export default function DispatchPage() {
                   {!collapsed.has(fc) && batches.filter(b => b.factory_code === fc).map(b => (
                     <tr key={b.id} className="border-b last:border-0 hover:bg-gray-50">
                       <td className="px-3 py-2">{canEdit && canFac(b.factory_code) && <input type="checkbox" checked={picked.has(b.id)} onChange={() => toggle(b.id)} className="h-4 w-4" />}</td>
-                      <td className="px-3 py-2"><span className="font-mono font-medium">{b.item_code}</span><span className="block text-gray-400">{b.description}</span>{(() => { const sos = [...new Set((b.production_batch_items || []).map(i => i.so_number).filter(Boolean))]; if (sos.length) return <span className="block text-gray-400 text-xs font-mono">{sos.join(', ')}</span>; const cands = pendingSOsForItem(b.item_code, b.factory_code); return cands.length ? <span className="block text-amber-700 text-xs">⚠ no SO · pending {cands.slice(0, 3).join(', ')} — link on the DO after sending</span> : null })()}</td>
+                      <td className="px-3 py-2"><span className="font-mono font-medium">{b.item_code}</span><span className="block text-gray-400">{b.description}</span>{(() => { const sos = [...new Set((b.production_batch_items || []).map(i => i.so_number).filter(Boolean))]; if (sos.length) return <span className="block text-gray-400 text-xs font-mono">{sos.join(', ')}</span>; const cands = pendingDetailForItem(b.item_code, b.factory_code); return cands.length ? <span className="block text-amber-700 text-xs">⚠ no SO · pending: {cands.slice(0, 3).map(c => `${c.so}${c.customer ? ' (' + c.customer + ')' : ''} need ${c.remaining}`).join('; ')} — link on the DO after sending</span> : null })()}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{b.batch_no || '—'}{(() => { const e = expByBatch[b.id]; return e ? <span className="block text-gray-400 text-xs">exp {fmtD(e)}</span> : <span className="block text-amber-700 text-xs">⚠ no expiry</span> })()}</td>
                       <td className="px-3 py-2 text-right font-semibold">{b.produced_qty}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{status(b) === 'Completed' ? <span className="text-green-700 font-medium">Completed</span> : <span className="text-amber-600">In Progress</span>}</td>
@@ -629,8 +638,8 @@ export default function DispatchPage() {
                           return <span className={`block ml-5 text-xs ${exp ? 'text-gray-400' : 'text-amber-700'}`}>{parts.join(' · ')}</span>
                         })()}
                         {!(l.batch_id && soByBatch[l.batch_id]) && canFac(o.factory_code) && (() => {
-                          const cands = pendingSOsForItem(l.item_code, o.factory_code)
-                          return cands.length ? <span className="block ml-5 text-xs text-amber-700">⚠ no SO linked · pending: {cands.slice(0, 5).map(so => <button key={so} onClick={() => linkDoLine(l.id, so)} disabled={busy} className="text-blue-600 hover:underline disabled:opacity-50 mr-2 font-medium">🔗 {so}</button>)}</span> : null
+                          const cands = pendingDetailForItem(l.item_code, o.factory_code)
+                          return cands.length ? <span className="block ml-5 text-xs text-amber-700">⚠ no SO linked · pending for this item:<span className="block ml-4">{cands.slice(0, 8).map(c => <button key={c.so} onClick={() => linkDoLine(l.id, c.so)} disabled={busy} className="block text-left text-blue-600 hover:underline disabled:opacity-50 font-medium">🔗 {c.so}{c.customer ? ` · ${c.customer}` : ''} · need {c.remaining}</button>)}</span></span> : null
                         })()}
                       </span>
                     ))}
