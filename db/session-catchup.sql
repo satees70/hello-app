@@ -1704,7 +1704,7 @@ create or replace function public.request_do_transport(p_do_id uuid, p_kind text
 declare v_fac text; v_no text;
 begin
   if p_kind not in ('lorry', 'driver') then raise exception 'Unknown request type'; end if;
-  if not has_perm('dispatch', 'edit') then raise exception 'Not allowed'; end if;
+  if not has_perm('dispatch', 'view') then raise exception 'Not allowed'; end if;   -- transport = view is enough
   select factory_code, do_number into v_fac, v_no from public.dispatch_orders where id = p_do_id;
   if v_fac is null then raise exception 'Delivery order not found'; end if;
   if my_factory_code() <> 'HEAD_OFFICE' and not (v_fac = any (my_factory_codes())) then raise exception 'Not your factory'; end if;
@@ -1728,7 +1728,7 @@ create or replace function public.assign_do_transport(p_do_id uuid, p_kind text,
 declare v_fac text; v_val text;
 begin
   if p_kind not in ('lorry', 'driver') then raise exception 'Unknown assignment type'; end if;
-  if not has_perm('dispatch', 'edit') then raise exception 'Not allowed'; end if;
+  if not has_perm('dispatch', 'view') then raise exception 'Not allowed'; end if;   -- transport = view is enough
   select factory_code into v_fac from public.dispatch_orders where id = p_do_id;
   if v_fac is null then raise exception 'Delivery order not found'; end if;
   if my_factory_code() <> 'HEAD_OFFICE' and not (v_fac = any (my_factory_codes())) then raise exception 'Not your factory'; end if;
@@ -1853,7 +1853,7 @@ create or replace function public.fulfill_lorry_request(p_id uuid, p_lorry text 
  language plpgsql security definer set search_path to 'public' as $function$
 declare v_fac text; v_kind text; v_lorry text;
 begin
-  if not has_perm('dispatch', 'edit') then raise exception 'Not allowed'; end if;
+  if not has_perm('dispatch', 'view') then raise exception 'Not allowed'; end if;   -- transport = view is enough
   select factory_code, kind into v_fac, v_kind from public.lorry_requests where id = p_id;
   if v_fac is null then raise exception 'Request not found'; end if;
   if my_factory_code() <> 'HEAD_OFFICE' and not (v_fac = any (my_factory_codes())) then raise exception 'Not your factory'; end if;

@@ -69,7 +69,10 @@ export default function TransportPage() {
 
   const factoryName = (c: string | null) => factories.find(x => x.code === c)?.name || c || '—'
   const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
-  const canEditFac = (fac: string) => can(profile, 'dispatch', 'edit', fac)
+  // Transport is warehouse logistics — anyone who can VIEW a factory's delivery
+  // orders can assign/request/fulfil transport there (they needn't be able to
+  // create DOs). Per-factory view-only no longer blocks assigning.
+  const canEditFac = (fac: string) => can(profile, 'dispatch', 'view', fac)
   const itemCount = (o: DOrder) => (o.dispatch_order_lines?.length || 0) + (o.material_returns?.length || 0)
 
   async function assign(o: DOrder, kind: 'lorry' | 'driver', value: string) {
