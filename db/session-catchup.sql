@@ -1175,3 +1175,79 @@ alter table public.discussion_threads enable row level security;
 drop policy if exists dt_all on public.discussion_threads;
 create policy dt_all on public.discussion_threads for all
   using (auth.uid() is not null) with check (auth.uid() is not null);
+
+-- ============================================================================
+-- 2026-07 · Enable the missing notification triggers
+-- ----------------------------------------------------------------------------
+-- Only new-order / urgent / material-request notifications were live. These add
+-- notifications for: order confirmed, goods received, delivered-to-warehouse,
+-- and new discussion messages on an order. (order/urgent/mr already installed.)
+-- ============================================================================
+-- Order confirmed to production
+create or replace function public.tg_notify_confirmation() returns trigger
+ language plpgsql security definer set search_path to 'public' as $function$
+begin
+  insert into public.notifications (factory_code, type, title, body, link, ref)
+  values (NEW.factory_code, 'confirm', 'Order confirmed',
+          'Lines for your location were confirmed to production.', '/production',
+          'conf:' || NEW.import_id::text || ':' || NEW.factory_code)
+  on conflict (ref) do nothing;
+  return NEW;
+end; $function$;
+drop trigger if exists notify_confirmation on public.document_confirmations;
+create trigger notify_confirmation after insert on public.document_confirmations
+  for each row execute function public.tg_notify_confirmation();
+
+-- Goods received against a delivery order (status change)
+create or replace function public.tg_notify_grn() returns trigger
+ language plpgsql security definer set search_path to 'public' as $function$
+begin
+  if NEW.status is distinct from OLD.status and NEW.status in ('Received', 'Partially Received') then
+    insert into public.notifications (factory_code, type, title, body, link, ref)
+    values (NEW.factory_code, 'grn', NEW.status || ': ' || coalesce(NEW.do_number, NEW.file_name),
+            'A delivery order for your location was ' || lower(NEW.status) || '.', '/incoming',
+            'grn:' || NEW.id::text || ':' || NEW.status)
+    on conflict (ref) do nothing;
+  end if;
+  return NEW;
+end; $function$;
+drop trigger if exists notify_grn on public.delivery_orders;
+create trigger notify_grn after update of status on public.delivery_orders
+  for each row execute function public.tg_notify_grn();
+
+-- Finished goods delivered to the warehouse (batch dispatched)
+create or replace function public.tg_notify_dispatch() returns trigger
+ language plpgsql security definer set search_path to 'public' as $function$
+begin
+  if OLD.dispatched_at is null and NEW.dispatched_at is not null then
+    insert into public.notifications (factory_code, type, title, body, link, ref)
+    values (NEW.factory_code, 'dispatch', 'Delivered to warehouse ' || coalesce(NEW.batch_no, ''),
+            coalesce(NEW.item_code, '') || ' was delivered to the warehouse.', '/dispatch',
+            'dispatch:' || NEW.id::text)
+    on conflict (ref) do nothing;
+  end if;
+  return NEW;
+end; $function$;
+drop trigger if exists notify_dispatch on public.production_batches;
+create trigger notify_dispatch after update of dispatched_at on public.production_batches
+  for each row execute function public.tg_notify_dispatch();
+
+-- New discussion message linked to an SO → notify that order's location(s)
+create or replace function public.tg_notify_discussion() returns trigger
+ language plpgsql security definer set search_path to 'public' as $function$
+begin
+  if NEW.so_number is not null then
+    insert into public.notifications (factory_code, type, title, body, link, ref)
+    select distinct sol.factory_code, 'discussion', 'New message · SO ' || NEW.so_number,
+           coalesce(NEW.author_name, 'Someone') || ': ' || left(NEW.body, 80),
+           '/discussion?so=' || NEW.so_number,
+           'disc:' || NEW.id::text || ':' || sol.factory_code
+    from public.sales_order_lines sol
+    where sol.so_number = NEW.so_number and coalesce(sol.factory_code, '') <> ''
+    on conflict (ref) do nothing;
+  end if;
+  return NEW;
+end; $function$;
+drop trigger if exists notify_discussion on public.discussions;
+create trigger notify_discussion after insert on public.discussions
+  for each row execute function public.tg_notify_discussion();
