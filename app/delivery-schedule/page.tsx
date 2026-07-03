@@ -552,10 +552,13 @@ export default function DeliverySchedulePage() {
           shownSched.forEach(s => { const k = `${s.route || ''}||${s.delivery_date || ''}`; (groups[k] = groups[k] || { route: s.route, date: s.delivery_date, rows: [] }).rows.push(s) })
           const li = (r: string | null) => { const i = LINES.indexOf(r || ''); return i < 0 ? 999 : i }
           const keys = Object.keys(groups).sort((a, b) => (li(groups[a].route) - li(groups[b].route)) || (groups[a].date || '').localeCompare(groups[b].date || ''))
-          // Driver trips summary (each line+date with a driver = one trip), respecting the date filter.
-          const driverSum: Record<string, { total: number; cat: Record<string, number> }> = {}
-          Object.values(trips).filter(t => (dateFilter === 'all' || t.delivery_date === dateFilter) && (t.driver || '').trim())
-            .forEach(t => { const d = t.driver!.trim(); const e = (driverSum[d] = driverSum[d] || { total: 0, cat: {} }); e.total++; const c = t.category || '—'; e.cat[c] = (e.cat[c] || 0) + 1 })
+          // Driver trips summary — only lines that actually have orders on the date count as a trip.
+          // (A leftover driver assignment on a line with no orders is NOT a real trip.)
+          const activeKeys = new Set(Object.values(groups).map(g => `${g.route}|${g.date}`))
+          const driverSum: Record<string, { total: number; lines: string[] }> = {}
+          Object.values(trips)
+            .filter(t => (dateFilter === 'all' || t.delivery_date === dateFilter) && (t.driver || '').trim() && activeKeys.has(`${t.route}|${t.delivery_date}`))
+            .forEach(t => { const d = t.driver!.trim(); const e = (driverSum[d] = driverSum[d] || { total: 0, lines: [] }); e.total++; e.lines.push(`${t.route}${t.remark ? ' — ' + t.remark : ''}${t.category ? ' · ' + t.category : ''}`) })
           const driverNames = Object.keys(driverSum).sort()
           return (
           <div id="delivery-print" className="space-y-5">
@@ -568,7 +571,7 @@ export default function DeliverySchedulePage() {
               <div className="mb-3 p-3 rounded-lg bg-gray-50 border text-sm">
                 <div className="font-semibold mb-1">Driver trips{dateFilter !== 'all' ? ` — ${fmtD(dateFilter)}` : ' (all dates)'}</div>
                 <div className="grid sm:grid-cols-2 gap-x-6 gap-y-0.5">
-                  {driverNames.map(d => <div key={d}><strong>{d}</strong>: {driverSum[d].total} trip(s) <span className="text-gray-500">({Object.entries(driverSum[d].cat).map(([c, n]) => `${c} ${n}`).join(', ')})</span></div>)}
+                  {driverNames.map(d => <div key={d}><strong>{d}</strong>: {driverSum[d].total} trip(s) <span className="text-gray-500">({driverSum[d].lines.join('; ')})</span></div>)}
                 </div>
               </div>
             )}
