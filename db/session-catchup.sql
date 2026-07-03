@@ -1202,7 +1202,7 @@ create trigger notify_confirmation after insert on public.document_confirmations
 create or replace function public.tg_notify_grn() returns trigger
  language plpgsql security definer set search_path to 'public' as $function$
 begin
-  if NEW.status is distinct from OLD.status and NEW.status in ('Received', 'Partially Received') then
+  if NEW.status is distinct from OLD.status and NEW.status in ('Received', 'Partially Received') and coalesce(NEW.factory_code, '') <> '' then
     insert into public.notifications (factory_code, type, title, body, link, ref)
     values (NEW.factory_code, 'grn', NEW.status || ': ' || coalesce(NEW.do_number, NEW.file_name),
             'A delivery order for your location was ' || lower(NEW.status) || '.', '/incoming',
@@ -1356,7 +1356,7 @@ begin
     v_uid := nullif(coalesce(v_new->>'requested_by', v_new->>'created_by'), '')::uuid;
     v_fac := coalesce(v_new->>'factory_code', v_new->>'from_factory');
     insert into public.notifications (user_id, factory_code, type, title, body, link, ref)
-    values (v_uid, case when v_uid is null then v_fac else null end, 'request_result',
+    values (v_uid, coalesce(v_fac, 'HEAD_OFFICE'), 'request_result',   -- factory_code is NOT NULL; user_id drives who sees it
             'Request ' || lower(v_status) || ': ' || v_label,
             'Your ' || v_label || ' request was ' || lower(v_status) || ' by Head Office.', '/sales-orders/changes',
             'reqres:' || TG_TABLE_NAME || ':' || (v_new->>'id') || ':' || v_status)
