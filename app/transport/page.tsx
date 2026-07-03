@@ -5,6 +5,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
 import { can } from '@/lib/permissions'
+import { VEHICLE_TYPES, lorryTypeLabel } from '@/lib/lorryTypes'
 import MultiFilter from '@/components/MultiFilter'
 
 interface DOrder {
@@ -22,7 +23,7 @@ export default function TransportPage() {
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
   const [lorries, setLorries] = useState<{ id: string; name: string; parked_at: string | null; lorry_type: string | null }[]>([])
   const [crew, setCrew] = useState<string[]>([])
-  const [lorryReqs, setLorryReqs] = useState<{ id: string; factory_code: string; kind: string; lorry_type: string; note: string | null; requested_by_name: string | null; requested_at: string }[]>([])
+  const [lorryReqs, setLorryReqs] = useState<{ id: string; factory_code: string; kind: string; lorry_type: string; note: string | null; destination: string | null; requested_by_name: string | null; requested_at: string }[]>([])
   const [search, setSearch] = useState('')
   const [facF, setFacF] = useState<Set<string>>(new Set())
   const [pendingOnly, setPendingOnly] = useState(true)
@@ -38,7 +39,7 @@ export default function TransportPage() {
       supabase.from('dispatch_orders')
         .select('id, do_number, factory_code, created_at, created_by_name, vehicle, lorry_requested_at, driver_name, driver_requested_at, dispatch_order_lines(item_code, quantity), material_returns(item_code, quantity)')
         .order('created_at', { ascending: false }).limit(100),
-      supabase.from('lorry_requests').select('id, factory_code, kind, lorry_type, note, requested_by_name, requested_at').eq('status', 'open').order('requested_at', { ascending: false }),
+      supabase.from('lorry_requests').select('id, factory_code, kind, lorry_type, note, destination, requested_by_name, requested_at').eq('status', 'open').order('requested_at', { ascending: false }),
     ])
     setFactories(f || [])
     setLorries((res || []).filter(r => r.kind === 'lorry').map(r => ({ id: r.id, name: r.name, parked_at: r.parked_at, lorry_type: r.lorry_type })))
@@ -107,7 +108,7 @@ export default function TransportPage() {
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
-        <h1 className="text-2xl font-bold mb-1">Transport</h1>
+        <h1 className="text-2xl font-bold mb-1">Lorry Internal Transfer</h1>
         <p className="text-gray-500 text-sm mb-4">Assign a lorry and a driver to each delivery order. A lorry parked on-site can be assigned straight away; if none is available, request one from the warehouse. Assignments show up in the driver app.</p>
 
         {error && <div className="mb-4 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{error}</div>}
@@ -132,8 +133,9 @@ export default function TransportPage() {
                   <li key={r.id} className="flex flex-wrap items-center gap-2 text-sm border-b last:border-0 pb-2 last:pb-0">
                     {isDriver
                       ? <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 rounded-full px-2.5 py-0.5 text-xs font-medium">👤 driver</span>
-                      : <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 rounded-full px-2.5 py-0.5 text-xs font-medium">🚚 {r.lorry_type === 'any' ? 'Any' : r.lorry_type} lorry</span>}
+                      : <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 rounded-full px-2.5 py-0.5 text-xs font-medium">🚚 {lorryTypeLabel(r.lorry_type)}</span>}
                     <span className="text-gray-700 font-medium">{factoryName(r.factory_code)}</span>
+                    {r.destination && <span className="text-gray-600 text-xs">→ {r.destination}</span>}
                     {r.note && <span className="text-gray-500 text-xs">· {r.note}</span>}
                     <span className="text-gray-400 text-xs">· {r.requested_by_name || '—'}, {fmt(r.requested_at)}</span>
                     <div className="flex items-center gap-2 ml-auto">
@@ -143,7 +145,7 @@ export default function TransportPage() {
                         <>
                           <select value="" onChange={e => fulfillLorry(r.id, e.target.value)} disabled={!editable || busy === 'lr' + r.id} className="border rounded px-2 py-1 text-xs">
                             <option value="">Sent lorry…</option>
-                            {lorries.map(l => <option key={l.id} value={l.name}>{l.name}{l.lorry_type ? ` · ${l.lorry_type}` : ''}{l.parked_at ? ` · at ${factoryName(l.parked_at)}` : ''}</option>)}
+                            {lorries.map(l => <option key={l.id} value={l.name}>{l.name}{l.lorry_type ? ` · ${lorryTypeLabel(l.lorry_type)}` : ''}{l.parked_at ? ` · at ${factoryName(l.parked_at)}` : ''}</option>)}
                           </select>
                           <button onClick={() => fulfillLorry(r.id, '')} disabled={!editable || busy === 'lr' + r.id} className="text-xs text-gray-500 hover:underline">Done (no lorry)</button>
                         </>
@@ -167,10 +169,9 @@ export default function TransportPage() {
                 {lorries.map(l => (
                   <div key={l.id} className="flex items-center gap-2 border rounded-lg px-3 py-2">
                     <span className="font-medium text-sm flex-1 truncate">🚚 {l.name}</span>
-                    <select value={l.lorry_type || ''} onChange={e => setLorrySize(l.id, e.target.value)} className="border rounded px-1.5 py-1 text-xs" title="Lorry size">
-                      <option value="">size?</option>
-                      <option value="small">Small</option>
-                      <option value="big">Big</option>
+                    <select value={l.lorry_type || ''} onChange={e => setLorrySize(l.id, e.target.value)} className="border rounded px-1.5 py-1 text-xs" title="Lorry type">
+                      <option value="">type?</option>
+                      {VEHICLE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                     </select>
                     <select value={l.parked_at || ''} onChange={e => setParked(l.id, e.target.value)} disabled={busy === 'park' + l.id} className="border rounded px-2 py-1 text-xs">
                       <option value="">— on the road —</option>
@@ -213,8 +214,8 @@ export default function TransportPage() {
                             return (
                               <select value="" onChange={e => assign(o, 'lorry', e.target.value)} disabled={!editable || busy === o.id + 'lorry'} className="border rounded px-2 py-1 text-xs w-44">
                                 <option value="">{onSite.length ? `Assign on-site lorry (${onSite.length})…` : 'Assign lorry…'}</option>
-                                {onSite.length > 0 && <optgroup label={`🅿 Parked here (${onSite.length})`}>{onSite.map(l => <option key={l.id} value={l.name}>{l.name}{l.lorry_type ? ` · ${l.lorry_type}` : ''}</option>)}</optgroup>}
-                                {others.length > 0 && <optgroup label="Other lorries">{others.map(l => <option key={l.id} value={l.name}>{l.name}{l.lorry_type ? ` · ${l.lorry_type}` : ''}{l.parked_at ? ` · at ${factoryName(l.parked_at)}` : ''}</option>)}</optgroup>}
+                                {onSite.length > 0 && <optgroup label={`🅿 Parked here (${onSite.length})`}>{onSite.map(l => <option key={l.id} value={l.name}>{l.name}{l.lorry_type ? ` · ${lorryTypeLabel(l.lorry_type)}` : ''}</option>)}</optgroup>}
+                                {others.length > 0 && <optgroup label="Other lorries">{others.map(l => <option key={l.id} value={l.name}>{l.name}{l.lorry_type ? ` · ${lorryTypeLabel(l.lorry_type)}` : ''}{l.parked_at ? ` · at ${factoryName(l.parked_at)}` : ''}</option>)}</optgroup>}
                               </select>
                             )
                           })()}

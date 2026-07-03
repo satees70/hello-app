@@ -5,6 +5,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can, hasCap } from '@/lib/permissions'
+import { LORRY_TYPES, lorryTypeLabel } from '@/lib/lorryTypes'
 import ItemPicker from '@/components/ItemPicker'
 
 interface Item { id: string; code: string; description: string; unit: string }
@@ -65,10 +66,11 @@ export default function DispatchPage() {
   const [reason, setReason] = useState('')
   const [returnCart, setReturnCart] = useState<CartReturn[]>([])
   const [vehicleByFac, setVehicleByFac] = useState<Record<string, string>>({})   // vehicle no. keyed by factory, set before creating each DO
-  const [lorryReqs, setLorryReqs] = useState<{ id: string; factory_code: string; kind: string; lorry_type: string; note: string | null; requested_by_name: string | null; requested_at: string }[]>([])
+  const [lorryReqs, setLorryReqs] = useState<{ id: string; factory_code: string; kind: string; lorry_type: string; note: string | null; destination: string | null; requested_by_name: string | null; requested_at: string }[]>([])
   const [lrFactory, setLrFactory] = useState('')     // which factory to request a lorry for
-  const [lrType, setLrType] = useState('any')        // small | big | any
+  const [lrType, setLrType] = useState('any')        // see LORRY_TYPES
   const [lrNote, setLrNote] = useState('')
+  const [lrDest, setLrDest] = useState('')           // where the lorry should go
   const [salesLines, setSalesLines] = useState<SLine[]>([])
   const [directCart, setDirectCart] = useState<{ lineId: string; so: string; itemCode: string; description: string; qty: number; batchNo: string; expDate: string; factory: string; factoryName: string }[]>([])
   const [dSo, setDSo] = useState('')
@@ -122,7 +124,7 @@ export default function DispatchPage() {
     setOrders((o as DOrder[]) || [])
     // Open lorry requests (raised before a DO exists).
     const { data: lr } = await supabase.from('lorry_requests')
-      .select('id, factory_code, kind, lorry_type, note, requested_by_name, requested_at').eq('status', 'open')
+      .select('id, factory_code, kind, lorry_type, note, destination, requested_by_name, requested_at').eq('status', 'open')
       .order('requested_at', { ascending: false })
     setLorryReqs(lr || [])
     // SO number(s) per dispatched batch, so each delivery line can show its order.
@@ -287,10 +289,10 @@ export default function DispatchPage() {
     const fac = lrFactory || myFactories[0]?.code
     if (!fac) { setError('Pick a factory to request a lorry for.'); return }
     setBusy(true); setError(''); setSuccess('')
-    const { error: e } = await supabase.rpc('request_lorry', { p_factory: fac, p_type: lrType, p_note: lrNote.trim() || null })
+    const { error: e } = await supabase.rpc('request_lorry', { p_factory: fac, p_type: lrType, p_note: lrNote.trim() || null, p_dest: lrDest.trim() || null })
     setBusy(false)
     if (e) { setError(e.message); return }
-    setLrNote(''); setLrType('any')
+    setLrNote(''); setLrType('any'); setLrDest('')
     setSuccess(`Lorry requested for ${factoryName(fac)} — the warehouse has been notified.`)
     load()
   }
@@ -298,10 +300,10 @@ export default function DispatchPage() {
     const fac = lrFactory || myFactories[0]?.code
     if (!fac) { setError('Pick a factory to request a driver for.'); return }
     setBusy(true); setError(''); setSuccess('')
-    const { error: e } = await supabase.rpc('request_driver', { p_factory: fac, p_note: lrNote.trim() || null })
+    const { error: e } = await supabase.rpc('request_driver', { p_factory: fac, p_note: lrNote.trim() || null, p_dest: lrDest.trim() || null })
     setBusy(false)
     if (e) { setError(e.message); return }
-    setLrNote('')
+    setLrNote(''); setLrDest('')
     setSuccess(`Driver requested for ${factoryName(fac)} — the warehouse has been notified.`)
     load()
   }
@@ -485,13 +487,14 @@ export default function DispatchPage() {
                 )}
                 <label className="text-xs text-gray-600">Lorry type
                   <select value={lrType} onChange={e => setLrType(e.target.value)} className="block mt-0.5 border rounded-lg px-2 py-1.5 text-sm">
-                    <option value="any">Any</option>
-                    <option value="small">Small</option>
-                    <option value="big">Big</option>
+                    {LORRY_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                   </select>
                 </label>
+                <label className="text-xs text-gray-600">Send to
+                  <input value={lrDest} onChange={e => setLrDest(e.target.value)} placeholder="where the lorry should go" className="block mt-0.5 border rounded-lg px-2 py-1.5 text-sm w-44" />
+                </label>
                 <label className="text-xs text-gray-600">Note (optional)
-                  <input value={lrNote} onChange={e => setLrNote(e.target.value)} placeholder="e.g. for Kelana Jaya run" className="block mt-0.5 border rounded-lg px-2 py-1.5 text-sm w-48" />
+                  <input value={lrNote} onChange={e => setLrNote(e.target.value)} placeholder="e.g. urgent" className="block mt-0.5 border rounded-lg px-2 py-1.5 text-sm w-40" />
                 </label>
                 <button onClick={requestLorry} disabled={busy} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">📞 Request lorry</button>
                 <button onClick={requestDriver} disabled={busy} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium">👤 Request driver</button>
@@ -505,15 +508,16 @@ export default function DispatchPage() {
                     <li key={r.id} className="flex items-center gap-2 text-sm">
                       {r.kind === 'driver'
                         ? <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 rounded-full px-2.5 py-0.5 text-xs">👤 driver</span>
-                        : <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 rounded-full px-2.5 py-0.5 text-xs">🚚 {r.lorry_type === 'any' ? 'Any' : r.lorry_type} lorry</span>}
+                        : <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 rounded-full px-2.5 py-0.5 text-xs">🚚 {lorryTypeLabel(r.lorry_type)}</span>}
                       <span className="text-gray-600">{factoryName(r.factory_code)}</span>
+                      {r.destination && <span className="text-gray-600 text-xs">→ {r.destination}</span>}
                       {r.note && <span className="text-gray-400 text-xs truncate">· {r.note}</span>}
                       <span className="text-gray-400 text-xs">· {r.requested_by_name || '—'}, {fmt(r.requested_at)}</span>
                       {canFac(r.factory_code) && <button onClick={() => cancelLorryReq(r.id)} className="text-red-500 hover:underline text-xs ml-auto shrink-0">Cancel</button>}
                     </li>
                   ))}
                 </ul>
-                <p className="text-[11px] text-gray-400 mt-1">The warehouse assigns the lorry to a site on the Transport page; once it&apos;s parked here you can create the DO and pick it.</p>
+                <p className="text-[11px] text-gray-400 mt-1">The warehouse handles these on the Lorry Internal Transfer page; once a lorry is parked here you can create the DO and pick it.</p>
               </div>
             )}
           </div>

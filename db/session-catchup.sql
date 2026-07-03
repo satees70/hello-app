@@ -1798,48 +1798,54 @@ create policy lr_read on public.lorry_requests for select
 alter table public.lorry_requests add column if not exists kind text not null default 'lorry';
 alter table public.lorry_requests drop constraint if exists lorry_requests_reqkind_check;
 alter table public.lorry_requests add constraint lorry_requests_reqkind_check check (kind in ('lorry', 'driver'));
+-- Where the lorry should go (e.g. the delivery destination).
+alter table public.lorry_requests add column if not exists destination text;
+-- Lorry types are maintained in app code (lib/lorryTypes.ts) so new ones (van,
+-- reach truck, …) can be added without SQL — drop the fixed CHECK on the type.
+alter table public.lorry_requests drop constraint if exists lorry_requests_lorry_type_check;
 
 -- Raise an early call for a driver at a site (before the DO exists).
-create or replace function public.request_driver(p_factory text, p_note text default null) returns uuid
+drop function if exists public.request_driver(text, text);
+create or replace function public.request_driver(p_factory text, p_note text default null, p_dest text default null) returns uuid
  language plpgsql security definer set search_path to 'public' as $function$
 declare v_id uuid; v_name text;
 begin
   if not has_perm('dispatch', 'edit') then raise exception 'Not allowed'; end if;
   if my_factory_code() <> 'HEAD_OFFICE' and not (p_factory = any (my_factory_codes())) then raise exception 'Not your factory'; end if;
   select full_name into v_name from public.profiles where id = auth.uid();
-  insert into public.lorry_requests (factory_code, kind, lorry_type, note, requested_by, requested_by_name)
-  values (p_factory, 'driver', 'any', nullif(btrim(p_note), ''), auth.uid(), v_name)
+  insert into public.lorry_requests (factory_code, kind, lorry_type, note, destination, requested_by, requested_by_name)
+  values (p_factory, 'driver', 'any', nullif(btrim(p_note), ''), nullif(btrim(p_dest), ''), auth.uid(), v_name)
   returning id into v_id;
   insert into public.notifications (factory_code, type, title, body, link, ref)
   values (p_factory, 'transport', 'Driver requested',
-          coalesce(v_name, 'Production') || ' asked for a driver.' || coalesce(' ' || nullif(btrim(p_note), ''), ''),
+          coalesce(v_name, 'Production') || ' asked for a driver.' || coalesce(' → ' || nullif(btrim(p_dest), ''), '') || coalesce(' ' || nullif(btrim(p_note), ''), ''),
           '/transport', 'driver-req:' || v_id::text)
   on conflict (ref) do nothing;
   return v_id;
 end; $function$;
-grant execute on function public.request_driver(text, text) to authenticated;
+grant execute on function public.request_driver(text, text, text) to authenticated;
 
 -- Production/warehouse raises a call for a lorry at a site (no DO yet).
-create or replace function public.request_lorry(p_factory text, p_type text default 'any', p_note text default null) returns uuid
+drop function if exists public.request_lorry(text, text, text);
+create or replace function public.request_lorry(p_factory text, p_type text default 'any', p_note text default null, p_dest text default null) returns uuid
  language plpgsql security definer set search_path to 'public' as $function$
 declare v_id uuid; v_name text;
 begin
   if not has_perm('dispatch', 'edit') then raise exception 'Not allowed'; end if;
-  if coalesce(p_type, 'any') not in ('small', 'big', 'any') then raise exception 'Unknown lorry type'; end if;
   if my_factory_code() <> 'HEAD_OFFICE' and not (p_factory = any (my_factory_codes())) then raise exception 'Not your factory'; end if;
   select full_name into v_name from public.profiles where id = auth.uid();
-  insert into public.lorry_requests (factory_code, lorry_type, note, requested_by, requested_by_name)
-  values (p_factory, coalesce(p_type, 'any'), nullif(btrim(p_note), ''), auth.uid(), v_name)
+  insert into public.lorry_requests (factory_code, lorry_type, note, destination, requested_by, requested_by_name)
+  values (p_factory, coalesce(nullif(btrim(p_type), ''), 'any'), nullif(btrim(p_note), ''), nullif(btrim(p_dest), ''), auth.uid(), v_name)
   returning id into v_id;
   insert into public.notifications (factory_code, type, title, body, link, ref)
   values (p_factory, 'transport',
           'Lorry requested' || (case when coalesce(p_type,'any') = 'any' then '' else ' (' || p_type || ')' end),
-          coalesce(v_name, 'Production') || ' asked for a lorry.' || coalesce(' ' || nullif(btrim(p_note), ''), ''),
+          coalesce(v_name, 'Production') || ' asked for a lorry.' || coalesce(' → ' || nullif(btrim(p_dest), ''), '') || coalesce(' ' || nullif(btrim(p_note), ''), ''),
           '/transport', 'lorry-req:' || v_id::text)
   on conflict (ref) do nothing;
   return v_id;
 end; $function$;
-grant execute on function public.request_lorry(text, text, text) to authenticated;
+grant execute on function public.request_lorry(text, text, text, text) to authenticated;
 
 -- Warehouse marks a request done; for a lorry request, naming the lorry parks
 -- it on-site. For a driver request it's just an acknowledgement.
