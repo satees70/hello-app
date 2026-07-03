@@ -20,11 +20,12 @@ export default function TransportPage() {
   useRequireView(profile, 'dispatch')
   const [orders, setOrders] = useState<DOrder[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
-  const [lorries, setLorries] = useState<string[]>([])
+  const [lorries, setLorries] = useState<{ id: string; name: string; parked_at: string | null }[]>([])
   const [crew, setCrew] = useState<string[]>([])
   const [search, setSearch] = useState('')
   const [facF, setFacF] = useState<Set<string>>(new Set())
   const [pendingOnly, setPendingOnly] = useState(true)
+  const [showParking, setShowParking] = useState(false)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
 
@@ -32,15 +33,22 @@ export default function TransportPage() {
   async function load() {
     const [{ data: f }, { data: res }, { data: o }] = await Promise.all([
       supabase.from('factories').select('code, name').order('code'),
-      supabase.from('delivery_resources').select('kind, name').eq('active', true).order('name'),
+      supabase.from('delivery_resources').select('id, kind, name, parked_at').eq('active', true).order('name'),
       supabase.from('dispatch_orders')
         .select('id, do_number, factory_code, created_at, created_by_name, vehicle, lorry_requested_at, driver_name, driver_requested_at, dispatch_order_lines(item_code, quantity), material_returns(item_code, quantity)')
         .order('created_at', { ascending: false }).limit(100),
     ])
     setFactories(f || [])
-    setLorries((res || []).filter(r => r.kind === 'lorry').map(r => r.name))
+    setLorries((res || []).filter(r => r.kind === 'lorry').map(r => ({ id: r.id, name: r.name, parked_at: r.parked_at })))
     setCrew([...new Set((res || []).filter(r => r.kind !== 'lorry').map(r => r.name))].sort())
     setOrders((o as DOrder[]) || [])
+  }
+  async function setParked(id: string, factory: string) {
+    setBusy('park' + id); setError('')
+    const { error: e } = await supabase.from('delivery_resources').update({ parked_at: factory || null }).eq('id', id)
+    setBusy('')
+    if (e) { setError(e.message); return }
+    setLorries(prev => prev.map(l => l.id === id ? { ...l, parked_at: factory || null } : l))
   }
 
   const factoryName = (c: string | null) => factories.find(x => x.code === c)?.name || c || '—'
@@ -94,7 +102,30 @@ export default function TransportPage() {
           <label className="flex items-center gap-1.5"><input type="checkbox" checked={pendingOnly} onChange={e => setPendingOnly(e.target.checked)} />Needs a lorry or driver</label>
           {isHO && <div className="w-48"><span className="text-xs text-gray-500">Factory</span><MultiFilter values={[...new Set(orders.map(o => factoryName(o.factory_code)))].sort()} selected={facF} onChange={setFacF} /></div>}
           <span className="text-amber-700 text-xs">🚚 {needLorry} need a lorry · 👤 {needDriver} need a driver</span>
+          <button onClick={() => setShowParking(v => !v)} className="text-xs text-blue-600 hover:underline">🅿 Lorry parking</button>
         </div>
+
+        {showParking && (
+          <div className="mb-4 bg-white rounded-xl shadow-sm border p-4">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="font-medium">🅿 Where is each lorry parked?</h2>
+              <span className="text-xs text-gray-400">Set this when a driver drops a lorry off. On-site lorries show up first when assigning.</span>
+            </div>
+            {lorries.length === 0 ? <p className="text-sm text-gray-400">No lorries in the list yet — add them under Delivery Schedule › Manage lorries / crew.</p> : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {lorries.map(l => (
+                  <div key={l.id} className="flex items-center gap-2 border rounded-lg px-3 py-2">
+                    <span className="font-medium text-sm flex-1 truncate">🚚 {l.name}</span>
+                    <select value={l.parked_at || ''} onChange={e => setParked(l.id, e.target.value)} disabled={busy === 'park' + l.id} className="border rounded px-2 py-1 text-xs">
+                      <option value="">— on the road —</option>
+                      {factories.map(f => <option key={f.code} value={f.code}>{f.name}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="bg-white rounded-xl shadow-sm border overflow-auto">
           <table className="w-full text-sm">
@@ -120,10 +151,17 @@ export default function TransportPage() {
                         </span>
                       ) : (
                         <div className="flex flex-col gap-1">
-                          <select value="" onChange={e => assign(o, 'lorry', e.target.value)} disabled={!editable || busy === o.id + 'lorry'} className="border rounded px-2 py-1 text-xs w-40">
-                            <option value="">Assign on-site lorry…</option>
-                            {lorries.map(l => <option key={l} value={l}>{l}</option>)}
-                          </select>
+                          {(() => {
+                            const onSite = lorries.filter(l => l.parked_at === o.factory_code)
+                            const others = lorries.filter(l => l.parked_at !== o.factory_code)
+                            return (
+                              <select value="" onChange={e => assign(o, 'lorry', e.target.value)} disabled={!editable || busy === o.id + 'lorry'} className="border rounded px-2 py-1 text-xs w-44">
+                                <option value="">{onSite.length ? `Assign on-site lorry (${onSite.length})…` : 'Assign lorry…'}</option>
+                                {onSite.length > 0 && <optgroup label={`🅿 Parked here (${onSite.length})`}>{onSite.map(l => <option key={l.id} value={l.name}>{l.name}</option>)}</optgroup>}
+                                {others.length > 0 && <optgroup label="Other lorries">{others.map(l => <option key={l.id} value={l.name}>{l.name}{l.parked_at ? ` · at ${factoryName(l.parked_at)}` : ''}</option>)}</optgroup>}
+                              </select>
+                            )
+                          })()}
                           <div className="flex items-center gap-2">
                             <button onClick={() => request(o, 'lorry')} disabled={!editable || busy === o.id + 'lorryreq'} className="text-xs text-blue-600 hover:underline disabled:opacity-50">{o.lorry_requested_at ? 'Re-request' : '📞 Request lorry'}</button>
                             {o.lorry_requested_at && <span className="text-[11px] text-amber-600">requested {fmt(o.lorry_requested_at)}</span>}

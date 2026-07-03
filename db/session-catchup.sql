@@ -1750,3 +1750,11 @@ begin
   end if;
 end; $function$;
 grant execute on function public.assign_do_transport(uuid, text, text) to authenticated;
+
+-- ============================================================================
+-- 2026-07 · Where each lorry is currently parked. A driver returning from a
+-- delivery parks the lorry at a production site; marking it here makes it show
+-- as an on-site lorry there, so production can assign it to the next DO.
+-- null = whereabouts unknown / out on the road.
+-- ============================================================================
+alter table public.delivery_resources add column if not exists parked_at text;
