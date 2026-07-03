@@ -65,6 +65,8 @@ export default function GrindingPage() {
   const [items, setItems] = useState<{ code: string; description: string | null }[]>([])
   const [machines, setMachines] = useState<string[]>([])   // grinding machine master list
   const [emps, setEmps] = useState<string[]>([])           // HR employee names (for "Grind by")
+  const [showMachines, setShowMachines] = useState(false)
+  const [newMachine, setNewMachine] = useState('')
   const [saving, setSaving] = useState(false)
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -90,6 +92,14 @@ export default function GrindingPage() {
     supabase.from('grinding_machines').select('name').eq('active', true).order('name').then(({ data }) => setMachines((data || []).map(r => r.name)))
     supabase.from('employees').select('name').eq('active', true).order('name').then(({ data }) => setEmps((data || []).map(r => r.name).filter(Boolean)))
   }, [profile])
+  async function addMachine() {
+    const n = newMachine.trim(); if (!n || machines.some(m => m.toLowerCase() === n.toLowerCase())) { setNewMachine(''); return }
+    const { error } = await supabase.from('grinding_machines').insert({ name: n })
+    if (!error) { setMachines(p => [...p, n].sort()); setNewMachine('') }
+  }
+  async function removeMachine(name: string) {
+    await supabase.from('grinding_machines').delete().eq('name', name); setMachines(p => p.filter(m => m !== name))
+  }
 
   async function loadFactories() {
     const { data } = await supabase.from('factories').select('code, name').order('code'); setFactories(data || [])
@@ -538,13 +548,24 @@ export default function GrindingPage() {
 
             {/* Machine + who ground it */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-              <div><label className="block text-sm font-medium mb-1">Grinding machine ID</label>
+              <div>
+                <div className="flex items-center justify-between mb-1"><label className="block text-sm font-medium">Grinding machine ID</label>{recEdit && <button type="button" onClick={() => setShowMachines(true)} className="text-xs text-blue-600 hover:underline">🛠 Manage machines</button>}</div>
                 <input list="grind-machines" value={insp.machine_id || ''} onChange={e => setInsp(s => ({ ...s, machine_id: e.target.value }))} disabled={!recEdit} placeholder="Pick or type a machine…" className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100" />
                 <datalist id="grind-machines">{machines.map(m => <option key={m} value={m} />)}</datalist>
                 <span className="text-[11px] text-gray-400">Pick from the list, or type a new one — it’s added to the machine list.</span></div>
-              <div><label className="block text-sm font-medium mb-1">Grind by</label>
-                <input list="grind-emps" value={insp.grind_by || ''} onChange={e => setInsp(s => ({ ...s, grind_by: e.target.value }))} disabled={!recEdit} placeholder="Pick an employee…" className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100" />
-                <datalist id="grind-emps">{emps.map(n => <option key={n} value={n} />)}</datalist></div>
+              <div><label className="block text-sm font-medium mb-1">Grind by <span className="text-gray-400 font-normal">(one or more)</span></label>
+                {(() => {
+                  const list = (insp.grind_by || '').split(',').map(s => s.trim()).filter(Boolean)
+                  const add = (n: string) => { const v = n.trim(); if (!v || list.some(x => x.toLowerCase() === v.toLowerCase())) return; setInsp(s => ({ ...s, grind_by: [...list, v].join(', ') })) }
+                  const rm = (n: string) => setInsp(s => ({ ...s, grind_by: list.filter(x => x !== n).join(', ') }))
+                  return <>
+                    <div className="flex flex-wrap gap-1 mb-1">{list.map(n => <span key={n} className="inline-flex items-center gap-1 bg-gray-200 rounded px-2 py-0.5 text-sm">{n}{recEdit && <button type="button" onClick={() => rm(n)} className="text-gray-500 hover:text-red-600">×</button>}</span>)}{list.length === 0 && <span className="text-xs text-gray-400">No one added yet.</span>}</div>
+                    {recEdit && <select value="" onChange={e => { if (e.target.value) add(e.target.value) }} className="w-full border rounded-lg px-3 py-2 bg-white text-sm">
+                      <option value="">+ Add person…</option>
+                      {emps.filter(n => !list.some(x => x.toLowerCase() === n.toLowerCase())).map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>}
+                  </>
+                })()}</div>
             </div>
 
             {/* Output products: lookup item, then batch / expiry / qty */}
@@ -629,6 +650,31 @@ export default function GrindingPage() {
               <button onClick={saveRecipe} disabled={saving || !recipeForm.product.trim()} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{saving ? 'Saving…' : 'Save recipe'}</button>
               <button onClick={() => { setEditRecipe(null); setRecipeForm(null) }} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showMachines && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setShowMachines(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mt-16 p-5" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-lg">Grinding machines</h3>
+              <button onClick={() => setShowMachines(false)} className="text-gray-400 hover:text-gray-700 text-xl leading-none">×</button>
+            </div>
+            <p className="text-sm text-gray-500 mb-3">Add or remove the machines that appear in the record’s machine dropdown.</p>
+            <div className="flex gap-2 mb-3">
+              <input value={newMachine} onChange={e => setNewMachine(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addMachine() }} placeholder="Machine ID / name…" className="flex-1 border rounded-lg px-3 py-2 text-sm" />
+              <button onClick={addMachine} className="bg-gray-800 text-white px-4 py-2 rounded-lg text-sm shrink-0">Add</button>
+            </div>
+            <ul className="space-y-1 max-h-72 overflow-auto">
+              {machines.length === 0 && <li className="text-xs text-gray-400">No machines yet.</li>}
+              {machines.map(m => (
+                <li key={m} className="flex items-center justify-between gap-2 text-sm border-b border-gray-100 py-1">
+                  <span className="font-medium">{m}</span>
+                  <button onClick={() => removeMachine(m)} className="text-red-500 hover:text-red-700 text-xs shrink-0">Remove</button>
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
       )}
