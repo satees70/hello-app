@@ -17,7 +17,7 @@ interface Batch {
 }
 interface DOrder {
   id: string; do_number: string | null; factory_code: string; status: string
-  created_by_name: string | null; created_at: string; vehicle: string | null
+  created_by_name: string | null; created_at: string; vehicle: string | null; driver_name: string | null
   dispatch_order_lines?: { id: string; item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null; batch_id: string | null }[]
   material_returns?: { id: string; item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null; reason: string | null }[]
 }
@@ -113,7 +113,7 @@ export default function DispatchPage() {
       .is('dispatched_at', null).gt('produced_qty', 0).neq('status', 'Bypassed').order('delivery_date')
     setBatches((b as Batch[]) || [])
     const { data: o } = await supabase.from('dispatch_orders')
-      .select('id, do_number, factory_code, status, created_by_name, created_at, vehicle, dispatch_order_lines(id, item_code, description, quantity, batch_no, exp_date, batch_id), material_returns(id, item_code, description, quantity, batch_no, exp_date, reason)')
+      .select('id, do_number, factory_code, status, created_by_name, created_at, vehicle, driver_name, dispatch_order_lines(id, item_code, description, quantity, batch_no, exp_date, batch_id), material_returns(id, item_code, description, quantity, batch_no, exp_date, reason)')
       .order('created_at', { ascending: false }).limit(50)
     setOrders((o as DOrder[]) || [])
     // SO number(s) per dispatched batch, so each delivery line can show its order.
@@ -318,7 +318,7 @@ export default function DispatchPage() {
     doc.setFontSize(8); doc.setFont('helvetica', 'normal')
     doc.text(`DO No: ${o.do_number || '—'}`, 10, 40)
     doc.text(`Factory: ${factoryName(o.factory_code)}`, 10, 44.5)
-    doc.text(`Vehicle: ${o.vehicle || '—'}`, 10, 49)
+    doc.text(`Vehicle: ${o.vehicle || '—'}    Driver: ${o.driver_name || '—'}`, 10, 49)
     doc.text(`Date: ${fmt(o.created_at)}`, W - 10, 40, { align: 'right' })
     doc.text(`By: ${o.created_by_name || '—'}`, W - 10, 44.5, { align: 'right' })
     const fg = o.dispatch_order_lines || [], rt = o.material_returns || []

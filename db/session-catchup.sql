@@ -1648,3 +1648,105 @@ begin
   return v_no;
 end $$;
 grant execute on function public.create_delivery_order(uuid[], jsonb, text) to authenticated;
+
+-- ============================================================================
+-- 2026-07 · Transport for delivery orders: request + assign a lorry and driver.
+--  · vehicle          — the assigned lorry number (reused from the DO print field).
+--  · lorry_requested… — a lorry was requested from the warehouse (call raised).
+--  · driver_name      — the assigned driver (crew).
+--  · driver_requested…— auto-set when the DO is created (a driver is always needed).
+-- A lorry parked on-site is self-assigned by production (no request); a missing
+-- lorry is requested with a button. Warehouse assigns the driver. The driver app
+-- reads driver_name / vehicle off the DO. Both production and warehouse (dispatch
+-- edit) can request and assign, so an on-site lorry is a one-click assign.
+-- ============================================================================
+alter table public.dispatch_orders add column if not exists lorry_requested_at timestamptz;
+alter table public.dispatch_orders add column if not exists lorry_assigned_at timestamptz;
+alter table public.dispatch_orders add column if not exists lorry_assigned_by uuid;
+alter table public.dispatch_orders add column if not exists driver_name text;
+alter table public.dispatch_orders add column if not exists driver_requested_at timestamptz;
+alter table public.dispatch_orders add column if not exists driver_assigned_at timestamptz;
+alter table public.dispatch_orders add column if not exists driver_assigned_by uuid;
+
+-- A DO always needs a driver → auto-request one the moment it's created.
+create or replace function public.tg_do_request_driver() returns trigger
+ language plpgsql security definer set search_path to 'public' as $function$
+begin
+  if NEW.driver_requested_at is null and NEW.driver_name is null then
+    NEW.driver_requested_at := now();
+  end if;
+  return NEW;
+end; $function$;
+drop trigger if exists do_request_driver on public.dispatch_orders;
+create trigger do_request_driver before insert on public.dispatch_orders
+  for each row execute function public.tg_do_request_driver();
+
+-- Notify the location a driver is needed (a "call" to the warehouse).
+create or replace function public.tg_do_notify_driver_req() returns trigger
+ language plpgsql security definer set search_path to 'public' as $function$
+begin
+  if NEW.driver_requested_at is not null and NEW.driver_name is null then
+    insert into public.notifications (factory_code, type, title, body, link, ref)
+    values (NEW.factory_code, 'transport', 'Driver needed: ' || coalesce(NEW.do_number, 'DO'),
+            'A delivery order needs a driver assigned.', '/transport',
+            'transport-driver:' || NEW.id::text)
+    on conflict (ref) do nothing;
+  end if;
+  return NEW;
+end; $function$;
+drop trigger if exists do_notify_driver_req on public.dispatch_orders;
+create trigger do_notify_driver_req after insert on public.dispatch_orders
+  for each row execute function public.tg_do_notify_driver_req();
+
+-- Raise a call to request a lorry or driver for a DO.
+create or replace function public.request_do_transport(p_do_id uuid, p_kind text) returns void
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_fac text; v_no text;
+begin
+  if p_kind not in ('lorry', 'driver') then raise exception 'Unknown request type'; end if;
+  if not has_perm('dispatch', 'edit') then raise exception 'Not allowed'; end if;
+  select factory_code, do_number into v_fac, v_no from public.dispatch_orders where id = p_do_id;
+  if v_fac is null then raise exception 'Delivery order not found'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_fac = any (my_factory_codes())) then raise exception 'Not your factory'; end if;
+  if p_kind = 'lorry' then
+    update public.dispatch_orders set lorry_requested_at = now() where id = p_do_id;
+  else
+    update public.dispatch_orders set driver_requested_at = now() where id = p_do_id;
+  end if;
+  insert into public.notifications (factory_code, type, title, body, link, ref)
+  values (v_fac, 'transport',
+          (case when p_kind = 'lorry' then 'Lorry needed: ' else 'Driver needed: ' end) || coalesce(v_no, 'DO'),
+          'A delivery order needs a ' || p_kind || ' assigned.', '/transport',
+          'transport-req:' || p_do_id::text || ':' || p_kind || ':' || floor(extract(epoch from now()))::text)
+  on conflict (ref) do nothing;
+end; $function$;
+grant execute on function public.request_do_transport(uuid, text) to authenticated;
+
+-- Assign (or clear, with empty value) a lorry or driver on a DO.
+create or replace function public.assign_do_transport(p_do_id uuid, p_kind text, p_value text) returns void
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_fac text; v_val text;
+begin
+  if p_kind not in ('lorry', 'driver') then raise exception 'Unknown assignment type'; end if;
+  if not has_perm('dispatch', 'edit') then raise exception 'Not allowed'; end if;
+  select factory_code into v_fac from public.dispatch_orders where id = p_do_id;
+  if v_fac is null then raise exception 'Delivery order not found'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_fac = any (my_factory_codes())) then raise exception 'Not your factory'; end if;
+  v_val := nullif(btrim(p_value), '');
+  if p_kind = 'lorry' then
+    update public.dispatch_orders
+       set vehicle = v_val,
+           lorry_assigned_at = case when v_val is null then null else now() end,
+           lorry_assigned_by = case when v_val is null then null else auth.uid() end,
+           lorry_requested_at = case when v_val is null then lorry_requested_at else null end
+     where id = p_do_id;
+  else
+    update public.dispatch_orders
+       set driver_name = v_val,
+           driver_assigned_at = case when v_val is null then null else now() end,
+           driver_assigned_by = case when v_val is null then null else auth.uid() end,
+           driver_requested_at = case when v_val is null then driver_requested_at else null end
+     where id = p_do_id;
+  end if;
+end; $function$;
+grant execute on function public.assign_do_transport(uuid, text, text) to authenticated;
