@@ -629,17 +629,18 @@ begin
         if v_item.id is not null then
           update public.item_stock set quantity = quantity - v_qty, updated_at = now() where item_id = v_item.id and factory_code = v_fac;
         end if;
-        insert into public.material_returns (factory_code, item_code, description, batch_no, quantity, reason, dispatch_id, lot_id, created_by, created_by_name)
-        values (v_fac, v_lot.item_code, v_item.description, v_lot.batch_no, v_qty, nullif(r->>'reason', ''), v_id, v_lot.id, auth.uid(), v_name);
+        insert into public.material_returns (factory_code, item_code, description, batch_no, exp_date, quantity, reason, dispatch_id, lot_id, created_by, created_by_name)
+        values (v_fac, v_lot.item_code, v_item.description, v_lot.batch_no, v_lot.exp_date, v_qty, nullif(r->>'reason', ''), v_id, v_lot.id, auth.uid(), v_name);
       else
         -- Manual item: not in stock. Record it; reduce item_stock only if a row exists.
         if nullif(r->>'item_code', '') is null then raise exception 'Manual return needs an item code'; end if;
+        if nullif(r->>'batch_no', '') is null and nullif(r->>'exp_date', '') is null then raise exception 'A returned item needs a batch number or an expiry date'; end if;
         select * into v_item from public.items where code = r->>'item_code' limit 1;
         if v_item.id is not null then
           update public.item_stock set quantity = quantity - v_qty, updated_at = now() where item_id = v_item.id and factory_code = v_fac;
         end if;
-        insert into public.material_returns (factory_code, item_code, description, batch_no, quantity, reason, dispatch_id, lot_id, created_by, created_by_name)
-        values (v_fac, r->>'item_code', coalesce(v_item.description, nullif(r->>'description', '')), nullif(r->>'batch_no', ''), v_qty, nullif(r->>'reason', ''), v_id, null, auth.uid(), v_name);
+        insert into public.material_returns (factory_code, item_code, description, batch_no, exp_date, quantity, reason, dispatch_id, lot_id, created_by, created_by_name)
+        values (v_fac, r->>'item_code', coalesce(v_item.description, nullif(r->>'description', '')), nullif(r->>'batch_no', ''), nullif(r->>'exp_date','')::date, v_qty, nullif(r->>'reason', ''), v_id, null, auth.uid(), v_name);
       end if;
     end loop;
   end if;

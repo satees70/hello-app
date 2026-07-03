@@ -21,11 +21,12 @@ interface DOrder {
   dispatch_order_lines?: { item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null }[]
   material_returns?: { item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null }[]
 }
-interface CartReturn { lotId: string; itemCode: string; description: string; unit: string; batchNo: string | null; qty: number; reason: string; factory: string; factoryName: string; manual?: boolean }
+interface CartReturn { lotId: string; itemCode: string; description: string; unit: string; batchNo: string | null; expDate?: string | null; qty: number; reason: string; factory: string; factoryName: string; manual?: boolean }
 interface SLine { id: string; so_number: string; item_code: string; description: string | null; quantity: number | null; outstanding_qty: number | null; factory_code: string; delivered_qty: number | null }
 interface MReturn {
   id: string; factory_code: string; item_code: string; description: string | null
   batch_no: string | null; exp_date: string | null; quantity: number; reason: string | null; created_by_name: string | null; created_at: string
+  dispatch_orders?: { do_number: string | null } | null
 }
 
 export default function DispatchPage() {
@@ -53,7 +54,8 @@ export default function DispatchPage() {
   const [code, setCode] = useState('')
   const [lotId, setLotId] = useState('')
   const [manual, setManual] = useState(false)   // type an item not in stock
-  const [manBatch, setManBatch] = useState('')   // manual batch no (optional)
+  const [manBatch, setManBatch] = useState('')   // manual batch no
+  const [manExp, setManExp] = useState('')        // manual expiry (batch or expiry required)
   const [qty, setQty] = useState('')
   const [issue, setIssue] = useState<'no' | 'yes'>('no')
   const [reason, setReason] = useState('')
@@ -100,7 +102,7 @@ export default function DispatchPage() {
       .select('id, do_number, factory_code, status, created_by_name, created_at, dispatch_order_lines(item_code, description, quantity, batch_no, exp_date), material_returns(item_code, description, quantity, batch_no, exp_date)')
       .order('created_at', { ascending: false }).limit(50)
     setOrders((o as DOrder[]) || [])
-    const { data: r } = await supabase.from('material_returns').select('*').order('created_at', { ascending: false }).limit(50)
+    const { data: r } = await supabase.from('material_returns').select('*, dispatch_orders(do_number)').order('created_at', { ascending: false }).limit(50)
     setReturns((r as MReturn[]) || [])
     const { data: pe } = await supabase.from('return_edit_requests').select('return_id').eq('status', 'Pending')
     setEditPending(new Set((pe || []).map(x => x.return_id).filter(Boolean)))
@@ -143,20 +145,22 @@ export default function DispatchPage() {
     if (issue === 'yes' && !reason.trim()) { setError('Please give the reason for the issue.'); return }
     const note = issue === 'yes' ? reason.trim() : ''
     if (manual) {
-      // Item not in stock — keyed in by hand. No batch check (there's no lot in the system).
+      // Item not in stock — keyed in by hand. Batch OR expiry is required for traceability.
       const mc = code.trim()
       if (!mc) { setError('Pick an item from the list.'); return }
+      if (!manBatch.trim() && !manExp) { setError('Enter a batch number or an expiry date (at least one is required).'); return }
       const known = resolve(mc)
-      setReturnCart(c => [...c, { lotId: '', itemCode: known?.code || mc.toUpperCase(), description: known?.description || '', unit: known?.unit || '', batchNo: manBatch.trim() || null, qty: num, reason: note, factory, factoryName: factoryName(factory), manual: true }])
-      setCode(''); setManBatch(''); setQty(''); setIssue('no'); setReason('')
+      setReturnCart(c => [...c, { lotId: '', itemCode: known?.code || mc.toUpperCase(), description: known?.description || '', unit: known?.unit || '', batchNo: manBatch.trim() || null, expDate: manExp || null, qty: num, reason: note, factory, factoryName: factoryName(factory), manual: true }])
+      setCode(''); setManBatch(''); setManExp(''); setQty(''); setIssue('no'); setReason('')
       return
     }
     const it = resolve(code)
     if (!it) { setError('Pick a valid raw-material code from the list.'); return }
     if (!lot) { setError('Pick the batch you are returning.'); return }
+    if (!lot.batch_no && !lot.exp_date) { setError('This batch has no batch number or expiry — it cannot be returned. Fix the stock record first.'); return }
     const already = returnCart.filter(r => r.lotId === lot.id).reduce((s, r) => s + r.qty, 0)
     if (already + num > lot.qty_remaining) { setError(`Batch ${lot.batch_no || '—'} only has ${lot.qty_remaining} ${it.unit} left${already ? ` (you already added ${already})` : ''}.`); return }
-    setReturnCart(c => [...c, { lotId: lot.id, itemCode: it.code, description: it.description, unit: it.unit, batchNo: lot.batch_no, qty: num, reason: note, factory, factoryName: factoryName(factory) }])
+    setReturnCart(c => [...c, { lotId: lot.id, itemCode: it.code, description: it.description, unit: it.unit, batchNo: lot.batch_no, expDate: lot.exp_date, qty: num, reason: note, factory, factoryName: factoryName(factory) }])
     setCode(''); setLotId(''); setQty(''); setIssue('no'); setReason('')
   }
 
@@ -207,7 +211,7 @@ export default function DispatchPage() {
     const { data, error: e } = await supabase.rpc('create_delivery_order', {
       p_batch_ids: batchIds,
       p_returns: facReturns.map(r => r.manual
-        ? { manual: true, item_code: r.itemCode, description: r.description, batch_no: r.batchNo, qty: r.qty, reason: r.reason, factory_code: r.factory }
+        ? { manual: true, item_code: r.itemCode, description: r.description, batch_no: r.batchNo, exp_date: r.expDate || null, qty: r.qty, reason: r.reason, factory_code: r.factory }
         : { lot_id: r.lotId, qty: r.qty, reason: r.reason }),
     })
     if (e) { setError(e.message); setBusy(false); return }
@@ -224,20 +228,30 @@ export default function DispatchPage() {
     const { default: autoTable } = await import('jspdf-autotable')
     const doc = new jsPDF({ format: 'a5' })
     const W = doc.internal.pageSize.getWidth()
-    doc.setFontSize(14); doc.setFont('helvetica', 'bold')
-    doc.text('DELIVERY ORDER', 10, 12)
-    doc.setFontSize(9); doc.setFont('helvetica', 'normal')
-    doc.text(`DO No: ${o.do_number || '—'}`, 10, 19)
-    doc.text(`Factory: ${factoryName(o.factory_code)}`, 10, 24)
-    doc.text(`Date: ${fmt(o.created_at)}`, W - 10, 19, { align: 'right' })
-    doc.text(`By: ${o.created_by_name || '—'}`, W - 10, 24, { align: 'right' })
+    // ── Company letterhead ──
+    doc.setFontSize(13); doc.setFont('helvetica', 'bold')
+    doc.text('SRRI EASWARI MILLS SDN. BHD.', W / 2, 11, { align: 'center' })
+    doc.setFontSize(6.5); doc.setFont('helvetica', 'normal')
+    doc.text('(157367-T)', W / 2, 14.5, { align: 'center' })
+    doc.text('15, Jalan Anggerik Mokara 31/62, Kota Kemuning, Sek. 31,', W / 2, 18, { align: 'center' })
+    doc.text('40460 Shah Alam, Selangor Darul Ehsan, Malaysia', W / 2, 21, { align: 'center' })
+    doc.text('Tel: 03-51220304   Fax: 03-51221505   E-mail: admin@easwarimills.com   Website: www.easwarimills.com', W / 2, 24, { align: 'center' })
+    doc.setLineWidth(0.4); doc.line(10, 27, W - 10, 27)
+    // ── Document title + meta ──
+    doc.setFontSize(11); doc.setFont('helvetica', 'bold')
+    doc.text('DELIVERY ORDER', W / 2, 33, { align: 'center' })
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal')
+    doc.text(`DO No: ${o.do_number || '—'}`, 10, 40)
+    doc.text(`Factory: ${factoryName(o.factory_code)}`, 10, 44.5)
+    doc.text(`Date: ${fmt(o.created_at)}`, W - 10, 40, { align: 'right' })
+    doc.text(`By: ${o.created_by_name || '—'}`, W - 10, 44.5, { align: 'right' })
     const fg = o.dispatch_order_lines || [], rt = o.material_returns || []
     const body = [
       ...fg.map((l, i) => [String(i + 1), l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', l.exp_date ? fmtD(l.exp_date) : '—', 'Finished']),
       ...rt.map((l, i) => [String(fg.length + i + 1), l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', l.exp_date ? fmtD(l.exp_date) : '—', 'Return']),
     ]
     autoTable(doc, {
-      startY: 30, head: [['#', 'Code', 'Item name', 'Qty', 'Batch', 'Exp', 'Type']], body,
+      startY: 48, head: [['#', 'Code', 'Item name', 'Qty', 'Batch', 'Exp', 'Type']], body,
       styles: { fontSize: 8, cellPadding: 1.4 }, headStyles: { fillColor: [30, 58, 138] },
       columnStyles: { 0: { cellWidth: 7 }, 3: { halign: 'right' } }, margin: { left: 10, right: 10 },
     })
@@ -388,8 +402,12 @@ export default function DispatchPage() {
                 )}
               </div>
               {manual && (
-                <div className="flex flex-col gap-1 min-w-[140px]"><span className="text-xs font-medium text-gray-600">Batch (optional)</span>
-                  <input value={manBatch} onChange={e => setManBatch(e.target.value)} placeholder="Batch no" className="border rounded px-2 py-1.5 text-sm" /></div>
+                <>
+                  <div className="flex flex-col gap-1 min-w-[130px]"><span className="text-xs font-medium text-gray-600">Batch <span className="text-gray-400">(batch or exp)</span></span>
+                    <input value={manBatch} onChange={e => setManBatch(e.target.value)} placeholder="Batch no" className="border rounded px-2 py-1.5 text-sm" /></div>
+                  <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">Expiry</span>
+                    <input type="date" value={manExp} onChange={e => setManExp(e.target.value)} className="border rounded px-2 py-1.5 text-sm" /></div>
+                </>
               )}
               {!manual && item && (
                 <div className="flex flex-col gap-1 min-w-[180px]"><span className="text-xs font-medium text-gray-600">Batch</span>
@@ -539,11 +557,12 @@ export default function DispatchPage() {
         <h2 className="text-lg font-semibold mb-2">Recent material returns</h2>
         <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[20rem]">
           <table className="w-full text-xs">
-            <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{[...(multiFac ? ['Factory'] : []), 'Material', 'Batch', 'Exp', 'Qty', 'Reason', 'By', 'When', ''].map((h, i) => <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
+            <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{['DO No.', ...(multiFac ? ['Factory'] : []), 'Material', 'Batch', 'Exp', 'Qty', 'Reason', 'By', 'When', ''].map((h, i) => <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
             <tbody>
-              {returns.length === 0 && <tr><td colSpan={10} className="text-center py-8 text-gray-400">No returns yet.</td></tr>}
+              {returns.length === 0 && <tr><td colSpan={11} className="text-center py-8 text-gray-400">No returns yet.</td></tr>}
               {returns.map(r => (
                 <tr key={r.id} className="border-b last:border-0 align-top hover:bg-gray-50">
+                  <td className="px-3 py-2 font-mono whitespace-nowrap">{r.dispatch_orders?.do_number || <span className="text-gray-300">—</span>}</td>
                   {multiFac && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(r.factory_code)}</td>}
                   <td className="px-3 py-2"><span className="font-mono font-medium">{r.item_code}</span><span className="block text-gray-400">{r.description}</span></td>
                   <td className="px-3 py-2 whitespace-nowrap">{r.batch_no || '—'}</td>
