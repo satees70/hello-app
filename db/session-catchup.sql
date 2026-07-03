@@ -1758,3 +1758,12 @@ grant execute on function public.assign_do_transport(uuid, text, text) to authen
 -- null = whereabouts unknown / out on the road.
 -- ============================================================================
 alter table public.delivery_resources add column if not exists parked_at text;
+
+-- ============================================================================
+-- 2026-07 · Allow kind='crew'. Drivers & kelindan were merged into one "crew"
+-- pool, but the table's CHECK still only allowed lorry/driver/kelindan, so every
+-- new crew member was silently rejected. Add 'crew' to the allowed kinds.
+-- ============================================================================
+alter table public.delivery_resources drop constraint if exists delivery_resources_kind_check;
+alter table public.delivery_resources add constraint delivery_resources_kind_check
+  check (kind in ('lorry', 'driver', 'kelindan', 'crew'));
