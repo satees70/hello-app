@@ -110,8 +110,16 @@ export default function PendingSummaryPage() {
   const toggle = (f: string) => setCollapsed(p => { const n = new Set(p); n.has(f) ? n.delete(f) : n.add(f); return n })
   const qtyOf = (l: Line) => Number(l.outstanding_qty ?? l.quantity ?? 0)
   // Which factories each item is pending at — an item at 2+ factories is flagged as a problem.
+  // Follows the Tomorrow / search / status filters (but NOT the factory filter — we need all
+  // factories to spot a split), so the warning matches what you're currently looking at.
+  const bannerBase = pending.filter(l => {
+    if (tomorrowOnly && !(l.so_number && tomorrowSOs.has(l.so_number))) return false
+    if (statF.size && !statF.has(lineStatus(l))) return false
+    if (q && !(`${l.so_number} ${l.item_code} ${l.description}`.toLowerCase().includes(q))) return false
+    return true
+  })
   const itemFactories = new Map<string, Set<string>>()
-  pending.forEach(l => { const k = l.item_code || '—'; const s = itemFactories.get(k) || new Set<string>(); s.add(factoryName(l.factory_code)); itemFactories.set(k, s) })
+  bannerBase.forEach(l => { const k = l.item_code || '—'; const s = itemFactories.get(k) || new Set<string>(); s.add(factoryName(l.factory_code)); itemFactories.set(k, s) })
   const multiFacItems = [...itemFactories].filter(([, s]) => s.size > 1).map(([k, s]) => ({ code: k, facs: [...s].sort() }))
   const isMultiFac = new Set(multiFacItems.map(m => m.code))
   // Combine visible lines by item within a factory: sum qty, gather SOs + statuses.
@@ -136,7 +144,7 @@ export default function PendingSummaryPage() {
 
         {multiFacItems.length > 0 && (
           <div className="mb-3 p-3 rounded-lg bg-red-50 border border-red-300 text-sm text-red-800">
-            ⚠ <strong>Same item pending at more than one factory</strong> — check these are meant to split:
+            ⚠ <strong>Same item pending at more than one factory{tomorrowOnly ? ' (tomorrow)' : ''}</strong> — check these are meant to split:
             <div className="mt-1 space-y-0.5">{multiFacItems.map(m => <div key={m.code}><span className="font-mono font-medium">{m.code}</span> — {m.facs.join(', ')}</div>)}</div>
           </div>
         )}
