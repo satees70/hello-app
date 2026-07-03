@@ -41,6 +41,8 @@ export default function DispatchPage() {
   const [soByBatch, setSoByBatch] = useState<Record<string, string>>({})
   const [expByBatch, setExpByBatch] = useState<Record<string, string>>({})   // effective expiry: batch's own, else its label's
   const [soByDoItem, setSoByDoItem] = useState<Record<string, string>>({})   // `${do_number}|${item_code}` -> SO (bypass/direct deliveries)
+  const [linkModal, setLinkModal] = useState<{ lineId: string; isReturn: boolean; itemCode: string; description: string | null; factory: string; qty: number } | null>(null)
+  const [alloc, setAlloc] = useState<Record<string, string>>({})
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const toggleFac = (fc: string) => setCollapsed(p => { const n = new Set(p); n.has(fc) ? n.delete(fc) : n.add(fc); return n })
@@ -225,13 +227,20 @@ export default function DispatchPage() {
     })
     return [...m.values()].sort((a, b) => a.so.localeCompare(b.so))
   }
-  async function linkDoLine(lineId: string, so: string) {
-    if (!confirm(`Link this delivery to ${so} and mark that order delivered?`)) return
+  function openLink(lineId: string, isReturn: boolean, itemCode: string, description: string | null, factory: string, qty: number) {
+    setLinkModal({ lineId, isReturn, itemCode, description, factory, qty }); setAlloc({}); setError(''); setSuccess('')
+  }
+  async function submitLink() {
+    if (!linkModal) return
+    const entries = Object.entries(alloc).map(([so, v]) => ({ so, qty: Number(v) })).filter(x => x.qty > 0)
+    if (entries.length === 0) { setError('Enter a quantity for at least one order.'); return }
     setBusy(true); setError(''); setSuccess('')
-    const { error: e } = await supabase.rpc('link_do_line_to_so', { p_line_id: lineId, p_so: so })
-    setBusy(false)
-    if (e) { setError(/link_do_line_to_so/.test(e.message) ? 'Linking needs a database update — run the latest catch-up SQL.' : e.message); return }
-    setSuccess(`Linked to ${so} and marked delivered.`); load()
+    for (const e of entries) {
+      const { error: er } = await supabase.rpc('link_line_to_so', { p_line_id: linkModal.lineId, p_is_return: linkModal.isReturn, p_so: e.so, p_qty: e.qty })
+      if (er) { setError(/link_line_to_so/.test(er.message) ? 'Linking needs a database update — run the latest catch-up SQL.' : er.message); setBusy(false); return }
+    }
+    setBusy(false); setLinkModal(null)
+    setSuccess(`Linked ${entries.length} order(s) and marked delivered.`); load()
   }
   function addDirect(e: React.FormEvent) {
     e.preventDefault(); setError(''); setSuccess('')
@@ -648,7 +657,7 @@ export default function DispatchPage() {
                         })()}
                         {!((l.batch_id && soByBatch[l.batch_id]) || soByDoItem[`${o.do_number}|${l.item_code}`]) && canFac(o.factory_code) && (() => {
                           const cands = pendingDetailForItem(l.item_code, o.factory_code)
-                          return cands.length ? <span className="block ml-5 text-xs text-amber-700">⚠ no SO linked · pending for this item:<span className="block ml-4">{cands.slice(0, 8).map(c => <button key={c.so} onClick={() => linkDoLine(l.id, c.so)} disabled={busy} className="block text-left text-blue-600 hover:underline disabled:opacity-50 font-medium">🔗 {c.so}{c.customer ? ` · ${c.customer}` : ''} · need {c.remaining}</button>)}</span></span> : null
+                          return cands.length ? <span className="block ml-5 text-xs text-amber-700">⚠ no SO linked · {cands.length} pending order(s) for this item <button onClick={() => openLink(l.id, false, l.item_code, l.description, o.factory_code, l.quantity)} disabled={busy} className="text-blue-600 hover:underline disabled:opacity-50 font-medium">🔗 Link to order(s)</button></span> : null
                         })()}
                       </span>
                     ))}
@@ -661,7 +670,7 @@ export default function DispatchPage() {
                             ? <button onClick={() => openRetEdit({ id: l.id, factory_code: o.factory_code, item_code: l.item_code, description: l.description, batch_no: l.batch_no, exp_date: l.exp_date, quantity: l.quantity, reason: l.reason, created_by_name: null, created_at: o.created_at })} className="ml-2 text-blue-600 hover:underline text-xs">Edit</button>
                             : null}
                         {(() => { const so = soByDoItem[`${o.do_number}|${l.item_code}`]; const bits = [so ? `SO ${so}` : '', l.batch_no ? `batch ${l.batch_no}` : '', l.exp_date ? `exp ${fmtD(l.exp_date)}` : ''].filter(Boolean); return bits.length ? <span className="block ml-5 text-xs text-orange-400">{bits.join(' · ')}</span> : null })()}
-                        {!soByDoItem[`${o.do_number}|${l.item_code}`] && (() => { const cands = pendingDetailForItem(l.item_code, o.factory_code); return cands.length ? <span className="block ml-5 text-xs text-amber-700">⚠ pending SO for this item: {cands.slice(0, 5).map(c => `${c.so}${c.customer ? ' (' + c.customer + ')' : ''}`).join(', ')} — check if this should be an order delivery</span> : null })()}
+                        {!soByDoItem[`${o.do_number}|${l.item_code}`] && canFac(o.factory_code) && (() => { const cands = pendingDetailForItem(l.item_code, o.factory_code); return cands.length ? <span className="block ml-5 text-xs text-amber-700">⚠ {cands.length} pending order(s) for this item <button onClick={() => openLink(l.id, true, l.item_code, l.description, o.factory_code, l.quantity)} disabled={busy} className="text-blue-600 hover:underline disabled:opacity-50 font-medium">🔗 Link to order(s)</button></span> : null })()}
                       </span>
                     ))}
                   </td>
@@ -737,6 +746,38 @@ export default function DispatchPage() {
           </div>
         </div>
       )}
+
+      {/* Link a delivery/return line to one or more pending sales orders */}
+      {linkModal && (() => {
+        const cands = pendingDetailForItem(linkModal.itemCode, linkModal.factory)
+        const allocated = cands.reduce((s, c) => s + (Number(alloc[c.so]) || 0), 0)
+        return (
+          <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setLinkModal(null)}>
+            <div className="bg-white rounded-xl shadow-xl border w-full max-w-lg my-8 p-6" onClick={e => e.stopPropagation()}>
+              <h2 className="font-semibold text-lg mb-1">Link to order(s)</h2>
+              <p className="text-gray-500 text-sm mb-1"><span className="font-mono">{linkModal.itemCode}</span>{linkModal.description ? ` — ${linkModal.description}` : ''} · delivered <strong>{linkModal.qty}</strong></p>
+              <p className="text-gray-400 text-xs mb-3">Give each order the quantity to fulfil from this delivery. Each order it&apos;s allocated to is marked delivered and cleared.</p>
+              <div className="border rounded-lg divide-y max-h-72 overflow-auto mb-2">
+                {cands.length === 0 && <p className="text-gray-400 text-sm text-center py-6">No pending orders for this item.</p>}
+                {cands.map(c => (
+                  <div key={c.so} className="flex items-center gap-3 px-3 py-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-mono font-medium text-sm">{c.so}</div>
+                      <div className="text-gray-500 text-xs truncate">{c.customer || '—'} · need {c.remaining}</div>
+                    </div>
+                    <input type="number" step="any" min="0" max={c.remaining} value={alloc[c.so] || ''} onChange={e => setAlloc(p => ({ ...p, [c.so]: e.target.value }))} placeholder="0" className="w-24 border rounded-lg px-2 py-1.5 text-sm text-right" />
+                  </div>
+                ))}
+              </div>
+              <p className={`text-xs mb-3 ${allocated > linkModal.qty ? 'text-red-600 font-medium' : 'text-gray-500'}`}>Allocated {Number(allocated.toFixed(3))} of {linkModal.qty}{allocated > linkModal.qty ? ' — more than delivered!' : ''}</p>
+              <div className="flex gap-2">
+                <button onClick={submitLink} disabled={busy || allocated <= 0} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{busy ? 'Linking…' : 'Link & mark delivered'}</button>
+                <button onClick={() => setLinkModal(null)} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

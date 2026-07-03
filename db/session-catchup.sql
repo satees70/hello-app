@@ -1492,3 +1492,37 @@ alter table public.grinding_machines enable row level security;
 drop policy if exists gm_all on public.grinding_machines;
 create policy gm_all on public.grinding_machines for all
   using (auth.uid() is not null) with check (auth.uid() is not null);
+
+-- ============================================================================
+-- 2026-07 · Link a delivery/return line to a specific SO for a given quantity
+-- ----------------------------------------------------------------------------
+-- Allocate part (or all) of a delivered line to a pending sales order: marks
+-- that SO's line delivered by p_qty and stamps the DO. Call once per SO to
+-- split a delivery across several orders. Works for finished goods and returns.
+-- ============================================================================
+create or replace function public.link_line_to_so(p_line_id uuid, p_is_return boolean, p_so text, p_qty numeric) returns void
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_item text; v_fac text; v_do text; v_batch uuid; v_did uuid; v_sl public.sales_order_lines;
+begin
+  if p_qty is null or p_qty <= 0 then raise exception 'Quantity must be greater than zero'; end if;
+  if p_is_return then
+    select item_code, factory_code, dispatch_id into v_item, v_fac, v_did from public.material_returns where id = p_line_id;
+    if v_item is null then raise exception 'Return line not found'; end if;
+  else
+    select item_code, batch_id, dispatch_id into v_item, v_batch, v_did from public.dispatch_order_lines where id = p_line_id;
+    if v_item is null then raise exception 'Delivery line not found'; end if;
+    select factory_code into v_fac from public.dispatch_orders where id = v_did;
+  end if;
+  select do_number into v_do from public.dispatch_orders where id = v_did;
+  if not has_perm('dispatch', 'edit') then raise exception 'Not allowed'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_fac = any (my_factory_codes())) then raise exception 'Not your factory'; end if;
+  select * into v_sl from public.sales_order_lines
+    where so_number = p_so and item_code = v_item and factory_code = v_fac and coalesce(delivered_qty, 0) < coalesce(quantity, 0)
+    order by coalesce(delivered_qty, 0) asc limit 1;
+  if not found then raise exception 'No pending line for % / % at this factory', p_so, v_item; end if;
+  if not p_is_return and v_batch is not null and not exists (select 1 from public.production_batch_items where batch_id = v_batch and so_number = p_so) then
+    insert into public.production_batch_items (batch_id, so_number, quantity, factory_code) values (v_batch, p_so, p_qty, v_fac);
+  end if;
+  update public.sales_order_lines set delivered_qty = coalesce(delivered_qty, 0) + p_qty, delivered_do = v_do, delivered_at = now() where id = v_sl.id;
+end $function$;
+grant execute on function public.link_line_to_so(uuid, boolean, text, numeric) to authenticated;
