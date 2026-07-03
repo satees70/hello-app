@@ -40,6 +40,7 @@ export default function DispatchPage() {
   const [orders, setOrders] = useState<DOrder[]>([])
   const [soByBatch, setSoByBatch] = useState<Record<string, string>>({})
   const [expByBatch, setExpByBatch] = useState<Record<string, string>>({})   // effective expiry: batch's own, else its label's
+  const [soByDoItem, setSoByDoItem] = useState<Record<string, string>>({})   // `${do_number}|${item_code}` -> SO (bypass/direct deliveries)
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const toggleFac = (fc: string) => setCollapsed(p => { const n = new Set(p); n.has(fc) ? n.delete(fc) : n.add(fc); return n })
@@ -137,6 +138,14 @@ export default function DispatchPage() {
     const eb: Record<string, string> = {}
     Object.entries(bexp).forEach(([id, x]) => { const e = x.exp || (x.mr ? lblExp[x.mr] : null); if (e) eb[id] = e })
     setExpByBatch(eb)
+    // SOs delivered against each DO via bypass/direct delivery (sales line stamped with the DO number).
+    const doNos = [...new Set(((o as DOrder[]) || []).map(d => d.do_number).filter(Boolean))] as string[]
+    const sdi: Record<string, string> = {}
+    for (let i = 0; i < doNos.length; i += 100) {
+      const { data: dl } = await supabase.from('sales_order_lines').select('so_number, item_code, delivered_do').in('delivered_do', doNos.slice(i, i + 100))
+      ;(dl || []).forEach(r => { if (!r.delivered_do || !r.so_number) return; const k = `${r.delivered_do}|${r.item_code}`; sdi[k] = sdi[k] ? (sdi[k].includes(r.so_number) ? sdi[k] : sdi[k] + ', ' + r.so_number) : r.so_number })
+    }
+    setSoByDoItem(sdi)
     const { data: pe } = await supabase.from('return_edit_requests').select('return_id').eq('status', 'Pending')
     setEditPending(new Set((pe || []).map(x => x.return_id).filter(Boolean)))
     const { data: fpe } = await supabase.from('dispatch_line_edit_requests').select('line_id').eq('status', 'Pending')
@@ -301,8 +310,8 @@ export default function DispatchPage() {
     doc.text(`By: ${o.created_by_name || '—'}`, W - 10, 44.5, { align: 'right' })
     const fg = o.dispatch_order_lines || [], rt = o.material_returns || []
     const body = [
-      ...fg.map((l, i) => { const ex = l.exp_date || (l.batch_id ? expByBatch[l.batch_id] : ''); return [String(i + 1), (l.batch_id && soByBatch[l.batch_id]) || '—', l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', ex ? fmtD(ex) : '⚠ none'] }),
-      ...rt.map((l, i) => [String(fg.length + i + 1), 'Return', l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', l.exp_date ? fmtD(l.exp_date) : '—']),
+      ...fg.map((l, i) => { const ex = l.exp_date || (l.batch_id ? expByBatch[l.batch_id] : ''); const so = (l.batch_id && soByBatch[l.batch_id]) || soByDoItem[`${o.do_number}|${l.item_code}`] || '—'; return [String(i + 1), so, l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', ex ? fmtD(ex) : '⚠ none'] }),
+      ...rt.map((l, i) => [String(fg.length + i + 1), soByDoItem[`${o.do_number}|${l.item_code}`] || 'Return', l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', l.exp_date ? fmtD(l.exp_date) : '—']),
     ]
     autoTable(doc, {
       startY: 48, head: [['#', 'SO', 'Code', 'Item name', 'Qty', 'Batch', 'Exp']], body,
@@ -629,7 +638,7 @@ export default function DispatchPage() {
                             ? <button onClick={() => openFgEdit(l, o)} className="ml-2 text-blue-600 hover:underline text-xs">Edit</button>
                             : null}
                         {(() => {
-                          const so = l.batch_id ? soByBatch[l.batch_id] : ''
+                          const so = (l.batch_id && soByBatch[l.batch_id]) || soByDoItem[`${o.do_number}|${l.item_code}`] || ''
                           const exp = l.exp_date || (l.batch_id ? expByBatch[l.batch_id] : '')
                           const parts: React.ReactNode[] = []
                           if (so) parts.push(`SO ${so}`)
@@ -637,7 +646,7 @@ export default function DispatchPage() {
                           parts.push(exp ? `exp ${fmtD(exp)}` : '⚠ no expiry')
                           return <span className={`block ml-5 text-xs ${exp ? 'text-gray-400' : 'text-amber-700'}`}>{parts.join(' · ')}</span>
                         })()}
-                        {!(l.batch_id && soByBatch[l.batch_id]) && canFac(o.factory_code) && (() => {
+                        {!((l.batch_id && soByBatch[l.batch_id]) || soByDoItem[`${o.do_number}|${l.item_code}`]) && canFac(o.factory_code) && (() => {
                           const cands = pendingDetailForItem(l.item_code, o.factory_code)
                           return cands.length ? <span className="block ml-5 text-xs text-amber-700">⚠ no SO linked · pending for this item:<span className="block ml-4">{cands.slice(0, 8).map(c => <button key={c.so} onClick={() => linkDoLine(l.id, c.so)} disabled={busy} className="block text-left text-blue-600 hover:underline disabled:opacity-50 font-medium">🔗 {c.so}{c.customer ? ` · ${c.customer}` : ''} · need {c.remaining}</button>)}</span></span> : null
                         })()}
@@ -651,7 +660,8 @@ export default function DispatchPage() {
                           : canFac(o.factory_code) && hasCap(profile, 'request_return_edit')
                             ? <button onClick={() => openRetEdit({ id: l.id, factory_code: o.factory_code, item_code: l.item_code, description: l.description, batch_no: l.batch_no, exp_date: l.exp_date, quantity: l.quantity, reason: l.reason, created_by_name: null, created_at: o.created_at })} className="ml-2 text-blue-600 hover:underline text-xs">Edit</button>
                             : null}
-                        {(l.batch_no || l.exp_date) && <span className="block ml-5 text-xs text-orange-400">{l.batch_no ? `batch ${l.batch_no}` : ''}{l.batch_no && l.exp_date ? ' · ' : ''}{l.exp_date ? `exp ${fmtD(l.exp_date)}` : ''}</span>}
+                        {(() => { const so = soByDoItem[`${o.do_number}|${l.item_code}`]; const bits = [so ? `SO ${so}` : '', l.batch_no ? `batch ${l.batch_no}` : '', l.exp_date ? `exp ${fmtD(l.exp_date)}` : ''].filter(Boolean); return bits.length ? <span className="block ml-5 text-xs text-orange-400">{bits.join(' · ')}</span> : null })()}
+                        {!soByDoItem[`${o.do_number}|${l.item_code}`] && (() => { const cands = pendingDetailForItem(l.item_code, o.factory_code); return cands.length ? <span className="block ml-5 text-xs text-amber-700">⚠ pending SO for this item: {cands.slice(0, 5).map(c => `${c.so}${c.customer ? ' (' + c.customer + ')' : ''}`).join(', ')} — check if this should be an order delivery</span> : null })()}
                       </span>
                     ))}
                   </td>
