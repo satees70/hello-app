@@ -1888,15 +1888,23 @@ alter table public.dispatch_orders add column if not exists departed_by uuid;
 
 create or replace function public.mark_lorry_out(p_do_id uuid, p_out boolean default true) returns void
  language plpgsql security definer set search_path to 'public' as $function$
-declare v_fac text;
+declare v_fac text; v_no text; v_veh text; v_drv text;
 begin
   if not has_perm('dispatch', 'edit') then raise exception 'Not allowed'; end if;
-  select factory_code into v_fac from public.dispatch_orders where id = p_do_id;
+  select factory_code, do_number, vehicle, driver_name into v_fac, v_no, v_veh, v_drv from public.dispatch_orders where id = p_do_id;
   if v_fac is null then raise exception 'Delivery order not found'; end if;
   if my_factory_code() <> 'HEAD_OFFICE' and not (v_fac = any (my_factory_codes())) then raise exception 'Not your factory'; end if;
   update public.dispatch_orders
      set departed_at = case when p_out then now() else null end,
          departed_by = case when p_out then auth.uid() else null end
    where id = p_do_id;
+  -- On departure, tell the warehouse it's on the way.
+  if p_out then
+    insert into public.notifications (factory_code, type, title, body, link, ref)
+    values (v_fac, 'transport', 'Lorry out: ' || coalesce(v_no, 'DO'),
+            'Lorry ' || coalesce(v_veh, '(unassigned)') || coalesce(' · driver ' || v_drv, '') || ' has left production — on the way to the warehouse.',
+            '/incoming', 'lorry-out:' || p_do_id::text || ':' || floor(extract(epoch from now()))::text)
+    on conflict (ref) do nothing;
+  end if;
 end; $function$;
 grant execute on function public.mark_lorry_out(uuid, boolean) to authenticated;

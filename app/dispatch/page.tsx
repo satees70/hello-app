@@ -8,6 +8,34 @@ import { can, hasCap } from '@/lib/permissions'
 import { LORRY_TYPES, lorryTypeLabel } from '@/lib/lorryTypes'
 import ItemPicker from '@/components/ItemPicker'
 
+// Small multi-select dropdown: pick one or more sites for "Send to".
+function MultiPick({ options, selected, onChange, placeholder }: { options: string[]; selected: Set<string>; onChange: (s: Set<string>) => void; placeholder: string }) {
+  const [open, setOpen] = useState(false)
+  const toggle = (v: string) => { const n = new Set(selected); n.has(v) ? n.delete(v) : n.add(v); onChange(n) }
+  const label = selected.size === 0 ? placeholder : [...selected].join(', ')
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setOpen(o => !o)} title={selected.size ? [...selected].join(', ') : ''}
+        className="w-44 border rounded-lg px-2 py-1.5 text-sm text-left flex items-center justify-between gap-1 bg-white">
+        <span className={`truncate ${selected.size ? '' : 'text-gray-400'}`}>{label}</span><span className="text-gray-400 shrink-0">▾</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute z-50 mt-1 w-52 max-h-60 overflow-auto bg-white border rounded-lg shadow-xl p-2 text-sm">
+            {options.map(v => (
+              <label key={v} className="flex items-center gap-2 px-1 py-1 hover:bg-gray-50 cursor-pointer">
+                <input type="checkbox" checked={selected.has(v)} onChange={() => toggle(v)} className="h-4 w-4" /> {v}
+              </label>
+            ))}
+            {options.length === 0 && <div className="text-gray-400 px-1 py-1">No sites</div>}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 interface Item { id: string; code: string; description: string; unit: string }
 interface Lot { id: string; item_code: string; factory_code: string; batch_no: string | null; exp_date: string | null; qty_remaining: number }
 interface Batch {
@@ -70,7 +98,7 @@ export default function DispatchPage() {
   const [lrFactory, setLrFactory] = useState('')     // which factory to request a lorry for
   const [lrType, setLrType] = useState('any')        // see LORRY_TYPES
   const [lrNote, setLrNote] = useState('')
-  const [lrDest, setLrDest] = useState('')           // where the lorry should go
+  const [lrDests, setLrDests] = useState<Set<string>>(new Set())   // sites the lorry should go to (one or more)
   const [salesLines, setSalesLines] = useState<SLine[]>([])
   const [directCart, setDirectCart] = useState<{ lineId: string; so: string; itemCode: string; description: string; qty: number; batchNo: string; expDate: string; factory: string; factoryName: string }[]>([])
   const [dSo, setDSo] = useState('')
@@ -289,10 +317,10 @@ export default function DispatchPage() {
     const fac = lrFactory || myFactories[0]?.code
     if (!fac) { setError('Pick a factory to request a lorry for.'); return }
     setBusy(true); setError(''); setSuccess('')
-    const { error: e } = await supabase.rpc('request_lorry', { p_factory: fac, p_type: lrType, p_note: lrNote.trim() || null, p_dest: lrDest.trim() || null })
+    const { error: e } = await supabase.rpc('request_lorry', { p_factory: fac, p_type: lrType, p_note: lrNote.trim() || null, p_dest: [...lrDests].join(', ') || null })
     setBusy(false)
     if (e) { setError(e.message); return }
-    setLrNote(''); setLrType('any'); setLrDest('')
+    setLrNote(''); setLrType('any'); setLrDests(new Set())
     setSuccess(`Lorry requested for ${factoryName(fac)} — the warehouse has been notified.`)
     load()
   }
@@ -300,10 +328,10 @@ export default function DispatchPage() {
     const fac = lrFactory || myFactories[0]?.code
     if (!fac) { setError('Pick a factory to request a driver for.'); return }
     setBusy(true); setError(''); setSuccess('')
-    const { error: e } = await supabase.rpc('request_driver', { p_factory: fac, p_note: lrNote.trim() || null, p_dest: lrDest.trim() || null })
+    const { error: e } = await supabase.rpc('request_driver', { p_factory: fac, p_note: lrNote.trim() || null, p_dest: [...lrDests].join(', ') || null })
     setBusy(false)
     if (e) { setError(e.message); return }
-    setLrNote(''); setLrDest('')
+    setLrNote(''); setLrDests(new Set())
     setSuccess(`Driver requested for ${factoryName(fac)} — the warehouse has been notified.`)
     load()
   }
@@ -499,9 +527,9 @@ export default function DispatchPage() {
                     {LORRY_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                   </select>
                 </label>
-                <label className="text-xs text-gray-600">Send to
-                  <input value={lrDest} onChange={e => setLrDest(e.target.value)} placeholder="where the lorry should go" className="block mt-0.5 border rounded-lg px-2 py-1.5 text-sm w-44" />
-                </label>
+                <div className="text-xs text-gray-600">Send to <span className="text-gray-400">(one or more sites)</span>
+                  <div className="mt-0.5"><MultiPick options={factories.map(f => f.name)} selected={lrDests} onChange={setLrDests} placeholder="pick site(s)…" /></div>
+                </div>
                 <label className="text-xs text-gray-600">Note (optional)
                   <input value={lrNote} onChange={e => setLrNote(e.target.value)} placeholder="e.g. urgent" className="block mt-0.5 border rounded-lg px-2 py-1.5 text-sm w-40" />
                 </label>
