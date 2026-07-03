@@ -359,6 +359,15 @@ export default function DeliverySchedulePage() {
 
   async function removeSched(id: string) { await supabase.from('delivery_schedule').delete().eq('id', id); load() }
   async function updateSched(id: string, patch: Partial<Sched>) { await supabase.from('delivery_schedule').update(patch).eq('id', id); load() }
+  // Move a whole line's orders at once — to a different date and/or a different line.
+  async function moveGroup(rows: Sched[], patch: Partial<Sched>) {
+    const ids = rows.map(r => r.id); if (!ids.length) return
+    setBusy('move'); setError('')
+    const { error: e } = await supabase.from('delivery_schedule').update(patch).in('id', ids)
+    setBusy('')
+    if (e) { setError(e.message); return }
+    setSuccess(`${ids.length} order(s) moved.`); load()
+  }
 
   const schedDates = useMemo(() => [...new Set(sched.map(s => s.delivery_date).filter(Boolean) as string[])].sort(), [sched])
   const shownSched = useMemo(() => sched.filter(s =>
@@ -613,6 +622,15 @@ export default function DeliverySchedulePage() {
                       const parts = Object.entries(loc).sort((a, b) => a[0].localeCompare(b[0]))
                       return <div className="text-xs text-gray-500 mt-0.5">{parts.map(([f, c]) => `${c.done >= c.total ? '✓ ' : ''}${f} (${c.done}/${c.total})`).join('  ·  ')}</div>
                     })()}
+                    <div className="flex items-center gap-2 text-xs mt-1 no-print text-gray-600">
+                      <span>Move all {g.rows.length}:</span>
+                      <label className="flex items-center gap-1">date
+                        <input type="date" defaultValue={g.date || ''} onChange={e => { const v = e.target.value; if (v && v !== g.date && confirm(`Move all ${g.rows.length} order(s)${g.route ? ' on ' + g.route : ''} to ${fmtD(v)}?`)) moveGroup(g.rows, { delivery_date: v }) }} className="border rounded px-2 py-1" /></label>
+                      <select value="" disabled={busy === 'move'} onChange={e => { const v = e.target.value; if (v && v !== g.route && confirm(`Move all ${g.rows.length} order(s) to ${v}?`)) moveGroup(g.rows, { route: v }) }} className="border rounded px-2 py-1 bg-white">
+                        <option value="">to line…</option>
+                        {LINES.filter(l => l !== g.route).map(l => <option key={l} value={l}>{l}</option>)}
+                      </select>
+                    </div>
                   </div>
                   {tripKey && (<>
                     <div className="flex items-center gap-2 text-xs flex-wrap no-print">
