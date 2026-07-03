@@ -1526,3 +1526,22 @@ begin
   update public.sales_order_lines set delivered_qty = coalesce(delivered_qty, 0) + p_qty, delivered_do = v_do, delivered_at = now() where id = v_sl.id;
 end $function$;
 grant execute on function public.link_line_to_so(uuid, boolean, text, numeric) to authenticated;
+
+-- ============================================================================
+-- 2026-07 · Production staff flag. Only people ticked as production staff show
+-- up in the production module pickers (e.g. Grinding "Grind by"), so the whole
+-- company list isn't exposed there. Everyone can still work at any factory.
+-- ============================================================================
+alter table public.employees add column if not exists is_production boolean not null default false;
+
+-- ============================================================================
+-- 2026-07 · Grinding machine details. Assign each grinding machine to a factory
+-- and keep its specs, so a machine-maintenance module can be built on top later.
+-- Extends the existing grinding_machines master list.
+-- ============================================================================
+alter table public.grinding_machines add column if not exists factory_code text;
+alter table public.grinding_machines add column if not exists model text;
+alter table public.grinding_machines add column if not exists serial_no text;
+alter table public.grinding_machines add column if not exists location text;
+alter table public.grinding_machines add column if not exists commissioned_on date;
+alter table public.grinding_machines add column if not exists notes text;

@@ -4,7 +4,7 @@ import { supabase, fetchAll } from '@/lib/supabase'
 
 type DayWin = { start: string; end: string } | null
 interface ShiftProfile { id: string; name: string; normal_hours: number; lunch_rule: string; lunch_minutes: number; week_schedule: Record<string, DayWin> | null; attendance_mode: string | null }
-interface Employee { employee_code: string; name: string | null; shift_profile_id: string | null; is_driver: boolean; active: boolean; department: string | null; delivery_name: string | null }
+interface Employee { employee_code: string; name: string | null; shift_profile_id: string | null; is_driver: boolean; is_production: boolean; active: boolean; department: string | null; delivery_name: string | null }
 interface Row extends Employee { seenInPunches: boolean; lastSeen: string | null }
 interface Holiday { holiday_date: string; name: string | null }
 
@@ -41,7 +41,7 @@ export default function EmployeesSetupPage() {
     setLoading(true); setError(null)
     const [{ data: profs }, { data: emps }, codes, { data: hols }, { data: drv }] = await Promise.all([
       supabase.from('shift_profiles').select('id, name, normal_hours, lunch_rule, lunch_minutes, week_schedule, attendance_mode').order('name'),
-      supabase.from('employees').select('employee_code, name, shift_profile_id, is_driver, active, department, delivery_name'),
+      supabase.from('employees').select('employee_code, name, shift_profile_id, is_driver, is_production, active, department, delivery_name'),
       fetchAll<{ employee_code: string; punch_time: string }>('attendance_punches', 'employee_code, punch_time'),
       supabase.from('public_holidays').select('holiday_date, name').order('holiday_date'),
       supabase.from('delivery_resources').select('name').eq('kind', 'driver').eq('active', true).order('name'),
@@ -62,6 +62,7 @@ export default function EmployeesSetupPage() {
         name: e?.name ?? '',
         shift_profile_id: e?.shift_profile_id ?? null,
         is_driver: e?.is_driver ?? false,
+        is_production: e?.is_production ?? false,
         active: e?.active ?? true,
         department: e?.department ?? null,
         delivery_name: e?.delivery_name ?? null,
@@ -85,7 +86,7 @@ export default function EmployeesSetupPage() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         employee_code: r.employee_code, name: next.name,
-        shift_profile_id: next.shift_profile_id, is_driver: next.is_driver, active: next.active,
+        shift_profile_id: next.shift_profile_id, is_driver: next.is_driver, is_production: next.is_production, active: next.active,
         delivery_name: next.delivery_name,
       }),
     })
@@ -287,7 +288,7 @@ export default function EmployeesSetupPage() {
       {/* Employees */}
       <section className="rounded-lg border border-gray-200 overflow-hidden">
         <header className="flex flex-wrap items-center justify-between gap-2 bg-gray-50 px-4 py-2 border-b border-gray-200">
-          <span className="text-sm text-gray-600">{rows.length} people · {named} named · {withProfile} with a shift · {rows.filter(r => r.active).length} active</span>
+          <span className="text-sm text-gray-600">{rows.length} people · {named} named · {withProfile} with a shift · {rows.filter(r => r.active).length} active · {rows.filter(r => r.is_production).length} production</span>
           <div className="flex gap-2">
             <button onClick={setActiveFromAttendance}
               className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50">
@@ -339,6 +340,7 @@ export default function EmployeesSetupPage() {
                 <th className="px-3 py-2 font-medium">Name</th>
                 <th className="px-3 py-2 font-medium">Department</th>
                 <th className="px-3 py-2 font-medium">Shift profile</th>
+                <th className="px-3 py-2 font-medium" title="Ticked people appear in the Production module (e.g. Grinding “Grind by”)">Production</th>
                 <th className="px-3 py-2 font-medium">Driver</th>
                 <th className="px-3 py-2 font-medium">Delivery link</th>
                 <th className="px-3 py-2 font-medium">Last seen</th>
@@ -364,6 +366,9 @@ export default function EmployeesSetupPage() {
                       <option value="">—</option>
                       {profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    <input type="checkbox" checked={r.is_production} onChange={e => saveEmployee(r, { is_production: e.target.checked })} title="Show this person in the Production module" />
                   </td>
                   <td className="px-3 py-2 text-center">
                     <input type="checkbox" checked={r.is_driver} onChange={e => saveEmployee(r, { is_driver: e.target.checked })} />

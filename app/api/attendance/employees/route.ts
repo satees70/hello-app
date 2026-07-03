@@ -10,13 +10,14 @@ const admin = createClient(
 )
 
 export async function POST(request: Request) {
-  const { employee_code, name, shift_profile_id, is_driver, active, delivery_name } = await request.json()
+  const { employee_code, name, shift_profile_id, is_driver, is_production, active, delivery_name } = await request.json()
   if (!employee_code) return NextResponse.json({ error: 'Missing employee_code' }, { status: 400 })
 
   const row: Record<string, unknown> = { employee_code }
   if (name !== undefined) row.name = (name ?? '').trim() || employee_code
   if (shift_profile_id !== undefined) row.shift_profile_id = shift_profile_id || null
   if (is_driver !== undefined) row.is_driver = !!is_driver
+  if (is_production !== undefined) row.is_production = !!is_production
   if (active !== undefined) row.active = !!active
   if (delivery_name !== undefined) row.delivery_name = (delivery_name ?? '').trim() || null
 

@@ -90,7 +90,8 @@ export default function GrindingPage() {
   // Grinding-machine master list + HR employee names (for the record's Machine / Grind by pickers)
   useEffect(() => { if (!profile) return
     supabase.from('grinding_machines').select('name').eq('active', true).order('name').then(({ data }) => setMachines((data || []).map(r => r.name)))
-    supabase.from('employees').select('name').eq('active', true).order('name').then(({ data }) => setEmps((data || []).map(r => r.name).filter(Boolean)))
+    // Only production-tagged staff (set on HR › Employees) appear here — not the whole company.
+    supabase.from('employees').select('name').eq('active', true).eq('is_production', true).order('name').then(({ data }) => setEmps((data || []).map(r => r.name).filter(Boolean)))
   }, [profile])
   async function addMachine() {
     const n = newMachine.trim(); if (!n || machines.some(m => m.toLowerCase() === n.toLowerCase())) { setNewMachine(''); return }
