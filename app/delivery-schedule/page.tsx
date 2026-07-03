@@ -92,10 +92,11 @@ export default function DeliverySchedulePage() {
   const [routeFilter, setRouteFilter] = useState('all')
   const [dateFilter, setDateFilter] = useState('all')
   const [showScheduled, setShowScheduled] = useState(false)   // upload list: also show orders already scheduled
-  const [resources, setResources] = useState<Record<'lorry' | 'driver' | 'kelindan', { id: string; name: string; phone: string | null }[]>>({ lorry: [], driver: [], kelindan: [] })
+  // Drivers & kelindan share one "crew" pool — a person can go as either, and a lorry can carry several kelindan.
+  const [resources, setResources] = useState<Record<'lorry' | 'crew', { id: string; name: string; phone: string | null }[]>>({ lorry: [], crew: [] })
   const [showManage, setShowManage] = useState(false)
-  const [newRes, setNewRes] = useState<Record<'lorry' | 'driver' | 'kelindan', string>>({ lorry: '', driver: '', kelindan: '' })
-  const [newPhone, setNewPhone] = useState<Record<'lorry' | 'driver' | 'kelindan', string>>({ lorry: '', driver: '', kelindan: '' })
+  const [newRes, setNewRes] = useState<Record<'lorry' | 'crew', string>>({ lorry: '', crew: '' })
+  const [newPhone, setNewPhone] = useState<Record<'lorry' | 'crew', string>>({ lorry: '', crew: '' })
   const didInitDate = useRef(false)   // default the date filter to the latest day, once
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
@@ -105,14 +106,16 @@ export default function DeliverySchedulePage() {
   // Master lists of lorries / drivers / kelindan (the future driver app reads from here too).
   async function loadResources() {
     const { data } = await supabase.from('delivery_resources').select('id, kind, name, phone').eq('active', true).order('name')
-    const g: Record<'lorry' | 'driver' | 'kelindan', { id: string; name: string; phone: string | null }[]> = { lorry: [], driver: [], kelindan: [] }
-    ;(data || []).forEach((r: { id: string; kind: 'lorry' | 'driver' | 'kelindan'; name: string; phone: string | null }) => { if (g[r.kind]) g[r.kind].push({ id: r.id, name: r.name, phone: r.phone }) })
+    const g: Record<'lorry' | 'crew', { id: string; name: string; phone: string | null }[]> = { lorry: [], crew: [] }
+    ;(data || []).forEach((r: { id: string; kind: string; name: string; phone: string | null }) => { (r.kind === 'lorry' ? g.lorry : g.crew).push({ id: r.id, name: r.name, phone: r.phone }) })
+    g.crew.sort((a, b) => a.name.localeCompare(b.name))
     setResources(g)
   }
-  async function addResource(kind: 'lorry' | 'driver' | 'kelindan', name: string, phone?: string) {
+  async function addResource(kind: 'lorry' | 'crew', name: string, phone?: string) {
     const n = (name || '').trim()
     if (!n || resources[kind].some(r => r.name.toLowerCase() === n.toLowerCase())) return
-    const { error: e } = await supabase.from('delivery_resources').insert({ kind, name: n, phone: (phone || '').trim() || null })
+    // Crew is stored with kind 'crew'; existing 'driver'/'kelindan' rows still count as crew.
+    const { error: e } = await supabase.from('delivery_resources').insert({ kind: kind === 'lorry' ? 'lorry' : 'crew', name: n, phone: (phone || '').trim() || null })
     if (!e) { setNewRes(p => ({ ...p, [kind]: '' })); setNewPhone(p => ({ ...p, [kind]: '' })); loadResources() }
   }
   async function removeResource(id: string) {
@@ -240,23 +243,37 @@ export default function DeliverySchedulePage() {
     Object.values(trips).forEach(t => {
       if (!t.delivery_date || !t.route) return
       const add = (kind: string, val?: string | null) => { const v = (val || '').trim(); if (v) m.set(`${t.delivery_date}|${kind}|${v.toLowerCase()}`, t.route) }
-      add('lorry', t.lorry_no); add('driver', t.driver); add('kelindan', t.kelindan)
+      // Driver and every kelindan share one 'crew' pool — a person can't be on two lines the same day.
+      add('lorry', t.lorry_no); add('crew', t.driver)
+      ;(t.kelindan || '').split(',').forEach(k => add('crew', k))
     })
     return m
   }, [trips])
   const ownerOf = (date: string | null, kind: string, name: string) => date ? resourceOwner.get(`${date}|${kind}|${name.trim().toLowerCase()}`) : undefined
-  // Save a lorry/driver/kelindan to a trip — but block it if another line already uses it that day.
-  function commitResource(route: string, date: string, kind: 'lorry' | 'driver' | 'kelindan', field: keyof Trip, value: string) {
+  const dayStr = (date: string) => { const d = (date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return d ? `${d[3]}/${d[2]}/${d[1]}` : date }
+  // Save a single lorry/driver to a trip — but block it if another line already uses it that day.
+  function commitResource(route: string, date: string, ownerKind: 'lorry' | 'crew', field: keyof Trip, value: string, label: string) {
     const v = (value || '').trim()
-    const owner = v ? ownerOf(date, kind, v) : undefined
-    if (owner && owner !== route) {
-      const d = (date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); const ds = d ? `${d[3]}/${d[2]}/${d[1]}` : date
-      setError(`"${v}" is already assigned to ${owner} on ${ds}. Each ${kind} can only be on one line per day.`)
-      return
-    }
+    const owner = v ? ownerOf(date, ownerKind, v) : undefined
+    if (owner && owner !== route) { setError(`"${v}" is already assigned to ${owner} on ${dayStr(date)}. Each ${label} can only be on one line per day.`); return }
     setError('')
     setTripField(route, date, field, v)
     saveTrip(route, date, { [field]: v })
+  }
+  // Kelindan is a list (a lorry can carry several). Add/remove one at a time.
+  function addKelindan(route: string, date: string, name: string) {
+    const v = (name || '').trim(); if (!v) return
+    const owner = ownerOf(date, 'crew', v)
+    if (owner && owner !== route) { setError(`"${v}" is already on ${owner} on ${dayStr(date)}. Each person can only be on one line per day.`); return }
+    const cur = (trips[`${route}|${date}`]?.kelindan || '').split(',').map(s => s.trim()).filter(Boolean)
+    if (cur.some(x => x.toLowerCase() === v.toLowerCase())) return
+    const next = [...cur, v].join(', ')
+    setError(''); setTripField(route, date, 'kelindan', next); saveTrip(route, date, { kelindan: next })
+  }
+  function removeKelindan(route: string, date: string, name: string) {
+    const cur = (trips[`${route}|${date}`]?.kelindan || '').split(',').map(s => s.trim()).filter(Boolean)
+    const next = cur.filter(x => x.toLowerCase() !== (name || '').toLowerCase()).join(', ')
+    setTripField(route, date, 'kelindan', next); saveTrip(route, date, { kelindan: next })
   }
   async function loadUploads() {
     const { data } = await supabase.from('delivery_uploads').select('id, file_name, path, created_at, created_by_name').order('created_at', { ascending: false }).limit(30)
@@ -504,7 +521,7 @@ export default function DeliverySchedulePage() {
           <h2 className="font-semibold">Scheduled deliveries</h2>
           <div className="flex items-center gap-3 flex-wrap">
             <button onClick={() => window.print()} className="text-sm px-3 py-1.5 rounded-lg bg-gray-800 text-white hover:bg-gray-900">🖨 Print / PDF</button>
-            <button onClick={() => setShowManage(true)} className="text-sm px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50">🚚 Manage lorries / drivers / kelindan</button>
+            <button onClick={() => setShowManage(true)} className="text-sm px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50">🚚 Manage lorries / crew</button>
             <label className="flex items-center gap-2 text-sm text-gray-500">Date
               <select value={dateFilter} onChange={e => setDateFilter(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm">
                 <option value="all">All dates</option>
@@ -524,14 +541,14 @@ export default function DeliverySchedulePage() {
           <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 overflow-auto no-print" onClick={() => setShowManage(false)}>
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl mt-10 p-5" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-semibold text-lg">Lorries · Drivers · Kelindan</h3>
+                <h3 className="font-semibold text-lg">Lorries · Crew (drivers &amp; kelindan)</h3>
                 <button onClick={() => setShowManage(false)} className="text-gray-400 hover:text-gray-700 text-xl leading-none">×</button>
               </div>
-              <p className="text-sm text-gray-500 mb-4">These saved names appear as a dropdown when you fill in a trip. Add or remove them here. (This master list is what your future driver app will use.)</p>
-              <div className="grid sm:grid-cols-3 gap-4">
-                {(['lorry', 'driver', 'kelindan'] as const).map(kind => (
+              <p className="text-sm text-gray-500 mb-4">Drivers and kelindan share one <strong>crew</strong> list — the same person can go as a driver on one trip and a kelindan on another. Add or remove them here. (This master list is what your future driver app will use.)</p>
+              <div className="grid sm:grid-cols-2 gap-4">
+                {(['lorry', 'crew'] as const).map(kind => (
                   <div key={kind} className="border rounded-xl p-3">
-                    <div className="font-medium capitalize mb-2">{kind === 'lorry' ? 'Lorries' : kind === 'driver' ? 'Drivers' : 'Kelindan'} <span className="text-gray-400 font-normal">({resources[kind].length})</span></div>
+                    <div className="font-medium mb-2">{kind === 'lorry' ? 'Lorries' : 'Crew (drivers & kelindan)'} <span className="text-gray-400 font-normal">({resources[kind].length})</span></div>
                     <div className="flex flex-col gap-1 mb-2">
                       <input value={newRes[kind]} onChange={e => setNewRes(p => ({ ...p, [kind]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') addResource(kind, newRes[kind], newPhone[kind]) }} placeholder={kind === 'lorry' ? 'Lorry no…' : 'Name…'} className="border rounded px-2 py-1 text-sm w-full" />
                       <div className="flex gap-1">
@@ -600,8 +617,11 @@ export default function DeliverySchedulePage() {
             {keys.map(k => {
               const g = groups[k]
               const tripKey = g.route && g.date ? `${g.route}|${g.date}` : ''
-              const availRes = (kind: 'lorry' | 'driver' | 'kelindan') => resources[kind].filter(r => { const o = ownerOf(g.date, kind, r.name); return !o || o === g.route })
               const trip = tripKey ? trips[tripKey] : undefined
+              // Lorries free that day; crew (drivers/kelindan) free that day.
+              const availLorries = resources.lorry.filter(r => { const o = ownerOf(g.date, 'lorry', r.name); return !o || o === g.route })
+              const availCrew = resources.crew.filter(r => { const o = ownerOf(g.date, 'crew', r.name); return !o || o === g.route })
+              const kelList = (trip?.kelindan || '').split(',').map(s => s.trim()).filter(Boolean)
               return (
               <div key={k} className="border rounded-xl bg-white shadow-sm overflow-hidden">
                 <div className="px-4 py-2 bg-gray-100 flex items-start justify-between flex-wrap gap-2">
@@ -639,18 +659,26 @@ export default function DeliverySchedulePage() {
                         {TRIP_TYPES.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
                       <input value={trip?.remark || ''} placeholder="For (e.g. Klang)" onChange={e => setTripField(g.route!, g.date!, 'remark', e.target.value)} onBlur={() => saveTrip(g.route!, g.date!, {})} className="border rounded px-2 py-1 w-32" />
-                      {(['lorry', 'driver', 'kelindan'] as const).map(kind => {
-                        const field = (kind === 'lorry' ? 'lorry_no' : kind) as keyof Trip
-                        const cur = (trip?.[field] as string) || ''
-                        const opts = availRes(kind)
-                        return (
-                          <select key={kind} value={cur} onChange={e => commitResource(g.route!, g.date!, kind, field, e.target.value)} className="border rounded px-2 py-1 w-28 bg-white">
-                            <option value="">{kind === 'lorry' ? 'Lorry no' : kind === 'driver' ? 'Driver' : 'Kelindan'}…</option>
-                            {opts.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
-                            {cur && !opts.some(r => r.name === cur) && <option value={cur}>{cur}</option>}
-                          </select>
-                        )
-                      })}
+                      {/* Lorry (single) */}
+                      <select value={trip?.lorry_no || ''} onChange={e => commitResource(g.route!, g.date!, 'lorry', 'lorry_no', e.target.value, 'lorry')} className="border rounded px-2 py-1 w-28 bg-white">
+                        <option value="">Lorry no…</option>
+                        {availLorries.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
+                        {trip?.lorry_no && !availLorries.some(r => r.name === trip.lorry_no) && <option value={trip.lorry_no}>{trip.lorry_no}</option>}
+                      </select>
+                      {/* Driver (single, from crew) */}
+                      <select value={trip?.driver || ''} onChange={e => commitResource(g.route!, g.date!, 'crew', 'driver', e.target.value, 'driver')} className="border rounded px-2 py-1 w-28 bg-white">
+                        <option value="">Driver…</option>
+                        {availCrew.filter(r => !kelList.some(k => k.toLowerCase() === r.name.toLowerCase())).map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
+                        {trip?.driver && !availCrew.some(r => r.name === trip.driver) && <option value={trip.driver}>{trip.driver}</option>}
+                      </select>
+                      {/* Kelindan (multiple, from crew) */}
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {kelList.map(k => <span key={k} className="inline-flex items-center gap-1 bg-gray-200 rounded px-1.5 py-0.5">{k}<button onClick={() => removeKelindan(g.route!, g.date!, k)} className="text-gray-500 hover:text-red-600">×</button></span>)}
+                        <select value="" onChange={e => { if (e.target.value) addKelindan(g.route!, g.date!, e.target.value) }} className="border rounded px-2 py-1 w-28 bg-white">
+                          <option value="">+ Kelindan…</option>
+                          {availCrew.filter(r => r.name !== (trip?.driver || '') && !kelList.some(k => k.toLowerCase() === r.name.toLowerCase())).map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
+                        </select>
+                      </div>
                     </div>
                     {/* Print-only: show only the filled-in trip details, no empty boxes */}
                     <div className="hidden print:block text-xs text-gray-700">{[trip?.category && `Type: ${trip.category}`, trip?.remark && `For: ${trip.remark}`, trip?.lorry_no && `Lorry: ${trip.lorry_no}`, trip?.driver && `Driver: ${trip.driver}`, trip?.kelindan && `Kelindan: ${trip.kelindan}`].filter(Boolean).join('   ·   ')}</div>
