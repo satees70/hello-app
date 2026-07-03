@@ -2060,3 +2060,87 @@ begin
   end if;
 end; $function$;
 grant execute on function public.confirm_gr_received(uuid) to authenticated;
+
+-- ============================================================================
+-- 2026-07 · Private discussion groups. A group is a named channel only its
+-- members can see & post in. Messages reuse discussions with channel
+-- 'group:<id>'. The creator (and HO/admin) manage the member list.
+-- ============================================================================
+create table if not exists public.discussion_groups (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  created_by uuid,
+  created_by_name text,
+  created_at timestamptz not null default now()
+);
+create table if not exists public.discussion_group_members (
+  group_id uuid not null references public.discussion_groups(id) on delete cascade,
+  user_id uuid not null,
+  added_by uuid,
+  added_at timestamptz not null default now(),
+  primary key (group_id, user_id)
+);
+alter table public.discussion_groups enable row level security;
+alter table public.discussion_group_members enable row level security;
+
+-- Manager = the creator, or Head Office / admin.
+create or replace function public.dg_is_manager(p_group uuid) returns boolean
+ language sql security definer set search_path to 'public' as $$
+  select exists (select 1 from public.discussion_groups g where g.id = p_group and g.created_by = auth.uid())
+      or coalesce((select p.factory_code = 'HEAD_OFFICE' or p.role = 'admin' from public.profiles p where p.id = auth.uid()), false);
+$$;
+-- Member = a manager, or listed in the members table.
+create or replace function public.dg_is_member(p_group uuid) returns boolean
+ language sql security definer set search_path to 'public' as $$
+  select public.dg_is_manager(p_group)
+      or exists (select 1 from public.discussion_group_members m where m.group_id = p_group and m.user_id = auth.uid());
+$$;
+
+drop policy if exists dg_read on public.discussion_groups;
+create policy dg_read on public.discussion_groups for select to authenticated using (public.dg_is_member(id));
+drop policy if exists dgm_read on public.discussion_group_members;
+create policy dgm_read on public.discussion_group_members for select to authenticated using (public.dg_is_member(group_id));
+
+-- Group messages: only members can read/post (normal channels unchanged).
+drop policy if exists discussions_read on public.discussions;
+create policy discussions_read on public.discussions for select to authenticated using (
+  channel not like 'group:%' or public.dg_is_member(substring(channel from 7)::uuid)
+);
+drop policy if exists discussions_insert on public.discussions;
+create policy discussions_insert on public.discussions for insert to authenticated with check (
+  author_id = auth.uid() and (channel not like 'group:%' or public.dg_is_member(substring(channel from 7)::uuid))
+);
+
+create or replace function public.create_discussion_group(p_name text) returns uuid
+ language plpgsql security definer set search_path to 'public' as $$
+declare v_id uuid; v_name text;
+begin
+  if nullif(btrim(p_name), '') is null then raise exception 'Name required'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  insert into public.discussion_groups (name, created_by, created_by_name) values (btrim(p_name), auth.uid(), v_name) returning id into v_id;
+  insert into public.discussion_group_members (group_id, user_id, added_by) values (v_id, auth.uid(), auth.uid());
+  return v_id;
+end; $$;
+grant execute on function public.create_discussion_group(text) to authenticated;
+
+create or replace function public.add_group_member(p_group uuid, p_user uuid) returns void
+ language plpgsql security definer set search_path to 'public' as $$
+begin
+  if not public.dg_is_manager(p_group) then raise exception 'Only the group owner or Head Office can manage members'; end if;
+  insert into public.discussion_group_members (group_id, user_id, added_by) values (p_group, p_user, auth.uid())
+  on conflict (group_id, user_id) do nothing;
+  insert into public.notifications (user_id, factory_code, type, title, body, link, ref)
+  select p_user, coalesce((select factory_code from public.profiles where id = p_user), 'HEAD_OFFICE'), 'discussion',
+         'Added to a group', 'You were added to the group “' || g.name || '”.', '/discussion', 'grp-add:' || p_group::text || ':' || p_user::text
+  from public.discussion_groups g where g.id = p_group
+  on conflict (ref) do nothing;
+end; $$;
+grant execute on function public.add_group_member(uuid, uuid) to authenticated;
+
+create or replace function public.remove_group_member(p_group uuid, p_user uuid) returns void
+ language plpgsql security definer set search_path to 'public' as $$
+begin
+  if not public.dg_is_manager(p_group) then raise exception 'Only the group owner or Head Office can manage members'; end if;
+  delete from public.discussion_group_members where group_id = p_group and user_id = p_user;
+end; $$;
+grant execute on function public.remove_group_member(uuid, uuid) to authenticated;
