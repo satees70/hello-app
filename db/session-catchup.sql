@@ -1159,3 +1159,19 @@ grant execute on function public.reject_dispatch_line_edit(uuid) to authenticate
 alter table public.production_batches drop constraint if exists production_batches_status_check;
 alter table public.production_batches add constraint production_batches_status_check
   check (status in ('Planned', 'Requested', 'In Progress', 'Completed', 'Bypassed'));
+
+-- ============================================================================
+-- 2026-07 · Discussion: mark an order's conversation "completed" (shared)
+-- ============================================================================
+create table if not exists public.discussion_threads (
+  channel text not null,
+  so_number text not null,
+  completed_at timestamptz default now(),
+  completed_by uuid,
+  completed_by_name text,
+  primary key (channel, so_number)
+);
+alter table public.discussion_threads enable row level security;
+drop policy if exists dt_all on public.discussion_threads;
+create policy dt_all on public.discussion_threads for all
+  using (auth.uid() is not null) with check (auth.uid() is not null);
