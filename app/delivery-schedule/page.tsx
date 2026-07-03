@@ -128,7 +128,20 @@ export default function DeliverySchedulePage() {
       if (dates.length) { setDateFilter(dates[dates.length - 1]); didInitDate.current = true }
     }
     const { data: t } = await supabase.from('delivery_trips').select('route, delivery_date, lorry_no, driver, kelindan, remark, category')
-    const tm: Record<string, Trip> = {}; (t as Trip[] || []).forEach(x => { tm[`${x.route}|${x.delivery_date}`] = x }); setTrips(tm)
+    // A driver/lorry/kelindan can only be assigned to a line that has orders. If a line's
+    // orders later move away, its assignment is now stale — clear it so it's not shown/held.
+    const orderKeys = new Set(((s as Sched[]) || []).filter(x => x.route && x.delivery_date).map(x => `${x.route}|${x.delivery_date}`))
+    const tm: Record<string, Trip> = {}; const stale: Trip[] = []
+    ;(t as Trip[] || []).forEach(x => {
+      const key = `${x.route}|${x.delivery_date}`
+      const hasResource = !!((x.driver || '').trim() || (x.lorry_no || '').trim() || (x.kelindan || '').trim())
+      if (x.delivery_date && hasResource && !orderKeys.has(key)) { stale.push(x); tm[key] = { ...x, driver: null, lorry_no: null, kelindan: null } }
+      else tm[key] = x
+    })
+    setTrips(tm)
+    if (stale.length) await Promise.all(stale.map(x => supabase.from('delivery_trips')
+      .update({ driver: null, lorry_no: null, kelindan: null, updated_at: new Date().toISOString() })
+      .match({ route: x.route, delivery_date: x.delivery_date })))
     // Each SO's production location (factory) + its ordered items (the fallback detail for SOs with no batch yet).
     const sos = [...new Set(((s as Sched[]) || []).map(x => x.so_number).filter(Boolean))]
     const sf: Record<string, string> = {}
