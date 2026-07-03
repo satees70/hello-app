@@ -1,120 +1,158 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
 interface Msg { id: string; author_id: string | null; author_name: string | null; body: string; created_at: string; so_number: string | null; mention_ids: string[] | null; mention_factories: string[] | null; reply_to: string | null }
 
-// A lightweight message board so the warehouse and office can talk to each other.
-// Messages are shared by `channel` (default "warehouse") and can be linked to a
-// specific SO number — filter the thread by SO, or post against one.
+const GENERAL = '__general__'
+const keyOf = (m: Msg) => m.so_number || GENERAL
+
+// Per-order discussion: a list of order threads (with unread counts) → open one to chat.
+// Each order (SO) is its own conversation, so there's no confusing reply nesting.
 export default function DiscussionPanel({ channel = 'warehouse', me, meName, title = 'Discussion', soOptions = [], filterSo: filterSoProp, onFilterChange, panelId, onPosted }: {
   channel?: string; me: string; meName?: string | null; title?: string; soOptions?: string[]
   filterSo?: string; onFilterChange?: (so: string) => void; panelId?: string; onPosted?: () => void
 }) {
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [body, setBody] = useState('')
-  const [tagSo, setTagSo] = useState('')      // SO to link the new message to
-  const [internalFilter, setInternalFilter] = useState('')
-  const filterSo = filterSoProp !== undefined ? filterSoProp : internalFilter   // controlled or internal
-  const setFilterSo = onFilterChange || setInternalFilter
   const [sending, setSending] = useState(false)
   const [err, setErr] = useState('')
-  const [open, setOpen] = useState(true)
   const [users, setUsers] = useState<{ id: string; full_name: string }[]>([])
   const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
-  const [mentions, setMentions] = useState<string[]>([])      // tagged user ids
-  const [facMentions, setFacMentions] = useState<string[]>([])// tagged location codes
-  const [replyTo, setReplyTo] = useState<Msg | null>(null)    // message being replied to
+  const [mentions, setMentions] = useState<string[]>([])
+  const [facMentions, setFacMentions] = useState<string[]>([])
+  const [thread, setThread] = useState<string | null | undefined>(undefined)   // undefined=list, null=General, string=SO
+  const [seen, setSeen] = useState<Record<string, string>>({})
+  const [newSo, setNewSo] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
-  const msgById = (id: string | null) => id ? msgs.find(m => m.id === id) : undefined
-  function startReply(m: Msg) {
-    setReplyTo(m)
-    if (m.so_number) setTagSo(m.so_number)
-    if (m.author_id && m.author_id !== me) setMentions(x => x.includes(m.author_id!) ? x : [...x, m.author_id!])
-  }
-  const nameOf = (id: string) => users.find(u => u.id === id)?.full_name || 'someone'
+  const seenKey = `disc_seen_${channel}`
 
   async function load() {
-    const { data } = await supabase.from('discussions').select('*').eq('channel', channel).order('created_at', { ascending: true }).limit(500)
+    const { data } = await supabase.from('discussions').select('*').eq('channel', channel).order('created_at', { ascending: true }).limit(1000)
     setMsgs((data as Msg[]) || [])
   }
+  useEffect(() => { try { setSeen(JSON.parse(localStorage.getItem(seenKey) || '{}')) } catch { /* ignore */ } }, [seenKey])
   useEffect(() => { load(); const id = setInterval(load, 20000); return () => clearInterval(id) }, [channel]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     supabase.rpc('list_users').then(({ data }) => setUsers((data as { id: string; full_name: string }[]) || []))
     supabase.from('factories').select('code, name').order('code').then(({ data }) => setFactories((data as { code: string; name: string }[]) || []))
   }, [])
-  // When the parent points us at an SO (e.g. clicked from a document), open and pre-link the reply
-  useEffect(() => { if (filterSoProp) { setOpen(true); setTagSo(filterSoProp) } }, [filterSoProp])
-  const shown = filterSo ? msgs.filter(m => (m.so_number || '') === filterSo) : msgs
-  useEffect(() => { endRef.current?.scrollIntoView({ block: 'nearest' }) }, [shown.length])
+  // Deep link (e.g. /discussion?so=SO-40823) opens that order's thread directly.
+  useEffect(() => { if (filterSoProp) openThread(filterSoProp) }, [filterSoProp]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const nameOf = (id: string) => users.find(u => u.id === id)?.full_name || 'someone'
+  const fmt = (iso: string) => new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+  const soList = [...new Set([...soOptions, ...msgs.map(m => m.so_number || '').filter(Boolean)])].sort()
+
+  // One entry per order (plus General), newest activity first, with an unread count.
+  const threads = useMemo(() => {
+    const m = new Map<string, { key: string; so: string | null; last: Msg; count: number; unread: number }>()
+    msgs.forEach(msg => {
+      const k = keyOf(msg)
+      const e = m.get(k) || { key: k, so: msg.so_number, last: msg, count: 0, unread: 0 }
+      e.count++
+      if (new Date(msg.created_at) >= new Date(e.last.created_at)) e.last = msg
+      m.set(k, e)
+    })
+    m.forEach(e => {
+      const ls = seen[e.key]
+      e.unread = msgs.filter(x => keyOf(x) === e.key && x.author_id !== me && (!ls || new Date(x.created_at) > new Date(ls))).length
+    })
+    return [...m.values()].sort((a, b) => new Date(b.last.created_at).getTime() - new Date(a.last.created_at).getTime())
+  }, [msgs, seen, me])
+  const totalUnread = threads.reduce((s, t) => s + t.unread, 0)
+
+  function markSeen(k: string) {
+    const latest = msgs.filter(x => keyOf(x) === k).reduce((mx, x) => x.created_at > mx ? x.created_at : mx, new Date().toISOString())
+    setSeen(prev => { const next = { ...prev, [k]: latest }; try { localStorage.setItem(seenKey, JSON.stringify(next)) } catch { /* ignore */ } return next })
+  }
+  function openThread(so: string | null) {
+    setThread(so); setErr(''); setBody(''); setMentions([]); setFacMentions([])
+    markSeen(so || GENERAL)
+    if (onFilterChange) onFilterChange(so || '')
+  }
+  function backToList() { setThread(undefined); if (onFilterChange) onFilterChange('') }
+
+  const inThread = thread !== undefined
+  const threadKey = thread || GENERAL
+  const shown = useMemo(() => msgs.filter(m => keyOf(m) === threadKey), [msgs, threadKey])
+  useEffect(() => { if (inThread) endRef.current?.scrollIntoView({ block: 'nearest' }) }, [shown.length, inThread])
+  // keep the open thread marked read as new messages arrive
+  useEffect(() => { if (inThread && shown.length) markSeen(threadKey) }, [shown.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function send() {
-    const text = body.trim()
-    if (!text) return
+    const text = body.trim(); if (!text) return
     setSending(true); setErr('')
-    let { error } = await supabase.from('discussions').insert({ channel, author_id: me, author_name: meName || null, body: text, so_number: tagSo.trim() || null, mention_ids: mentions, mention_factories: facMentions, reply_to: replyTo?.id || null })
-    // If the tagging columns aren't in the database yet, still send a plain message
-    if (error && /column|schema cache|mention_|so_number|reply_to/i.test(error.message)) {
-      const res = await supabase.from('discussions').insert({ channel, author_id: me, author_name: meName || null, body: text })
-      error = res.error
+    const so = typeof thread === 'string' ? thread : null
+    let { error } = await supabase.from('discussions').insert({ channel, author_id: me, author_name: meName || null, body: text, so_number: so, mention_ids: mentions, mention_factories: facMentions })
+    if (error && /column|schema cache|mention_|so_number/i.test(error.message)) {
+      const res = await supabase.from('discussions').insert({ channel, author_id: me, author_name: meName || null, body: text }); error = res.error
     }
     setSending(false)
     if (error) { setErr(error.message); return }
-    setBody(''); setMentions([]); setFacMentions([]); setReplyTo(null); load(); onPosted?.()
+    setBody(''); setMentions([]); setFacMentions([]); await load(); markSeen(so || GENERAL); onPosted?.()
   }
-  const fmt = (iso: string) => new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
-  // SO numbers to offer: the ones passed in plus any already used in messages
-  const soList = [...new Set([...soOptions, ...msgs.map(m => m.so_number || '').filter(Boolean)])].sort()
 
   return (
     <div id={panelId} className="bg-white rounded-xl shadow-sm border mb-8">
-      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between px-4 py-3 text-left">
-        <span className="font-semibold">💬 {title} <span className="font-normal text-gray-400 text-sm">· {msgs.length} message{msgs.length === 1 ? '' : 's'}</span></span>
-        <span className="text-gray-400 text-sm">{open ? '▾' : '▸'}</span>
-      </button>
-      {open && (
-        <div className="px-4 pb-4">
-          {soList.length > 0 && (
-            <div className="flex items-center gap-2 mb-2 text-sm">
-              <span className="text-gray-500">Show:</span>
-              <select value={filterSo} onChange={e => setFilterSo(e.target.value)} className="border rounded-lg px-2 py-1 text-sm bg-white">
-                <option value="">All messages</option>
-                {soList.map(so => <option key={so} value={so}>SO {so}</option>)}
-              </select>
-              {filterSo && <span className="text-gray-400 text-xs">{shown.length} for SO {filterSo}</span>}
-            </div>
-          )}
-          <div className="max-h-72 overflow-y-auto space-y-2 border rounded-lg p-3 bg-gray-50 mb-3">
-            {shown.length === 0 && <p className="text-gray-400 text-sm text-center py-4">{filterSo ? `No messages for SO ${filterSo} yet.` : 'No messages yet — start the conversation.'}</p>}
+      <div className="px-4 py-3 border-b flex items-center gap-2">
+        {inThread && <button onClick={backToList} className="text-blue-600 hover:underline text-sm font-medium">← Orders</button>}
+        <span className="font-semibold">💬 {inThread ? (thread ? `Order ${thread}` : 'General chat') : title}</span>
+        <span className="font-normal text-gray-400 text-sm">· {inThread ? `${shown.length} message${shown.length === 1 ? '' : 's'}` : `${threads.length} thread${threads.length === 1 ? '' : 's'}`}</span>
+        {!inThread && totalUnread > 0 && <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full px-2 py-0.5">{totalUnread} unread</span>}
+      </div>
+
+      {/* THREAD LIST */}
+      {!inThread && (
+        <div className="p-3">
+          <div className="flex flex-wrap items-center gap-2 mb-3 text-sm">
+            <input list="disc-so-list" value={newSo} onChange={e => setNewSo(e.target.value)} placeholder="Open an order (SO#)…" className="w-48 border rounded-lg px-3 py-2 text-sm" />
+            <datalist id="disc-so-list">{soList.map(so => <option key={so} value={so} />)}</datalist>
+            <button onClick={() => { if (newSo.trim()) { openThread(newSo.trim().toUpperCase()); setNewSo('') } }} disabled={!newSo.trim()} className="bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">Open</button>
+            <button onClick={() => openThread(null)} className="border px-3 py-2 rounded-lg hover:bg-gray-50 text-sm">General chat</button>
+          </div>
+          <div className="divide-y border rounded-lg overflow-hidden max-h-[30rem] overflow-y-auto">
+            {threads.length === 0 && <p className="text-gray-400 text-sm text-center py-8">No conversations yet — open an order above to start.</p>}
+            {threads.map(t => (
+              <button key={t.key} onClick={() => openThread(t.so)} className="w-full text-left px-3 py-2.5 hover:bg-gray-50 flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-gray-800">{t.so ? `SO ${t.so}` : 'General'}</span>
+                    <span className="text-gray-400 text-xs">· {t.count} msg</span>
+                    {t.unread > 0 && <span className="bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5">{t.unread} new</span>}
+                  </div>
+                  <div className={`text-sm truncate ${t.unread > 0 ? 'text-gray-800 font-medium' : 'text-gray-500'}`}><span className="text-gray-400">{t.last.author_name || 'Someone'}:</span> {t.last.body}</div>
+                </div>
+                <span className="text-gray-400 text-xs whitespace-nowrap">{fmt(t.last.created_at)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ONE THREAD (chat) */}
+      {inThread && (
+        <div className="px-4 pb-4 pt-3">
+          <div className="max-h-80 overflow-y-auto space-y-2 border rounded-lg p-3 bg-gray-50 mb-3">
+            {shown.length === 0 && <p className="text-gray-400 text-sm text-center py-6">No messages yet — say something about this {thread ? 'order' : 'topic'}.</p>}
             {shown.map(m => {
               const mine = m.author_id === me
               return (
                 <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-[80%] rounded-lg px-3 py-1.5 text-sm ${mine ? 'bg-blue-600 text-white' : 'bg-white border'}`}>
                     {!mine && <div className="text-xs font-medium text-gray-500">{m.author_name || 'Someone'}</div>}
-                    {m.reply_to && (() => { const p = msgById(m.reply_to); return <div className={`mb-1 px-2 py-1 rounded border-l-2 text-[11px] ${mine ? 'bg-blue-500/40 border-blue-200' : 'bg-gray-100 border-gray-300 text-gray-600'}`}>↩ {p ? <><span className="font-medium">{p.author_name || 'Someone'}</span>: {p.body.slice(0, 60)}{p.body.length > 60 ? '…' : ''}</> : 'replied message'}</div> })()}
-                    {m.so_number && <button onClick={() => setFilterSo(m.so_number!)} className={`inline-block mb-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold ${mine ? 'bg-blue-500 text-white' : 'bg-indigo-100 text-indigo-700'}`}>SO {m.so_number}</button>}
                     {((m.mention_ids && m.mention_ids.length > 0) || (m.mention_factories && m.mention_factories.length > 0)) && <div className="mb-0.5 flex flex-wrap gap-1">
                       {(m.mention_ids || []).map(id => <span key={id} className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${mine ? 'bg-blue-500 text-white' : 'bg-amber-100 text-amber-800'}`}>@{nameOf(id)}</span>)}
                       {(m.mention_factories || []).map(fc => <span key={fc} className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${mine ? 'bg-blue-500 text-white' : 'bg-teal-100 text-teal-800'}`}>@{fc} (all)</span>)}
                     </div>}
                     <div className="whitespace-pre-wrap break-words">{m.body}</div>
-                    <div className={`flex items-center gap-2 text-[10px] mt-0.5 ${mine ? 'text-blue-100' : 'text-gray-400'}`}>
-                      <span>{fmt(m.created_at)}</span>
-                      <button onClick={() => startReply(m)} className={`hover:underline font-medium ${mine ? 'text-blue-100' : 'text-blue-600'}`}>Reply</button>
-                    </div>
+                    <div className={`text-[10px] mt-0.5 ${mine ? 'text-blue-100' : 'text-gray-400'}`}>{fmt(m.created_at)}</div>
                   </div>
                 </div>
               )
             })}
             <div ref={endRef} />
           </div>
-          {replyTo && (
-            <div className="flex items-center gap-2 mb-2 text-xs bg-gray-100 border-l-2 border-blue-400 rounded px-2 py-1">
-              <span className="text-gray-500">↩ Replying to <span className="font-medium">{replyTo.author_name || 'Someone'}</span>: {replyTo.body.slice(0, 50)}{replyTo.body.length > 50 ? '…' : ''}</span>
-              <button onClick={() => setReplyTo(null)} className="text-gray-400 ml-auto">✕</button>
-            </div>
-          )}
           {(mentions.length > 0 || facMentions.length > 0) && (
             <div className="flex flex-wrap items-center gap-1 mb-2 text-xs">
               <span className="text-gray-500">Tagging:</span>
@@ -123,10 +161,8 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
             </div>
           )}
           <div className="flex flex-wrap gap-2">
-            <input list="disc-so-list" value={tagSo} onChange={e => setTagSo(e.target.value)} placeholder="Link SO# (optional)" className="w-36 border rounded-lg px-3 py-2 text-sm" />
-            <datalist id="disc-so-list">{soList.map(so => <option key={so} value={so} />)}</datalist>
             {(users.length > 0 || factories.length > 0) && (
-              <select value="" onChange={e => { const v = e.target.value; if (!v) return; if (v.startsWith('fac:')) { const c = v.slice(4); setFacMentions(f => f.includes(c) ? f : [...f, c]) } else { setMentions(m => m.includes(v) ? m : [...m, v]) } }} className="w-40 border rounded-lg px-2 py-2 text-sm bg-white" title="Tag a person or location">
+              <select value="" onChange={e => { const v = e.target.value; if (!v) return; if (v.startsWith('fac:')) { const c = v.slice(4); setFacMentions(f => f.includes(c) ? f : [...f, c]) } else { setMentions(m => m.includes(v) ? m : [...m, v]) } }} className="w-36 border rounded-lg px-2 py-2 text-sm bg-white" title="Tag a person or location">
                 <option value="">＠ Tag…</option>
                 {factories.length > 0 && <optgroup label="Locations (all users)">
                   {factories.filter(f => f.code !== 'HEAD_OFFICE' && !facMentions.includes(f.code)).map(f => <option key={f.code} value={`fac:${f.code}`}>{f.code}{f.name && f.name !== f.code ? ` — ${f.name}` : ''}</option>)}
@@ -137,7 +173,7 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
               </select>
             )}
             <input value={body} onChange={e => setBody(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
-              placeholder={tagSo ? `Message about SO ${tagSo}…` : 'Type a message…'} className="flex-1 min-w-[12rem] border rounded-lg px-3 py-2 text-sm" />
+              placeholder={thread ? `Message about SO ${thread}…` : 'Type a message…'} className="flex-1 min-w-[12rem] border rounded-lg px-3 py-2 text-sm" />
             <button onClick={send} disabled={sending || !body.trim()} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{sending ? 'Sending…' : 'Send'}</button>
           </div>
           {err && <p className="text-red-500 text-xs mt-2">Couldn’t send: {err}</p>}

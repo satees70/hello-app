@@ -27,7 +27,7 @@ export default function DiscussionPage() {
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
         <h1 className="text-2xl font-bold mb-1">Discussion</h1>
-        <p className="text-gray-500 text-sm mb-5">Shared board for warehouse and office. Link a message to a specific SO number, or filter the thread by SO.</p>
+        <p className="text-gray-500 text-sm mb-5">One conversation per order. Pick an order to open its chat — unread messages are marked with a red count.</p>
         <DiscussionPanel channel="warehouse" me={profile.id} meName={profile.full_name} title="Warehouse discussion"
           soOptions={soOptions} filterSo={filterSo} onFilterChange={setFilterSo} />
       </div>
