@@ -1251,3 +1251,50 @@ end; $function$;
 drop trigger if exists notify_discussion on public.discussions;
 create trigger notify_discussion after insert on public.discussions
   for each row execute function public.tg_notify_discussion();
+
+-- ============================================================================
+-- 2026-07 · Notify Head Office when ANY approval request is raised
+-- ----------------------------------------------------------------------------
+-- One shared trigger fn; attached to every request table that exists. Notifies
+-- HEAD_OFFICE (only HO sees these) with a link to the Pending Changes page.
+-- ============================================================================
+create or replace function public.tg_notify_pending_request() returns trigger
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_label text := TG_ARGV[0];
+begin
+  if coalesce(NEW.status, 'Pending') = 'Pending' then
+    insert into public.notifications (factory_code, type, title, body, link, ref)
+    values ('HEAD_OFFICE', 'approval', 'New request: ' || v_label,
+            'A ' || v_label || ' request is waiting for Head Office approval.', '/sales-orders/changes',
+            'req:' || TG_TABLE_NAME || ':' || NEW.id::text)
+    on conflict (ref) do nothing;
+  end if;
+  return NEW;
+end; $function$;
+
+do $$
+declare r record;
+begin
+  for r in select * from (values
+    ('change_requests', 'order change'),
+    ('correction_requests', 'timer cancellation'),
+    ('do_change_requests', 'goods-received change'),
+    ('split_requests', 'batch split'),
+    ('stock_adjustments', 'stock adjustment'),
+    ('run_mode_requests', 'run-mode change'),
+    ('mr_cancel_requests', 'pick-run cancel'),
+    ('doc_delete_requests', 'document delete'),
+    ('return_edit_requests', 'return edit'),
+    ('dispatch_line_edit_requests', 'delivery-line edit'),
+    ('item_change_requests', 'item change'),
+    ('so_change_requests', 'SO change'),
+    ('mr_qty_move_requests', 'quantity move'),
+    ('factory_change_requests', 'factory move'),
+    ('food_loss_alerts', 'food-loss alert')
+  ) as t(tbl, lbl) loop
+    if exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = r.tbl) then
+      execute format('drop trigger if exists notify_pending on public.%I', r.tbl);
+      execute format('create trigger notify_pending after insert on public.%I for each row execute function public.tg_notify_pending_request(%L)', r.tbl, r.lbl);
+    end if;
+  end loop;
+end $$;
