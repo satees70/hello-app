@@ -1943,3 +1943,120 @@ begin
   end if;
 end; $function$;
 grant execute on function public.mark_lorry_out(uuid, boolean) to authenticated;
+
+-- ============================================================================
+-- 2026-07 · Goods-Received transport. Warehouse moves goods to a factory on a
+-- specific incoming document: assign a lorry, mark loaded, assign a driver
+-- (often later — drivers aren't always free), send, and the destination factory
+-- confirms receipt. Each step notifies. Attached to delivery_orders (incoming).
+-- ============================================================================
+alter table public.delivery_orders add column if not exists vehicle text;
+alter table public.delivery_orders add column if not exists driver_name text;
+alter table public.delivery_orders add column if not exists loaded_at timestamptz;
+alter table public.delivery_orders add column if not exists loaded_by uuid;
+alter table public.delivery_orders add column if not exists driver_assigned_at timestamptz;
+alter table public.delivery_orders add column if not exists gr_departed_at timestamptz;
+alter table public.delivery_orders add column if not exists transport_received_at timestamptz;
+alter table public.delivery_orders add column if not exists transport_received_by uuid;
+
+-- Shared guard: caller may act on Goods Received at this document's factory.
+create or replace function public._gr_can(p_fac text) returns boolean
+ language plpgsql security definer set search_path to 'public' as $function$
+begin
+  if not has_perm('goods_received', 'view') then return false; end if;
+  if my_factory_code() = 'HEAD_OFFICE' then return true; end if;
+  if p_fac = any (my_factory_codes()) then return true; end if;
+  return coalesce((select warehouse_user from public.profiles where id = auth.uid()), false);
+end; $function$;
+
+-- Assign a lorry or driver to an incoming document (driver assign notifies).
+create or replace function public.assign_gr_transport(p_doc_id uuid, p_kind text, p_value text) returns void
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_fac text; v_no text; v_val text;
+begin
+  if p_kind not in ('lorry', 'driver') then raise exception 'Unknown assignment type'; end if;
+  select factory_code, do_number into v_fac, v_no from public.delivery_orders where id = p_doc_id;
+  if v_fac is null then raise exception 'Document not found'; end if;
+  if not public._gr_can(v_fac) then raise exception 'Not allowed'; end if;
+  v_val := nullif(btrim(p_value), '');
+  if p_kind = 'lorry' then
+    update public.delivery_orders set vehicle = v_val where id = p_doc_id;
+    if v_val is not null then
+      update public.delivery_resources set parked_at = null where kind = 'lorry' and lower(name) = lower(v_val);
+    end if;
+  else
+    update public.delivery_orders
+       set driver_name = v_val, driver_assigned_at = case when v_val is null then null else now() end
+     where id = p_doc_id;
+    if v_val is not null then
+      insert into public.notifications (factory_code, type, title, body, link, ref)
+      values (v_fac, 'transport', 'Driver assigned: ' || coalesce(v_no, 'incoming'),
+              'Driver ' || v_val || ' assigned to bring your goods.', '/incoming',
+              'gr-driver:' || p_doc_id::text || ':' || floor(extract(epoch from now()))::text)
+      on conflict (ref) do nothing;
+    end if;
+  end if;
+end; $function$;
+grant execute on function public.assign_gr_transport(uuid, text, text) to authenticated;
+
+-- Mark goods loaded onto the lorry (notifies the destination factory).
+create or replace function public.mark_gr_loaded(p_doc_id uuid, p_on boolean default true) returns void
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_fac text; v_no text; v_veh text;
+begin
+  select factory_code, do_number, vehicle into v_fac, v_no, v_veh from public.delivery_orders where id = p_doc_id;
+  if v_fac is null then raise exception 'Document not found'; end if;
+  if not public._gr_can(v_fac) then raise exception 'Not allowed'; end if;
+  update public.delivery_orders
+     set loaded_at = case when p_on then now() else null end,
+         loaded_by = case when p_on then auth.uid() else null end
+   where id = p_doc_id;
+  if p_on then
+    insert into public.notifications (factory_code, type, title, body, link, ref)
+    values (v_fac, 'transport', 'Goods loaded: ' || coalesce(v_no, 'incoming'),
+            'Your goods have been loaded' || coalesce(' onto ' || v_veh, '') || '.', '/incoming',
+            'gr-loaded:' || p_doc_id::text || ':' || floor(extract(epoch from now()))::text)
+    on conflict (ref) do nothing;
+  end if;
+end; $function$;
+grant execute on function public.mark_gr_loaded(uuid, boolean) to authenticated;
+
+-- Lorry departs the warehouse towards the factory.
+create or replace function public.mark_gr_out(p_doc_id uuid, p_out boolean default true) returns void
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_fac text; v_no text; v_veh text; v_drv text;
+begin
+  select factory_code, do_number, vehicle, driver_name into v_fac, v_no, v_veh, v_drv from public.delivery_orders where id = p_doc_id;
+  if v_fac is null then raise exception 'Document not found'; end if;
+  if not public._gr_can(v_fac) then raise exception 'Not allowed'; end if;
+  update public.delivery_orders set gr_departed_at = case when p_out then now() else null end where id = p_doc_id;
+  if p_out then
+    insert into public.notifications (factory_code, type, title, body, link, ref)
+    values (v_fac, 'transport', 'Incoming lorry on the way: ' || coalesce(v_no, ''),
+            'Lorry ' || coalesce(v_veh, '') || coalesce(' · driver ' || v_drv, '') || ' has left the warehouse — confirm when it arrives.', '/incoming',
+            'gr-out:' || p_doc_id::text || ':' || floor(extract(epoch from now()))::text)
+    on conflict (ref) do nothing;
+  end if;
+end; $function$;
+grant execute on function public.mark_gr_out(uuid, boolean) to authenticated;
+
+-- Destination factory confirms the lorry/goods arrived (notifies whoever loaded).
+create or replace function public.confirm_gr_received(p_doc_id uuid) returns void
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_fac text; v_no text; v_by uuid;
+begin
+  select factory_code, do_number, loaded_by into v_fac, v_no, v_by from public.delivery_orders where id = p_doc_id;
+  if v_fac is null then raise exception 'Document not found'; end if;
+  if not public._gr_can(v_fac) then raise exception 'Not allowed'; end if;
+  update public.delivery_orders
+     set transport_received_at = now(), transport_received_by = auth.uid()
+   where id = p_doc_id;
+  if v_by is not null then
+    insert into public.notifications (user_id, factory_code, type, title, body, link, ref)
+    values (v_by, v_fac, 'transport', 'Lorry received: ' || coalesce(v_no, ''),
+            'The destination factory confirmed the lorry arrived.', '/incoming',
+            'gr-received:' || p_doc_id::text)
+    on conflict (ref) do nothing;
+  end if;
+end; $function$;
+grant execute on function public.confirm_gr_received(uuid) to authenticated;

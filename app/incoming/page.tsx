@@ -17,6 +17,12 @@ interface DeliveryOrder {
   created_at: string
   so_number?: string | null
   pick_run_no?: string | null
+  vehicle?: string | null
+  driver_name?: string | null
+  loaded_at?: string | null
+  driver_assigned_at?: string | null
+  gr_departed_at?: string | null
+  transport_received_at?: string | null
 }
 interface DoLine { id: string; item_code: string; description: string; quantity: number; unit: string; batch_no: string; qc_checked: boolean; photo_path: string | null; received_at: string | null; stock_lot_id?: string | null; received_qty?: number | null }
 interface MRItem { id: string; item_code: string; unit: string; requested_qty: number; received_qty: number }
@@ -77,6 +83,12 @@ export default function IncomingPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // Transport (warehouse → factory) for a document
+  const [transportDoc, setTransportDoc] = useState<DeliveryOrder | null>(null)
+  const [lorries, setLorries] = useState<{ name: string; parked_at: string | null; lorry_type: string | null }[]>([])
+  const [crew, setCrew] = useState<string[]>([])
+  const [tBusy, setTBusy] = useState(false)
 
   // Lines / review state for the currently opened document
   const [linesFor, setLinesFor] = useState<DeliveryOrder | null>(null)
@@ -184,7 +196,22 @@ export default function IncomingPage() {
     reloadLines()
   }
 
-  useEffect(() => { if (profile) { loadDocs(); loadFactories(); loadItemsMaster() } }, [profile])
+  useEffect(() => { if (profile) { loadDocs(); loadFactories(); loadItemsMaster(); loadResources() } }, [profile])
+
+  async function loadResources() {
+    const { data } = await supabase.from('delivery_resources').select('kind, name, parked_at, lorry_type').eq('active', true).order('name')
+    setLorries((data || []).filter(r => r.kind === 'lorry').map(r => ({ name: r.name, parked_at: r.parked_at, lorry_type: r.lorry_type })))
+    setCrew([...new Set((data || []).filter(r => r.kind !== 'lorry').map(r => r.name))].sort())
+  }
+  // Transport-step actions on a Goods-Received document.
+  async function grTransport(rpc: string, args: Record<string, unknown>) {
+    setTBusy(true); setError('')
+    const { error: e } = await supabase.rpc(rpc, args)
+    setTBusy(false)
+    if (e) { setError(e.message); return false }
+    await loadDocs()
+    return true
+  }
 
   async function loadDocs() {
     const { data } = await supabase.from('delivery_orders').select('*').order('created_at', { ascending: false })
@@ -563,6 +590,7 @@ export default function IncomingPage() {
               <div className="flex flex-wrap gap-3 mt-2 pt-2 border-t text-xs">
                 <button onClick={() => viewLines(doc)} className="text-blue-600 hover:underline font-medium">View Lines</button>
                 {(doc.status === 'Processing' || doc.status === 'Error') && <button onClick={() => reExtract(doc)} className="text-blue-600 hover:underline">Re-read</button>}
+                <button onClick={() => setTransportDoc(doc)} className="text-teal-700 hover:underline">🚚 Transport{doc.transport_received_at ? ' ✅' : doc.vehicle ? ' •' : ''}</button>
                 <button onClick={() => handleViewPdf(doc.file_path)} className="text-blue-600 hover:underline">View PDF</button>
                 <button onClick={() => handleDelete(doc)} className="text-red-500 hover:underline ml-auto">Delete</button>
               </div>
@@ -594,11 +622,14 @@ export default function IncomingPage() {
                   <td className="px-4 py-3 whitespace-nowrap">{isHO ? factoryName(doc.factory_code) : doc.factory_code}</td>
                   <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[doc.status] || 'bg-gray-100 text-gray-700'}`}>{doc.status}</span>{lineCounts[doc.id]?.total ? <span className="block text-xs text-gray-500 mt-1">{lineCounts[doc.id].recv}/{lineCounts[doc.id].total} received</span> : null}</td>
                   <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{new Date(doc.created_at).toLocaleString()}</td>
-                  <td className="px-4 py-3 whitespace-nowrap flex gap-3">
+                  <td className="px-4 py-3 whitespace-nowrap flex gap-3 items-center">
                     <button onClick={() => viewLines(doc)} className="text-blue-600 hover:underline text-xs">View Lines</button>
                     {(doc.status === 'Processing' || doc.status === 'Error') && (
                       <button onClick={() => reExtract(doc)} className="text-blue-600 hover:underline text-xs">Re-read</button>
                     )}
+                    <button onClick={() => setTransportDoc(doc)} className="text-teal-700 hover:underline text-xs whitespace-nowrap">
+                      🚚 Transport{doc.transport_received_at ? ' ✅' : doc.vehicle ? ' •' : ''}
+                    </button>
                     <button onClick={() => handleViewPdf(doc.file_path)} className="text-blue-600 hover:underline text-xs">View PDF</button>
                     <button onClick={() => handleDelete(doc)} className="text-red-500 hover:underline text-xs">Delete</button>
                   </td>
@@ -726,6 +757,80 @@ export default function IncomingPage() {
           </div>
         )}
       </div>
+
+      {transportDoc && (() => {
+        const doc = docs.find(d => d.id === transportDoc.id) || transportDoc
+        const dest = isHO ? factoryName(doc.factory_code) : doc.factory_code
+        const onSite = lorries.filter(l => l.parked_at === doc.factory_code)   // parked at destination (rare)
+        const atWh = lorries.filter(l => l.parked_at && l.parked_at !== doc.factory_code)
+        const fmtT = (iso?: string | null) => iso ? new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
+        const step = (done: boolean, label: string, when?: string | null) => (
+          <span className={`inline-flex items-center gap-1 text-xs ${done ? 'text-green-700' : 'text-gray-400'}`}>{done ? '✅' : '○'} {label}{done && when ? ` · ${fmtT(when)}` : ''}</span>
+        )
+        return (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setTransportDoc(null)}>
+          <div className="bg-white rounded-xl shadow-xl border w-full max-w-lg my-8 p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="font-semibold text-lg">🚚 Transport — {doc.do_number || doc.file_name}</h3>
+              <button onClick={() => setTransportDoc(null)} className="text-gray-400 hover:text-gray-600 text-sm">Close</button>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">Send these goods to <strong>{dest}</strong>. Assign a lorry, mark loaded, assign a driver (can be later), send — the factory confirms on arrival.</p>
+
+            <div className="flex flex-wrap gap-x-4 gap-y-1 mb-4 pb-3 border-b">
+              {step(!!doc.vehicle, 'Lorry')}
+              {step(!!doc.loaded_at, 'Loaded', doc.loaded_at)}
+              {step(!!doc.driver_name, 'Driver', doc.driver_assigned_at)}
+              {step(!!doc.gr_departed_at, 'Sent', doc.gr_departed_at)}
+              {step(!!doc.transport_received_at, 'Received', doc.transport_received_at)}
+            </div>
+
+            <div className="space-y-4">
+              {/* Lorry */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Lorry</label>
+                {doc.vehicle
+                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-teal-50 text-teal-800 rounded-full px-2.5 py-1 text-sm font-medium">🚚 {doc.vehicle}</span><button onClick={() => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'lorry', p_value: null })} disabled={tBusy} className="text-xs text-gray-400 hover:text-red-600">change</button></div>
+                  : <select value="" onChange={e => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'lorry', p_value: e.target.value })} disabled={tBusy} className="border rounded-lg px-2 py-1.5 text-sm w-full">
+                      <option value="">Assign a lorry…</option>
+                      {atWh.length > 0 && <optgroup label="🅿 Parked at a warehouse/site">{atWh.map(l => <option key={l.name} value={l.name}>{l.name}{l.lorry_type ? ` · ${l.lorry_type}` : ''} · at {factoryName(l.parked_at!)}</option>)}</optgroup>}
+                      {onSite.length > 0 && <optgroup label="🅿 Parked at destination">{onSite.map(l => <option key={l.name} value={l.name}>{l.name}</option>)}</optgroup>}
+                      <optgroup label="Other lorries">{lorries.filter(l => !l.parked_at).map(l => <option key={l.name} value={l.name}>{l.name}{l.lorry_type ? ` · ${l.lorry_type}` : ''}</option>)}</optgroup>
+                    </select>}
+              </div>
+
+              {/* Loaded */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Loaded</label>
+                {doc.loaded_at
+                  ? <button onClick={() => grTransport('mark_gr_loaded', { p_doc_id: doc.id, p_on: false })} disabled={tBusy} className="text-xs text-gray-400 hover:underline">✅ Loaded {fmtT(doc.loaded_at)} · undo</button>
+                  : <button onClick={() => grTransport('mark_gr_loaded', { p_doc_id: doc.id, p_on: true })} disabled={tBusy} className="bg-amber-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-amber-700 disabled:opacity-50">📦 Mark loaded</button>}
+              </div>
+
+              {/* Driver */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Driver <span className="text-gray-400 font-normal">(can be assigned later)</span></label>
+                {doc.driver_name
+                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 rounded-full px-2.5 py-1 text-sm font-medium">👤 {doc.driver_name}</span><button onClick={() => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'driver', p_value: null })} disabled={tBusy} className="text-xs text-gray-400 hover:text-red-600">change</button></div>
+                  : <select value="" onChange={e => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'driver', p_value: e.target.value })} disabled={tBusy} className="border rounded-lg px-2 py-1.5 text-sm w-full">
+                      <option value="">Assign a driver…</option>
+                      {crew.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>}
+              </div>
+
+              {/* Send + Receive */}
+              <div className="flex items-center gap-3 pt-2 border-t">
+                {doc.gr_departed_at
+                  ? <span className="text-green-700 text-sm">✅ Sent {fmtT(doc.gr_departed_at)}<button onClick={() => grTransport('mark_gr_out', { p_doc_id: doc.id, p_out: false })} disabled={tBusy} className="ml-1 text-gray-400 hover:underline text-xs">undo</button></span>
+                  : <button onClick={() => grTransport('mark_gr_out', { p_doc_id: doc.id, p_out: true })} disabled={tBusy || !doc.vehicle} className="bg-teal-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-teal-700 disabled:opacity-50">🚚 Send to factory</button>}
+                {doc.transport_received_at
+                  ? <span className="text-green-700 text-sm font-medium ml-auto">✅ Received {fmtT(doc.transport_received_at)}</span>
+                  : <button onClick={() => grTransport('confirm_gr_received', { p_doc_id: doc.id })} disabled={tBusy} className="ml-auto bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-green-700 disabled:opacity-50">Confirm received</button>}
+              </div>
+            </div>
+          </div>
+        </div>
+        )
+      })()}
 
       {editReq && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setEditReq(null)}>
