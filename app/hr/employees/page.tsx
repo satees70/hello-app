@@ -44,10 +44,11 @@ export default function EmployeesSetupPage() {
       supabase.from('employees').select('employee_code, name, shift_profile_id, is_driver, is_production, active, department, delivery_name'),
       fetchAll<{ employee_code: string; punch_time: string }>('attendance_punches', 'employee_code, punch_time'),
       supabase.from('public_holidays').select('holiday_date, name').order('holiday_date'),
-      supabase.from('delivery_resources').select('name').eq('kind', 'driver').eq('active', true).order('name'),
+      // Delivery link comes from the unified crew pool (kind 'crew' + legacy 'driver'/'kelindan'), not just 'driver'.
+      supabase.from('delivery_resources').select('name').neq('kind', 'lorry').eq('active', true).order('name'),
     ])
     setHolidays((hols as Holiday[]) || [])
-    setDeliveryDrivers((drv || []).map(d => d.name))
+    setDeliveryDrivers([...new Set((drv || []).map(d => d.name))])
     const empByCode = new Map<string, Employee>((emps || []).map(e => [e.employee_code, e as Employee]))
     // Last punch per person (for the "Last seen" column).
     const lastByCode = new Map<string, string>()
