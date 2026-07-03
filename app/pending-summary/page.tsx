@@ -4,6 +4,7 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
+import { fetchTomorrowDeliverySOs } from '@/lib/delivery'
 import MultiFilter from '@/components/MultiFilter'
 
 interface Line {
@@ -46,11 +47,14 @@ export default function PendingSummaryPage() {
   const [facF, setFacF] = useState<Set<string>>(new Set())
   const [statF, setStatF] = useState<Set<string>>(new Set())
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [tomorrowSOs, setTomorrowSOs] = useState<Set<string>>(new Set())
+  const [tomorrowOnly, setTomorrowOnly] = useState(false)
   const [busy, setBusy] = useState(true)
 
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
     setBusy(true)
+    setTomorrowSOs(await fetchTomorrowDeliverySOs())
     const { data: f } = await supabase.from('factories').select('code, name').order('code')
     setFactories(f || [])
     const all = await fetchAll<Line>('sales_order_lines', 'id, so_number, item_code, description, quantity, outstanding_qty, delivered_qty, factory_code, is_grinding')
@@ -95,11 +99,13 @@ export default function PendingSummaryPage() {
   })
   const q = search.trim().toLowerCase()
   const visible = pending.filter(l => {
+    if (tomorrowOnly && !(l.so_number && tomorrowSOs.has(l.so_number))) return false
     if (facF.size && !facF.has(factoryName(l.factory_code))) return false
     if (statF.size && !statF.has(lineStatus(l))) return false
     if (q && !(`${l.so_number} ${l.item_code} ${l.description}`.toLowerCase().includes(q))) return false
     return true
   })
+  const tomorrowCount = pending.filter(l => l.so_number && tomorrowSOs.has(l.so_number)).length
   const facs = [...new Set(visible.map(l => factoryName(l.factory_code)))].sort()
   const toggle = (f: string) => setCollapsed(p => { const n = new Set(p); n.has(f) ? n.delete(f) : n.add(f); return n })
   const qtyOf = (l: Line) => Number(l.outstanding_qty ?? l.quantity ?? 0)
@@ -115,6 +121,7 @@ export default function PendingSummaryPage() {
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Search SO, item code or name…" className="border rounded-lg px-3 py-2 w-full sm:w-72" />
           <div className="w-44"><span className="text-xs text-gray-500">Factory</span><MultiFilter values={[...new Set(pending.map(l => factoryName(l.factory_code)))].sort()} selected={facF} onChange={setFacF} /></div>
           <div className="w-52"><span className="text-xs text-gray-500">Status</span><MultiFilter values={[...new Set(pending.map(lineStatus))].sort()} selected={statF} onChange={setStatF} /></div>
+          <button onClick={() => setTomorrowOnly(v => !v)} className={`text-xs px-3 py-1.5 rounded-full font-medium border self-end ${tomorrowOnly ? 'bg-yellow-300 border-yellow-400 text-yellow-900' : 'bg-white border-gray-300 text-gray-600 hover:bg-yellow-50'}`}>🚚 Tomorrow{tomorrowCount ? ` (${tomorrowCount})` : ''}</button>
           <span className="text-gray-400 text-xs self-end">{visible.length} pending line(s)</span>
         </div>
 
