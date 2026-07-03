@@ -199,7 +199,9 @@ export default function GrindingPage() {
   const setOutput = (i: number, k: keyof Output, v: string) => setOutputs(p => { const o = [...p]; o[i] = { ...o[i], [k]: v }; return o })
   // Totals for the internal record: input = actual (or needed) raw material; output = sum of output qty
   const totalInput = mixMats.reduce((s, m) => s + (Number(m.actual_qty) || Number(m.qty) || 0), 0)
-  const totalOutput = outputs.reduce((s, o) => s + (Number(o.qty) || 0), 0)
+  // Output weight in KG: a bagged item (e.g. S852-SP-30KG/BAG) counts qty × its bag KG; loose KG counts as-is.
+  const outputKg = (o: Output) => { const n = Number(o.qty) || 0; const code = (o.item || '').split(' — ')[0]; const m = code.match(/(\d+(?:\.\d+)?)\s*KG/i); return n * (m ? Number(m[1]) : 1) }
+  const totalOutput = outputs.reduce((s, o) => s + outputKg(o), 0)
   const yieldPct = totalInput > 0 ? (totalOutput / totalInput) * 100 : null
   // Output item must be a real item from the master (picked, so it carries a code).
   const knownCodes = new Set(items.map(i => i.code))
@@ -557,8 +559,8 @@ export default function GrindingPage() {
               )}
               {/* Internal record totals */}
               <div className="mt-3 border-t pt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm">
-                <span className="text-gray-500">Total input: <strong className="text-gray-800">{Number(totalInput.toFixed(3))}</strong></span>
-                <span className="text-gray-500">Total output: <strong className="text-gray-800">{Number(totalOutput.toFixed(3))}</strong></span>
+                <span className="text-gray-500">Total input: <strong className="text-gray-800">{Number(totalInput.toFixed(3))} kg</strong></span>
+                <span className="text-gray-500">Total output: <strong className="text-gray-800">{Number(totalOutput.toFixed(3))} kg</strong></span>
                 <span className="text-gray-500">Yield: <strong className={yieldPct == null ? 'text-gray-400' : yieldPct >= 100 ? 'text-green-700' : 'text-amber-700'}>{yieldPct == null ? '—' : `${yieldPct.toFixed(1)}%`}</strong></span>
               </div>
             </div>
