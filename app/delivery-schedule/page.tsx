@@ -97,6 +97,7 @@ export default function DeliverySchedulePage() {
   const [showManage, setShowManage] = useState(false)
   const [newRes, setNewRes] = useState<Record<'lorry' | 'crew', string>>({ lorry: '', crew: '' })
   const [newPhone, setNewPhone] = useState<Record<'lorry' | 'crew', string>>({ lorry: '', crew: '' })
+  const [linkedNames, setLinkedNames] = useState<Set<string>>(new Set())   // employee delivery-link names (lowercased) — crew not in here is unlinked
   const didInitDate = useRef(false)   // default the date filter to the latest day, once
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
@@ -110,7 +111,11 @@ export default function DeliverySchedulePage() {
     ;(data || []).forEach((r: { id: string; kind: string; name: string; phone: string | null }) => { (r.kind === 'lorry' ? g.lorry : g.crew).push({ id: r.id, name: r.name, phone: r.phone }) })
     g.crew.sort((a, b) => a.name.localeCompare(b.name))
     setResources(g)
+    // A crew member is "linked" if a driver employee's Delivery link points at their name.
+    const { data: emps } = await supabase.from('employees').select('delivery_name').eq('active', true).eq('is_driver', true)
+    setLinkedNames(new Set((emps || []).map(e => (e.delivery_name || '').trim().toLowerCase()).filter(Boolean)))
   }
+  const isLinked = (name: string) => linkedNames.has(name.trim().toLowerCase())
   async function addResource(kind: 'lorry' | 'crew', name: string, phone?: string) {
     const n = (name || '').trim()
     if (!n || resources[kind].some(r => r.name.toLowerCase() === n.toLowerCase())) return
@@ -558,14 +563,24 @@ export default function DeliverySchedulePage() {
                         <button onClick={() => addResource(kind, newRes[kind], newPhone[kind])} className="px-3 py-1 rounded bg-gray-800 text-white text-sm shrink-0">Add</button>
                       </div>
                     </div>
+                    {kind === 'crew' && (() => { const unlinked = resources.crew.filter(r => !isLinked(r.name)).length; return unlinked > 0
+                      ? <div className="mb-2 rounded bg-red-50 border border-red-200 px-2 py-1 text-xs text-red-700">⚠ {unlinked} crew member(s) not linked to an employee. Set their <strong>Delivery link</strong> on HR › Employees so attendance &amp; the driver app can match them.</div>
+                      : null })()}
                     <ul className="space-y-1 max-h-60 overflow-auto">
                       {resources[kind].length === 0 && <li className="text-xs text-gray-400">None yet.</li>}
-                      {resources[kind].map(r => (
+                      {resources[kind].map(r => {
+                        const unlinked = kind === 'crew' && !isLinked(r.name)
+                        return (
                         <li key={r.id} className="flex items-center justify-between gap-2 text-sm border-b border-gray-100 py-1">
-                          <span>{r.name}{r.phone && <span className="text-gray-400 text-xs ml-1">· {r.phone}</span>}</span>
+                          <span className="min-w-0">
+                            <span className={unlinked ? 'text-red-700' : ''}>{r.name}</span>
+                            {r.phone && <span className="text-gray-400 text-xs ml-1">· {r.phone}</span>}
+                            {unlinked && <span className="ml-1.5 inline-flex items-center rounded bg-red-100 text-red-700 text-[10px] px-1.5 py-0.5" title="No employee has this name set as their Delivery link">⚠ not linked</span>}
+                          </span>
                           <button onClick={() => removeResource(r.id)} className="text-red-500 hover:text-red-700 text-xs shrink-0">Remove</button>
                         </li>
-                      ))}
+                        )
+                      })}
                     </ul>
                   </div>
                 ))}
