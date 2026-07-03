@@ -1149,3 +1149,13 @@ begin
   update public.dispatch_line_edit_requests set status = 'Rejected', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id and status = 'Pending';
 end $$;
 grant execute on function public.reject_dispatch_line_edit(uuid) to authenticated;
+
+-- ============================================================================
+-- 2026-07 · Allow 'Bypassed' status on production_batches (Mark completed bypass)
+-- ----------------------------------------------------------------------------
+-- The original status check predates the bypass feature, so setting a batch to
+-- 'Bypassed' was rejected. Recreate the check to include every status in use.
+-- ============================================================================
+alter table public.production_batches drop constraint if exists production_batches_status_check;
+alter table public.production_batches add constraint production_batches_status_check
+  check (status in ('Planned', 'Requested', 'In Progress', 'Completed', 'Bypassed'));
