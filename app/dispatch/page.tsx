@@ -19,7 +19,7 @@ interface DOrder {
   id: string; do_number: string | null; factory_code: string; status: string
   created_by_name: string | null; created_at: string
   dispatch_order_lines?: { item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null }[]
-  material_returns?: { item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null }[]
+  material_returns?: { id: string; item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null; reason: string | null }[]
 }
 interface CartReturn { lotId: string; itemCode: string; description: string; unit: string; batchNo: string | null; expDate?: string | null; qty: number; reason: string; factory: string; factoryName: string; manual?: boolean }
 interface SLine { id: string; so_number: string; item_code: string; description: string | null; quantity: number | null; outstanding_qty: number | null; factory_code: string; delivered_qty: number | null }
@@ -38,7 +38,6 @@ export default function DispatchPage() {
   const [onHand, setOnHand] = useState<Record<string, number>>({})
   const [batches, setBatches] = useState<Batch[]>([])
   const [orders, setOrders] = useState<DOrder[]>([])
-  const [returns, setReturns] = useState<MReturn[]>([])
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const toggleFac = (fc: string) => setCollapsed(p => { const n = new Set(p); n.has(fc) ? n.delete(fc) : n.add(fc); return n })
@@ -99,11 +98,9 @@ export default function DispatchPage() {
       .is('dispatched_at', null).gt('produced_qty', 0).neq('status', 'Bypassed').order('delivery_date')
     setBatches((b as Batch[]) || [])
     const { data: o } = await supabase.from('dispatch_orders')
-      .select('id, do_number, factory_code, status, created_by_name, created_at, dispatch_order_lines(item_code, description, quantity, batch_no, exp_date), material_returns(item_code, description, quantity, batch_no, exp_date)')
+      .select('id, do_number, factory_code, status, created_by_name, created_at, dispatch_order_lines(item_code, description, quantity, batch_no, exp_date), material_returns(id, item_code, description, quantity, batch_no, exp_date, reason)')
       .order('created_at', { ascending: false }).limit(50)
     setOrders((o as DOrder[]) || [])
-    const { data: r } = await supabase.from('material_returns').select('*, dispatch_orders(do_number)').order('created_at', { ascending: false }).limit(50)
-    setReturns((r as MReturn[]) || [])
     const { data: pe } = await supabase.from('return_edit_requests').select('return_id').eq('status', 'Pending')
     setEditPending(new Set((pe || []).map(x => x.return_id).filter(Boolean)))
     // Sales-order lines (for direct delivery). Limit to the factories the user can act on.
@@ -541,6 +538,11 @@ export default function DispatchPage() {
                     {(o.material_returns || []).map((l, i) => (
                       <span key={`r${i}`} className="block mb-1 text-orange-600">
                         ↩ <span className="font-mono">{l.item_code}</span>{l.description ? ` — ${l.description}` : ''} × {l.quantity}
+                        {editPending.has(l.id)
+                          ? <span className="ml-2 text-amber-600 text-xs">⏳ edit pending approval</span>
+                          : canFac(o.factory_code) && hasCap(profile, 'request_return_edit')
+                            ? <button onClick={() => openRetEdit({ id: l.id, factory_code: o.factory_code, item_code: l.item_code, description: l.description, batch_no: l.batch_no, exp_date: l.exp_date, quantity: l.quantity, reason: l.reason, created_by_name: null, created_at: o.created_at })} className="ml-2 text-blue-600 hover:underline text-xs">Edit</button>
+                            : null}
                         {(l.batch_no || l.exp_date) && <span className="block ml-5 text-xs text-orange-400">{l.batch_no ? `batch ${l.batch_no}` : ''}{l.batch_no && l.exp_date ? ' · ' : ''}{l.exp_date ? `exp ${fmtD(l.exp_date)}` : ''}</span>}
                       </span>
                     ))}
@@ -553,34 +555,7 @@ export default function DispatchPage() {
             </tbody>
           </table>
         </div>
-
-        <h2 className="text-lg font-semibold mb-2">Recent material returns</h2>
-        <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[20rem]">
-          <table className="w-full text-xs">
-            <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{['DO No.', ...(multiFac ? ['Factory'] : []), 'Material', 'Batch', 'Exp', 'Qty', 'Reason', 'By', 'When', ''].map((h, i) => <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
-            <tbody>
-              {returns.length === 0 && <tr><td colSpan={11} className="text-center py-8 text-gray-400">No returns yet.</td></tr>}
-              {returns.map(r => (
-                <tr key={r.id} className="border-b last:border-0 align-top hover:bg-gray-50">
-                  <td className="px-3 py-2 font-mono whitespace-nowrap">{r.dispatch_orders?.do_number || <span className="text-gray-300">—</span>}</td>
-                  {multiFac && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(r.factory_code)}</td>}
-                  <td className="px-3 py-2"><span className="font-mono font-medium">{r.item_code}</span><span className="block text-gray-400">{r.description}</span></td>
-                  <td className="px-3 py-2 whitespace-nowrap">{r.batch_no || '—'}</td>
-                  <td className="px-3 py-2 whitespace-nowrap text-gray-500">{r.exp_date ? fmtD(r.exp_date) : '—'}</td>
-                  <td className="px-3 py-2 text-right font-semibold">{r.quantity}</td>
-                  <td className="px-3 py-2 text-gray-600 min-w-[120px]">{r.reason || '—'}</td>
-                  <td className="px-3 py-2 whitespace-nowrap text-gray-600">{r.created_by_name || '—'}</td>
-                  <td className="px-3 py-2 whitespace-nowrap text-gray-400">{fmt(r.created_at)}</td>
-                  <td className="px-3 py-2 whitespace-nowrap text-right">
-                    {editPending.has(r.id) ? <span className="text-amber-600">⏳ edit pending</span>
-                      : canFac(r.factory_code) && hasCap(profile, 'request_return_edit') ? <button onClick={() => openRetEdit(r)} className="text-blue-600 hover:underline">Edit</button>
-                        : null}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <p className="text-xs text-gray-400 mt-2">📦 = finished goods · ↩ = raw-material return. Returns can be edited here — the change is sent to Head Office for approval before it takes effect.</p>
       </div>
 
       {/* Edit-a-return modal (HO approval) */}
