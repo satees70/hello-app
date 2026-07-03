@@ -344,10 +344,13 @@ export default function ProductionPage() {
   async function markCompleted(b: Batch) {
     if (!canEditFac(b.factory_code)) { setError("You have view-only access at this factory."); return }
     if (!confirm(`Mark ${b.batch_no} (${b.item_code} · qty ${b.total_quantity}) as COMPLETED, skipping the material request and inspection steps?\n\nUse this only for old orders that were handled outside the system.`)) return
+    // Capture the product batch number so it prints on the delivery order.
+    const batchNo = window.prompt(`Batch number for ${b.item_code} — this prints on the delivery order.\n\n(Leave blank if there isn't one.)`, '')
+    if (batchNo === null) return   // Cancel → don't complete
     setError(''); setSuccess('')
-    const { error: e } = await supabase.rpc('mark_batch_completed', { p_batch_id: b.id })
+    const { error: e } = await supabase.rpc('mark_batch_completed', { p_batch_id: b.id, p_batch_no: batchNo.trim() || null })
     if (e) { setError(e.message); return }
-    setSuccess(`${b.batch_no} marked completed (bypass) — removed from the board.`)
+    setSuccess(`${b.batch_no} marked completed (bypass)${batchNo.trim() ? ` · batch ${batchNo.trim()}` : ''} — removed from the board.`)
     loadAll()
   }
 

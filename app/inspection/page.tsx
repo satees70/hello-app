@@ -38,6 +38,31 @@ function GoodBad({ k, label }: { k: string; label: string }) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="flex flex-col gap-1"><span className="text-xs font-medium text-gray-600">{label}</span>{children}</div>
 }
+// Multi-person picker backed by a comma-joined string. Only names in `options`
+// (production staff) can be added; any name already saved shows as a removable chip.
+function PeoplePicker({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: string[] }) {
+  const people = value.split(',').map(x => x.trim()).filter(Boolean)
+  const add = (name: string) => { if (name && !people.includes(name)) onChange([...people, name].join(', ')) }
+  const remove = (name: string) => onChange(people.filter(p => p !== name).join(', '))
+  const avail = options.filter(o => !people.includes(o))
+  return (
+    <div className="flex flex-col gap-1.5">
+      {people.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {people.map(p => (
+            <span key={p} className="inline-flex items-center gap-1 bg-gray-100 rounded-full pl-2.5 pr-1.5 py-1 text-sm">
+              {p}<button type="button" onClick={() => remove(p)} className="text-gray-400 hover:text-red-600 text-base leading-none no-print">×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <select value="" onChange={e => { add(e.target.value); e.target.value = '' }} className="border rounded px-2 py-2 text-sm w-full no-print">
+        <option value="">+ Add person…</option>
+        {avail.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </div>
+  )
+}
 
 interface Seg { s: string; e: string | null }
 interface Timer { status: 'idle' | 'running' | 'paused' | 'stopped'; segments: Seg[] }
@@ -162,8 +187,14 @@ export default function InspectionPage() {
   const [packLines, setPackLines] = useState<{ name: string; line_code: string | null; line_mode: string | null }[]>([])
   const [batchMode, setBatchMode] = useState('')   // batch run mode: auto | manual
   const [stockLots, setStockLots] = useState<Record<string, { batch_no: string; qty_remaining: number; exp_date: string | null }[]>>({})
+  const [emps, setEmps] = useState<string[]>([])   // production-tagged staff, for the sign-off pickers
 
   useEffect(() => { setBatchId(new URLSearchParams(window.location.search).get('batch') || '') }, [])
+  // Only production-tagged staff (HR › Employees) can be picked for the sign-offs.
+  useEffect(() => { if (!profile) return
+    supabase.from('employees').select('name').eq('active', true).eq('is_production', true).order('name')
+      .then(({ data }) => setEmps((data || []).map(r => r.name).filter(Boolean) as string[]))
+  }, [profile])
   useEffect(() => { if (profile && batchId) loadForBatch(batchId) }, [profile, batchId])
   // Auto-fill No. once the scheduled line + date + packing lines are known (don't overwrite an existing one)
   useEffect(() => { if (f.area_machine && !f.no && packLines.length && f.date && factoryCode) genNo(String(f.area_machine), String(f.date)) }, [f.area_machine, f.date, packLines, factoryCode]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -515,10 +546,10 @@ export default function InspectionPage() {
 
           {/* Sign-offs */}
           <div className="border-t pt-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Field label="Weighed by (bulk pack)"><In k="weighed_by" /></Field>
-            <Field label="Done by"><In k="done_by" /></Field>
-            <Field label="Checked by"><In k="checked_by" /></Field>
-            <Field label="Verified by"><In k="verified_by" /></Field>
+            <Field label="Weighed by (bulk pack)"><PeoplePicker value={s('weighed_by')} onChange={v => set('weighed_by', v)} options={emps} /></Field>
+            <Field label="Done by"><PeoplePicker value={s('done_by')} onChange={v => set('done_by', v)} options={emps} /></Field>
+            <Field label="Checked by"><PeoplePicker value={s('checked_by')} onChange={v => set('checked_by', v)} options={emps} /></Field>
+            <Field label="Verified by"><PeoplePicker value={s('verified_by')} onChange={v => set('verified_by', v)} options={emps} /></Field>
             <Field label="Retained Sample">
               <span className="flex items-center gap-2"><span><Radio k="retained" val="yes" label="Yes" /><Radio k="retained" val="no" label="No" /></span><input value={s('retained_qty')} onChange={e => set('retained_qty', e.target.value)} placeholder="Qty" className="border rounded px-2 py-1 text-sm w-20" /></span>
             </Field>

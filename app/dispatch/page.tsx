@@ -17,7 +17,7 @@ interface Batch {
 }
 interface DOrder {
   id: string; do_number: string | null; factory_code: string; status: string
-  created_by_name: string | null; created_at: string
+  created_by_name: string | null; created_at: string; vehicle: string | null
   dispatch_order_lines?: { id: string; item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null; batch_id: string | null }[]
   material_returns?: { id: string; item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null; reason: string | null }[]
 }
@@ -64,6 +64,7 @@ export default function DispatchPage() {
   const [issue, setIssue] = useState<'no' | 'yes'>('no')
   const [reason, setReason] = useState('')
   const [returnCart, setReturnCart] = useState<CartReturn[]>([])
+  const [vehicleByFac, setVehicleByFac] = useState<Record<string, string>>({})   // vehicle no. keyed by factory, set before creating each DO
   const [salesLines, setSalesLines] = useState<SLine[]>([])
   const [directCart, setDirectCart] = useState<{ lineId: string; so: string; itemCode: string; description: string; qty: number; batchNo: string; expDate: string; factory: string; factoryName: string }[]>([])
   const [dSo, setDSo] = useState('')
@@ -112,7 +113,7 @@ export default function DispatchPage() {
       .is('dispatched_at', null).gt('produced_qty', 0).neq('status', 'Bypassed').order('delivery_date')
     setBatches((b as Batch[]) || [])
     const { data: o } = await supabase.from('dispatch_orders')
-      .select('id, do_number, factory_code, status, created_by_name, created_at, dispatch_order_lines(id, item_code, description, quantity, batch_no, exp_date, batch_id), material_returns(id, item_code, description, quantity, batch_no, exp_date, reason)')
+      .select('id, do_number, factory_code, status, created_by_name, created_at, vehicle, dispatch_order_lines(id, item_code, description, quantity, batch_no, exp_date, batch_id), material_returns(id, item_code, description, quantity, batch_no, exp_date, reason)')
       .order('created_at', { ascending: false }).limit(50)
     setOrders((o as DOrder[]) || [])
     // SO number(s) per dispatched batch, so each delivery line can show its order.
@@ -285,12 +286,14 @@ export default function DispatchPage() {
       p_returns: facReturns.map(r => r.manual
         ? { manual: true, item_code: r.itemCode, description: r.description, batch_no: r.batchNo, exp_date: r.expDate || null, qty: r.qty, reason: r.reason, factory_code: r.factory }
         : { lot_id: r.lotId, qty: r.qty, reason: r.reason }),
+      p_vehicle: (vehicleByFac[fac] || '').trim() || null,
     })
     if (e) { setError(e.message); setBusy(false); return }
     setSuccess(`Delivery order ${data} created — ${count} item(s) sent to warehouse.`)
     // Clear only this factory's items; keep the rest of the cart for its own DO.
     setPicked(p => { const n = new Set(p); batchIds.forEach(id => n.delete(id)); return n })
     setReturnCart(c => c.filter(r => r.factory !== fac))
+    setVehicleByFac(v => { const n = { ...v }; delete n[fac]; return n })
     setBusy(false); load()
   }
 
@@ -315,6 +318,7 @@ export default function DispatchPage() {
     doc.setFontSize(8); doc.setFont('helvetica', 'normal')
     doc.text(`DO No: ${o.do_number || '—'}`, 10, 40)
     doc.text(`Factory: ${factoryName(o.factory_code)}`, 10, 44.5)
+    doc.text(`Vehicle: ${o.vehicle || '—'}`, 10, 49)
     doc.text(`Date: ${fmt(o.created_at)}`, W - 10, 40, { align: 'right' })
     doc.text(`By: ${o.created_by_name || '—'}`, W - 10, 44.5, { align: 'right' })
     const fg = o.dispatch_order_lines || [], rt = o.material_returns || []
@@ -323,7 +327,7 @@ export default function DispatchPage() {
       ...rt.map((l, i) => [String(fg.length + i + 1), soByDoItem[`${o.do_number}|${l.item_code}`] || 'Return', l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', l.exp_date ? fmtD(l.exp_date) : '—']),
     ]
     autoTable(doc, {
-      startY: 48, head: [['#', 'SO', 'Code', 'Item name', 'Qty', 'Batch', 'Exp']], body,
+      startY: 53, head: [['#', 'SO', 'Code', 'Item name', 'Qty', 'Batch', 'Exp']], body,
       styles: { fontSize: 8, cellPadding: 1.4 }, headStyles: { fillColor: [30, 58, 138] },
       columnStyles: { 0: { cellWidth: 7 }, 4: { halign: 'right' } }, margin: { left: 10, right: 10 },
     })
@@ -596,9 +600,15 @@ export default function DispatchPage() {
               const count = facBatches.length + facReturns.length
               return (
                 <div key={fac} className="bg-white border-2 border-teal-300 rounded-xl shadow-sm p-4">
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                     <h3 className="font-semibold">🏭 {factoryName(fac)} <span className="text-gray-400 font-normal text-sm">· {count} item(s)</span></h3>
-                    <button onClick={() => createDO(fac)} disabled={busy} className="bg-teal-600 text-white px-4 py-2 rounded-lg hover:bg-teal-700 disabled:opacity-50 text-sm font-medium">{busy ? 'Creating…' : 'Create delivery order'}</button>
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm text-gray-600">🚚 Vehicle
+                        <input value={vehicleByFac[fac] || ''} onChange={e => setVehicleByFac(v => ({ ...v, [fac]: e.target.value }))}
+                          placeholder="Lorry / plate no." className="ml-2 border rounded-lg px-2 py-1.5 text-sm w-40" />
+                      </label>
+                      <button onClick={() => createDO(fac)} disabled={busy} className="bg-teal-600 text-white px-4 py-2 rounded-lg hover:bg-teal-700 disabled:opacity-50 text-sm font-medium">{busy ? 'Creating…' : 'Create delivery order'}</button>
+                    </div>
                   </div>
                   <div className="text-sm divide-y">
                     {facBatches.map(b => (
