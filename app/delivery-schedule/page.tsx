@@ -251,24 +251,26 @@ export default function DeliverySchedulePage() {
   }, [trips])
   const ownerOf = (date: string | null, kind: string, name: string) => date ? resourceOwner.get(`${date}|${kind}|${name.trim().toLowerCase()}`) : undefined
   const dayStr = (date: string) => { const d = (date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return d ? `${d[3]}/${d[2]}/${d[1]}` : date }
-  // Save a single lorry/driver to a trip — but block it if another line already uses it that day.
+  // Save a single lorry/driver to a trip. A resource can be on more than one line a day (2nd trip),
+  // so this doesn't block — it just flags when it's a repeat so you don't double-book by accident.
   function commitResource(route: string, date: string, ownerKind: 'lorry' | 'crew', field: keyof Trip, value: string, label: string) {
     const v = (value || '').trim()
     const owner = v ? ownerOf(date, ownerKind, v) : undefined
-    if (owner && owner !== route) { setError(`"${v}" is already assigned to ${owner} on ${dayStr(date)}. Each ${label} can only be on one line per day.`); return }
     setError('')
+    setSuccess(owner && owner !== route ? `Note: ${v} (${label}) is also on ${owner} on ${dayStr(date)} — 2nd trip.` : '')
     setTripField(route, date, field, v)
     saveTrip(route, date, { [field]: v })
   }
   // Kelindan is a list (a lorry can carry several). Add/remove one at a time.
   function addKelindan(route: string, date: string, name: string) {
     const v = (name || '').trim(); if (!v) return
-    const owner = ownerOf(date, 'crew', v)
-    if (owner && owner !== route) { setError(`"${v}" is already on ${owner} on ${dayStr(date)}. Each person can only be on one line per day.`); return }
     const cur = (trips[`${route}|${date}`]?.kelindan || '').split(',').map(s => s.trim()).filter(Boolean)
-    if (cur.some(x => x.toLowerCase() === v.toLowerCase())) return
+    if (cur.some(x => x.toLowerCase() === v.toLowerCase())) return   // already on this line
+    const owner = ownerOf(date, 'crew', v)
+    setError('')
+    setSuccess(owner && owner !== route ? `Note: ${v} is also on ${owner} on ${dayStr(date)} — 2nd trip.` : '')
     const next = [...cur, v].join(', ')
-    setError(''); setTripField(route, date, 'kelindan', next); saveTrip(route, date, { kelindan: next })
+    setTripField(route, date, 'kelindan', next); saveTrip(route, date, { kelindan: next })
   }
   function removeKelindan(route: string, date: string, name: string) {
     const cur = (trips[`${route}|${date}`]?.kelindan || '').split(',').map(s => s.trim()).filter(Boolean)
@@ -618,9 +620,9 @@ export default function DeliverySchedulePage() {
               const g = groups[k]
               const tripKey = g.route && g.date ? `${g.route}|${g.date}` : ''
               const trip = tripKey ? trips[tripKey] : undefined
-              // Lorries free that day; crew (drivers/kelindan) free that day.
-              const availLorries = resources.lorry.filter(r => { const o = ownerOf(g.date, 'lorry', r.name); return !o || o === g.route })
-              const availCrew = resources.crew.filter(r => { const o = ownerOf(g.date, 'crew', r.name); return !o || o === g.route })
+              // Show all lorries / crew — a driver can run more than one trip a day (2nd trip), so nothing is hidden.
+              const availLorries = resources.lorry
+              const availCrew = resources.crew
               const kelList = (trip?.kelindan || '').split(',').map(s => s.trim()).filter(Boolean)
               return (
               <div key={k} className="border rounded-xl bg-white shadow-sm overflow-hidden">
