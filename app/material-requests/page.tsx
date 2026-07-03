@@ -948,7 +948,7 @@ export default function MaterialRequestsPage() {
                   <span className="font-mono font-semibold">{r.request_no}</span>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[r.status] || 'bg-gray-100 text-gray-700'}`}>{r.status}</span>
                   <span className="text-sm text-gray-500">
-                    Batch <span className="font-mono">{r.production_batches?.batch_no}</span> · {r.production_batches?.item_code}
+                    Batch <span className="font-mono">{r.production_batches?.batch_no}</span> · {r.production_batches?.item_code}{r.production_batches?.description ? ` — ${r.production_batches.description}` : ''}
                   </span>
                   <span className="text-sm text-gray-500">· {isHO ? factoryName(r.factory_code) : r.factory_code}</span>
                   <span className="text-sm text-gray-400 ml-auto">{new Date(r.created_at).toLocaleString()}{r.created_by_name ? ` · by ${r.created_by_name}` : ''}</span>
