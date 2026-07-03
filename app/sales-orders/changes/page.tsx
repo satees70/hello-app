@@ -102,6 +102,7 @@ interface FactoryChangeReq {
 interface FoodLossAlert {
   id: string; factory_code: string | null; batch_no: string | null; item_code: string | null; pct: number | null; status: string
   created_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
+  query: string | null; query_by_name: string | null; answer: string | null; answered_by_name: string | null
 }
 
 const FIELD_LABEL: Record<string, string> = {
@@ -412,6 +413,14 @@ export default function PendingChangesPage() {
     if (e) { setError(e.message); setBusyId(''); return }
     setSuccess('Food-loss alert acknowledged.'); setBusyId(''); loadFoodLoss()
   }
+  async function raiseFlQuery(a: FoodLossAlert) {
+    const q = window.prompt(`Ask production about ${a.item_code || a.batch_no || 'this batch'} (${a.pct}% loss):`, a.query || '')
+    if (q === null || !q.trim()) return
+    setBusyId(a.id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('query_food_loss', { p_id: a.id, p_query: q.trim() })
+    if (e) { setError(/query_food_loss/.test(e.message) ? 'This needs a database update — run the latest catch-up SQL.' : e.message); setBusyId(''); return }
+    setSuccess('Query sent to production.'); setBusyId(''); loadFoodLoss()
+  }
   async function approveRM(id: string) {
     setBusyId(id); setError(''); setSuccess('')
     const { error: e } = await supabase.rpc('approve_run_mode', { p_id: id })
@@ -536,9 +545,9 @@ export default function PendingChangesPage() {
   requests.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1 })
 
   // Every pending request, from all types, in one list — with the right approve/reject wired in.
-  type Pend = { id: string; kind: string; summary: string; by: string | null; at: string; approve: () => Promise<void>; reject: (() => Promise<void>) | null }
+  type Pend = { id: string; kind: string; summary: string; by: string | null; at: string; approve: () => Promise<void>; reject: (() => Promise<void>) | null; query?: (() => void) | null; approveLabel?: string }
   const fld = (f: string | null) => f ? (FIELD_LABEL[f] || f) : ''
-  const P = (id: string, kind: string, summary: string, by: string | null, at: string, approve: () => Promise<void>, reject: (() => Promise<void>) | null): Pend => ({ id, kind, summary, by, at, approve, reject })
+  const P = (id: string, kind: string, summary: string, by: string | null, at: string, approve: () => Promise<void>, reject: (() => Promise<void>) | null, query?: (() => void) | null): Pend => ({ id, kind, summary, by, at, approve, reject, query })
   const allPending: Pend[] = [
     ...requests.filter(r => r.status === 'Pending').map(r => P(r.id, 'Order field change', `${r.sales_order_lines?.so_number || r.sales_imports?.file_name || '—'} · ${fld(r.field)}: ${r.old_value ?? '—'} → ${r.new_value}`, r.requested_by_name, r.requested_at, () => approve(r.id), () => reject(r.id))),
     ...corrections.filter(c => c.status === 'Pending').map(c => P(c.id, 'Timer cancel', c.label || c.timer_key, c.requested_by_name, c.created_at, () => approveCorr(c.id), () => rejectCorr(c.id))),
@@ -554,7 +563,7 @@ export default function PendingChangesPage() {
     ...soChanges.filter(a => a.status === 'Pending').map(a => P(a.id, 'SO change', `${a.old_so ?? '—'} → ${a.new_so ?? '—'}${a.pick_run_no ? ' (' + a.pick_run_no + ')' : ''}`, a.requested_by_name, a.created_at, () => approveSO(a.id), () => rejectSO(a.id))),
     ...factoryChanges.filter(a => a.status === 'Pending').map(a => P(a.id, 'Factory move', `${a.from_factory ?? '—'} → ${a.to_factory}`, a.requested_by_name, a.created_at, () => approveFC(a.id), () => rejectFC(a.id))),
     ...qtyMoves.filter(a => a.status === 'Pending').map(a => P(a.id, 'Qty move', `${a.item_code || '—'} ${a.qty}: ${a.from_label ?? '—'} → ${a.to_label ?? '—'}`, a.requested_by_name, a.created_at, () => approveQM(a.id), () => rejectQM(a.id))),
-    ...foodLoss.filter(a => a.status === 'Pending').map(a => P(a.id, 'Food loss alert', `${a.item_code || a.batch_no || '—'} · ${a.pct ?? '?'}%`, a.created_by_name, a.created_at, () => ackFL(a.id), null)),
+    ...foodLoss.filter(a => a.status !== 'Acknowledged').map(a => P(a.id, 'Food loss alert', `${a.item_code || a.batch_no || '—'} · ${a.pct ?? '?'}%${a.query ? `  · Q: ${a.query}` : ''}${a.answer ? `  · A: ${a.answer}` : ''}`, a.created_by_name, a.created_at, () => ackFL(a.id), null, () => raiseFlQuery(a))),
   ].sort((a, b) => (a.at || '').localeCompare(b.at || ''))
   const approveAllPending = async () => {
     if (allPending.length === 0) return
@@ -603,6 +612,7 @@ export default function PendingChangesPage() {
                       <td className="px-3 py-2 min-w-[240px]">{p.summary}</td>
                       <td className="px-3 py-2 whitespace-nowrap"><span className="block">{p.by || '—'}</span><span className="block text-gray-400">{fmt(p.at)}</span></td>
                       <td className="px-3 py-2 whitespace-nowrap"><div className="flex gap-2">
+                        {p.query && <button onClick={() => p.query!()} disabled={approvingAll} className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 disabled:opacity-50">Raise query</button>}
                         <button onClick={() => p.approve()} disabled={approvingAll} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">{p.reject ? 'Approve' : 'Acknowledge'}</button>
                         {p.reject && <button onClick={() => p.reject!()} disabled={approvingAll} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>}
                       </div></td>

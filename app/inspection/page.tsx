@@ -97,6 +97,50 @@ const EMPTY: Form = {
   materials: [],
 }
 
+// Head-Office queries about high food loss — production answers here.
+interface FlQuery { id: string; factory_code: string | null; batch_no: string | null; item_code: string | null; pct: number | null; query: string | null; query_by_name: string | null }
+function FoodLossQueries({ profile }: { profile: { factory_code: string; factory_codes?: string[] | null } }) {
+  const [qs, setQs] = useState<FlQuery[]>([])
+  const [ans, setAns] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState('')
+  const isHO = profile.factory_code === 'HEAD_OFFICE'
+  const myFacs = profile.factory_codes && profile.factory_codes.length ? profile.factory_codes : [profile.factory_code]
+  async function load() {
+    let q = supabase.from('food_loss_alerts').select('id, factory_code, batch_no, item_code, pct, query, query_by_name, status').eq('status', 'Queried')
+    if (!isHO) q = q.in('factory_code', myFacs)
+    const { data, error } = await q.order('query_at', { ascending: true })
+    if (!error) setQs((data as FlQuery[]) || [])
+  }
+  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  async function answer(a: FlQuery) {
+    const text = (ans[a.id] || '').trim(); if (!text) return
+    setBusy(a.id)
+    const { error } = await supabase.rpc('answer_food_loss', { p_id: a.id, p_answer: text })
+    setBusy('')
+    if (error) return
+    setAns(p => ({ ...p, [a.id]: '' })); load()
+  }
+  if (qs.length === 0) return null
+  return (
+    <div className="mb-6 bg-white border border-amber-300 rounded-xl p-4">
+      <h2 className="font-semibold mb-1">❓ Food-loss queries from Head Office</h2>
+      <p className="text-gray-500 text-sm mb-3">Head Office asked about these batches’ high food loss — please explain.</p>
+      <div className="space-y-3">
+        {qs.map(a => (
+          <div key={a.id} className="border rounded-lg p-3">
+            <div className="text-sm"><span className="font-mono font-medium">{a.item_code || a.batch_no}</span>{a.batch_no ? ` · ${a.batch_no}` : ''} · <span className="text-red-600 font-semibold">{a.pct}% loss</span></div>
+            <div className="text-sm text-gray-700 mt-1">❓ {a.query} <span className="text-gray-400">— {a.query_by_name}</span></div>
+            <div className="flex gap-2 mt-2">
+              <input value={ans[a.id] || ''} onChange={e => setAns(p => ({ ...p, [a.id]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') answer(a) }} placeholder="Type your answer…" className="flex-1 border rounded-lg px-3 py-2 text-sm" />
+              <button onClick={() => answer(a)} disabled={busy === a.id || !(ans[a.id] || '').trim()} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{busy === a.id ? 'Sending…' : 'Answer'}</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function InspectionPage() {
   const { profile, loading, error: profileError } = useProfile()
   useRequireView(profile, 'inspection')
@@ -273,6 +317,7 @@ export default function InspectionPage() {
       <style>{`@media print { nav, .no-print { display: none !important } body { background: white } .printable { box-shadow: none !important; border: none !important } }`}</style>
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
+        <div className="no-print"><FoodLossQueries profile={profile} /></div>
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4 no-print">
           <h1 className="text-2xl font-bold">Packing &amp; Finished Goods Inspection Record <span className="text-gray-400 font-normal text-sm">P07-F01 Ver.06</span></h1>
           <div className="flex gap-2">

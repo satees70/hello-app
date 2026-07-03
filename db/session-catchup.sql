@@ -1390,3 +1390,63 @@ begin
     end if;
   end loop;
 end $$;
+
+-- ============================================================================
+-- 2026-07 · Food-loss alert Q&A — HO raises a query, production answers
+-- ============================================================================
+alter table public.food_loss_alerts add column if not exists query text;
+alter table public.food_loss_alerts add column if not exists query_by uuid;
+alter table public.food_loss_alerts add column if not exists query_by_name text;
+alter table public.food_loss_alerts add column if not exists query_at timestamptz;
+alter table public.food_loss_alerts add column if not exists answer text;
+alter table public.food_loss_alerts add column if not exists answered_by uuid;
+alter table public.food_loss_alerts add column if not exists answered_by_name text;
+alter table public.food_loss_alerts add column if not exists answered_at timestamptz;
+
+create or replace function public.query_food_loss(p_id uuid, p_query text) returns void
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_a public.food_loss_alerts; v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can raise a query'; end if;
+  if coalesce(btrim(p_query), '') = '' then raise exception 'Type a question first'; end if;
+  select * into v_a from public.food_loss_alerts where id = p_id;
+  if not found then raise exception 'Alert not found'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.food_loss_alerts set query = p_query, query_by = auth.uid(), query_by_name = v_name, query_at = now(), status = 'Queried' where id = p_id;
+  insert into public.notifications (factory_code, type, title, body, link, ref)
+  values (v_a.factory_code, 'food_query', 'Food-loss query · ' || coalesce(v_a.batch_no, ''),
+          'Head Office asked about ' || coalesce(v_a.item_code, v_a.batch_no, 'a batch') || ' (' || coalesce(v_a.pct::text, '?') || '% loss) — please answer on the Inspection page.', '/inspection',
+          'flq:' || p_id::text || ':' || extract(epoch from now())::bigint)
+  on conflict (ref) do nothing;
+end $function$;
+grant execute on function public.query_food_loss(uuid, text) to authenticated;
+
+create or replace function public.answer_food_loss(p_id uuid, p_answer text) returns void
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_a public.food_loss_alerts; v_name text;
+begin
+  if coalesce(btrim(p_answer), '') = '' then raise exception 'Type an answer first'; end if;
+  select * into v_a from public.food_loss_alerts where id = p_id;
+  if not found then raise exception 'Alert not found'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_a.factory_code = any (my_factory_codes())) then raise exception 'Not your factory'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.food_loss_alerts set answer = p_answer, answered_by = auth.uid(), answered_by_name = v_name, answered_at = now(), status = 'Answered' where id = p_id;
+  insert into public.notifications (factory_code, type, title, body, link, ref)
+  values ('HEAD_OFFICE', 'food_answer', 'Food-loss answer · ' || coalesce(v_a.batch_no, ''),
+          coalesce(v_name, 'Production') || ' answered the query for ' || coalesce(v_a.item_code, v_a.batch_no, 'a batch') || '.', '/sales-orders/changes',
+          'fla:' || p_id::text || ':ans:' || extract(epoch from now())::bigint)
+  on conflict (ref) do nothing;
+end $function$;
+grant execute on function public.answer_food_loss(uuid, text) to authenticated;
+
+-- Allow HO to acknowledge from any state (incl. after Answered)
+create or replace function public.ack_food_loss(p_id uuid) returns void
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can acknowledge'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.food_loss_alerts set status = 'Acknowledged', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now()
+   where id = p_id and status <> 'Acknowledged';
+end $function$;
+grant execute on function public.ack_food_loss(uuid) to authenticated;
