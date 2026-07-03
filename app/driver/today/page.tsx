@@ -42,6 +42,8 @@ function groupByOutlet(route: string, orders: Order[]): OutletGroup[] {
 export default function DriverTodayPage() {
   const [drivers, setDrivers] = useState<Driver[]>([])
   const [driverId, setDriverId] = useState('')
+  const [factories, setFactories] = useState<{ code: string; name: string }[]>([])
+  const [parkedByLorry, setParkedByLorry] = useState<Record<string, string | null>>({})   // lorry name (lower) -> parked factory code
   const [lines, setLines] = useState<LineBlock[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -63,6 +65,7 @@ export default function DriverTodayPage() {
         const saved = typeof window !== 'undefined' ? localStorage.getItem(DRIVER_KEY) : ''
         setDriverId(saved && list.some(d => d.id === saved) ? saved : (list[0]?.id || ''))
       })
+    supabase.from('factories').select('code, name').order('code').then(({ data }) => setFactories(data || []))
   }, [])
 
   const load = useCallback(async () => {
@@ -89,6 +92,11 @@ export default function DriverTodayPage() {
       trip,
       orders: orders.filter(o => o.route === trip.route),
     })))
+    // Current parked location of each lorry (so the driver sees & updates where it sits).
+    const { data: lorr } = await supabase.from('delivery_resources').select('name, parked_at').eq('kind', 'lorry')
+    const pmap: Record<string, string | null> = {}
+    ;(lorr || []).forEach(r => { pmap[(r.name || '').toLowerCase()] = r.parked_at })
+    setParkedByLorry(pmap)
     setLoading(false)
   }, [driverName, today])
 
@@ -141,6 +149,12 @@ export default function DriverTodayPage() {
       body: JSON.stringify({ route: trip.route, delivery_date: trip.delivery_date, [field]: value }),
     })
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Odometer save failed') } else await load()
+  }
+
+  async function parkLorry(lorryNo: string, factory: string) {
+    const { error: e } = await supabase.from('delivery_resources').update({ parked_at: factory || null }).eq('kind', 'lorry').ilike('name', lorryNo)
+    if (e) { setError(e.message); return }
+    setParkedByLorry(p => ({ ...p, [lorryNo.toLowerCase()]: factory || null }))
   }
 
   async function viewPhoto(path: string) {
@@ -206,6 +220,15 @@ export default function DriverTodayPage() {
                     className="block w-full mt-0.5 rounded border border-gray-300 px-2 py-1 text-sm" placeholder="km" />
                 </label>
               </div>
+              {trip.lorry_no && (
+                <label className="text-xs block mt-2">🅿 Where did you park {trip.lorry_no}?
+                  <select value={parkedByLorry[trip.lorry_no.toLowerCase()] ?? ''} onChange={e => parkLorry(trip.lorry_no!, e.target.value)}
+                    className="block w-full mt-0.5 rounded border border-gray-300 px-2 py-1 text-sm">
+                    <option value="">— still on the road —</option>
+                    {factories.map(f => <option key={f.code} value={f.code}>{f.name}</option>)}
+                  </select>
+                </label>
+              )}
             </header>
 
             {groups.length === 0
