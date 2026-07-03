@@ -94,7 +94,7 @@ export default function DispatchPage() {
   const [reason, setReason] = useState('')
   const [returnCart, setReturnCart] = useState<CartReturn[]>([])
   const [vehicleByFac, setVehicleByFac] = useState<Record<string, string>>({})   // vehicle no. keyed by factory, set before creating each DO
-  const [lorryReqs, setLorryReqs] = useState<{ id: string; factory_code: string; kind: string; lorry_type: string; note: string | null; destination: string | null; requested_by_name: string | null; requested_at: string }[]>([])
+  const [lorryReqs, setLorryReqs] = useState<{ id: string; factory_code: string; kind: string; lorry_type: string; note: string | null; destination: string | null; status: string; fulfilled_lorry: string | null; requested_by_name: string | null; requested_at: string }[]>([])
   const [lrFactory, setLrFactory] = useState('')     // which factory to request a lorry for
   const [lrType, setLrType] = useState('any')        // see LORRY_TYPES
   const [lrNote, setLrNote] = useState('')
@@ -152,7 +152,7 @@ export default function DispatchPage() {
     setOrders((o as DOrder[]) || [])
     // Open lorry requests (raised before a DO exists).
     const { data: lr } = await supabase.from('lorry_requests')
-      .select('id, factory_code, kind, lorry_type, note, destination, requested_by_name, requested_at').eq('status', 'open')
+      .select('id, factory_code, kind, lorry_type, note, destination, status, fulfilled_lorry, requested_by_name, requested_at').in('status', ['open', 'fulfilled'])
       .order('requested_at', { ascending: false })
     setLorryReqs(lr || [])
     // SO number(s) per dispatched batch, so each delivery line can show its order.
@@ -343,6 +343,12 @@ export default function DispatchPage() {
     setBusy(false)
     if (e) { setError(e.message); return }
     setOrders(prev => prev.map(x => x.id === o.id ? { ...x, departed_at: out ? new Date().toISOString() : null } : x))
+  }
+  async function confirmReceived(id: string) {
+    const { error: e } = await supabase.rpc('confirm_lorry_received', { p_id: id })
+    if (e) { setError(e.message); return }
+    setLorryReqs(prev => prev.filter(r => r.id !== id))
+    setSuccess('Lorry receipt confirmed.')
   }
   async function cancelLorryReq(id: string) {
     if (!confirm('Cancel this request?')) return
@@ -539,9 +545,11 @@ export default function DispatchPage() {
             </div>
             {lorryReqs.length > 0 && (
               <div className="mt-3 border-t pt-3">
-                <div className="text-xs font-medium text-gray-500 mb-1">Open requests</div>
+                <div className="text-xs font-medium text-gray-500 mb-1">Your requests</div>
                 <ul className="space-y-1">
-                  {lorryReqs.map(r => (
+                  {lorryReqs.map(r => {
+                    const done = r.status === 'fulfilled'
+                    return (
                     <li key={r.id} className="flex items-center gap-2 text-sm">
                       {r.kind === 'driver'
                         ? <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 rounded-full px-2.5 py-0.5 text-xs">👤 driver</span>
@@ -550,11 +558,20 @@ export default function DispatchPage() {
                       {r.destination && <span className="text-gray-600 text-xs">→ {r.destination}</span>}
                       {r.note && <span className="text-gray-400 text-xs truncate">· {r.note}</span>}
                       <span className="text-gray-400 text-xs">· {r.requested_by_name || '—'}, {fmt(r.requested_at)}</span>
-                      {canFac(r.factory_code) && <button onClick={() => cancelLorryReq(r.id)} className="text-red-500 hover:underline text-xs ml-auto shrink-0">Cancel</button>}
+                      {done
+                        ? <span className="ml-auto flex items-center gap-2 shrink-0">
+                            <span className="text-green-700 text-xs font-medium">✅ Assigned{r.fulfilled_lorry ? `: ${r.fulfilled_lorry}` : ''}</span>
+                            {canFac(r.factory_code) && <button onClick={() => confirmReceived(r.id)} className="bg-green-600 text-white px-2 py-1 rounded text-xs hover:bg-green-700">Confirm received</button>}
+                          </span>
+                        : <span className="ml-auto flex items-center gap-2 shrink-0">
+                            <span className="text-amber-600 text-xs">⏳ waiting</span>
+                            {canFac(r.factory_code) && <button onClick={() => cancelLorryReq(r.id)} className="text-red-500 hover:underline text-xs">Cancel</button>}
+                          </span>}
                     </li>
-                  ))}
+                    )
+                  })}
                 </ul>
-                <p className="text-[11px] text-gray-400 mt-1">The warehouse handles these on the Lorry Internal Transfer page; once a lorry is parked here you can create the DO and pick it.</p>
+                <p className="text-[11px] text-gray-400 mt-1">The warehouse assigns these on Lorry Internal Transfer. When it&apos;s assigned you&apos;ll see the lorry here — confirm receipt once it arrives.</p>
               </div>
             )}
           </div>

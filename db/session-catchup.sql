@@ -1800,6 +1800,11 @@ alter table public.lorry_requests drop constraint if exists lorry_requests_reqki
 alter table public.lorry_requests add constraint lorry_requests_reqkind_check check (kind in ('lorry', 'driver'));
 -- Where the lorry should go (e.g. the delivery destination).
 alter table public.lorry_requests add column if not exists destination text;
+-- Receipt: production confirms the lorry actually arrived (status 'received').
+alter table public.lorry_requests add column if not exists received_at timestamptz;
+alter table public.lorry_requests add column if not exists received_by uuid;
+alter table public.lorry_requests drop constraint if exists lorry_requests_status_check;
+alter table public.lorry_requests add constraint lorry_requests_status_check check (status in ('open', 'fulfilled', 'received', 'cancelled'));
 -- Lorry types are maintained in app code (lib/lorryTypes.ts) so new ones (van,
 -- reach truck, …) can be added without SQL — drop the fixed CHECK on the type.
 alter table public.lorry_requests drop constraint if exists lorry_requests_lorry_type_check;
@@ -1851,10 +1856,10 @@ grant execute on function public.request_lorry(text, text, text, text) to authen
 -- it on-site. For a driver request it's just an acknowledgement.
 create or replace function public.fulfill_lorry_request(p_id uuid, p_lorry text default null) returns void
  language plpgsql security definer set search_path to 'public' as $function$
-declare v_fac text; v_kind text; v_lorry text;
+declare v_fac text; v_kind text; v_lorry text; v_reqby uuid;
 begin
   if not has_perm('dispatch', 'view') then raise exception 'Not allowed'; end if;   -- transport = view is enough
-  select factory_code, kind into v_fac, v_kind from public.lorry_requests where id = p_id;
+  select factory_code, kind, requested_by into v_fac, v_kind, v_reqby from public.lorry_requests where id = p_id;
   if v_fac is null then raise exception 'Request not found'; end if;
   if my_factory_code() <> 'HEAD_OFFICE' and not (v_fac = any (my_factory_codes())) then raise exception 'Not your factory'; end if;
   v_lorry := nullif(btrim(p_lorry), '');
@@ -1864,8 +1869,38 @@ begin
   if coalesce(v_kind, 'lorry') = 'lorry' and v_lorry is not null then
     update public.delivery_resources set parked_at = v_fac where kind = 'lorry' and lower(name) = lower(v_lorry);
   end if;
+  -- Tell the person who asked that it's been assigned (personal notification).
+  if v_reqby is not null then
+    insert into public.notifications (user_id, factory_code, type, title, body, link, ref)
+    values (v_reqby, v_fac, 'transport',
+            case when v_kind = 'driver' then 'Driver arranged' else 'Lorry assigned' || coalesce(': ' || v_lorry, '') end,
+            case when v_kind = 'driver' then 'A driver has been arranged for your request.'
+                 else 'Lorry ' || coalesce(v_lorry, '(see warehouse)') || ' has been sent for your request — confirm receipt when it arrives.' end,
+            '/dispatch', 'lorry-fulfilled:' || p_id::text)
+    on conflict (ref) do nothing;
+  end if;
 end; $function$;
 grant execute on function public.fulfill_lorry_request(uuid, text) to authenticated;
+
+-- Production confirms the lorry actually arrived; tells the warehouse back.
+create or replace function public.confirm_lorry_received(p_id uuid) returns void
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_fac text; v_lorry text; v_fulby uuid;
+begin
+  if not has_perm('dispatch', 'view') then raise exception 'Not allowed'; end if;
+  select factory_code, fulfilled_lorry, fulfilled_by into v_fac, v_lorry, v_fulby from public.lorry_requests where id = p_id;
+  if v_fac is null then raise exception 'Request not found'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_fac = any (my_factory_codes())) then raise exception 'Not your factory'; end if;
+  update public.lorry_requests set status = 'received', received_at = now(), received_by = auth.uid() where id = p_id;
+  if v_fulby is not null then
+    insert into public.notifications (user_id, factory_code, type, title, body, link, ref)
+    values (v_fulby, v_fac, 'transport', 'Lorry received',
+            'Production confirmed receipt of ' || coalesce(v_lorry, 'the lorry') || '.', '/transport',
+            'lorry-received:' || p_id::text)
+    on conflict (ref) do nothing;
+  end if;
+end; $function$;
+grant execute on function public.confirm_lorry_received(uuid) to authenticated;
 
 create or replace function public.cancel_lorry_request(p_id uuid) returns void
  language plpgsql security definer set search_path to 'public' as $function$
