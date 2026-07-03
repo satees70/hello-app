@@ -1087,3 +1087,65 @@ begin
   return v_created;
 end $$;
 grant execute on function public.post_grinding_outputs(uuid) to authenticated;
+
+-- ============================================================================
+-- 2026-07 · Edit a finished-goods line on a delivery order (HO approval)
+-- ----------------------------------------------------------------------------
+-- Corrects the delivery-note record (item / qty / batch / expiry) on a
+-- dispatch_order_lines row. Dispatch does not move finished-goods stock, so
+-- this is a record correction only — no stock adjustment. Non-HO edits wait
+-- for Head Office approval (Pending Changes page); HO edits apply immediately.
+-- ============================================================================
+create table if not exists public.dispatch_line_edit_requests (
+  id uuid primary key default gen_random_uuid(),
+  line_id uuid not null references public.dispatch_order_lines(id) on delete cascade,
+  dispatch_id uuid,
+  do_number text,
+  factory_code text,
+  old_item_code text, new_item_code text,
+  old_qty numeric,    new_qty numeric,
+  old_batch_no text,  new_batch_no text,
+  old_exp_date date,  new_exp_date date,
+  reason text,
+  status text not null default 'Pending',
+  requested_by uuid, requested_by_name text,
+  reviewed_by uuid, reviewed_by_name text, reviewed_at timestamptz,
+  created_at timestamptz default now()
+);
+alter table public.dispatch_line_edit_requests enable row level security;
+drop policy if exists dler_read on public.dispatch_line_edit_requests;
+create policy dler_read on public.dispatch_line_edit_requests for select
+  using (my_factory_code() = 'HEAD_OFFICE' or factory_code = any (my_factory_codes()) or requested_by = auth.uid());
+drop policy if exists dler_insert on public.dispatch_line_edit_requests;
+create policy dler_insert on public.dispatch_line_edit_requests for insert with check (requested_by = auth.uid());
+
+create or replace function public.approve_dispatch_line_edit(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_req public.dispatch_line_edit_requests; v_desc text; v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can approve delivery-order edits'; end if;
+  select * into v_req from public.dispatch_line_edit_requests where id = p_id and status = 'Pending';
+  if not found then raise exception 'Request not found or already reviewed'; end if;
+  if v_req.new_qty is null or v_req.new_qty <= 0 then raise exception 'Quantity must be greater than zero'; end if;
+  select description into v_desc from public.items where code = v_req.new_item_code limit 1;
+  update public.dispatch_order_lines set
+    item_code   = coalesce(nullif(v_req.new_item_code, ''), item_code),
+    description  = coalesce(v_desc, description),
+    quantity     = v_req.new_qty,
+    batch_no     = v_req.new_batch_no,
+    exp_date     = v_req.new_exp_date
+  where id = v_req.line_id;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.dispatch_line_edit_requests set status = 'Approved', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id;
+end $$;
+grant execute on function public.approve_dispatch_line_edit(uuid) to authenticated;
+
+create or replace function public.reject_dispatch_line_edit(p_id uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_name text;
+begin
+  if my_factory_code() <> 'HEAD_OFFICE' then raise exception 'Only Head Office can reject delivery-order edits'; end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  update public.dispatch_line_edit_requests set status = 'Rejected', reviewed_by = auth.uid(), reviewed_by_name = v_name, reviewed_at = now() where id = p_id and status = 'Pending';
+end $$;
+grant execute on function public.reject_dispatch_line_edit(uuid) to authenticated;

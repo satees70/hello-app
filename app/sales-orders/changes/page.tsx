@@ -76,6 +76,14 @@ interface ItemChangeReq {
   requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
 }
 
+interface FgEditReq {
+  id: string; factory_code: string | null; do_number: string | null
+  old_item_code: string | null; new_item_code: string | null; old_qty: number | null; new_qty: number | null
+  old_batch_no: string | null; new_batch_no: string | null; old_exp_date: string | null; new_exp_date: string | null
+  reason: string | null; status: string
+  requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
+}
+
 interface SoChangeReq {
   id: string; pick_run_no: string | null; factory_code: string | null; old_so: string | null; new_so: string | null; reason: string | null; status: string
   requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
@@ -144,6 +152,7 @@ export default function PendingChangesPage() {
   const [mcFilters, setMcFilters] = useState<Record<string, Set<string>>>({})
   const [docDels, setDocDels] = useState<DocDelReq[]>([])
   const [retEdits, setRetEdits] = useState<RetEditReq[]>([])
+  const [fgEdits, setFgEdits] = useState<FgEditReq[]>([])
   const [itemChanges, setItemChanges] = useState<ItemChangeReq[]>([])
   const [soChanges, setSoChanges] = useState<SoChangeReq[]>([])
   const [factoryChanges, setFactoryChanges] = useState<FactoryChangeReq[]>([])
@@ -161,7 +170,7 @@ export default function PendingChangesPage() {
 
   useEffect(() => {
     if (!profile) return
-    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadFoodLoss()
+    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadFoodLoss()
     // Live refresh on any change-request activity, with a poll fallback
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) supabase.realtime.setAuth(data.session.access_token)
@@ -177,12 +186,13 @@ export default function PendingChangesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mr_cancel_requests' }, () => loadMrCancels())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'doc_delete_requests' }, () => loadDocDels())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'return_edit_requests' }, () => loadRetEdits())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'dispatch_line_edit_requests' }, () => loadFgEdits())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'item_change_requests' }, () => loadItemChanges())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'so_change_requests' }, () => loadSoChanges())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mr_qty_move_requests' }, () => loadQtyMoves())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'food_loss_alerts' }, () => loadFoodLoss())
       .subscribe()
-    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges() }, 20000)
+    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges() }, 20000)
     return () => { supabase.removeChannel(channel); clearInterval(timer) }
   }, [profile])
 
@@ -305,6 +315,23 @@ export default function PendingChangesPage() {
     const { error: e } = await supabase.rpc('reject_return_edit', { p_id: id })
     if (e) { setError(e.message); setBusyId(''); return }
     setSuccess('Return edit rejected.'); setBusyId(''); loadRetEdits()
+  }
+  async function loadFgEdits() {
+    const { data } = await supabase.from('dispatch_line_edit_requests').select('*').order('created_at', { ascending: false })
+    setFgEdits((data as FgEditReq[]) || [])
+  }
+  async function approveFge(id: string) {
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('approve_dispatch_line_edit', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Delivery line edit approved.'); setBusyId(''); loadFgEdits()
+  }
+  async function rejectFge(id: string) {
+    if (!confirm('Reject this delivery line edit? The line stays as it is.')) return
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('reject_dispatch_line_edit', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Delivery line edit rejected.'); setBusyId(''); loadFgEdits()
   }
   async function loadItemChanges() {
     const { data } = await supabase.from('item_change_requests').select('*').order('created_at', { ascending: false })
@@ -497,6 +524,7 @@ export default function PendingChangesPage() {
   const selMCIds = mcPending.filter(a => selMC.has(a.id)).map(a => a.id)
   const shownDD = filter === 'All' ? docDels : docDels.filter(a => a.status === filter)
   const shownRE = filter === 'All' ? retEdits : retEdits.filter(a => a.status === filter)
+  const shownFGE = filter === 'All' ? fgEdits : fgEdits.filter(a => a.status === filter)
   const ITEM_FIELD_LABEL: Record<string, string> = { description: 'Description', unit: 'Unit', type: 'Type', stock_group: 'Stock Group', supplied_by_factory: 'Made at factory', kg_per_bag: 'KG per bag', pcs_per_roll: 'Pieces per roll' }
   const shownIC = filter === 'All' ? itemChanges : itemChanges.filter(a => a.status === filter)
   const shownSO = filter === 'All' ? soChanges : soChanges.filter(a => a.status === filter)
@@ -1002,6 +1030,50 @@ export default function PendingChangesPage() {
                   )}
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Delivery line (finished goods) edits */}
+        <h2 className="text-lg font-semibold mt-8 mb-2">Delivery line edits</h2>
+        <p className="text-gray-500 text-sm mb-3">{isHO ? 'Approve to correct a finished-goods line on a delivery order (item / qty / batch / expiry). This fixes the record — no stock change.' : 'Track your requests to edit a delivery-order line.'}</p>
+        <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem]">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 border-b sticky top-0 z-10">
+              <tr>{['DO', 'Item', 'Change', 'Reason', 'Requested by', 'Status', 'Reviewed by', isHO ? 'Action' : ''].map((h, i) => (
+                <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
+            </thead>
+            <tbody>
+              {shownFGE.length === 0 && (<tr><td colSpan={8} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} delivery line edits.</td></tr>)}
+              {shownFGE.map(a => {
+                const chg: string[] = []
+                if ((a.new_item_code || '') !== (a.old_item_code || '')) chg.push(`item ${a.old_item_code || '—'} → ${a.new_item_code || '—'}`)
+                if (Number(a.new_qty) !== Number(a.old_qty)) chg.push(`qty ${a.old_qty} → ${a.new_qty}`)
+                if ((a.new_batch_no || '') !== (a.old_batch_no || '')) chg.push(`batch ${a.old_batch_no || '—'} → ${a.new_batch_no || '—'}`)
+                const oe = a.old_exp_date ? a.old_exp_date.split('-').reverse().join('/') : '—', ne = a.new_exp_date ? a.new_exp_date.split('-').reverse().join('/') : '—'
+                if ((a.new_exp_date || '') !== (a.old_exp_date || '')) chg.push(`exp ${oe} → ${ne}`)
+                return (
+                  <tr key={a.id} className="border-b last:border-0 align-top hover:bg-gray-50">
+                    <td className="px-3 py-2 font-mono whitespace-nowrap">{a.do_number || '—'}</td>
+                    <td className="px-3 py-2 whitespace-nowrap font-mono">{a.new_item_code || a.old_item_code}</td>
+                    <td className="px-3 py-2 min-w-[160px]">{chg.length ? chg.map((c, i) => <span key={i} className="block">{c}</span>) : <span className="text-gray-400">no change</span>}</td>
+                    <td className="px-3 py-2 text-gray-600 min-w-[120px]">{a.reason}</td>
+                    <td className="px-3 py-2 whitespace-nowrap"><span className="block">{a.requested_by_name || '—'}</span><span className="block text-gray-400">{fmt(a.created_at)}</span></td>
+                    <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full font-medium ${STATUS_STYLES[a.status] || 'bg-gray-100 text-gray-700'}`}>{a.status}</span></td>
+                    <td className="px-3 py-2 whitespace-nowrap text-gray-600">{a.status === 'Pending' ? '—' : (<><span className="block">{a.reviewed_by_name}</span><span className="block text-gray-400">{fmt(a.reviewed_at)}</span></>)}</td>
+                    {isHO && (
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {a.status === 'Pending' ? (
+                          <div className="flex gap-2">
+                            <button onClick={() => approveFge(a.id)} disabled={busyId === a.id} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">Approve</button>
+                            <button onClick={() => rejectFge(a.id)} disabled={busyId === a.id} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>
+                          </div>
+                        ) : <span className="text-gray-400">done</span>}
+                      </td>
+                    )}
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>

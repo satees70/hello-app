@@ -18,7 +18,7 @@ interface Batch {
 interface DOrder {
   id: string; do_number: string | null; factory_code: string; status: string
   created_by_name: string | null; created_at: string
-  dispatch_order_lines?: { item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null }[]
+  dispatch_order_lines?: { id: string; item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null }[]
   material_returns?: { id: string; item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null; reason: string | null }[]
 }
 interface CartReturn { lotId: string; itemCode: string; description: string; unit: string; batchNo: string | null; expDate?: string | null; qty: number; reason: string; factory: string; factoryName: string; manual?: boolean }
@@ -75,6 +75,15 @@ export default function DispatchPage() {
   const [editNewReason, setEditNewReason] = useState('')
   const [editWhy, setEditWhy] = useState('')
   const [editPending, setEditPending] = useState<Set<string>>(new Set())
+  // Finished-goods line edit (delivery-note correction, HO approval)
+  type FgLine = { id: string; item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null }
+  const [fgEdit, setFgEdit] = useState<{ line: FgLine; doNumber: string | null; dispatchId: string; factory: string } | null>(null)
+  const [fgItem, setFgItem] = useState('')     // 'CODE — desc' of the (possibly new) item
+  const [fgQty, setFgQty] = useState('')
+  const [fgBatch, setFgBatch] = useState('')
+  const [fgExp, setFgExp] = useState('')
+  const [fgWhy, setFgWhy] = useState('')
+  const [fgEditPending, setFgEditPending] = useState<Set<string>>(new Set())
 
   useEffect(() => { if (profile) load() }, [profile])
 
@@ -98,11 +107,13 @@ export default function DispatchPage() {
       .is('dispatched_at', null).gt('produced_qty', 0).neq('status', 'Bypassed').order('delivery_date')
     setBatches((b as Batch[]) || [])
     const { data: o } = await supabase.from('dispatch_orders')
-      .select('id, do_number, factory_code, status, created_by_name, created_at, dispatch_order_lines(item_code, description, quantity, batch_no, exp_date), material_returns(id, item_code, description, quantity, batch_no, exp_date, reason)')
+      .select('id, do_number, factory_code, status, created_by_name, created_at, dispatch_order_lines(id, item_code, description, quantity, batch_no, exp_date), material_returns(id, item_code, description, quantity, batch_no, exp_date, reason)')
       .order('created_at', { ascending: false }).limit(50)
     setOrders((o as DOrder[]) || [])
     const { data: pe } = await supabase.from('return_edit_requests').select('return_id').eq('status', 'Pending')
     setEditPending(new Set((pe || []).map(x => x.return_id).filter(Boolean)))
+    const { data: fpe } = await supabase.from('dispatch_line_edit_requests').select('line_id').eq('status', 'Pending')
+    setFgEditPending(new Set((fpe || []).map(x => x.line_id).filter(Boolean)))
     // Sales-order lines (for direct delivery). Limit to the factories the user can act on.
     const facCodes = isHO ? null : codes
     const sLines: SLine[] = []
@@ -261,6 +272,40 @@ export default function DispatchPage() {
 
   function openRetEdit(r: MReturn) {
     setEditRet(r); setEditQty(String(r.quantity)); setEditNewItem(''); setEditBatch(r.batch_no || ''); setEditExp(r.exp_date || ''); setEditNewReason(r.reason || ''); setEditWhy(''); setError(''); setSuccess('')
+  }
+  function openFgEdit(line: FgLine, o: DOrder) {
+    setFgEdit({ line, doNumber: o.do_number, dispatchId: o.id, factory: o.factory_code })
+    setFgItem(`${line.item_code}${line.description ? ' — ' + line.description : ''}`)
+    setFgQty(String(line.quantity)); setFgBatch(line.batch_no || ''); setFgExp(line.exp_date || ''); setFgWhy(''); setError(''); setSuccess('')
+  }
+  // Request an edit to a finished-goods delivery line (item/qty/batch/exp). HO approval applies it.
+  async function submitFgEdit() {
+    if (!fgEdit || !profile) return
+    const nq = Number(fgQty)
+    if (!(nq > 0)) { setError('Enter a quantity greater than zero.'); return }
+    if (!fgWhy.trim()) { setError('Please give a reason for the edit.'); return }
+    const newCode = fgItem.split(' — ')[0].trim() || fgEdit.line.item_code
+    setBusy(true); setError(''); setSuccess('')
+    const { data, error: e } = await supabase.from('dispatch_line_edit_requests').insert({
+      line_id: fgEdit.line.id, dispatch_id: fgEdit.dispatchId, do_number: fgEdit.doNumber, factory_code: fgEdit.factory,
+      old_item_code: fgEdit.line.item_code, new_item_code: newCode,
+      old_qty: fgEdit.line.quantity, new_qty: nq,
+      old_batch_no: fgEdit.line.batch_no, new_batch_no: fgBatch.trim() || null,
+      old_exp_date: fgEdit.line.exp_date, new_exp_date: fgExp || null,
+      reason: fgWhy.trim(), requested_by: profile.id, requested_by_name: profile.full_name || null,
+    }).select('id').single()
+    if (e || !data) {
+      const msg = e?.message || 'Could not send request'
+      setError(/dispatch_line_edit_requests/.test(msg) ? 'This needs a database update — run the latest catch-up SQL first.' : msg)
+      setBusy(false); return
+    }
+    if (isHO) {
+      const { error: apErr } = await supabase.rpc('approve_dispatch_line_edit', { p_id: data.id })
+      if (apErr) { setError(`Saved, but could not apply: ${apErr.message}`); setBusy(false); setFgEdit(null); load(); return }
+    }
+    setBusy(false); setFgEdit(null)
+    setSuccess(isHO ? 'Delivery line updated.' : 'Edit request sent to Head Office for approval.')
+    load()
   }
   // Request an edit to a past return (qty/reason). HO approval applies the stock change.
   async function submitRetEdit() {
@@ -532,6 +577,11 @@ export default function DispatchPage() {
                     {(o.dispatch_order_lines || []).map((l, i) => (
                       <span key={`f${i}`} className="block mb-1">
                         📦 <span className="font-mono">{l.item_code}</span>{l.description ? ` — ${l.description}` : ''} × {l.quantity}
+                        {fgEditPending.has(l.id)
+                          ? <span className="ml-2 text-amber-600 text-xs">⏳ edit pending approval</span>
+                          : canFac(o.factory_code) && hasCap(profile, 'request_return_edit')
+                            ? <button onClick={() => openFgEdit(l, o)} className="ml-2 text-blue-600 hover:underline text-xs">Edit</button>
+                            : null}
                         {(l.batch_no || l.exp_date) && <span className="block ml-5 text-xs text-gray-400">{l.batch_no ? `batch ${l.batch_no}` : ''}{l.batch_no && l.exp_date ? ' · ' : ''}{l.exp_date ? `exp ${fmtD(l.exp_date)}` : ''}</span>}
                       </span>
                     ))}
@@ -587,6 +637,34 @@ export default function DispatchPage() {
             <div className="flex gap-2 mt-5">
               <button onClick={submitRetEdit} disabled={busy} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{busy ? 'Saving…' : isHO ? 'Apply' : 'Send for approval'}</button>
               <button onClick={() => setEditRet(null)} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit a finished-goods delivery line (HO approval) */}
+      {fgEdit && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setFgEdit(null)}>
+          <div className="bg-white rounded-xl shadow-xl border w-full max-w-md my-8 p-6" onClick={e => e.stopPropagation()}>
+            <h2 className="font-semibold text-lg mb-1">Edit delivery line</h2>
+            <p className="text-gray-500 text-sm mb-4">DO <span className="font-mono">{fgEdit.doNumber || '—'}</span> · {factoryName(fgEdit.factory)}. {isHO ? 'Applies immediately.' : 'Goes to Head Office for approval.'} This corrects the delivery record; it does not change stock.</p>
+            <div className="space-y-3">
+              <div><label className="block text-sm font-medium mb-1">Item</label>
+                <ItemPicker items={items} value={fgItem} onPick={it => setFgItem(`${it.code} — ${it.description}`)} placeholder="Type a code or name…" /></div>
+              <div><label className="block text-sm font-medium mb-1">Quantity</label>
+                <input type="number" step="any" min="0" value={fgQty} onChange={e => setFgQty(e.target.value)} className="w-full border rounded-lg px-3 py-2" /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="block text-sm font-medium mb-1">Batch <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input value={fgBatch} onChange={e => setFgBatch(e.target.value)} placeholder="Batch no." className="w-full border rounded-lg px-3 py-2" /></div>
+                <div><label className="block text-sm font-medium mb-1">Expiry <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input type="date" value={fgExp} onChange={e => setFgExp(e.target.value)} className="w-full border rounded-lg px-3 py-2" /></div>
+              </div>
+              <div><label className="block text-sm font-medium mb-1">Reason for this edit</label>
+                <input value={fgWhy} onChange={e => setFgWhy(e.target.value)} placeholder="Why are you changing it?" className="w-full border rounded-lg px-3 py-2" /></div>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={submitFgEdit} disabled={busy} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{busy ? 'Saving…' : isHO ? 'Apply' : 'Send for approval'}</button>
+              <button onClick={() => setFgEdit(null)} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
             </div>
           </div>
         </div>
