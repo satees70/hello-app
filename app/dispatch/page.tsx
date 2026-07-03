@@ -18,7 +18,7 @@ interface Batch {
 interface DOrder {
   id: string; do_number: string | null; factory_code: string; status: string
   created_by_name: string | null; created_at: string
-  dispatch_order_lines?: { id: string; item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null }[]
+  dispatch_order_lines?: { id: string; item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null; batch_id: string | null }[]
   material_returns?: { id: string; item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null; reason: string | null }[]
 }
 interface CartReturn { lotId: string; itemCode: string; description: string; unit: string; batchNo: string | null; expDate?: string | null; qty: number; reason: string; factory: string; factoryName: string; manual?: boolean }
@@ -38,6 +38,7 @@ export default function DispatchPage() {
   const [onHand, setOnHand] = useState<Record<string, number>>({})
   const [batches, setBatches] = useState<Batch[]>([])
   const [orders, setOrders] = useState<DOrder[]>([])
+  const [soByBatch, setSoByBatch] = useState<Record<string, string>>({})
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const toggleFac = (fc: string) => setCollapsed(p => { const n = new Set(p); n.has(fc) ? n.delete(fc) : n.add(fc); return n })
@@ -107,9 +108,17 @@ export default function DispatchPage() {
       .is('dispatched_at', null).gt('produced_qty', 0).neq('status', 'Bypassed').order('delivery_date')
     setBatches((b as Batch[]) || [])
     const { data: o } = await supabase.from('dispatch_orders')
-      .select('id, do_number, factory_code, status, created_by_name, created_at, dispatch_order_lines(id, item_code, description, quantity, batch_no, exp_date), material_returns(id, item_code, description, quantity, batch_no, exp_date, reason)')
+      .select('id, do_number, factory_code, status, created_by_name, created_at, dispatch_order_lines(id, item_code, description, quantity, batch_no, exp_date, batch_id), material_returns(id, item_code, description, quantity, batch_no, exp_date, reason)')
       .order('created_at', { ascending: false }).limit(50)
     setOrders((o as DOrder[]) || [])
+    // SO number(s) per dispatched batch, so each delivery line can show its order.
+    const batchIds = [...new Set(((o as DOrder[]) || []).flatMap(d => (d.dispatch_order_lines || []).map(l => l.batch_id).filter(Boolean)))] as string[]
+    const sob: Record<string, string> = {}
+    for (let i = 0; i < batchIds.length; i += 200) {
+      const { data: pbi } = await supabase.from('production_batch_items').select('batch_id, so_number').in('batch_id', batchIds.slice(i, i + 200))
+      ;(pbi || []).forEach(r => { if (!r.batch_id || !r.so_number) return; sob[r.batch_id] = sob[r.batch_id] ? (sob[r.batch_id].includes(r.so_number) ? sob[r.batch_id] : sob[r.batch_id] + ', ' + r.so_number) : r.so_number })
+    }
+    setSoByBatch(sob)
     const { data: pe } = await supabase.from('return_edit_requests').select('return_id').eq('status', 'Pending')
     setEditPending(new Set((pe || []).map(x => x.return_id).filter(Boolean)))
     const { data: fpe } = await supabase.from('dispatch_line_edit_requests').select('line_id').eq('status', 'Pending')
@@ -255,13 +264,13 @@ export default function DispatchPage() {
     doc.text(`By: ${o.created_by_name || '—'}`, W - 10, 44.5, { align: 'right' })
     const fg = o.dispatch_order_lines || [], rt = o.material_returns || []
     const body = [
-      ...fg.map((l, i) => [String(i + 1), l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', l.exp_date ? fmtD(l.exp_date) : '—', 'Finished']),
-      ...rt.map((l, i) => [String(fg.length + i + 1), l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', l.exp_date ? fmtD(l.exp_date) : '—', 'Return']),
+      ...fg.map((l, i) => [String(i + 1), (l.batch_id && soByBatch[l.batch_id]) || '—', l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', l.exp_date ? fmtD(l.exp_date) : '—', 'Finished']),
+      ...rt.map((l, i) => [String(fg.length + i + 1), '—', l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', l.exp_date ? fmtD(l.exp_date) : '—', 'Return']),
     ]
     autoTable(doc, {
-      startY: 48, head: [['#', 'Code', 'Item name', 'Qty', 'Batch', 'Exp', 'Type']], body,
+      startY: 48, head: [['#', 'SO', 'Code', 'Item name', 'Qty', 'Batch', 'Exp', 'Type']], body,
       styles: { fontSize: 8, cellPadding: 1.4 }, headStyles: { fillColor: [30, 58, 138] },
-      columnStyles: { 0: { cellWidth: 7 }, 3: { halign: 'right' } }, margin: { left: 10, right: 10 },
+      columnStyles: { 0: { cellWidth: 7 }, 4: { halign: 'right' } }, margin: { left: 10, right: 10 },
     })
     const endY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || 40
     doc.setFontSize(8)
@@ -582,7 +591,7 @@ export default function DispatchPage() {
                           : canFac(o.factory_code) && hasCap(profile, 'request_return_edit')
                             ? <button onClick={() => openFgEdit(l, o)} className="ml-2 text-blue-600 hover:underline text-xs">Edit</button>
                             : null}
-                        {(l.batch_no || l.exp_date) && <span className="block ml-5 text-xs text-gray-400">{l.batch_no ? `batch ${l.batch_no}` : ''}{l.batch_no && l.exp_date ? ' · ' : ''}{l.exp_date ? `exp ${fmtD(l.exp_date)}` : ''}</span>}
+                        {(l.batch_no || l.exp_date || (l.batch_id && soByBatch[l.batch_id])) && <span className="block ml-5 text-xs text-gray-400">{l.batch_id && soByBatch[l.batch_id] ? `SO ${soByBatch[l.batch_id]}` : ''}{l.batch_id && soByBatch[l.batch_id] && (l.batch_no || l.exp_date) ? ' · ' : ''}{l.batch_no ? `batch ${l.batch_no}` : ''}{l.batch_no && l.exp_date ? ' · ' : ''}{l.exp_date ? `exp ${fmtD(l.exp_date)}` : ''}</span>}
                       </span>
                     ))}
                     {(o.material_returns || []).map((l, i) => (
