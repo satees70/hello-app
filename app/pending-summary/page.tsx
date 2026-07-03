@@ -109,13 +109,37 @@ export default function PendingSummaryPage() {
   const facs = [...new Set(visible.map(l => factoryName(l.factory_code)))].sort()
   const toggle = (f: string) => setCollapsed(p => { const n = new Set(p); n.has(f) ? n.delete(f) : n.add(f); return n })
   const qtyOf = (l: Line) => Number(l.outstanding_qty ?? l.quantity ?? 0)
+  // Which factories each item is pending at — an item at 2+ factories is flagged as a problem.
+  const itemFactories = new Map<string, Set<string>>()
+  pending.forEach(l => { const k = l.item_code || '—'; const s = itemFactories.get(k) || new Set<string>(); s.add(factoryName(l.factory_code)); itemFactories.set(k, s) })
+  const multiFacItems = [...itemFactories].filter(([, s]) => s.size > 1).map(([k, s]) => ({ code: k, facs: [...s].sort() }))
+  const isMultiFac = new Set(multiFacItems.map(m => m.code))
+  // Combine visible lines by item within a factory: sum qty, gather SOs + statuses.
+  const combineByItem = (rows: Line[]) => {
+    const m = new Map<string, { code: string; desc: string | null; qty: number; sos: string[]; statuses: Set<string>; grinding: boolean }>()
+    rows.forEach(l => {
+      const key = l.item_code || '—'
+      const e = m.get(key) || { code: key, desc: l.description, qty: 0, sos: [], statuses: new Set<string>(), grinding: false }
+      e.qty += qtyOf(l); if (l.so_number && !e.sos.includes(l.so_number)) e.sos.push(l.so_number)
+      e.statuses.add(lineStatus(l)); if (l.is_grinding) e.grinding = true
+      m.set(key, e)
+    })
+    return [...m.values()].sort((a, b) => a.code.localeCompare(b.code))
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
         <h1 className="text-2xl font-bold mb-1">Pending Summary</h1>
-        <p className="text-gray-500 text-sm mb-5">All sales-order lines still to be produced/delivered, grouped by factory.</p>
+        <p className="text-gray-500 text-sm mb-5">Pending items still to be produced/delivered, combined by item and grouped by factory.</p>
+
+        {multiFacItems.length > 0 && (
+          <div className="mb-3 p-3 rounded-lg bg-red-50 border border-red-300 text-sm text-red-800">
+            ⚠ <strong>Same item pending at more than one factory</strong> — check these are meant to split:
+            <div className="mt-1 space-y-0.5">{multiFacItems.map(m => <div key={m.code}><span className="font-mono font-medium">{m.code}</span> — {m.facs.join(', ')}</div>)}</div>
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-3 mb-3 text-sm">
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Search SO, item code or name…" className="border rounded-lg px-3 py-2 w-full sm:w-72" />
@@ -128,25 +152,25 @@ export default function PendingSummaryPage() {
         <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[36rem]">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b sticky top-0 z-10">
-              <tr>{['SO No', 'Item', 'Qty', 'Status'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr>
+              <tr>{['Item', 'Orders (SO)', 'Qty', 'Status'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr>
             </thead>
             <tbody>
               {busy && <tr><td colSpan={4} className="text-center py-8 text-gray-400">Loading…</td></tr>}
               {!busy && visible.length === 0 && <tr><td colSpan={4} className="text-center py-8 text-gray-400">Nothing pending 🎉</td></tr>}
               {!busy && facs.map(fc => {
-                const grp = visible.filter(l => factoryName(l.factory_code) === fc)
+                const items = combineByItem(visible.filter(l => factoryName(l.factory_code) === fc))
                 const open = !collapsed.has(fc)
                 return (
                   <Fragment key={fc}>
                     <tr className="bg-gray-50 border-b cursor-pointer hover:bg-gray-100" onClick={() => toggle(fc)}>
-                      <td colSpan={4} className="px-3 py-1.5 font-semibold text-gray-700"><span className="text-gray-400 mr-1">{open ? '▾' : '▸'}</span>🏭 {fc} <span className="text-gray-400 font-normal">· {grp.length}</span></td>
+                      <td colSpan={4} className="px-3 py-1.5 font-semibold text-gray-700"><span className="text-gray-400 mr-1">{open ? '▾' : '▸'}</span>🏭 {fc} <span className="text-gray-400 font-normal">· {items.length} item(s)</span></td>
                     </tr>
-                    {open && grp.map(l => (
-                      <tr key={l.id} className="border-b last:border-0 hover:bg-gray-50 align-top">
-                        <td className="px-3 py-2 font-mono whitespace-nowrap">{l.so_number || '—'}{l.is_grinding && <span className="ml-1 text-purple-600" title="Grinding">🌀</span>}</td>
-                        <td className="px-3 py-2"><span className="font-mono font-medium">{l.item_code}</span><span className="block text-gray-500 text-xs">{l.description}</span></td>
-                        <td className="px-3 py-2 text-right font-semibold whitespace-nowrap">{qtyOf(l)}</td>
-                        <td className="px-3 py-2 whitespace-nowrap"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[lineStatus(l)] || 'bg-gray-100 text-gray-600'}`}>{lineStatus(l)}</span></td>
+                    {open && items.map(it => (
+                      <tr key={it.code} className={`border-b last:border-0 align-top ${isMultiFac.has(it.code) ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-50'}`}>
+                        <td className="px-3 py-2"><span className="font-mono font-medium">{it.code}</span>{it.grinding && <span className="ml-1 text-purple-600" title="Grinding">🌀</span>}{isMultiFac.has(it.code) && <span className="ml-1.5 text-red-600 text-xs font-semibold" title={`Also pending at: ${itemFactories.get(it.code) ? [...itemFactories.get(it.code)!].join(', ') : ''}`}>⚠ 2+ factories</span>}<span className="block text-gray-500 text-xs">{it.desc}</span></td>
+                        <td className="px-3 py-2 text-gray-500 text-xs min-w-[120px]">{it.sos.length} order(s)<span className="block font-mono">{it.sos.join(', ')}</span></td>
+                        <td className="px-3 py-2 text-right font-semibold whitespace-nowrap">{Number(it.qty.toFixed(3))}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">{[...it.statuses].map(s => <span key={s} className={`inline-block mr-1 mb-0.5 px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[s] || 'bg-gray-100 text-gray-600'}`}>{s}</span>)}</td>
                       </tr>
                     ))}
                   </Fragment>
