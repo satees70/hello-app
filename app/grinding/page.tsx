@@ -65,8 +65,6 @@ export default function GrindingPage() {
   const [items, setItems] = useState<{ code: string; description: string | null }[]>([])
   const [machines, setMachines] = useState<string[]>([])   // grinding machine master list
   const [emps, setEmps] = useState<string[]>([])           // HR employee names (for "Grind by")
-  const [showMachines, setShowMachines] = useState(false)
-  const [newMachine, setNewMachine] = useState('')
   const [saving, setSaving] = useState(false)
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -93,14 +91,6 @@ export default function GrindingPage() {
     // Only production-tagged staff (set on HR › Employees) appear here — not the whole company.
     supabase.from('employees').select('name').eq('active', true).eq('is_production', true).order('name').then(({ data }) => setEmps((data || []).map(r => r.name).filter(Boolean)))
   }, [profile])
-  async function addMachine() {
-    const n = newMachine.trim(); if (!n || machines.some(m => m.toLowerCase() === n.toLowerCase())) { setNewMachine(''); return }
-    const { error } = await supabase.from('grinding_machines').insert({ name: n })
-    if (!error) { setMachines(p => [...p, n].sort()); setNewMachine('') }
-  }
-  async function removeMachine(name: string) {
-    await supabase.from('grinding_machines').delete().eq('name', name); setMachines(p => p.filter(m => m !== name))
-  }
 
   async function loadFactories() {
     const { data } = await supabase.from('factories').select('code, name').order('code'); setFactories(data || [])
@@ -237,12 +227,6 @@ export default function GrindingPage() {
         machine_id: insp.machine_id || null, grind_by: insp.grind_by || null,
       })
       if (Object.keys(payload).length) { const { error } = await supabase.from('grinding_records').update(payload).eq('id', openRec.id); if (error) throw error }
-      // A newly-typed machine is added to the master list (best-effort).
-      const mc = (insp.machine_id || '').trim()
-      if (recEdit && mc && !machines.some(m => m.toLowerCase() === mc.toLowerCase())) {
-        await supabase.from('grinding_machines').insert({ name: mc })
-        setMachines(p => [...p, mc].sort())
-      }
       if (recRecipeEdit) {
         for (const m of mixMats) {
           if (!m.id) continue
@@ -550,10 +534,13 @@ export default function GrindingPage() {
             {/* Machine + who ground it */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
               <div>
-                <div className="flex items-center justify-between mb-1"><label className="block text-sm font-medium">Grinding machine ID</label>{recEdit && <button type="button" onClick={() => setShowMachines(true)} className="text-xs text-blue-600 hover:underline">🛠 Manage machines</button>}</div>
-                <input list="grind-machines" value={insp.machine_id || ''} onChange={e => setInsp(s => ({ ...s, machine_id: e.target.value }))} disabled={!recEdit} placeholder="Pick or type a machine…" className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100" />
-                <datalist id="grind-machines">{machines.map(m => <option key={m} value={m} />)}</datalist>
-                <span className="text-[11px] text-gray-400">Pick from the list, or type a new one — it’s added to the machine list.</span></div>
+                <label className="block text-sm font-medium mb-1">Grinding machine ID</label>
+                <select value={insp.machine_id || ''} onChange={e => setInsp(s => ({ ...s, machine_id: e.target.value }))} disabled={!recEdit} className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100">
+                  <option value="">— select a machine —</option>
+                  {insp.machine_id && !machines.includes(insp.machine_id) && <option value={insp.machine_id}>{insp.machine_id}</option>}
+                  {machines.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <span className="text-[11px] text-gray-400">Machines are set up under <span className="font-medium">Setup › Grinding Machines</span>.</span></div>
               <div><label className="block text-sm font-medium mb-1">Grind by <span className="text-gray-400 font-normal">(one or more)</span></label>
                 {(() => {
                   const list = (insp.grind_by || '').split(',').map(s => s.trim()).filter(Boolean)
@@ -655,30 +642,6 @@ export default function GrindingPage() {
         </div>
       )}
 
-      {showMachines && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setShowMachines(false)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mt-16 p-5" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-lg">Grinding machines</h3>
-              <button onClick={() => setShowMachines(false)} className="text-gray-400 hover:text-gray-700 text-xl leading-none">×</button>
-            </div>
-            <p className="text-sm text-gray-500 mb-3">Add or remove the machines that appear in the record’s machine dropdown.</p>
-            <div className="flex gap-2 mb-3">
-              <input value={newMachine} onChange={e => setNewMachine(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addMachine() }} placeholder="Machine ID / name…" className="flex-1 border rounded-lg px-3 py-2 text-sm" />
-              <button onClick={addMachine} className="bg-gray-800 text-white px-4 py-2 rounded-lg text-sm shrink-0">Add</button>
-            </div>
-            <ul className="space-y-1 max-h-72 overflow-auto">
-              {machines.length === 0 && <li className="text-xs text-gray-400">No machines yet.</li>}
-              {machines.map(m => (
-                <li key={m} className="flex items-center justify-between gap-2 text-sm border-b border-gray-100 py-1">
-                  <span className="font-medium">{m}</span>
-                  <button onClick={() => removeMachine(m)} className="text-red-500 hover:text-red-700 text-xs shrink-0">Remove</button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
