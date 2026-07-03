@@ -63,6 +63,8 @@ export default function GrindingPage() {
   const [editRecipe, setEditRecipe] = useState<Recipe | 'new' | null>(null)
   const [recipeForm, setRecipeForm] = useState<{ factory_code: string; product: string; recipe_type: string; active: boolean; components: Component[] } | null>(null)
   const [items, setItems] = useState<{ code: string; description: string | null }[]>([])
+  const [machines, setMachines] = useState<string[]>([])   // grinding machine master list
+  const [emps, setEmps] = useState<string[]>([])           // HR employee names (for "Grind by")
   const [saving, setSaving] = useState(false)
 
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -83,6 +85,11 @@ export default function GrindingPage() {
   useEffect(() => { if (profile) { loadFactories(); load() } }, [profile])
   // Items master for the recipe pick-lists (only the mixer needs it)
   useEffect(() => { if (profile && (canRecipeEdit || canEdit) && items.length === 0) fetchAll<{ code: string; description: string | null }>('items', 'code, description', 'code').then(setItems) }, [profile, canRecipeEdit, canEdit])
+  // Grinding-machine master list + HR employee names (for the record's Machine / Grind by pickers)
+  useEffect(() => { if (!profile) return
+    supabase.from('grinding_machines').select('name').eq('active', true).order('name').then(({ data }) => setMachines((data || []).map(r => r.name)))
+    supabase.from('employees').select('name').eq('active', true).order('name').then(({ data }) => setEmps((data || []).map(r => r.name).filter(Boolean)))
+  }, [profile])
 
   async function loadFactories() {
     const { data } = await supabase.from('factories').select('code, name').order('code'); setFactories(data || [])
@@ -219,6 +226,12 @@ export default function GrindingPage() {
         machine_id: insp.machine_id || null, grind_by: insp.grind_by || null,
       })
       if (Object.keys(payload).length) { const { error } = await supabase.from('grinding_records').update(payload).eq('id', openRec.id); if (error) throw error }
+      // A newly-typed machine is added to the master list (best-effort).
+      const mc = (insp.machine_id || '').trim()
+      if (recEdit && mc && !machines.some(m => m.toLowerCase() === mc.toLowerCase())) {
+        await supabase.from('grinding_machines').insert({ name: mc })
+        setMachines(p => [...p, mc].sort())
+      }
       if (recRecipeEdit) {
         for (const m of mixMats) {
           if (!m.id) continue
@@ -526,9 +539,12 @@ export default function GrindingPage() {
             {/* Machine + who ground it */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
               <div><label className="block text-sm font-medium mb-1">Grinding machine ID</label>
-                <input value={insp.machine_id || ''} onChange={e => setInsp(s => ({ ...s, machine_id: e.target.value }))} disabled={!recEdit} placeholder="e.g. GR-01" className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100" /></div>
+                <input list="grind-machines" value={insp.machine_id || ''} onChange={e => setInsp(s => ({ ...s, machine_id: e.target.value }))} disabled={!recEdit} placeholder="Pick or type a machine…" className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100" />
+                <datalist id="grind-machines">{machines.map(m => <option key={m} value={m} />)}</datalist>
+                <span className="text-[11px] text-gray-400">Pick from the list, or type a new one — it’s added to the machine list.</span></div>
               <div><label className="block text-sm font-medium mb-1">Grind by</label>
-                <input value={insp.grind_by || ''} onChange={e => setInsp(s => ({ ...s, grind_by: e.target.value }))} disabled={!recEdit} placeholder="Name" className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100" /></div>
+                <input list="grind-emps" value={insp.grind_by || ''} onChange={e => setInsp(s => ({ ...s, grind_by: e.target.value }))} disabled={!recEdit} placeholder="Pick an employee…" className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100" />
+                <datalist id="grind-emps">{emps.map(n => <option key={n} value={n} />)}</datalist></div>
             </div>
 
             {/* Output products: lookup item, then batch / expiry / qty */}

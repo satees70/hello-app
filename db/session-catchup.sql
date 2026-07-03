@@ -1478,3 +1478,17 @@ begin
   update public.sales_order_lines set delivered_qty = coalesce(delivered_qty, 0) + v_line.quantity, delivered_do = v_do.do_number, delivered_at = now() where id = v_sl.id;
 end $function$;
 grant execute on function public.link_do_line_to_so(uuid, text) to authenticated;
+
+-- ============================================================================
+-- 2026-07 · Grinding machine master list (for the record's Machine picker)
+-- ============================================================================
+create table if not exists public.grinding_machines (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  active boolean not null default true,
+  created_at timestamptz default now()
+);
+alter table public.grinding_machines enable row level security;
+drop policy if exists gm_all on public.grinding_machines;
+create policy gm_all on public.grinding_machines for all
+  using (auth.uid() is not null) with check (auth.uid() is not null);
