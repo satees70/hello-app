@@ -39,6 +39,7 @@ export default function DispatchPage() {
   const [batches, setBatches] = useState<Batch[]>([])
   const [orders, setOrders] = useState<DOrder[]>([])
   const [soByBatch, setSoByBatch] = useState<Record<string, string>>({})
+  const [expByBatch, setExpByBatch] = useState<Record<string, string>>({})   // effective expiry: batch's own, else its label's
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const toggleFac = (fc: string) => setCollapsed(p => { const n = new Set(p); n.has(fc) ? n.delete(fc) : n.add(fc); return n })
@@ -119,6 +120,23 @@ export default function DispatchPage() {
       ;(pbi || []).forEach(r => { if (!r.batch_id || !r.so_number) return; sob[r.batch_id] = sob[r.batch_id] ? (sob[r.batch_id].includes(r.so_number) ? sob[r.batch_id] : sob[r.batch_id] + ', ' + r.so_number) : r.so_number })
     }
     setSoByBatch(sob)
+    // Effective expiry per batch: the batch's own exp_date, else the expiry printed on its label.
+    const rtsIds = ((b as Batch[]) || []).map(x => x.id)
+    const allBids = [...new Set([...rtsIds, ...batchIds])]
+    const bexp: Record<string, { exp: string | null; mr: string | null }> = {}
+    for (let i = 0; i < allBids.length; i += 200) {
+      const { data: bb } = await supabase.from('production_batches').select('id, exp_date, material_request_id').in('id', allBids.slice(i, i + 200))
+      ;(bb || []).forEach(r => { bexp[r.id] = { exp: r.exp_date, mr: r.material_request_id } })
+    }
+    const mrIds = [...new Set(Object.values(bexp).filter(x => !x.exp && x.mr).map(x => x.mr as string))]
+    const lblExp: Record<string, string> = {}
+    for (let i = 0; i < mrIds.length; i += 200) {
+      const { data: mi } = await supabase.from('material_request_items').select('request_id, label_exp_date').in('request_id', mrIds.slice(i, i + 200))
+      ;(mi || []).forEach(r => { if (!r.label_exp_date) return; if (!lblExp[r.request_id] || r.label_exp_date > lblExp[r.request_id]) lblExp[r.request_id] = r.label_exp_date })
+    }
+    const eb: Record<string, string> = {}
+    Object.entries(bexp).forEach(([id, x]) => { const e = x.exp || (x.mr ? lblExp[x.mr] : null); if (e) eb[id] = e })
+    setExpByBatch(eb)
     const { data: pe } = await supabase.from('return_edit_requests').select('return_id').eq('status', 'Pending')
     setEditPending(new Set((pe || []).map(x => x.return_id).filter(Boolean)))
     const { data: fpe } = await supabase.from('dispatch_line_edit_requests').select('line_id').eq('status', 'Pending')
@@ -274,7 +292,7 @@ export default function DispatchPage() {
     doc.text(`By: ${o.created_by_name || '—'}`, W - 10, 44.5, { align: 'right' })
     const fg = o.dispatch_order_lines || [], rt = o.material_returns || []
     const body = [
-      ...fg.map((l, i) => [String(i + 1), (l.batch_id && soByBatch[l.batch_id]) || '—', l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', l.exp_date ? fmtD(l.exp_date) : '—']),
+      ...fg.map((l, i) => { const ex = l.exp_date || (l.batch_id ? expByBatch[l.batch_id] : ''); return [String(i + 1), (l.batch_id && soByBatch[l.batch_id]) || '—', l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', ex ? fmtD(ex) : '⚠ none'] }),
       ...rt.map((l, i) => [String(fg.length + i + 1), 'Return', l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', l.exp_date ? fmtD(l.exp_date) : '—']),
     ]
     autoTable(doc, {
@@ -419,7 +437,7 @@ export default function DispatchPage() {
                     <tr key={b.id} className="border-b last:border-0 hover:bg-gray-50">
                       <td className="px-3 py-2">{canEdit && canFac(b.factory_code) && <input type="checkbox" checked={picked.has(b.id)} onChange={() => toggle(b.id)} className="h-4 w-4" />}</td>
                       <td className="px-3 py-2"><span className="font-mono font-medium">{b.item_code}</span><span className="block text-gray-400">{b.description}</span>{(() => { const sos = [...new Set((b.production_batch_items || []).map(i => i.so_number).filter(Boolean))]; if (sos.length) return <span className="block text-gray-400 text-xs font-mono">{sos.join(', ')}</span>; const cands = pendingSOsForItem(b.item_code, b.factory_code); return cands.length ? <span className="block text-amber-700 text-xs">⚠ no SO · pending {cands.slice(0, 3).join(', ')} — link on the DO after sending</span> : null })()}</td>
-                      <td className="px-3 py-2 whitespace-nowrap">{b.batch_no || '—'}{b.exp_date && <span className="block text-gray-400 text-xs">exp {fmtD(b.exp_date)}</span>}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{b.batch_no || '—'}{(() => { const e = expByBatch[b.id]; return e ? <span className="block text-gray-400 text-xs">exp {fmtD(e)}</span> : <span className="block text-amber-700 text-xs">⚠ no expiry</span> })()}</td>
                       <td className="px-3 py-2 text-right font-semibold">{b.produced_qty}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{status(b) === 'Completed' ? <span className="text-green-700 font-medium">Completed</span> : <span className="text-amber-600">In Progress</span>}</td>
                       {multiFac && <td className="px-3 py-2 whitespace-nowrap text-gray-600">{factoryName(b.factory_code)}</td>}
@@ -601,7 +619,15 @@ export default function DispatchPage() {
                           : canFac(o.factory_code) && hasCap(profile, 'request_return_edit')
                             ? <button onClick={() => openFgEdit(l, o)} className="ml-2 text-blue-600 hover:underline text-xs">Edit</button>
                             : null}
-                        {(l.batch_no || l.exp_date || (l.batch_id && soByBatch[l.batch_id])) && <span className="block ml-5 text-xs text-gray-400">{l.batch_id && soByBatch[l.batch_id] ? `SO ${soByBatch[l.batch_id]}` : ''}{l.batch_id && soByBatch[l.batch_id] && (l.batch_no || l.exp_date) ? ' · ' : ''}{l.batch_no ? `batch ${l.batch_no}` : ''}{l.batch_no && l.exp_date ? ' · ' : ''}{l.exp_date ? `exp ${fmtD(l.exp_date)}` : ''}</span>}
+                        {(() => {
+                          const so = l.batch_id ? soByBatch[l.batch_id] : ''
+                          const exp = l.exp_date || (l.batch_id ? expByBatch[l.batch_id] : '')
+                          const parts: React.ReactNode[] = []
+                          if (so) parts.push(`SO ${so}`)
+                          if (l.batch_no) parts.push(`batch ${l.batch_no}`)
+                          parts.push(exp ? `exp ${fmtD(exp)}` : '⚠ no expiry')
+                          return <span className={`block ml-5 text-xs ${exp ? 'text-gray-400' : 'text-amber-700'}`}>{parts.join(' · ')}</span>
+                        })()}
                         {!(l.batch_id && soByBatch[l.batch_id]) && canFac(o.factory_code) && (() => {
                           const cands = pendingSOsForItem(l.item_code, o.factory_code)
                           return cands.length ? <span className="block ml-5 text-xs text-amber-700">⚠ no SO linked · pending: {cands.slice(0, 5).map(so => <button key={so} onClick={() => linkDoLine(l.id, so)} disabled={busy} className="text-blue-600 hover:underline disabled:opacity-50 mr-2 font-medium">🔗 {so}</button>)}</span> : null
