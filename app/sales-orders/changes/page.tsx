@@ -158,6 +158,7 @@ export default function PendingChangesPage() {
   const [factoryChanges, setFactoryChanges] = useState<FactoryChangeReq[]>([])
   const [qtyMoves, setQtyMoves] = useState<QtyMoveReq[]>([])
   const [foodLoss, setFoodLoss] = useState<FoodLossAlert[]>([])
+  const [approvingAll, setApprovingAll] = useState(false)
 
   // Distinct values present in a list, for a filter dropdown
   const distinctOf = <T,>(arr: T[], get: (x: T) => string) => [...new Set(arr.map(get))].filter(Boolean).sort()
@@ -534,6 +535,35 @@ export default function PendingChangesPage() {
   const counts: Record<string, number> = { Pending: 0, Approved: 0, Rejected: 0 }
   requests.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1 })
 
+  // Every pending request, from all types, in one list — with the right approve/reject wired in.
+  type Pend = { id: string; kind: string; summary: string; by: string | null; at: string; approve: () => Promise<void>; reject: (() => Promise<void>) | null }
+  const fld = (f: string | null) => f ? (FIELD_LABEL[f] || f) : ''
+  const P = (id: string, kind: string, summary: string, by: string | null, at: string, approve: () => Promise<void>, reject: (() => Promise<void>) | null): Pend => ({ id, kind, summary, by, at, approve, reject })
+  const allPending: Pend[] = [
+    ...requests.filter(r => r.status === 'Pending').map(r => P(r.id, 'Order field change', `${r.sales_order_lines?.so_number || r.sales_imports?.file_name || '—'} · ${fld(r.field)}: ${r.old_value ?? '—'} → ${r.new_value}`, r.requested_by_name, r.requested_at, () => approve(r.id), () => reject(r.id))),
+    ...corrections.filter(c => c.status === 'Pending').map(c => P(c.id, 'Timer cancel', c.label || c.timer_key, c.requested_by_name, c.created_at, () => approveCorr(c.id), () => rejectCorr(c.id))),
+    ...doChanges.filter(c => c.status === 'Pending').map(c => P(c.id, 'Goods Received change', `${c.delivery_orders?.do_number || c.delivery_orders?.file_name || '—'} · ${c.line_label || ''}${c.field ? ' · ' + fld(c.field) + ': ' + (c.old_value ?? '—') + ' → ' + (c.new_value ?? '—') : ' · ' + c.request_type}`, c.requested_by_name, c.created_at, () => approveDo(c.id), () => rejectDo(c.id))),
+    ...splits.filter(c => c.status === 'Pending').map(c => P(c.id, 'Batch split', c.label || '—', c.requested_by_name, c.created_at, () => approveSplit(c.id), () => rejectSplit(c.id))),
+    ...stockAdjs.filter(a => a.status === 'Pending').map(a => P(a.id, 'Stock adjustment', `${a.item_code} ${a.direction} ${a.quantity}${a.batch_no ? ' · ' + a.batch_no : ''}`, a.requested_by_name, a.created_at, () => approveSA(a.id), () => rejectSA(a.id))),
+    ...runModes.filter(a => a.status === 'Pending').map(a => P(a.id, 'Run mode', `${a.batch_no || a.item_code || '—'}: ${a.from_mode ?? '—'} → ${a.to_mode ?? '—'}`, a.requested_by_name, a.created_at, () => approveRM(a.id), () => rejectRM(a.id))),
+    ...mrCancels.filter(a => a.status === 'Pending').map(a => P(a.id, 'Pick run cancel', a.request_no || '—', a.requested_by_name, a.created_at, () => approveMC(a.id), () => rejectMC(a.id))),
+    ...docDels.filter(a => a.status === 'Pending').map(a => P(a.id, 'Document delete', a.file_name || '—', a.requested_by_name, a.created_at, () => approveDD(a), () => rejectDD(a.id))),
+    ...retEdits.filter(a => a.status === 'Pending').map(a => P(a.id, 'Return edit', `${a.item_code || '—'} qty ${a.old_qty} → ${a.new_qty}`, a.requested_by_name, a.created_at, () => approveRE(a.id), () => rejectRE(a.id))),
+    ...fgEdits.filter(a => a.status === 'Pending').map(a => P(a.id, 'Delivery line edit', `DO ${a.do_number || '—'} · ${a.new_item_code || a.old_item_code} qty ${a.old_qty} → ${a.new_qty}`, a.requested_by_name, a.created_at, () => approveFge(a.id), () => rejectFge(a.id))),
+    ...itemChanges.filter(a => a.status === 'Pending').map(a => P(a.id, 'Item master change', `${a.item_code || '—'} · ${fld(a.field)}: ${a.old_value ?? '—'} → ${a.new_value ?? '—'}`, a.requested_by_name, a.created_at, () => approveIC(a.id), () => rejectIC(a.id))),
+    ...soChanges.filter(a => a.status === 'Pending').map(a => P(a.id, 'SO change', `${a.old_so ?? '—'} → ${a.new_so ?? '—'}${a.pick_run_no ? ' (' + a.pick_run_no + ')' : ''}`, a.requested_by_name, a.created_at, () => approveSO(a.id), () => rejectSO(a.id))),
+    ...factoryChanges.filter(a => a.status === 'Pending').map(a => P(a.id, 'Factory move', `${a.from_factory ?? '—'} → ${a.to_factory}`, a.requested_by_name, a.created_at, () => approveFC(a.id), () => rejectFC(a.id))),
+    ...qtyMoves.filter(a => a.status === 'Pending').map(a => P(a.id, 'Qty move', `${a.item_code || '—'} ${a.qty}: ${a.from_label ?? '—'} → ${a.to_label ?? '—'}`, a.requested_by_name, a.created_at, () => approveQM(a.id), () => rejectQM(a.id))),
+    ...foodLoss.filter(a => a.status === 'Pending').map(a => P(a.id, 'Food loss alert', `${a.item_code || a.batch_no || '—'} · ${a.pct ?? '?'}%`, a.created_by_name, a.created_at, () => ackFL(a.id), null)),
+  ].sort((a, b) => (a.at || '').localeCompare(b.at || ''))
+  const approveAllPending = async () => {
+    if (allPending.length === 0) return
+    if (!confirm(`Approve all ${allPending.length} pending request(s)? Each one is applied and logged.`)) return
+    setApprovingAll(true); setError(''); setSuccess('')
+    for (const p of allPending) { try { await p.approve() } catch { /* leave it pending, keep going */ } }
+    setApprovingAll(false); setSuccess('Processed all pending requests.')
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
@@ -554,6 +584,36 @@ export default function PendingChangesPage() {
 
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
         {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}
+
+        {/* One place to see & clear everything pending, across all types */}
+        {isHO && (filter === 'Pending' || filter === 'All') && (
+          <div className="mb-6 bg-white rounded-xl shadow-sm border">
+            <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b bg-gray-50 flex-wrap">
+              <span className="font-semibold">📋 All pending — <span className="text-blue-700">{allPending.length}</span> request(s) in one place</span>
+              {allPending.length > 0 && <button onClick={approveAllPending} disabled={approvingAll} className="bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium">{approvingAll ? 'Approving…' : `✓ Approve all (${allPending.length})`}</button>}
+            </div>
+            <div className="overflow-auto max-h-[28rem]">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{['Type', 'Details', 'Requested by', 'Action'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
+                <tbody>
+                  {allPending.length === 0 && <tr><td colSpan={4} className="text-center py-8 text-gray-400">Nothing pending 🎉</td></tr>}
+                  {allPending.map(p => (
+                    <tr key={`${p.kind}|${p.id}`} className="border-b last:border-0 hover:bg-gray-50 align-top">
+                      <td className="px-3 py-2 whitespace-nowrap"><span className="inline-block bg-gray-100 text-gray-700 rounded-full px-2 py-0.5 font-medium">{p.kind}</span></td>
+                      <td className="px-3 py-2 min-w-[240px]">{p.summary}</td>
+                      <td className="px-3 py-2 whitespace-nowrap"><span className="block">{p.by || '—'}</span><span className="block text-gray-400">{fmt(p.at)}</span></td>
+                      <td className="px-3 py-2 whitespace-nowrap"><div className="flex gap-2">
+                        <button onClick={() => p.approve()} disabled={approvingAll} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">{p.reject ? 'Approve' : 'Acknowledge'}</button>
+                        {p.reject && <button onClick={() => p.reject!()} disabled={approvingAll} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>}
+                      </div></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-gray-400 px-4 py-2 border-t">Tip: the detailed boxes below still show each type with full columns and history. This box is just the quick “see &amp; approve everything” view.</p>
+          </div>
+        )}
 
         {isHO && selPendingIds.length > 0 && (
           <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
