@@ -1873,8 +1873,8 @@ begin
   if v_reqby is not null then
     insert into public.notifications (user_id, factory_code, type, title, body, link, ref)
     values (v_reqby, v_fac, 'transport',
-            case when v_kind = 'driver' then 'Driver arranged' else 'Lorry assigned' || coalesce(': ' || v_lorry, '') end,
-            case when v_kind = 'driver' then 'A driver has been arranged for your request.'
+            case when v_kind = 'driver' then 'Driver arranged' || coalesce(': ' || v_lorry, '') else 'Lorry assigned' || coalesce(': ' || v_lorry, '') end,
+            case when v_kind = 'driver' then 'Driver ' || coalesce(v_lorry, '(see warehouse)') || ' has been arranged for your request.'
                  else 'Lorry ' || coalesce(v_lorry, '(see warehouse)') || ' has been sent for your request — confirm receipt when it arrives.' end,
             '/dispatch', 'lorry-fulfilled:' || p_id::text)
     on conflict (ref) do nothing;

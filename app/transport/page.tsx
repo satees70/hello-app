@@ -143,7 +143,10 @@ export default function TransportPage() {
                     <span className="text-gray-400 text-xs">· {r.requested_by_name || '—'}, {fmt(r.requested_at)}</span>
                     <div className="flex items-center gap-2 ml-auto">
                       {isDriver ? (
-                        <button onClick={() => fulfillLorry(r.id, '')} disabled={!editable || busy === 'lr' + r.id} className="text-xs bg-indigo-600 text-white px-3 py-1 rounded-lg hover:bg-indigo-700 disabled:opacity-50">✓ Driver arranged</button>
+                        <select value="" onChange={e => fulfillLorry(r.id, e.target.value)} disabled={!editable || busy === 'lr' + r.id} className="border rounded px-2 py-1 text-xs">
+                          <option value="">Assign driver…</option>
+                          {crew.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
                       ) : (
                         <>
                           <select value="" onChange={e => fulfillLorry(r.id, e.target.value)} disabled={!editable || busy === 'lr' + r.id} className="border rounded px-2 py-1 text-xs">
