@@ -1338,3 +1338,55 @@ end; $function$;
 drop trigger if exists notify_sales_line on public.sales_order_lines;
 create trigger notify_sales_line after insert or update of factory_code on public.sales_order_lines
   for each row execute function public.tg_notify_sales_line();
+
+-- ============================================================================
+-- 2026-07 · Tell the requester when Head Office approves/rejects their request
+-- ----------------------------------------------------------------------------
+-- Fires when a request's status becomes Approved/Rejected. Notifies the person
+-- who raised it (personal), or their location if no requester id is stored.
+-- Uses to_jsonb(NEW) so it works across tables with different column names.
+-- ============================================================================
+create or replace function public.tg_notify_request_result() returns trigger
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_label text := TG_ARGV[0]; v_new jsonb := to_jsonb(NEW); v_old jsonb := to_jsonb(OLD);
+        v_status text; v_uid uuid; v_fac text;
+begin
+  v_status := v_new->>'status';
+  if v_status in ('Approved', 'Rejected') and v_status is distinct from (v_old->>'status') then
+    v_uid := nullif(coalesce(v_new->>'requested_by', v_new->>'created_by'), '')::uuid;
+    v_fac := coalesce(v_new->>'factory_code', v_new->>'from_factory');
+    insert into public.notifications (user_id, factory_code, type, title, body, link, ref)
+    values (v_uid, case when v_uid is null then v_fac else null end, 'request_result',
+            'Request ' || lower(v_status) || ': ' || v_label,
+            'Your ' || v_label || ' request was ' || lower(v_status) || ' by Head Office.', '/sales-orders/changes',
+            'reqres:' || TG_TABLE_NAME || ':' || (v_new->>'id') || ':' || v_status)
+    on conflict (ref) do nothing;
+  end if;
+  return NEW;
+end; $function$;
+
+do $$
+declare r record;
+begin
+  for r in select * from (values
+    ('change_requests', 'order change'),
+    ('correction_requests', 'timer cancellation'),
+    ('do_change_requests', 'goods-received change'),
+    ('split_requests', 'batch split'),
+    ('stock_adjustments', 'stock adjustment'),
+    ('run_mode_requests', 'run-mode change'),
+    ('mr_cancel_requests', 'pick-run cancel'),
+    ('doc_delete_requests', 'document delete'),
+    ('return_edit_requests', 'return edit'),
+    ('dispatch_line_edit_requests', 'delivery-line edit'),
+    ('item_change_requests', 'item change'),
+    ('so_change_requests', 'SO change'),
+    ('mr_qty_move_requests', 'quantity move'),
+    ('factory_change_requests', 'factory move')
+  ) as t(tbl, lbl) loop
+    if exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = r.tbl) then
+      execute format('drop trigger if exists notify_request_result on public.%I', r.tbl);
+      execute format('create trigger notify_request_result after update of status on public.%I for each row execute function public.tg_notify_request_result(%L)', r.tbl, r.lbl);
+    end if;
+  end loop;
+end $$;
