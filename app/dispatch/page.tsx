@@ -18,7 +18,7 @@ interface Batch {
 }
 interface DOrder {
   id: string; do_number: string | null; factory_code: string; status: string
-  created_by_name: string | null; created_at: string; vehicle: string | null; driver_name: string | null
+  created_by_name: string | null; created_at: string; vehicle: string | null; driver_name: string | null; departed_at: string | null
   dispatch_order_lines?: { id: string; item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null; batch_id: string | null }[]
   material_returns?: { id: string; item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null; reason: string | null }[]
 }
@@ -119,7 +119,7 @@ export default function DispatchPage() {
       .is('dispatched_at', null).gt('produced_qty', 0).neq('status', 'Bypassed').order('delivery_date')
     setBatches((b as Batch[]) || [])
     const { data: o } = await supabase.from('dispatch_orders')
-      .select('id, do_number, factory_code, status, created_by_name, created_at, vehicle, driver_name, dispatch_order_lines(id, item_code, description, quantity, batch_no, exp_date, batch_id), material_returns(id, item_code, description, quantity, batch_no, exp_date, reason)')
+      .select('id, do_number, factory_code, status, created_by_name, created_at, vehicle, driver_name, departed_at, dispatch_order_lines(id, item_code, description, quantity, batch_no, exp_date, batch_id), material_returns(id, item_code, description, quantity, batch_no, exp_date, reason)')
       .order('created_at', { ascending: false }).limit(50)
     setOrders((o as DOrder[]) || [])
     // Open lorry requests (raised before a DO exists).
@@ -306,6 +306,15 @@ export default function DispatchPage() {
     setLrNote(''); setLrDest('')
     setSuccess(`Driver requested for ${factoryName(fac)} — the warehouse has been notified.`)
     load()
+  }
+  async function markLorryOut(o: DOrder, out: boolean) {
+    if (out && !o.vehicle) { setError('Assign a lorry first on Lorry Internal Transfer.'); return }
+    if (out && !confirm(`Confirm lorry ${o.vehicle} has left production for ${o.do_number}?`)) return
+    setBusy(true); setError('')
+    const { error: e } = await supabase.rpc('mark_lorry_out', { p_do_id: o.id, p_out: out })
+    setBusy(false)
+    if (e) { setError(e.message); return }
+    setOrders(prev => prev.map(x => x.id === o.id ? { ...x, departed_at: out ? new Date().toISOString() : null } : x))
   }
   async function cancelLorryReq(id: string) {
     if (!confirm('Cancel this request?')) return
@@ -734,9 +743,9 @@ export default function DispatchPage() {
         <h2 className="text-lg font-semibold mb-2">Recent delivery orders</h2>
         <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[20rem] mb-8">
           <table className="w-full text-xs">
-            <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{['DO No.', ...(multiFac ? ['Factory'] : []), 'Items', 'By', 'When', ''].map((h, i) => <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
+            <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{['DO No.', ...(multiFac ? ['Factory'] : []), 'Items', 'Lorry / Driver', 'By', 'When', ''].map((h, i) => <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
             <tbody>
-              {orders.length === 0 && <tr><td colSpan={6} className="text-center py-8 text-gray-400">No delivery orders yet.</td></tr>}
+              {orders.length === 0 && <tr><td colSpan={multiFac ? 8 : 7} className="text-center py-8 text-gray-400">No delivery orders yet.</td></tr>}
               {orders.map(o => (
                 <tr key={o.id} className="border-b last:border-0 align-top hover:bg-gray-50">
                   <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{o.do_number}</td>
@@ -777,6 +786,13 @@ export default function DispatchPage() {
                         {!soByDoItem[`${o.do_number}|${l.item_code}`] && canFac(o.factory_code) && (() => { const cands = pendingDetailForItem(l.item_code, o.factory_code); return cands.length ? <span className="block ml-5 text-xs text-amber-700">⚠ {cands.length} pending order(s) for this item <button onClick={() => openLink(l.id, true, l.item_code, l.description, o.factory_code, l.quantity)} disabled={busy} className="text-blue-600 hover:underline disabled:opacity-50 font-medium">🔗 Link to order(s)</button></span> : null })()}
                       </span>
                     ))}
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <div className="text-gray-700">🚚 {o.vehicle || <span className="text-gray-300">—</span>}</div>
+                    <div className="text-gray-700">👤 {o.driver_name || <span className="text-gray-300">—</span>}</div>
+                    {o.departed_at
+                      ? <div className="mt-1 text-green-600 text-xs">✅ Out {fmt(o.departed_at)}{canFac(o.factory_code) && <button onClick={() => markLorryOut(o, false)} className="ml-1 text-gray-400 hover:underline">undo</button>}</div>
+                      : canFac(o.factory_code) && <button onClick={() => markLorryOut(o, true)} disabled={busy} className="mt-1 bg-teal-600 text-white px-2 py-1 rounded text-xs hover:bg-teal-700 disabled:opacity-50">🚚 Lorry out</button>}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-600">{o.created_by_name || '—'}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-400">{fmt(o.created_at)}</td>

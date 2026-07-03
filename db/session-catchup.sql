@@ -1878,3 +1878,25 @@ begin
   update public.lorry_requests set status = 'cancelled' where id = p_id;
 end; $function$;
 grant execute on function public.cancel_lorry_request(uuid) to authenticated;
+
+-- ============================================================================
+-- 2026-07 · "Lorry out" — confirm a DO's lorry has physically left production.
+-- Stamps departed_at so the Delivery Orders list can show it as gone.
+-- ============================================================================
+alter table public.dispatch_orders add column if not exists departed_at timestamptz;
+alter table public.dispatch_orders add column if not exists departed_by uuid;
+
+create or replace function public.mark_lorry_out(p_do_id uuid, p_out boolean default true) returns void
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_fac text;
+begin
+  if not has_perm('dispatch', 'edit') then raise exception 'Not allowed'; end if;
+  select factory_code into v_fac from public.dispatch_orders where id = p_do_id;
+  if v_fac is null then raise exception 'Delivery order not found'; end if;
+  if my_factory_code() <> 'HEAD_OFFICE' and not (v_fac = any (my_factory_codes())) then raise exception 'Not your factory'; end if;
+  update public.dispatch_orders
+     set departed_at = case when p_out then now() else null end,
+         departed_by = case when p_out then auth.uid() else null end
+   where id = p_do_id;
+end; $function$;
+grant execute on function public.mark_lorry_out(uuid, boolean) to authenticated;
