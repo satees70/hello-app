@@ -805,7 +805,7 @@ export default function DispatchPage() {
                   {multiFac && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(o.factory_code)}</td>}
                   <td className="px-3 py-2 text-gray-600">
                     {(o.dispatch_order_lines || []).map((l, i) => (
-                      <span key={`f${i}`} className="block mb-1">
+                      <span key={`f${i}`} className="block whitespace-nowrap mb-0.5">
                         📦 <span className="font-mono">{l.item_code}</span>{l.description ? ` — ${l.description}` : ''} × {l.quantity}
                         {fgEditPending.has(l.id)
                           ? <span className="ml-2 text-amber-600 text-xs">⏳ edit pending approval</span>
@@ -819,7 +819,7 @@ export default function DispatchPage() {
                           if (so) parts.push(`SO ${so}`)
                           if (l.batch_no) parts.push(`batch ${l.batch_no}`)
                           parts.push(exp ? `exp ${fmtD(exp)}` : '⚠ no expiry')
-                          return <span className={`block ml-5 text-xs ${exp ? 'text-gray-400' : 'text-amber-700'}`}>{parts.join(' · ')}</span>
+                          return <span className={`ml-2 text-xs ${exp ? 'text-gray-400' : 'text-amber-700'}`}>· {parts.join(' · ')}</span>
                         })()}
                         {!((l.batch_id && soByBatch[l.batch_id]) || soByDoItem[`${o.do_number}|${l.item_code}`]) && canFac(o.factory_code) && (() => {
                           const cands = pendingDetailForItem(l.item_code, o.factory_code)
@@ -828,14 +828,14 @@ export default function DispatchPage() {
                       </span>
                     ))}
                     {(o.material_returns || []).map((l, i) => (
-                      <span key={`r${i}`} className="block mb-1 text-orange-600">
+                      <span key={`r${i}`} className="block whitespace-nowrap mb-0.5 text-orange-600">
                         ↩ <span className="font-mono">{l.item_code}</span>{l.description ? ` — ${l.description}` : ''} × {l.quantity}
                         {editPending.has(l.id)
                           ? <span className="ml-2 text-amber-600 text-xs">⏳ edit pending approval</span>
                           : canFac(o.factory_code) && hasCap(profile, 'request_return_edit')
                             ? <button onClick={() => openRetEdit({ id: l.id, factory_code: o.factory_code, item_code: l.item_code, description: l.description, batch_no: l.batch_no, exp_date: l.exp_date, quantity: l.quantity, reason: l.reason, created_by_name: null, created_at: o.created_at })} className="ml-2 text-blue-600 hover:underline text-xs">Edit</button>
                             : null}
-                        {(() => { const so = soByDoItem[`${o.do_number}|${l.item_code}`]; const bits = [so ? `SO ${so}` : '', l.batch_no ? `batch ${l.batch_no}` : '', l.exp_date ? `exp ${fmtD(l.exp_date)}` : ''].filter(Boolean); return bits.length ? <span className="block ml-5 text-xs text-orange-400">{bits.join(' · ')}</span> : null })()}
+                        {(() => { const so = soByDoItem[`${o.do_number}|${l.item_code}`]; const bits = [so ? `SO ${so}` : '', l.batch_no ? `batch ${l.batch_no}` : '', l.exp_date ? `exp ${fmtD(l.exp_date)}` : ''].filter(Boolean); return bits.length ? <span className="ml-2 text-xs text-orange-400">· {bits.join(' · ')}</span> : null })()}
                         {!soByDoItem[`${o.do_number}|${l.item_code}`] && canFac(o.factory_code) && (() => { const cands = pendingDetailForItem(l.item_code, o.factory_code); return cands.length ? <span className="block ml-5 text-xs text-amber-700">⚠ {cands.length} pending order(s) for this item <button onClick={() => openLink(l.id, true, l.item_code, l.description, o.factory_code, l.quantity)} disabled={busy} className="text-blue-600 hover:underline disabled:opacity-50 font-medium">🔗 Link to order(s)</button></span> : null })()}
                       </span>
                     ))}
