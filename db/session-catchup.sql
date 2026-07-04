@@ -2154,3 +2154,14 @@ begin
   delete from public.discussion_group_members where group_id = p_group and user_id = p_user;
 end; $$;
 grant execute on function public.remove_group_member(uuid, uuid) to authenticated;
+
+-- ============================================================================
+-- 2026-07 · Backfill: every Goods-Received document up to 3 Jul 2026 was already
+-- received before this transport system, so mark its transport as received (so it
+-- shows "Received", not "Not started"). Safe to re-run — only fills empty ones.
+-- Cutoff = 4 Jul 2026 00:00 Malaysia (covers through end of 3 Jul).
+-- ============================================================================
+update public.delivery_orders
+   set transport_received_at = coalesce(transport_received_at, created_at)
+ where transport_received_at is null
+   and created_at < '2026-07-03T16:00:00Z';
