@@ -2228,3 +2228,7 @@ delete from public.notifications
       where type = 'mr' and title like 'Pick run released %'
    ) s where rn > 1
  );
+
+-- 2026-07 · Per-user off-office access: bypass the office-only IP guard, so
+-- trusted people (managers) can use the app + get notifications from a phone.
+alter table public.profiles add column if not exists offsite_allowed boolean not null default false;

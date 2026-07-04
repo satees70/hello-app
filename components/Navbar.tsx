@@ -27,6 +27,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const [myFactories, setMyFactories] = useState<string[]>([])
   interface Notif { id: string; factory_code: string; user_id: string | null; type: string; title: string; body: string | null; link: string | null; created_at: string }
   const [me, setMe] = useState('')
+  const [offsiteAllowed, setOffsiteAllowed] = useState(false)   // may use the app outside the office
   const [notifs, setNotifs] = useState<Notif[]>([])
   const [notifSeenAt, setNotifSeenAt] = useState<string>('')
   const [notifOpen, setNotifOpen] = useState(false)
@@ -46,10 +47,11 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     supabase.auth.getSession().then(async ({ data }) => {
       if (!data.session) return
       setMe(data.session.user.id)
-      const { data: p } = await supabase.from('profiles').select('permissions, factory_codes, notifications_seen_at').eq('id', data.session.user.id).single()
+      const { data: p } = await supabase.from('profiles').select('permissions, factory_codes, notifications_seen_at, offsite_allowed').eq('id', data.session.user.id).single()
       setPerms((p?.permissions as Permissions) ?? {})
       setMyFactories((p?.factory_codes as string[]) ?? [])
       setNotifSeenAt((p?.notifications_seen_at as string) ?? '')
+      setOffsiteAllowed(!!p?.offsite_allowed)
     })
   }, [])
 
@@ -165,7 +167,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   // office IP; Head Office + Admins are exempt. Master switch (app_config) lets it
   // be turned off. Result cached for the session to avoid re-checking every page.
   useEffect(() => {
-    if (isHO || isAdmin) return
+    if (isHO || isAdmin || offsiteAllowed) return
     if (typeof window !== 'undefined' && sessionStorage.getItem('netguard_ok') === '1') return
     let cancelled = false
     ;(async () => {
@@ -181,7 +183,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       router.replace('/blocked')
     })()
     return () => { cancelled = true }
-  }, [isHO, isAdmin])
+  }, [isHO, isAdmin, offsiteAllowed])
 
   async function handleLogout() {
     sessionStorage.removeItem('netguard_ok')
