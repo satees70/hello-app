@@ -315,10 +315,10 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
             {notifOpen && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setNotifOpen(false)} />
-                <div className="absolute right-0 mt-1 w-80 max-w-[90vw] bg-white text-gray-800 rounded-lg shadow-xl border z-50 max-h-96 overflow-y-auto">
-                  <div className="px-4 py-2 border-b sticky top-0 bg-white flex items-center justify-between gap-2">
+                <div className="fixed sm:absolute left-2 right-2 sm:left-auto sm:right-0 top-14 sm:top-auto sm:mt-1 w-auto sm:w-80 max-w-none sm:max-w-[90vw] bg-white text-gray-800 rounded-lg shadow-xl border z-50 max-h-[75vh] sm:max-h-96 overflow-y-auto">
+                  <div className="px-4 py-2 border-b sticky top-0 bg-white flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
                     <span className="font-semibold text-sm">Notifications</span>
-                    <span className="flex items-center gap-2">
+                    <span className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
                       <button onClick={sendTest} className="text-blue-600 hover:underline text-xs">Send test</button>
                       <button onClick={diagnosePush} className="text-blue-600 hover:underline text-xs">Check phone push</button>
                       {unseenCount > 0 && <button onClick={markAllRead} className="text-blue-600 hover:underline text-xs">Mark all read</button>}
