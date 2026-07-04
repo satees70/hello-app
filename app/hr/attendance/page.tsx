@@ -203,6 +203,16 @@ export default function AttendancePage() {
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Excuse save failed') }
   }
 
+  // Per-day flags: exclude that day's OT (exclude_ot) and/or force it to a half
+  // day (force_half). A full reload keeps totals + half-day counting correct.
+  async function saveDayFlag(code: string, date: string, patch: { exclude_ot?: boolean; force_half?: boolean }) {
+    const res = await fetch('/api/attendance/day-flag', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employee_code: code, work_date: date, ...patch }),
+    })
+    if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') } else await load()
+  }
+
   // Build the printable HTML for one employee's attendance card.
   function cardHtml(b: EmpBlock): string {
     const leaveBreak = Object.entries(leaveBreakdown(b)).map(([k, v]) => `${k} ${v}`).join(', ')
@@ -367,7 +377,7 @@ export default function AttendancePage() {
                 </tr>
               </thead>
               <tbody>
-                {(onlyReview ? b.days.filter(dayNeedsAttn) : b.days).map(({ dateKey, result, trip, manualTime, outstationId, kind, leaveType, lateExcused, otInTrip }) => (
+                {(onlyReview ? b.days.filter(dayNeedsAttn) : b.days).map(({ dateKey, result, trip, manualTime, outstationId, kind, leaveType, lateExcused, otInTrip, otExcludedDay, forceHalf }) => (
                   <tr key={dateKey} className={`border-b border-gray-50 align-top ${result.needsReview ? 'bg-amber-50' : kind === 'absent' ? 'bg-rose-50' : kind === 'off' || kind === 'holiday' || kind === 'notEmployed' ? 'text-gray-400' : ''}`}>
                     <td className="px-4 py-2 whitespace-nowrap">
                       {fmtDate(dateKey)} <span className={`ml-1 ${weekdayOf(dateKey) === 0 ? 'text-rose-500' : 'text-gray-400'}`}>{DOW_SHORT[weekdayOf(dateKey)]}</span>
@@ -386,11 +396,19 @@ export default function AttendancePage() {
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap">{kind === 'worked' ? (result.needsReview ? '—' : fmtMinutes(result.workedMinutes)) : '—'}</td>
                     <td className="px-4 py-2 whitespace-nowrap">
-                      {kind === 'worked' && !result.needsReview && result.otMinutes > 0
-                        ? (otInTrip
-                          ? <span className="text-gray-400 line-through" title={`Driver on ${trip} — OT paid under the trip, not counted here`}>{fmtMinutes(result.otMinutes)}</span>
-                          : <span className="font-medium">{fmtMinutes(result.otMinutes)}</span>)
-                        : '—'}
+                      {kind === 'worked' && !result.needsReview && result.otMinutes > 0 ? (
+                        otInTrip ? (
+                          <span className="text-gray-400 line-through" title={`Driver on ${trip} — OT paid under the trip, not counted here`}>{fmtMinutes(result.otMinutes)}</span>
+                        ) : (
+                          <div>
+                            <span className={otExcludedDay ? 'text-gray-400 line-through' : 'font-medium'}>{fmtMinutes(result.otMinutes)}</span>
+                            <label className="mt-0.5 flex items-center gap-1 text-gray-500 text-xs cursor-pointer" title="Untick to NOT count this day's OT">
+                              <input type="checkbox" checked={!otExcludedDay} onChange={e => saveDayFlag(b.code, dateKey, { exclude_ot: !e.target.checked })} />
+                              OT
+                            </label>
+                          </div>
+                        )
+                      ) : '—'}
                     </td>
                     {b.deliveryName && (
                       <td className="px-4 py-2 whitespace-nowrap">
@@ -467,15 +485,22 @@ export default function AttendancePage() {
                             {LEAVE_TYPES.filter(t => t !== 'Half').map(t => <option key={t} value={t}>{t}</option>)}
                           </select>
                           <button onClick={() => reviewSession(b.code, dateKey)} className="text-xs text-blue-600 underline">enter times…</button>
+                          {forceHalf && <button onClick={() => saveDayFlag(b.code, dateKey, { force_half: false })} className="text-xs text-gray-400 underline" title="Undo — count as a full day again">undo ½</button>}
                         </span>
                       ) : result.presentDay ? (
-                        <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-800">present</span>
+                        <span className="inline-flex items-center gap-2">
+                          <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-800">present</span>
+                          <button onClick={() => saveDayFlag(b.code, dateKey, { force_half: true })} className="text-xs text-amber-600 underline" title="Count this as a half day (0.5 work + 0.5 leave)">make ½</button>
+                        </span>
                       ) : result.dayType !== 'normal' ? (
                         <span className="rounded bg-purple-100 px-2 py-0.5 text-xs text-purple-800">
                           {result.dayType === 'holiday' ? 'Public holiday' : 'Rest day'} · {result.dayUnits}d
                         </span>
                       ) : (
-                        <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-800">OK</span>
+                        <span className="inline-flex items-center gap-2">
+                          <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-800">OK</span>
+                          <button onClick={() => saveDayFlag(b.code, dateKey, { force_half: true })} className="text-xs text-amber-600 underline" title="Count this as a half day (0.5 work + 0.5 leave)">make ½</button>
+                        </span>
                       )}
                     </td>
                   </tr>

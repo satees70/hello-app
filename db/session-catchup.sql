@@ -2387,3 +2387,37 @@ alter table public.employees add column if not exists crew_role text
 -- not counted as absent/leave. Both nullable = employed for the whole range.
 alter table public.employees add column if not exists join_date date;
 alter table public.employees add column if not exists resign_date date;
+
+-- 2026-07 · Per-day HR overrides: exclude that day's OT from the total, and/or
+-- force the day to count as a half day (0.5 work + 0.5 leave). No row = neither.
+create table if not exists public.attendance_day_flags (
+  employee_code text not null,
+  work_date date not null,
+  exclude_ot boolean not null default false,
+  force_half boolean not null default false,
+  updated_at timestamptz not null default now(),
+  primary key (employee_code, work_date)
+);
+grant select, insert, update, delete on public.attendance_day_flags to authenticated;
+grant all on public.attendance_day_flags to service_role;
+alter table public.attendance_day_flags enable row level security;
+drop policy if exists adf_read on public.attendance_day_flags;
+create policy adf_read on public.attendance_day_flags for select using (true);
+drop policy if exists adf_write on public.attendance_day_flags;
+create policy adf_write on public.attendance_day_flags for all using (true) with check (true);
+
+-- 2026-07 · Per-person, per-month ('YYYY-MM'): a row = skip ALL of that person's
+-- OT for the month (the "Count OT" tick unticked on the Monthly Summary).
+create table if not exists public.ot_month_off (
+  employee_code text not null,
+  month text not null,
+  updated_at timestamptz not null default now(),
+  primary key (employee_code, month)
+);
+grant select, insert, update, delete on public.ot_month_off to authenticated;
+grant all on public.ot_month_off to service_role;
+alter table public.ot_month_off enable row level security;
+drop policy if exists omo_read on public.ot_month_off;
+create policy omo_read on public.ot_month_off for select using (true);
+drop policy if exists omo_write on public.ot_month_off;
+create policy omo_write on public.ot_month_off for all using (true) with check (true);

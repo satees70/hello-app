@@ -32,6 +32,7 @@ function rowFor(b: EmpBlock) {
     excusedLateMin: b.excusedLate,
     excusedEarlyMin: b.excusedEarly,
     noDeductLate: b.noDeductLate,
+    otMonthOff: b.otMonthOff,
     totalOtMin: totalOtMinutes(b),
     phDays: b.totalHolidayDays,
     restDays: b.totalRestDays,
@@ -52,6 +53,7 @@ const COLS: { key: string; label: string; num?: boolean; csv: (r: Row) => string
   { key: 'leaveBreak', label: 'Leave breakdown', csv: r => r.leaveBreak },
   { key: 'workedMin', label: 'Worked h', num: true, csv: r => hrs(r.workedMin) },
   { key: 'otMin', label: 'OT h', num: true, csv: r => hrs(r.otMin) },
+  { key: 'countOt', label: 'Count OT', csv: r => (r.otMonthOff ? 'no' : 'yes') },
   { key: 'lateMin', label: 'Late h', num: true, csv: r => hrs(r.lateMin) },
   { key: 'earlyMin', label: 'Early-out h', num: true, csv: r => hrs(r.earlyMin) },
   { key: 'totalOtMin', label: 'Total OT h', num: true, csv: r => hrs(r.totalOtMin) },
@@ -92,6 +94,17 @@ export default function SummaryPage() {
       body: JSON.stringify({ employee_code: code, month: from.slice(0, 7), no_deduct: !deduct }),
     })
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') }
+  }
+
+  // Toggle whether this person's OT counts for the month (optimistic). count=true
+  // (ticked) is the default; unticking skips all of their OT.
+  async function saveCountOt(code: string, count: boolean) {
+    setBlocks(bs => bs.map(b => b.code === code ? { ...b, otMonthOff: !count } : b))
+    const res = await fetch('/api/attendance/ot-month', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employee_code: code, month: from.slice(0, 7), off: !count }),
+    })
+    if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') } else await load()
   }
 
   const rows = useMemo(() => {
@@ -218,6 +231,10 @@ export default function SummaryPage() {
                   <td className="px-3 py-2 text-rose-600 whitespace-nowrap">{r.leaveBreak}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">{hrs(r.workedMin)}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap font-medium">{hrs(r.otMin)}</td>
+                  <td className="px-3 py-2 text-center">
+                    <input type="checkbox" checked={!r.otMonthOff} onChange={e => saveCountOt(r.code, e.target.checked)}
+                      title="Untick to NOT count this person's OT for the month" className="cursor-pointer" />
+                  </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap text-rose-600">
                     {hrs(r.lateMin)}
                     {r.noDeductLate && r.lateMin > 0
@@ -250,6 +267,7 @@ export default function SummaryPage() {
                 <td className="px-3 py-2"></td>
                 <td className="px-3 py-2 text-right">{hrs(totals.workedMin)}</td>
                 <td className="px-3 py-2 text-right">{hrs(totals.otMin)}</td>
+                <td className="px-3 py-2"></td>
                 <td className="px-3 py-2 text-right">{hrs(totals.lateMin)}</td>
                 <td className="px-3 py-2 text-right">{hrs(totals.earlyMin)}</td>
                 <td className="px-3 py-2 text-right">{hrs(totals.totalOtMin)}</td>

@@ -14,7 +14,7 @@ export interface Punch { employee_code: string; punch_time: string; department_n
 export interface Review extends ReviewLite { employee_code: string; work_date: string; manual_time: string | null }
 
 export type DayKind = 'worked' | 'outstation' | 'holiday' | 'off' | 'absent' | 'notEmployed'
-export interface DayRow { dateKey: string; result: DayResult; trip: string | null; manualTime: string | null; outstationId: string | null; kind: DayKind; leaveType: string | null; lateExcused: boolean; otInTrip: boolean }
+export interface DayRow { dateKey: string; result: DayResult; trip: string | null; manualTime: string | null; outstationId: string | null; kind: DayKind; leaveType: string | null; lateExcused: boolean; otInTrip: boolean; otExcludedDay: boolean; forceHalf: boolean }
 
 // Trip categories whose overtime a DRIVER earns under the trip, not as OT here.
 const OT_IN_TRIP_CATEGORIES = new Set(['OS1', 'OS2'])
@@ -35,6 +35,8 @@ export interface EmpBlock {
   // Late/early deduction control (HR Monthly Summary). `excusedLate/Early` are the
   // minutes on per-day-excused days; `noDeductLate` = the whole month is exempted.
   excusedLate: number; excusedEarly: number; noDeductLate: boolean
+  // `otMonthOff` = the "Count OT" tick is off for the whole month (all OT skipped).
+  otMonthOff: boolean
 }
 
 // Late/early minutes actually deducted from Total OT, honouring per-day excuses
@@ -119,6 +121,13 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
   const month = from.slice(0, 7)
   const { data: overrides } = await supabase.from('late_deduction_overrides').select('employee_code, no_deduct').eq('month', month)
   const noDeductSet = new Set<string>((overrides || []).filter(o => o.no_deduct).map(o => o.employee_code))
+  // Per-day flags: exclude that day's OT and/or force it to a half day.
+  const { data: dayFlags } = await supabase.from('attendance_day_flags').select('employee_code, work_date, exclude_ot, force_half').gte('work_date', from).lte('work_date', to)
+  const excludeOtSet = new Set<string>((dayFlags || []).filter(f => f.exclude_ot).map(f => `${f.employee_code}|${f.work_date}`))
+  const forceHalfSet = new Set<string>((dayFlags || []).filter(f => f.force_half).map(f => `${f.employee_code}|${f.work_date}`))
+  // Per-person monthly "Count OT" switch off → skip all of that person's OT.
+  const { data: otOff } = await supabase.from('ot_month_off').select('employee_code').eq('month', month)
+  const otMonthOffSet = new Set<string>((otOff || []).map(o => o.employee_code))
   // Outstation trips overlapping the range → per-employee map of dateKey → trip id.
   const { data: ostrips } = await supabase.from('outstation_trips').select('id, employee_code, start_date, end_date')
     .lte('start_date', to).gte('end_date', from)
@@ -161,6 +170,7 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
     const crewRole = emp?.crew_role ?? null
     const joinDate = emp?.join_date ?? null       // 'yyyy-MM-dd' or null (employed from the start)
     const resignDate = emp?.resign_date ?? null   // 'yyyy-MM-dd' or null (still employed)
+    const otMonthOff = otMonthOffSet.has(code)    // "Count OT" off for the whole month
     const osDates = outstationByEmp.get(code) ?? new Map<string, string>()
     const dayRows: DayRow[] = []
     let punchCount = 0, totalWorked = 0, totalOt = 0, totalLate = 0, totalEarlyOut = 0, totalRestDays = 0, totalHolidayDays = 0, totalPresentDays = 0, totalOutstation = 0, needsReview = 0
@@ -172,7 +182,7 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
       // Outside the employment period → "Not employed": shown but never counted as
       // absent/leave/work (before a new joiner started, or after a leaver resigned).
       if ((joinDate && dateKey < joinDate) || (resignDate && dateKey > resignDate)) {
-        dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'notEmployed', leaveType: null, lateExcused: false, otInTrip: false })
+        dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'notEmployed', leaveType: null, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false })
         continue
       }
       const isHol = holidaySet.has(dateKey)
@@ -188,7 +198,7 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
         punchCount += times.length
         totalOutstation++
         if (scheduledWorking && !isHol) workDays++
-        dayRows.push({ dateKey, result: outstationResult(times), trip, manualTime: null, outstationId: osDates.get(dateKey)!, kind: 'outstation', leaveType: null, lateExcused: false, otInTrip: false })
+        dayRows.push({ dateKey, result: outstationResult(times), trip, manualTime: null, outstationId: osDates.get(dateKey)!, kind: 'outstation', leaveType: null, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false })
         continue
       }
       // Resolve any human review + hand-entered times. Each HH:mm in manual_time
@@ -207,12 +217,19 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
         punchCount += times.length
         const result = computeDay(dayTimes, prof, review, { weekday: weekdayOf(dateKey), isHoliday: isHol })
         if (result.needsReview) needsReview++
+        // Force this day to a half day if the supervisor ticked it (overrides the
+        // auto detection); counts 0.5 work + 0.5 leave below.
+        const forceHalf = forceHalfSet.has(`${code}|${dateKey}`)
+        if (forceHalf) result.halfDay = true
         // A person whose delivery role is DRIVER earns an OS1/OS2 trip day under
         // the trip, not as OT here — even on a day he rode as a kelindan. A
         // kelindan (or anyone without the driver role) still earns OT normally.
         const otInTrip = crewRole === 'driver' && result.otMinutes > 0 && !!trip && OT_IN_TRIP_CATEGORIES.has(trip)
+        // Manual per-day OT off, or the whole month's OT switched off.
+        const otExcludedDay = excludeOtSet.has(`${code}|${dateKey}`)
+        const otCounted = !otInTrip && !otExcludedDay && !otMonthOff
         totalWorked += result.workedMinutes
-        totalOt += otInTrip ? 0 : result.otMinutes
+        totalOt += otCounted ? result.otMinutes : 0
         totalLate += result.lateMinutes
         totalEarlyOut += result.earlyOutMinutes
         const lateExcused = excusedSet.has(`${code}|${dateKey}`)
@@ -226,13 +243,13 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
         }
         // A half-worked day can carry a leave type for the missing half (e.g. MC
         // in the afternoon); the day counts 0.5 work + 0.5 leave either way.
-        dayRows.push({ dateKey, result, trip, manualTime, outstationId: null, kind: 'worked', leaveType: result.halfDay ? leaveType : null, lateExcused, otInTrip })
+        dayRows.push({ dateKey, result, trip, manualTime, outstationId: null, kind: 'worked', leaveType: result.halfDay ? leaveType : null, lateExcused, otInTrip, otExcludedDay, forceHalf })
         continue
       }
       // No punches. Public holiday → shown, counted, not leave.
       if (isHol) {
         totalHolidayDays += 1
-        dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'holiday', leaveType: null, lateExcused: false, otInTrip: false })
+        dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'holiday', leaveType: null, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false })
         continue
       }
       // No profile → we can't tell work day from rest day, so skip empty days.
@@ -240,19 +257,19 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
       // Rest / off day.
       if (!scheduledWorking) {
         totalRestDays += 1
-        dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'off', leaveType: null, lateExcused: false, otInTrip: false })
+        dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'off', leaveType: null, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false })
         continue
       }
       // Scheduled work day with no attendance → absent / leave (half-day = 0.5).
       const w = leaveWeight(leaveType)
       leaveDays += w
       workDays += 1 - w
-      dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'absent', leaveType, lateExcused: false, otInTrip: false })
+      dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'absent', leaveType, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false })
     }
     out.push({
       code, name: emp?.name || code, department: deptByCode.get(code) ?? null,
       profile: prof, deliveryName, days: dayRows, punches: punchCount, totalWorked, totalOt, totalLate, totalEarlyOut, totalRestDays, totalHolidayDays, totalPresentDays, totalOutstation, workDays, leaveDays, needsReview,
-      excusedLate, excusedEarly, noDeductLate: noDeductSet.has(code),
+      excusedLate, excusedEarly, noDeductLate: noDeductSet.has(code), otMonthOff,
     })
   }
   out.sort((a, b) => a.name.localeCompare(b.name))
