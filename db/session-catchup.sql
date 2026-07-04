@@ -2306,3 +2306,7 @@ begin
           'test:' || auth.uid()::text || ':' || floor(extract(epoch from now()))::text);
 end; $function$;
 grant execute on function public.send_test_notification() to authenticated;
+
+-- 2026-07 · Set which trip in a driver's day a line is (1st / 2nd …). Overrides
+-- the auto line-order numbering in the Driver trips summary.
+alter table public.delivery_trips add column if not exists trip_no int;

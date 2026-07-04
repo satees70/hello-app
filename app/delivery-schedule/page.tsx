@@ -10,7 +10,7 @@ interface Sched {
   id: string; so_number: string; customer_name: string | null; route: string | null
   delivery_date: string | null; created_by_name: string | null; data: Record<string, string> | null; invoiced: boolean
 }
-interface Trip { route: string; delivery_date: string; lorry_no: string | null; driver: string | null; kelindan: string | null; remark: string | null; category: string | null }
+interface Trip { route: string; delivery_date: string; lorry_no: string | null; driver: string | null; kelindan: string | null; remark: string | null; category: string | null; trip_no: number | null }
 
 // Fixed delivery lines A … K.
 const LINES = Array.from({ length: 11 }, (_, i) => 'LINE ' + String.fromCharCode(65 + i))
@@ -145,7 +145,7 @@ export default function DeliverySchedulePage() {
       const dates = [...new Set(((s as Sched[]) || []).filter(x => x.route).map(x => x.delivery_date).filter(Boolean) as string[])].sort()
       if (dates.length) { setDateFilter(dates[dates.length - 1]); didInitDate.current = true }
     }
-    const { data: t } = await supabase.from('delivery_trips').select('route, delivery_date, lorry_no, driver, kelindan, remark, category')
+    const { data: t } = await supabase.from('delivery_trips').select('route, delivery_date, lorry_no, driver, kelindan, remark, category, trip_no')
     // A driver/lorry/kelindan can only be assigned to a line that has orders. If a line's
     // orders later move away, its assignment is now stale — clear it so it's not shown/held.
     const orderKeys = new Set(((s as Sched[]) || []).filter(x => x.route && x.delivery_date).map(x => `${x.route}|${x.delivery_date}`))
@@ -241,17 +241,19 @@ export default function DeliverySchedulePage() {
   const lineLabel = (l: string, d?: string | null) => { const r = (d ? trips[`${l}|${d}`]?.remark : '') || lineLatest[l] || ''; return `${l}${r ? ' — ' + r : ''}` }
   // Update one field of a trip (line+date) locally; persist on blur via saveTrip.
   const setTripField = (route: string, date: string, field: keyof Trip, value: string) => setTrips(p => {
-    const key = `${route}|${date}`; const cur = p[key] || { route, delivery_date: date, lorry_no: '', driver: '', kelindan: '', remark: '', category: '' }
+    const key = `${route}|${date}`; const cur = p[key] || { route, delivery_date: date, lorry_no: '', driver: '', kelindan: '', remark: '', category: '', trip_no: null }
     return { ...p, [key]: { ...cur, [field]: value } }
   })
   async function saveTrip(route: string, deliveryDate: string, patch: Partial<Trip>) {
     const key = `${route}|${deliveryDate}`
-    const cur = trips[key] || { route, delivery_date: deliveryDate, lorry_no: '', driver: '', kelindan: '', remark: '', category: '' }
+    const cur = trips[key] || { route, delivery_date: deliveryDate, lorry_no: '', driver: '', kelindan: '', remark: '', category: '', trip_no: null }
     const next = { ...cur, ...patch }
     setTrips(p => ({ ...p, [key]: next }))
-    const { error: e } = await supabase.from('delivery_trips').upsert({ route, delivery_date: deliveryDate, lorry_no: next.lorry_no || null, driver: next.driver || null, kelindan: next.kelindan || null, remark: next.remark || null, category: next.category || null, updated_at: new Date().toISOString() }, { onConflict: 'route,delivery_date' })
+    const { error: e } = await supabase.from('delivery_trips').upsert({ route, delivery_date: deliveryDate, lorry_no: next.lorry_no || null, driver: next.driver || null, kelindan: next.kelindan || null, remark: next.remark || null, category: next.category || null, trip_no: next.trip_no ?? null, updated_at: new Date().toISOString() }, { onConflict: 'route,delivery_date' })
     if (e) setError(`Could not save line info: ${e.message}`)
   }
+  // Which trip in the driver's day this line is (1st / 2nd …). saveTrip updates state + persists.
+  const saveTripNo = (route: string, date: string, n: number | null) => saveTrip(route, date, { trip_no: n })
   // Who already holds a lorry/driver/kelindan on a given day: `${date}|${kind}|${name}` -> route.
   const resourceOwner = useMemo(() => {
     const m = new Map<string, string>()
@@ -627,10 +629,10 @@ export default function DeliverySchedulePage() {
           // Driver trips summary — only lines that actually have orders on the date count as a trip.
           // (A leftover driver assignment on a line with no orders is NOT a real trip.)
           const activeKeys = new Set(Object.values(groups).map(g => `${g.route}|${g.date}`))
-          const driverSum: Record<string, { total: number; lines: { route: string; date: string; label: string }[] }> = {}
+          const driverSum: Record<string, { total: number; lines: { route: string; date: string; label: string; trip_no: number | null }[] }> = {}
           Object.values(trips)
             .filter(t => (dateFilter === 'all' || t.delivery_date === dateFilter) && (t.driver || '').trim() && activeKeys.has(`${t.route}|${t.delivery_date}`))
-            .forEach(t => { const d = t.driver!.trim(); const e = (driverSum[d] = driverSum[d] || { total: 0, lines: [] }); e.total++; e.lines.push({ route: t.route, date: t.delivery_date, label: `${t.route}${t.remark ? ' — ' + t.remark : ''}${t.category ? ' · ' + t.category : ''}` }) })
+            .forEach(t => { const d = t.driver!.trim(); const e = (driverSum[d] = driverSum[d] || { total: 0, lines: [] }); e.total++; e.lines.push({ route: t.route, date: t.delivery_date, label: `${t.route}${t.remark ? ' — ' + t.remark : ''}${t.category ? ' · ' + t.category : ''}`, trip_no: t.trip_no ?? null }) })
           const driverNames = Object.keys(driverSum).sort()
           return (
           <div id="delivery-print" className="space-y-5">
@@ -644,7 +646,7 @@ export default function DeliverySchedulePage() {
                 <div className="font-semibold mb-1">Driver trips{dateFilter !== 'all' ? ` — ${fmtD(dateFilter)}` : ' (all dates)'}</div>
                 <div className="grid sm:grid-cols-2 gap-x-6 gap-y-0.5">
                   {driverNames.map(d => {
-                    const ts = driverSum[d].lines.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '') || li(a.route) - li(b.route))
+                    const ts = driverSum[d].lines.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.trip_no ?? 99) - (b.trip_no ?? 99) || li(a.route) - li(b.route))
                     const multi = ts.length > 1
                     return <div key={d}><strong>{d}</strong>: {driverSum[d].total} trip(s) <span className="text-gray-500">{ts.map((x, i) => <span key={i}>{i > 0 ? ' · ' : ' '}{multi ? <strong className="text-gray-600">{i + 1}{i === 0 ? 'st' : i === 1 ? 'nd' : i === 2 ? 'rd' : 'th'}:</strong> : null} {x.label}</span>)}</span></div>
                   })}
@@ -707,6 +709,11 @@ export default function DeliverySchedulePage() {
                         <option value="">Driver…</option>
                         {availCrew.filter(r => !kelList.some(k => k.toLowerCase() === r.name.toLowerCase())).map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
                         {trip?.driver && !availCrew.some(r => r.name === trip.driver) && <option value={trip.driver}>{trip.driver}</option>}
+                      </select>
+                      {/* Trip # in the driver's day (1st / 2nd …) */}
+                      <select value={trip?.trip_no ?? ''} onChange={e => saveTripNo(g.route!, g.date!, e.target.value ? Number(e.target.value) : null)} className="border rounded px-2 py-1 bg-white" title="Which trip in the driver's day">
+                        <option value="">Trip…</option>
+                        {[1, 2, 3, 4].map(n => <option key={n} value={n}>{n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`} trip</option>)}
                       </select>
                       {/* Kelindan (multiple, from crew) */}
                       <div className="flex items-center gap-1 flex-wrap">
