@@ -94,6 +94,7 @@ export default function DispatchPage() {
   const [reason, setReason] = useState('')
   const [returnCart, setReturnCart] = useState<CartReturn[]>([])
   const [vehicleByFac, setVehicleByFac] = useState<Record<string, string>>({})   // vehicle no. keyed by factory, set before creating each DO
+  const [recentQ, setRecentQ] = useState('')   // search Recent delivery orders by DO no. / item / location
   const [lorryReqs, setLorryReqs] = useState<{ id: string; factory_code: string; kind: string; lorry_type: string; note: string | null; destination: string | null; status: string; fulfilled_lorry: string | null; requested_by_name: string | null; requested_at: string }[]>([])
   const [lrFactory, setLrFactory] = useState('')     // which factory to request a lorry for
   const [lrType, setLrType] = useState('any')        // see LORRY_TYPES
@@ -785,13 +786,20 @@ export default function DispatchPage() {
         )}
 
         {/* ---- History ---- */}
-        <h2 className="text-lg font-semibold mb-2">Recent delivery orders</h2>
+        <div className="flex flex-wrap items-center gap-3 mb-2">
+          <h2 className="text-lg font-semibold">Recent delivery orders</h2>
+          <input value={recentQ} onChange={e => setRecentQ(e.target.value)} placeholder="🔍 DO no., item or location…" className="border rounded-lg px-3 py-1.5 text-sm w-full sm:w-72" />
+        </div>
+        {(() => { const rq = recentQ.trim().toLowerCase(); const shownOrders = rq
+          ? orders.filter(o => `${o.do_number || ''} ${factoryName(o.factory_code)} ${o.vehicle || ''} ${o.driver_name || ''} ${(o.dispatch_order_lines || []).map(l => `${l.item_code} ${l.description || ''}`).join(' ')} ${(o.material_returns || []).map(l => `${l.item_code} ${l.description || ''}`).join(' ')}`.toLowerCase().includes(rq))
+          : orders
+        return (
         <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[20rem] mb-8">
           <table className="w-full text-xs">
             <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{['DO No.', ...(multiFac ? ['Factory'] : []), 'Items', 'Lorry / Driver', 'By', 'When', ''].map((h, i) => <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
             <tbody>
-              {orders.length === 0 && <tr><td colSpan={multiFac ? 8 : 7} className="text-center py-8 text-gray-400">No delivery orders yet.</td></tr>}
-              {orders.map(o => (
+              {shownOrders.length === 0 && <tr><td colSpan={multiFac ? 8 : 7} className="text-center py-8 text-gray-400">{orders.length === 0 ? 'No delivery orders yet.' : 'No delivery orders match.'}</td></tr>}
+              {shownOrders.map(o => (
                 <tr key={o.id} className="border-b last:border-0 align-top hover:bg-gray-50">
                   <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{o.do_number}</td>
                   {multiFac && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(o.factory_code)}</td>}
@@ -847,6 +855,7 @@ export default function DispatchPage() {
             </tbody>
           </table>
         </div>
+        ) })()}
         <p className="text-xs text-gray-400 mt-2">📦 = finished goods · ↩ = raw-material return. Returns can be edited here — the change is sent to Head Office for approval before it takes effect.</p>
       </div>
 

@@ -69,10 +69,8 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   }, [isHO, me, myFacs.join(',')])
   useEffect(() => { loadNotifs(); const t = setInterval(loadNotifs, 30000); return () => clearInterval(t) }, [loadNotifs, pathname])
   const unseenCount = notifSeenAt ? notifs.filter(n => n.created_at > notifSeenAt).length : notifs.length
-  async function openNotifs() {
-    setNotifOpen(o => !o)
-    if (!notifOpen) { await supabase.rpc('mark_notifications_seen'); setNotifSeenAt(new Date().toISOString()) }
-  }
+  function openNotifs() { setNotifOpen(o => !o) }   // opening no longer marks all read — use the button
+  async function markAllRead() { await supabase.rpc('mark_notifications_seen'); setNotifSeenAt(new Date().toISOString()) }
 
   // Top-bar label: Head Office, "Multi-site (N)", or the single factory code.
   const factoryLabel = isHO ? 'Head Office'
@@ -304,9 +302,12 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
                 <div className="absolute right-0 mt-1 w-80 max-w-[90vw] bg-white text-gray-800 rounded-lg shadow-xl border z-50 max-h-96 overflow-y-auto">
                   <div className="px-4 py-2 border-b sticky top-0 bg-white flex items-center justify-between gap-2">
                     <span className="font-semibold text-sm">Notifications</span>
-                    {pushSupported() && (pushOn
-                      ? <span className="text-green-600 text-xs">✓ On this device</span>
-                      : <button onClick={enableThisDevice} className="text-blue-600 hover:underline text-xs">Enable on this phone</button>)}
+                    <span className="flex items-center gap-2">
+                      {unseenCount > 0 && <button onClick={markAllRead} className="text-blue-600 hover:underline text-xs">Mark all read</button>}
+                      {pushSupported() && (pushOn
+                        ? <span className="text-green-600 text-xs">✓ On this device</span>
+                        : <button onClick={enableThisDevice} className="text-blue-600 hover:underline text-xs">Enable on this phone</button>)}
+                    </span>
                   </div>
                   {notifs.length === 0 && <p className="px-4 py-6 text-center text-gray-400 text-sm">Nothing yet.</p>}
                   {notifs.map(n => {
