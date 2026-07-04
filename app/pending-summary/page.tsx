@@ -118,10 +118,18 @@ export default function PendingSummaryPage() {
     if (q && !(`${l.so_number} ${l.item_code} ${l.description}`.toLowerCase().includes(q))) return false
     return true
   })
-  const itemFactories = new Map<string, Set<string>>()
-  bannerBase.forEach(l => { const k = l.item_code || '—'; const s = itemFactories.get(k) || new Set<string>(); s.add(factoryName(l.factory_code)); itemFactories.set(k, s) })
-  const multiFacItems = [...itemFactories].filter(([, s]) => s.size > 1).map(([k, s]) => ({ code: k, facs: [...s].sort() }))
+  // item -> factory -> the SOs pending there (so we can show which SO to change)
+  const itemFacSos = new Map<string, Map<string, Set<string>>>()
+  bannerBase.forEach(l => {
+    const k = l.item_code || '—'; const f = factoryName(l.factory_code)
+    const fm = itemFacSos.get(k) || new Map<string, Set<string>>(); itemFacSos.set(k, fm)
+    const s = fm.get(f) || new Set<string>(); fm.set(f, s); if (l.so_number) s.add(l.so_number)
+  })
+  const multiFacItems = [...itemFacSos].filter(([, fm]) => fm.size > 1)
+    .map(([code, fm]) => ({ code, facs: [...fm.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([fac, sos]) => ({ fac, sos: [...sos].sort() })) }))
+    .sort((a, b) => a.code.localeCompare(b.code))
   const isMultiFac = new Set(multiFacItems.map(m => m.code))
+  const itemFactories = new Map<string, string[]>(multiFacItems.map(m => [m.code, m.facs.map(f => f.fac)]))
   // Combine visible lines by item within a factory: sum qty, gather SOs + statuses.
   const combineByItem = (rows: Line[]) => {
     const m = new Map<string, { code: string; desc: string | null; qty: number; sos: string[]; statuses: Set<string>; grinding: boolean }>()
@@ -144,8 +152,17 @@ export default function PendingSummaryPage() {
 
         {multiFacItems.length > 0 && (
           <div className="mb-3 p-3 rounded-lg bg-red-50 border border-red-300 text-sm text-red-800">
-            ⚠ <strong>Same item pending at more than one factory{tomorrowOnly ? ' (tomorrow)' : ''}</strong> — check these are meant to split:
-            <div className="mt-1 space-y-0.5">{multiFacItems.map(m => <div key={m.code}><span className="font-mono font-medium">{m.code}</span> — {m.facs.join(', ')}</div>)}</div>
+            ⚠ <strong>Same item pending at more than one factory{tomorrowOnly ? ' (tomorrow)' : ''}</strong> — check these are meant to split (click an SO to open it and fix its location):
+            <div className="mt-1 space-y-1">{multiFacItems.map(m => (
+              <div key={m.code} className="flex flex-wrap items-baseline gap-x-2">
+                <span className="font-mono font-medium">{m.code}</span>
+                {m.facs.map(f => (
+                  <span key={f.fac}>· <strong>{f.fac}</strong>: {f.sos.length
+                    ? f.sos.map((so, i) => <span key={so}><a href={`/sales-orders?so=${encodeURIComponent(so)}`} className="underline hover:text-red-900">{so}</a>{i < f.sos.length - 1 ? ', ' : ''}</span>)
+                    : <span className="text-red-500">no SO</span>}</span>
+                ))}
+              </div>
+            ))}</div>
           </div>
         )}
 
