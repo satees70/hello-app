@@ -6,6 +6,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { supabase } from '@/lib/supabase'
 import { PERMISSION_MODULES, CAPABILITIES, defaultGrid, defaultCaps, isConfigured, type Permissions, type Action } from '@/lib/permissions'
 import MultiFilter from '@/components/MultiFilter'
+import { apiFetch } from '@/lib/api'
 
 interface UserRow { id: string; username: string | null; email: string; full_name: string; factory_code: string; factory_codes: string[] | null; readonly_factories: string[] | null; warehouse_user?: boolean | null; offsite_allowed?: boolean | null; role: string; permissions: Permissions | null; capabilities?: Record<string, boolean> | null; location_perms?: Record<string, Permissions> | null; customer_filter?: string | null }
 type FormState = { username: string; email: string; password: string; full_name: string; factory_code: string; factory_codes: string[]; readonly_factories: string[]; warehouse_user: boolean; offsite_allowed: boolean; role: string; permissions: Permissions; capabilities: Record<string, boolean>; location_perms: Record<string, Permissions>; customer_filter: string }
@@ -188,7 +189,7 @@ export default function UsersPage() {
     const body = isEdit
       ? { id: editingId, username: form.username || undefined, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, warehouse_user: form.warehouse_user, offsite_allowed: form.offsite_allowed, role: form.role, permissions: form.permissions, capabilities: form.capabilities, location_perms: form.location_perms, customer_filter: form.customer_filter, password: form.password || undefined }
       : { username: form.username, email: form.email || undefined, password: form.password, full_name: form.full_name, factory_code: form.factory_code, factory_codes: form.factory_codes, readonly_factories: form.readonly_factories, warehouse_user: form.warehouse_user, offsite_allowed: form.offsite_allowed, role: form.role, permissions: form.permissions, capabilities: form.capabilities, location_perms: form.location_perms, customer_filter: form.customer_filter }
-    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    const res = await apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     const data = await res.json()
     if (data.error) { setError(data.error); setSaving(false); return }
     setSuccess(isEdit ? 'User updated successfully!' : 'User created successfully!')

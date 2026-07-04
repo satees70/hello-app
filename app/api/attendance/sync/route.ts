@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { fetchPunches } from '@/lib/zklink'
+import { requirePerm } from '@/lib/apiAuth'
 
 // ZKLink → attendance_punches sync.
 // ----------------------------------------------------------------------------
@@ -34,12 +35,14 @@ function klToday(): string {
 export async function GET(request: Request) {
   const url = new URL(request.url)
 
-  // Cron / manual protection.
+  // Auth: allow EITHER the cron secret (Vercel Cron sends it as ?key= or a
+  // Bearer header) OR a signed-in HR user with edit (the manual "Sync" button).
   const secret = process.env.CRON_SECRET
-  if (secret) {
-    const key = url.searchParams.get('key')
-      || request.headers.get('authorization')?.replace('Bearer ', '')
-    if (key !== secret) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const authHeader = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') || ''
+  const isCron = !!secret && (url.searchParams.get('key') === secret || authHeader === secret)
+  if (!isCron) {
+    const auth = await requirePerm(request, 'hr', 'edit')
+    if (auth instanceof NextResponse) return auth
   }
 
   const today = klToday()

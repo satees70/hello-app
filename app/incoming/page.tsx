@@ -5,6 +5,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can } from '@/lib/permissions'
+import { apiFetch } from '@/lib/api'
 
 interface DeliveryOrder {
   id: string
@@ -310,7 +311,7 @@ export default function IncomingPage() {
     setSuccess(`Uploaded "${file.name}". Reading the document with Claude…`)
     setUploading(false); loadDocs()
     try {
-      const res = await fetch('/api/extract-delivery-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doId: inserted.id, filePath: path }) })
+      const res = await apiFetch('/api/extract-delivery-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doId: inserted.id, filePath: path }) })
       const result = await res.json()
       if (!res.ok) { setError(`Extraction failed: ${result.error || 'Unknown error'}`); setSuccess('') }
       else { setSuccess(`Read ${result.count} line(s) from "${inserted.file_name}". Click View Lines to review and receive.`) }
@@ -407,7 +408,7 @@ export default function IncomingPage() {
     await supabase.from('delivery_orders').update({ status: 'Processing' }).eq('id', doc.id)
     loadDocs()
     try {
-      const res = await fetch('/api/extract-delivery-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doId: doc.id, filePath: doc.file_path }) })
+      const res = await apiFetch('/api/extract-delivery-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doId: doc.id, filePath: doc.file_path }) })
       const r = await res.json()
       if (!res.ok) setError(`Read failed: ${r.error || 'Unknown error'}`)
       else setSuccess(`Read ${r.count} line(s) from "${doc.file_name}". Click View Lines to review.`)

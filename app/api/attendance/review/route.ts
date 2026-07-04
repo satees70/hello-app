@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { requirePerm } from '@/lib/apiAuth'
 
 // Save (or clear) a human's decision for one employee on one day. One row per
 // employee per work_date in attendance_reviews. lunch_decision is one of:
@@ -14,6 +15,9 @@ const admin = createClient(
 )
 
 export async function POST(request: Request) {
+  const auth = await requirePerm(request, 'hr', 'edit')
+  if (auth instanceof NextResponse) return auth
+
   const body = await request.json()
   const { employee_code, work_date } = body
   if (!employee_code || !work_date) {

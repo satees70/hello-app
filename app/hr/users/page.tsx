@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
+import { apiFetch } from '@/lib/api'
 
 // Full profile so we can resend it unchanged (update-user replaces these fields).
 interface U {
@@ -41,7 +42,7 @@ export default function HrUsersPage() {
     setError(null); setMsg(null)
     const permissions = { ...(u.permissions || {}) }
     permissions[mod] = { view: on, edit: on, delete: false }
-    const res = await fetch('/api/update-user', {
+    const res = await apiFetch('/api/update-user', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         id: u.id, username: u.username, full_name: u.full_name, role: u.role,
@@ -62,7 +63,7 @@ export default function HrUsersPage() {
     const permissions: Record<string, any> = {}
     if (form.hr) permissions.hr = { view: true, edit: true, delete: false }
     if (form.driver) permissions.driver = { view: true, edit: true, delete: false }
-    const res = await fetch('/api/create-user', {
+    const res = await apiFetch('/api/create-user', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         username: form.username, password: form.password, full_name: form.full_name || form.username,

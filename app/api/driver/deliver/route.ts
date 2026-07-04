@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { requirePerm } from '@/lib/apiAuth'
 
 // Mark one delivery_schedule order delivered (or undo it). Uses the service key
 // so a driver's phone — not logged into the portal yet (placeholder auth) — can
@@ -12,6 +13,9 @@ const admin = createClient(
 )
 
 export async function POST(request: Request) {
+  const auth = await requirePerm(request, 'driver', 'edit')
+  if (auth instanceof NextResponse) return auth
+
   const { id, ids, photo_path, note, undo } = await request.json()
   // Accept one id or many (an outlet can have several SO orders delivered together).
   const idList: string[] = Array.isArray(ids) && ids.length ? ids : (id ? [id] : [])

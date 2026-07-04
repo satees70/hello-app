@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { requirePerm } from '@/lib/apiAuth'
 
 // Save the odometer (start/end km) for one line/trip — keyed by route + date,
 // matching the existing delivery_trips row the office created when assigning the
@@ -14,6 +15,9 @@ const toIntOrNull = (v: unknown) =>
   v === null || v === undefined || v === '' ? null : Number(v)
 
 export async function POST(request: Request) {
+  const auth = await requirePerm(request, 'driver', 'edit')
+  if (auth instanceof NextResponse) return auth
+
   const { route, delivery_date, odometer_start, odometer_end } = await request.json()
   if (!route || !delivery_date) {
     return NextResponse.json({ error: 'Missing route or delivery_date' }, { status: 400 })

@@ -3,6 +3,11 @@
 -- Standalone copy of the new-module tables for pasting into the Supabase SQL
 -- Editor. Identical to the section at the bottom of db/migrations.sql.
 -- Safe to re-run (everything uses "if not exists" / "drop policy if exists").
+--
+-- SECURITY: the `using (true)` read/write policies below are INTENTIONALLY
+-- superseded by db/2026-07-hr-rls-lockdown.sql, which restricts reads to
+-- signed-in users with the right permission and removes public writes. Run that
+-- migration LAST — re-running this file re-opens the tables.
 -- ============================================================================
 
 -- Shift profiles — per-employee OT threshold + how lunch is handled.

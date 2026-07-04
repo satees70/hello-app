@@ -8,6 +8,7 @@ import { supabase, fetchAll } from '@/lib/supabase'
 import { can, hasCap } from '@/lib/permissions'
 import { fetchTomorrowDeliverySOs } from '@/lib/delivery'
 import MultiFilter from '@/components/MultiFilter'
+import { apiFetch } from '@/lib/api'
 
 interface SalesImport {
   id: string
@@ -365,7 +366,7 @@ export default function SalesOrdersPage() {
     loadImports()
 
     try {
-      const res = await fetch('/api/extract-sales-order', {
+      const res = await apiFetch('/api/extract-sales-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ importId: inserted.id, filePath: path }),
@@ -386,7 +387,7 @@ export default function SalesOrdersPage() {
     await supabase.from('sales_imports').update({ status: 'Processing' }).eq('id', doc.id)
     loadImports()
     try {
-      const res = await fetch('/api/extract-sales-order', {
+      const res = await apiFetch('/api/extract-sales-order', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ importId: doc.id, filePath: doc.file_path }),
       })

@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { requirePerm } from '@/lib/apiAuth'
 
 // Add or remove a multi-day outstation trip for a driver.
 //   POST { employee_code, start_date, end_date }  → add
@@ -13,6 +14,9 @@ const admin = createClient(
 const isDate = (s: unknown) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s)
 
 export async function POST(request: Request) {
+  const auth = await requirePerm(request, 'hr', 'edit')
+  if (auth instanceof NextResponse) return auth
+
   const body = await request.json()
 
   if (body.action === 'delete') {

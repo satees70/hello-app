@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { supabase, fetchAll } from '@/lib/supabase'
+import { apiFetch } from '@/lib/api'
 
 type DayWin = { start: string; end: string } | null
 interface ShiftProfile { id: string; name: string; normal_hours: number; lunch_rule: string; lunch_minutes: number; week_schedule: Record<string, DayWin> | null; attendance_mode: string | null }
@@ -86,7 +87,7 @@ export default function EmployeesSetupPage() {
   async function saveEmployee(r: Row, patch: Partial<Row>) {
     const next = { ...r, ...patch }
     setRows(rs => rs.map(x => x.employee_code === r.employee_code ? next : x))
-    const res = await fetch('/api/attendance/employees', {
+    const res = await apiFetch('/api/attendance/employees', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         employee_code: r.employee_code, name: next.name,
@@ -109,7 +110,7 @@ export default function EmployeesSetupPage() {
       if (w.on && w.start && w.end) { week_schedule[d.key] = { start: w.start, end: w.end }; fb = fb || { start: w.start, end: w.end } }
       else week_schedule[d.key] = null
     }
-    const res = await fetch('/api/attendance/shift-profiles', {
+    const res = await apiFetch('/api/attendance/shift-profiles', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...newProf, week_schedule, shift_start: fb?.start || '', shift_end: fb?.end || '' }),
     })
@@ -120,14 +121,14 @@ export default function EmployeesSetupPage() {
   async function addHoliday(e: FormEvent) {
     e.preventDefault()
     if (!newHol.holiday_date) return
-    const res = await fetch('/api/attendance/holidays', {
+    const res = await apiFetch('/api/attendance/holidays', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newHol),
     })
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') }
     else { setNewHol({ holiday_date: '', name: '' }); await load() }
   }
   async function deleteHoliday(date: string) {
-    const res = await fetch('/api/attendance/holidays', {
+    const res = await apiFetch('/api/attendance/holidays', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', holiday_date: date }),
     })
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Delete failed') } else await load()
@@ -137,7 +138,7 @@ export default function EmployeesSetupPage() {
 
   async function deleteProfile(id: string) {
     if (!confirm('Delete this shift profile? Employees using it will be left without one.')) return
-    const res = await fetch('/api/attendance/shift-profiles', {
+    const res = await apiFetch('/api/attendance/shift-profiles', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', id }),
     })
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Delete failed') } else await load()
@@ -146,7 +147,7 @@ export default function EmployeesSetupPage() {
   async function pullNames() {
     setPulling(true); setError(null); setMsg(null)
     try {
-      const res = await fetch('/api/attendance/employees/sync')
+      const res = await apiFetch('/api/attendance/employees/sync')
       const j = await res.json()
       if (!res.ok) setError(j.error || 'Pull failed')
       else { setMsg(`Pulled ${j.pulled} employees from ZKLink, updated ${j.upserted}.`); await load() }
@@ -156,7 +157,7 @@ export default function EmployeesSetupPage() {
   async function setActiveFromAttendance() {
     if (!confirm('Set Active/Inactive from attendance? Anyone with no punch in the last 14 days is marked inactive. You can still edit each one after.')) return
     setError(null); setMsg(null)
-    const res = await fetch('/api/attendance/employees/refresh-active', { method: 'POST' })
+    const res = await apiFetch('/api/attendance/employees/refresh-active', { method: 'POST' })
     const j = await res.json()
     if (!res.ok) setError(j.error || 'Failed')
     else { setMsg(`Active updated: ${j.active} active, ${j.inactive} inactive (based on last ${j.windowDays} days).`); await load() }
