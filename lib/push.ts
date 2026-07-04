@@ -25,8 +25,11 @@ export async function enablePush(userId: string): Promise<{ ok: boolean; msg: st
   if (perm !== 'granted') return { ok: false, msg: 'Notifications were not allowed. Enable them for this site in your browser settings.' }
   const reg = await navigator.serviceWorker.register('/sw.js')
   await navigator.serviceWorker.ready
-  let sub = await reg.pushManager.getSubscription()
-  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC) })
+  // Drop any existing subscription first — if the server's VAPID key was rotated,
+  // an old subscription would still carry the old key and every send would fail.
+  const existing = await reg.pushManager.getSubscription()
+  if (existing) { try { await existing.unsubscribe() } catch { /* ignore */ } }
+  const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC) })
   const j = sub.toJSON() as { keys?: { p256dh?: string; auth?: string } }
   if (!j.keys?.p256dh || !j.keys?.auth) return { ok: false, msg: 'Could not read the push keys.' }
   const { error } = await supabase.from('push_subscriptions').upsert(
