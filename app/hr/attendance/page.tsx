@@ -438,6 +438,7 @@ export default function AttendancePage() {
                           <div className="text-xs text-amber-700 mb-1">{result.reviewReason}</div>
                           <div className="flex flex-wrap gap-1">
                             <button onClick={() => reviewTime(b.code, dateKey)} className="rounded border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs text-blue-700 hover:bg-blue-100">Enter time…</button>
+                            <button onClick={() => saveReview(b.code, dateKey, 'span')} title="Ignore the missing/odd punch: count first punch → last punch, minus 1 hour lunch" className="rounded border border-green-300 bg-green-50 px-2 py-0.5 text-xs text-green-700 hover:bg-green-100">First→last −1h</button>
                             <button onClick={() => saveReview(b.code, dateKey, 'deduct')} className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50">Deduct lunch</button>
                             <button onClick={() => saveReview(b.code, dateKey, 'worked_through')} className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50">Worked through</button>
                             <button onClick={() => reviewManual(b.code, dateKey)} className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50">Manual mins…</button>

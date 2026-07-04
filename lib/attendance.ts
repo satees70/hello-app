@@ -174,7 +174,7 @@ export function emptyDay(): DayResult {
 }
 
 export function computeDay(times: Date[], profile: ShiftProfileLite | null, review: ReviewLite | null, ctx?: DayContext): DayResult {
-  const pairing = pairDay(times)
+  let pairing = pairDay(times)
   const normalMin = Math.round((profile?.normal_hours ?? DEFAULT_NORMAL_HOURS) * 60)
   const lunchRule = profile?.lunch_rule ?? 'punch'
   const lunchMin = profile?.lunch_minutes ?? 60
@@ -201,7 +201,22 @@ export function computeDay(times: Date[], profile: ShiftProfileLite | null, revi
   // Salesman: any punch that day = present. No pairing / OT / review.
   if (profile?.attendance_mode === 'single') return presentResult(pairing)
 
-  // Missing clock-out — never invent a time (applies to every day type).
+  // Span override (a supervisor's bypass for odd / missing-clock-out days): ignore
+  // the broken pairing and treat the whole day as ONE session from the first punch
+  // to the last, then always deduct one lunch. Computed like any normal day after.
+  const spanMode = review?.lunch_decision === 'span' && times.length >= 2
+  if (spanMode) {
+    const sorted = [...times].sort((a, b) => a.getTime() - b.getTime())
+    const inD = sorted[0], outD = sorted[sorted.length - 1]
+    pairing = {
+      sessions: [{ in: inD, out: outD }], collapsed: 0, punchCount: times.length,
+      workedMinutes: Math.max(0, Math.round((outD.getTime() - inD.getTime()) / 60000)),
+      needsReview: false, reviewReason: null,
+    }
+  }
+
+  // Missing clock-out — never invent a time (applies to every day type). Span mode
+  // has already replaced the pairing above, so it won't flag here.
   if (pairing.needsReview) return flag(pairing, pairing.reviewReason || 'Missing a clock-out')
 
   // Rest day / public holiday with work → counted in days, not hours.
@@ -212,9 +227,9 @@ export function computeDay(times: Date[], profile: ShiftProfileLite | null, revi
   // never clock lunch). Punched-lunch days already exclude lunch via their gaps,
   // so no deduction there. A 'worked_through' review can cancel the deduction.
   // (Missing clock-outs / odd punches still flag above.)
-  const deductLunch = lunchRule === 'auto_deduct'
+  const deductLunch = spanMode || (lunchRule === 'auto_deduct'
     && pairing.sessions.length <= 1 && pairing.punchCount >= 2
-    && review?.lunch_decision !== 'worked_through'
+    && review?.lunch_decision !== 'worked_through')
 
   // Flat fallback when no shift window is set: OT over the daily threshold.
   if (!windowMode) {

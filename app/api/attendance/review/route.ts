@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true })
   }
 
-  const valid = ['deduct', 'worked_through', 'manual', 'manual_time']
+  const valid = ['deduct', 'worked_through', 'manual', 'manual_time', 'span']
   if (!valid.includes(body.lunch_decision)) {
     return NextResponse.json({ error: 'Invalid lunch_decision' }, { status: 400 })
   }
