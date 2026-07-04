@@ -10,6 +10,7 @@ interface Group { id: string; name: string; created_by: string | null; created_b
 export default function DiscussionPage() {
   const { profile, loading, error: profileError } = useProfile()
   const [soOptions, setSoOptions] = useState<string[]>([])
+  const [soCustomers, setSoCustomers] = useState<Record<string, string>>({})
   const [filterSo, setFilterSo] = useState('')
   const [groups, setGroups] = useState<Group[]>([])
   const [sel, setSel] = useState('warehouse')   // 'warehouse' or a group id
@@ -25,8 +26,12 @@ export default function DiscussionPage() {
   useEffect(() => { setFilterSo(new URLSearchParams(window.location.search).get('so') || '') }, [])
   useEffect(() => {
     if (!profile) return
-    fetchAll<{ so_number: string | null }>('sales_order_lines', 'so_number').then(rows =>
-      setSoOptions([...new Set(rows.map(r => r.so_number).filter(Boolean) as string[])].sort()))
+    fetchAll<{ so_number: string | null; customer_name: string | null }>('sales_order_lines', 'so_number, customer_name').then(rows => {
+      setSoOptions([...new Set(rows.map(r => r.so_number).filter(Boolean) as string[])].sort())
+      const m: Record<string, string> = {}
+      rows.forEach(r => { if (r.so_number && r.customer_name && !m[r.so_number]) m[r.so_number] = r.customer_name })
+      setSoCustomers(m)
+    })
     supabase.rpc('list_users').then(({ data }) => setUsers((data as { id: string; full_name: string }[]) || []))
     loadGroups()
   }, [profile]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -118,7 +123,7 @@ export default function DiscussionPage() {
         )}
 
         <DiscussionPanel key={channel} channel={channel} me={profile.id} meName={profile.full_name} title={title}
-          soOptions={soOptions} filterSo={selGroup ? '' : filterSo} onFilterChange={selGroup ? undefined : setFilterSo}
+          soOptions={soOptions} soCustomers={soCustomers} filterSo={selGroup ? '' : filterSo} onFilterChange={selGroup ? undefined : setFilterSo}
           restrictToUserIds={selGroup ? selMembers : undefined} />
       </div>
 

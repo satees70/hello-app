@@ -13,13 +13,15 @@ const rawId = (key: string) => (key.startsWith('s:') || key.startsWith('t:')) ? 
 // Discussion, WhatsApp-style: thread list on the left, the open chat on the right.
 // Threads are per-order (SO), free-form tickets/topics, or the General thread.
 // Any thread can be marked "completed" to archive it.
-export default function DiscussionPanel({ channel = 'warehouse', me, meName, title = 'Discussion', soOptions = [], filterSo: filterSoProp, onFilterChange, panelId, onPosted, restrictToUserIds }: {
+export default function DiscussionPanel({ channel = 'warehouse', me, meName, title = 'Discussion', soOptions = [], soCustomers = {}, filterSo: filterSoProp, onFilterChange, panelId, onPosted, restrictToUserIds }: {
   channel?: string; me: string; meName?: string | null; title?: string; soOptions?: string[]
+  soCustomers?: Record<string, string>   // SO# -> customer name, shown on order threads
   filterSo?: string; onFilterChange?: (so: string) => void; panelId?: string; onPosted?: () => void
   // When set (e.g. a private group), only these users can be tagged and location-tagging is hidden.
   restrictToUserIds?: string[] | null
 }) {
   const restricted = Array.isArray(restrictToUserIds)
+  const custOf = (key: string) => key.startsWith('s:') ? (soCustomers[key.slice(2)] || '') : ''
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [body, setBody] = useState('')
   const [sending, setSending] = useState(false)
@@ -148,6 +150,7 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="font-semibold text-gray-800 text-sm truncate">{labelOf(t.key)}</span>
+                      {custOf(t.key) && <span className="text-gray-500 text-xs truncate">· {custOf(t.key)}</span>}
                       {isDone(t.key) && <span className="text-green-600 text-[10px] font-semibold">✓ done</span>}
                       {t.unread > 0 && <span className="ml-auto bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 shrink-0">{t.unread}</span>}
                     </div>
@@ -168,6 +171,7 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
           ) : (<>
             <div className="px-4 py-2.5 border-b flex items-center gap-2">
               <span className="font-semibold">{labelOf(thread!)}</span>
+              {custOf(thread!) && <span className="text-gray-500 text-sm">· {custOf(thread!)}</span>}
               <span className="text-gray-400 text-sm">· {shown.length} msg</span>
               {rawId(thread!) && (
                 <button onClick={() => toggleDone(thread!)} className={`ml-auto text-xs px-3 py-1 rounded-lg font-medium border ${isDone(thread!) ? 'bg-green-50 border-green-300 text-green-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-green-50'}`}>{isDone(thread!) ? '✓ Completed · Reopen' : '✓ Mark completed'}</button>
