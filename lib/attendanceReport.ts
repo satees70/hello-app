@@ -9,11 +9,11 @@ import {
 // always matches the detail exactly.
 
 export interface ShiftProfile extends ShiftProfileLite { id: string; name: string }
-export interface Employee { employee_code: string; name: string | null; shift_profile_id: string | null; delivery_name: string | null; crew_role: string | null }
+export interface Employee { employee_code: string; name: string | null; shift_profile_id: string | null; delivery_name: string | null; crew_role: string | null; join_date: string | null; resign_date: string | null }
 export interface Punch { employee_code: string; punch_time: string; department_name: string | null }
 export interface Review extends ReviewLite { employee_code: string; work_date: string; manual_time: string | null }
 
-export type DayKind = 'worked' | 'outstation' | 'holiday' | 'off' | 'absent'
+export type DayKind = 'worked' | 'outstation' | 'holiday' | 'off' | 'absent' | 'notEmployed'
 export interface DayRow { dateKey: string; result: DayResult; trip: string | null; manualTime: string | null; outstationId: string | null; kind: DayKind; leaveType: string | null; lateExcused: boolean; otInTrip: boolean }
 
 // Trip categories whose overtime a DRIVER earns under the trip, not as OT here.
@@ -77,7 +77,7 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
   const [punches, { data: emps }, { data: profs }, { data: reviews }] = await Promise.all([
     fetchAll<Punch>('attendance_punches', 'employee_code, punch_time, department_name',
       q => q.gte('punch_time', fromUtc).lte('punch_time', toUtc).order('punch_time')),
-    supabase.from('employees').select('employee_code, name, shift_profile_id, delivery_name, crew_role'),
+    supabase.from('employees').select('employee_code, name, shift_profile_id, delivery_name, crew_role, join_date, resign_date'),
     supabase.from('shift_profiles').select('id, name, normal_hours, lunch_rule, lunch_minutes, shift_start, shift_end, week_schedule, attendance_mode'),
     supabase.from('attendance_reviews').select('employee_code, work_date, lunch_decision, manual_minutes, manual_time')
       .gte('work_date', from).lte('work_date', to),
@@ -159,6 +159,8 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
     const deliveryName = emp?.delivery_name ?? null
     const deliveryKey = deliveryName ? deliveryName.trim().toLowerCase() : null
     const crewRole = emp?.crew_role ?? null
+    const joinDate = emp?.join_date ?? null       // 'yyyy-MM-dd' or null (employed from the start)
+    const resignDate = emp?.resign_date ?? null   // 'yyyy-MM-dd' or null (still employed)
     const osDates = outstationByEmp.get(code) ?? new Map<string, string>()
     const dayRows: DayRow[] = []
     let punchCount = 0, totalWorked = 0, totalOt = 0, totalLate = 0, totalEarlyOut = 0, totalRestDays = 0, totalHolidayDays = 0, totalPresentDays = 0, totalOutstation = 0, needsReview = 0
@@ -167,6 +169,12 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
     // Walk every calendar day in the range, so absent (leave) days show as rows too.
     for (const dateKey of rangeDates) {
       const times = days.get(dateKey) ?? []
+      // Outside the employment period → "Not employed": shown but never counted as
+      // absent/leave/work (before a new joiner started, or after a leaver resigned).
+      if ((joinDate && dateKey < joinDate) || (resignDate && dateKey > resignDate)) {
+        dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'notEmployed', leaveType: null, lateExcused: false, otInTrip: false })
+        continue
+      }
       const isHol = holidaySet.has(dateKey)
       const win = ws ? ws[String(weekdayOf(dateKey))] : null
       // true = scheduled work day, false = rest/off, null = unknown (no profile).
@@ -216,7 +224,9 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
           if (result.halfDay) { workDays += 0.5; leaveDays += 0.5 }
           else workDays++
         }
-        dayRows.push({ dateKey, result, trip, manualTime, outstationId: null, kind: 'worked', leaveType: null, lateExcused, otInTrip })
+        // A half-worked day can carry a leave type for the missing half (e.g. MC
+        // in the afternoon); the day counts 0.5 work + 0.5 leave either way.
+        dayRows.push({ dateKey, result, trip, manualTime, outstationId: null, kind: 'worked', leaveType: result.halfDay ? leaveType : null, lateExcused, otInTrip })
         continue
       }
       // No punches. Public holiday → shown, counted, not leave.
@@ -250,12 +260,15 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
   return { blocks: out, tripOptions, punchCount: (punches || []).length }
 }
 
-// Per-leave-type counts for one employee's month (e.g. { AL: 2, MC: 1, Half: 1 }).
+// Per-leave-type day counts for one employee's month, in day-fractions so they
+// sum to leaveDays (e.g. { AL: 2, MC: 0.5, Half: 0.5 }). A worked half-day adds
+// 0.5 under its chosen leave type, or 'Half' if none was picked.
 export function leaveBreakdown(b: EmpBlock): Record<string, number> {
   const lc: Record<string, number> = {}
+  const add = (k: string, n: number) => { lc[k] = (lc[k] || 0) + n }
   for (const d of b.days) {
-    if (d.kind === 'absent' && d.leaveType) lc[d.leaveType] = (lc[d.leaveType] || 0) + 1
-    else if (d.kind === 'worked' && d.result.halfDay) lc['Half'] = (lc['Half'] || 0) + 1
+    if (d.kind === 'absent' && d.leaveType) add(d.leaveType, leaveWeight(d.leaveType))
+    else if (d.kind === 'worked' && d.result.halfDay) add(d.leaveType || 'Half', 0.5)
   }
   return lc
 }

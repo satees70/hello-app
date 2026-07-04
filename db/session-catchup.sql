@@ -2381,3 +2381,9 @@ $$;
 -- ticked for all delivery crew (drivers + kelindan) just to link them.
 alter table public.employees add column if not exists crew_role text
   check (crew_role in ('driver', 'kelindan'));
+
+-- 2026-07 · Employment period for HR attendance. Scheduled days BEFORE join_date
+-- (newly joined) or AFTER resign_date (resigned) are shown as "Not employed" and
+-- not counted as absent/leave. Both nullable = employed for the whole range.
+alter table public.employees add column if not exists join_date date;
+alter table public.employees add column if not exists resign_date date;

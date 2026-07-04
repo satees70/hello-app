@@ -11,13 +11,14 @@ const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;
 
 // One short status label for a day on the printed card.
 function dayStatusText(d: DayRow): string {
+  if (d.kind === 'notEmployed') return 'Not employed'
   if (d.kind === 'off') return 'Rest day'
   if (d.kind === 'holiday') return 'Public holiday'
   if (d.kind === 'absent') return 'Absent' + (d.leaveType ? ` (${d.leaveType})` : '')
   if (d.kind === 'outstation') return 'Outstation'
   const r = d.result
   if (r.needsReview) return 'Needs review'
-  if (r.halfDay) return 'Half day'
+  if (r.halfDay) return 'Half day' + (d.leaveType ? ` (${d.leaveType})` : '')
   if (r.presentDay) return 'Present'
   if (r.dayType !== 'normal') return `${r.dayType === 'holiday' ? 'Public holiday' : 'Rest day'} ${r.dayUnits}d`
   return 'OK'
@@ -161,19 +162,27 @@ export default function AttendancePage() {
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Trip save failed') }
   }
 
-  // Set the leave type on an absent day (optimistic — no full reload).
+  // Set the leave type on an absent OR half-worked day (optimistic — no reload).
+  // On an absent day the leave weight also shifts work↔leave; on a half-worked day
+  // the split is already 0.5/0.5, so only the type label changes.
   async function saveLeave(code: string, date: string, leaveType: string) {
     setBlocks(bs => bs.map(b => {
       if (b.code !== code) return b
       const old = b.days.find(d => d.dateKey === date)
-      if (!old || old.kind !== 'absent') return b
-      const oldW = leaveWeight(old.leaveType), newW = leaveWeight(leaveType || null)
-      return {
-        ...b,
-        days: b.days.map(d => d.dateKey === date ? { ...d, leaveType: leaveType || null } : d),
-        leaveDays: b.leaveDays - oldW + newW,
-        workDays: b.workDays - (1 - oldW) + (1 - newW),
+      if (!old) return b
+      if (old.kind === 'absent') {
+        const oldW = leaveWeight(old.leaveType), newW = leaveWeight(leaveType || null)
+        return {
+          ...b,
+          days: b.days.map(d => d.dateKey === date ? { ...d, leaveType: leaveType || null } : d),
+          leaveDays: b.leaveDays - oldW + newW,
+          workDays: b.workDays - (1 - oldW) + (1 - newW),
+        }
       }
+      if (old.kind === 'worked' && old.result.halfDay) {
+        return { ...b, days: b.days.map(d => d.dateKey === date ? { ...d, leaveType: leaveType || null } : d) }
+      }
+      return b
     }))
     const res = await fetch('/api/attendance/leave', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -359,7 +368,7 @@ export default function AttendancePage() {
               </thead>
               <tbody>
                 {(onlyReview ? b.days.filter(dayNeedsAttn) : b.days).map(({ dateKey, result, trip, manualTime, outstationId, kind, leaveType, lateExcused, otInTrip }) => (
-                  <tr key={dateKey} className={`border-b border-gray-50 align-top ${result.needsReview ? 'bg-amber-50' : kind === 'absent' ? 'bg-rose-50' : kind === 'off' || kind === 'holiday' ? 'text-gray-400' : ''}`}>
+                  <tr key={dateKey} className={`border-b border-gray-50 align-top ${result.needsReview ? 'bg-amber-50' : kind === 'absent' ? 'bg-rose-50' : kind === 'off' || kind === 'holiday' || kind === 'notEmployed' ? 'text-gray-400' : ''}`}>
                     <td className="px-4 py-2 whitespace-nowrap">
                       {fmtDate(dateKey)} <span className={`ml-1 ${weekdayOf(dateKey) === 0 ? 'text-rose-500' : 'text-gray-400'}`}>{DOW_SHORT[weekdayOf(dateKey)]}</span>
                     </td>
@@ -408,7 +417,9 @@ export default function AttendancePage() {
                       )}
                     </td>
                     <td className="px-4 py-2">
-                      {kind === 'off' ? (
+                      {kind === 'notEmployed' ? (
+                        <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-500">Not employed</span>
+                      ) : kind === 'off' ? (
                         <span className="rounded bg-purple-100 px-2 py-0.5 text-xs text-purple-800">Rest day</span>
                       ) : kind === 'holiday' ? (
                         <span className="rounded bg-purple-100 px-2 py-0.5 text-xs text-purple-800">Public holiday</span>
@@ -448,6 +459,12 @@ export default function AttendancePage() {
                       ) : result.halfDay ? (
                         <span className="inline-flex items-center gap-2">
                           <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">½ day</span>
+                          <select value={leaveType ?? ''} onChange={e => saveLeave(b.code, dateKey, e.target.value)}
+                            title="Leave type for the other half of the day"
+                            className={`rounded border px-1 py-0.5 text-xs ${leaveType ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-gray-200 text-gray-400'}`}>
+                            <option value="">½ leave…</option>
+                            {LEAVE_TYPES.filter(t => t !== 'Half').map(t => <option key={t} value={t}>{t}</option>)}
+                          </select>
                           <button onClick={() => reviewSession(b.code, dateKey)} className="text-xs text-blue-600 underline">enter times…</button>
                         </span>
                       ) : result.presentDay ? (

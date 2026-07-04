@@ -4,7 +4,7 @@ import { supabase, fetchAll } from '@/lib/supabase'
 
 type DayWin = { start: string; end: string } | null
 interface ShiftProfile { id: string; name: string; normal_hours: number; lunch_rule: string; lunch_minutes: number; week_schedule: Record<string, DayWin> | null; attendance_mode: string | null }
-interface Employee { employee_code: string; name: string | null; shift_profile_id: string | null; is_driver: boolean; is_production: boolean; active: boolean; department: string | null; delivery_name: string | null; crew_role: string | null }
+interface Employee { employee_code: string; name: string | null; shift_profile_id: string | null; is_driver: boolean; is_production: boolean; active: boolean; department: string | null; delivery_name: string | null; crew_role: string | null; join_date: string | null; resign_date: string | null }
 interface Row extends Employee { seenInPunches: boolean; lastSeen: string | null }
 interface Holiday { holiday_date: string; name: string | null }
 
@@ -68,6 +68,8 @@ export default function EmployeesSetupPage() {
         department: e?.department ?? null,
         delivery_name: e?.delivery_name ?? null,
         crew_role: e?.crew_role ?? null,
+        join_date: e?.join_date ?? null,
+        resign_date: e?.resign_date ?? null,
         seenInPunches: punchCodes.has(code),
         lastSeen: lastByCode.get(code) ?? null,
       }
@@ -90,6 +92,7 @@ export default function EmployeesSetupPage() {
         employee_code: r.employee_code, name: next.name,
         shift_profile_id: next.shift_profile_id, is_driver: next.is_driver, is_production: next.is_production, active: next.active,
         delivery_name: next.delivery_name, crew_role: next.crew_role,
+        join_date: next.join_date, resign_date: next.resign_date,
       }),
     })
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') }
@@ -345,6 +348,7 @@ export default function EmployeesSetupPage() {
                 <th className="px-3 py-2 font-medium" title="Ticked people appear in the Production module (e.g. Grinding “Grind by”)">Production</th>
                 <th className="px-3 py-2 font-medium">Driver</th>
                 <th className="px-3 py-2 font-medium">Delivery link</th>
+                <th className="px-3 py-2 font-medium" title="Joined date (days before are 'Not employed') / Left date (days after are 'Not employed')">Joined / Left</th>
                 <th className="px-3 py-2 font-medium">Last seen</th>
                 <th className="px-3 py-2 font-medium">Active</th>
               </tr>
@@ -392,6 +396,14 @@ export default function EmployeesSetupPage() {
                         </select>
                       </div>
                     ) : <span className="text-gray-300 text-xs">—</span>}
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-col gap-1">
+                      <input type="date" lang="en-GB" value={r.join_date ?? ''} onChange={e => saveEmployee(r, { join_date: e.target.value || null })}
+                        className="rounded border border-gray-200 px-1 py-0.5 text-xs" title="Joined — days before this are 'Not employed'" />
+                      <input type="date" lang="en-GB" value={r.resign_date ?? ''} onChange={e => saveEmployee(r, { resign_date: e.target.value || null })}
+                        className="rounded border border-gray-200 px-1 py-0.5 text-xs" title="Left / resigned — days after this are 'Not employed'" />
+                    </div>
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500">
                     {r.lastSeen ? new Date(r.lastSeen).toLocaleDateString('en-GB', { timeZone: 'Asia/Kuala_Lumpur', day: '2-digit', month: '2-digit' }) : <span className="text-gray-300">never</span>}
