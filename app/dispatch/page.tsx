@@ -796,13 +796,23 @@ export default function DispatchPage() {
         return (
         <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[20rem] mb-8">
           <table className="w-full text-xs">
-            <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{['DO No.', ...(multiFac ? ['Factory'] : []), 'Items', 'Lorry / Driver', 'By', 'When', ''].map((h, i) => <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
+            <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{['DO No.', ...(multiFac ? ['Factory'] : []), 'Lorry / Driver', 'By', 'When', '', 'Items'].map((h, i) => <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
             <tbody>
               {shownOrders.length === 0 && <tr><td colSpan={multiFac ? 8 : 7} className="text-center py-8 text-gray-400">{orders.length === 0 ? 'No delivery orders yet.' : 'No delivery orders match.'}</td></tr>}
               {shownOrders.map(o => (
                 <tr key={o.id} className="border-b last:border-0 align-top hover:bg-gray-50">
                   <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{o.do_number}</td>
                   {multiFac && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(o.factory_code)}</td>}
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <div className="text-gray-700">🚚 {o.vehicle || <span className="text-gray-300">—</span>}</div>
+                    <div className="text-gray-700">👤 {o.driver_name || <span className="text-gray-300">—</span>}</div>
+                    {o.departed_at
+                      ? <div className="mt-1 text-green-600 text-xs">✅ Out {fmt(o.departed_at)}{canFac(o.factory_code) && <button onClick={() => markLorryOut(o, false)} className="ml-1 text-gray-400 hover:underline">undo</button>}</div>
+                      : canFac(o.factory_code) && <button onClick={() => markLorryOut(o, true)} disabled={busy} className="mt-1 bg-teal-600 text-white px-2 py-1 rounded text-xs hover:bg-teal-700 disabled:opacity-50">🚚 Lorry out</button>}
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-600">{o.created_by_name || '—'}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-400">{fmt(o.created_at)}</td>
+                  <td className="px-3 py-2 whitespace-nowrap"><button onClick={() => printDO(o)} className="text-blue-600 hover:underline">🖨 Print</button></td>
                   <td className="px-3 py-2 text-gray-600">
                     {(o.dispatch_order_lines || []).map((l, i) => (
                       <span key={`f${i}`} className="block whitespace-nowrap mb-0.5">
@@ -840,16 +850,6 @@ export default function DispatchPage() {
                       </span>
                     ))}
                   </td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    <div className="text-gray-700">🚚 {o.vehicle || <span className="text-gray-300">—</span>}</div>
-                    <div className="text-gray-700">👤 {o.driver_name || <span className="text-gray-300">—</span>}</div>
-                    {o.departed_at
-                      ? <div className="mt-1 text-green-600 text-xs">✅ Out {fmt(o.departed_at)}{canFac(o.factory_code) && <button onClick={() => markLorryOut(o, false)} className="ml-1 text-gray-400 hover:underline">undo</button>}</div>
-                      : canFac(o.factory_code) && <button onClick={() => markLorryOut(o, true)} disabled={busy} className="mt-1 bg-teal-600 text-white px-2 py-1 rounded text-xs hover:bg-teal-700 disabled:opacity-50">🚚 Lorry out</button>}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap text-gray-600">{o.created_by_name || '—'}</td>
-                  <td className="px-3 py-2 whitespace-nowrap text-gray-400">{fmt(o.created_at)}</td>
-                  <td className="px-3 py-2 whitespace-nowrap"><button onClick={() => printDO(o)} className="text-blue-600 hover:underline">🖨 Print</button></td>
                 </tr>
               ))}
             </tbody>
