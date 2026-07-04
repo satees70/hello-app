@@ -38,6 +38,22 @@ const STATUS_STYLES: Record<string, string> = {
 const ACTIVE = ['Open', 'Partially Received']
 const PACK = 'BAG|CTN|CARTON'
 
+// Transport stage of a Goods-Received document (warehouse → factory).
+type GrStage = 'none' | 'lorry' | 'loaded' | 'driver' | 'sent' | 'received'
+function grStage(d: { vehicle?: string | null; loaded_at?: string | null; driver_name?: string | null; gr_departed_at?: string | null; transport_received_at?: string | null }): GrStage {
+  if (d.transport_received_at) return 'received'
+  if (d.gr_departed_at) return 'sent'
+  if (d.driver_name) return 'driver'
+  if (d.loaded_at) return 'loaded'
+  if (d.vehicle) return 'lorry'
+  return 'none'
+}
+const GR_LABEL: Record<GrStage, string> = { none: 'Not started', lorry: 'Lorry assigned', loaded: 'Loaded', driver: 'Driver assigned', sent: 'On the way', received: 'Received' }
+const GR_STYLE: Record<GrStage, string> = {
+  none: 'bg-gray-100 text-gray-500', lorry: 'bg-teal-100 text-teal-700', loaded: 'bg-amber-100 text-amber-800',
+  driver: 'bg-indigo-100 text-indigo-700', sent: 'bg-blue-100 text-blue-700', received: 'bg-green-100 text-green-700',
+}
+
 // Searchable item picker — type a code OR a name, then click a row. Works on every browser
 // (the native datalist arrow is unreliable and was hiding matches).
 function ItemCombo({ items, value, onPick }: { items: { code: string; description: string; unit: string }[]; value: string; onPick: (code: string, description: string, unit: string) => void }) {
@@ -74,7 +90,7 @@ export default function IncomingPage() {
   const isWarehouse = !!profile?.warehouse_user   // warehouse staff receive for every factory they serve
   const canEditFac = (fc: string | undefined) => isWarehouse || can(profile, 'goods_received', 'edit', fc)   // honours per-factory view-only
   const [docs, setDocs] = useState<DeliveryOrder[]>([])
-  const [docFilters, setDocFilters] = useState({ file: '', do: '', factory: '', status: '', uploaded: '' })
+  const [docFilters, setDocFilters] = useState({ file: '', do: '', factory: '', status: '', uploaded: '', transport: '' })
   const [docQ, setDocQ] = useState('')   // single search box used on mobile
   const [lineCounts, setLineCounts] = useState<Record<string, { recv: number; total: number }>>({})
   const [docLineText, setDocLineText] = useState<Record<string, string>>({})   // do_id -> its item codes + descriptions (for searching documents by content)
@@ -246,7 +262,8 @@ export default function IncomingPage() {
   const fileMatch = (d: DeliveryOrder, q: string) => !q || inc(d.file_name, q) || inc(d.pick_run_no, q) || inc(docLineText[d.id] || '', q)
   const colDocs = docs.filter(d =>
     fileMatch(d, docFilters.file) && inc(d.do_number, docFilters.do) && inc(docFacName(d), docFilters.factory) &&
-    (!docFilters.status || d.status === docFilters.status) && inc(new Date(d.created_at).toLocaleString(), docFilters.uploaded))
+    (!docFilters.status || d.status === docFilters.status) && inc(new Date(d.created_at).toLocaleString(), docFilters.uploaded) &&
+    (!docFilters.transport || (docFilters.transport === 'needs_driver' ? (!!d.vehicle && !d.driver_name && !d.transport_received_at) : grStage(d) === docFilters.transport)))
   const mobDocs = docs.filter(d => !docQ || [d.file_name, d.do_number, d.pick_run_no, docFacName(d), d.status, docLineText[d.id] || ''].some(v => inc(v, docQ)))
   const docStatuses = [...new Set(docs.map(d => d.status))].sort()
   const shownLines = lines.filter(l => !lineQ || inc(l.item_code, lineQ) || inc(l.description, lineQ))
@@ -601,26 +618,28 @@ export default function IncomingPage() {
         <div className="hidden md:block bg-white rounded-xl shadow-sm border overflow-auto mb-8 max-h-[24rem]">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b sticky top-0 z-10">
-              <tr>{['File', 'DO No.', 'Factory', 'Status', 'Uploaded', 'Actions'].map(h => (
+              <tr>{['File', 'DO No.', 'Factory', 'Status', 'Transport', 'Uploaded', 'Actions'].map(h => (
                 <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
               <tr className="border-b">
                 <th className="px-3 py-2"><input value={docFilters.file} onChange={e => setDocFilters({ ...docFilters, file: e.target.value })} placeholder="File, item or PR…" className="w-full border rounded px-2 py-1 text-xs font-normal" /></th>
                 <th className="px-3 py-2"><input value={docFilters.do} onChange={e => setDocFilters({ ...docFilters, do: e.target.value })} placeholder="Filter…" className="w-full border rounded px-2 py-1 text-xs font-normal" /></th>
                 <th className="px-3 py-2"><input value={docFilters.factory} onChange={e => setDocFilters({ ...docFilters, factory: e.target.value })} placeholder="Filter…" className="w-full border rounded px-2 py-1 text-xs font-normal" /></th>
                 <th className="px-3 py-2"><select value={docFilters.status} onChange={e => setDocFilters({ ...docFilters, status: e.target.value })} className="w-full border rounded px-2 py-1 text-xs font-normal bg-white"><option value="">All</option>{docStatuses.map(s => <option key={s} value={s}>{s}</option>)}</select></th>
+                <th className="px-3 py-2"><select value={docFilters.transport} onChange={e => setDocFilters({ ...docFilters, transport: e.target.value })} className="w-full border rounded px-2 py-1 text-xs font-normal bg-white"><option value="">All</option><option value="needs_driver">⚠ Needs driver</option>{(['none', 'lorry', 'loaded', 'driver', 'sent', 'received'] as GrStage[]).map(s => <option key={s} value={s}>{GR_LABEL[s]}</option>)}</select></th>
                 <th className="px-3 py-2"><input value={docFilters.uploaded} onChange={e => setDocFilters({ ...docFilters, uploaded: e.target.value })} placeholder="Filter…" className="w-full border rounded px-2 py-1 text-xs font-normal" /></th>
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
             <tbody>
-              {docs.length === 0 && <tr><td colSpan={6} className="text-center py-8 text-gray-400">No delivery orders uploaded yet</td></tr>}
-              {docs.length > 0 && colDocs.length === 0 && <tr><td colSpan={6} className="text-center py-8 text-gray-400">No documents match the filters</td></tr>}
+              {docs.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-gray-400">No delivery orders uploaded yet</td></tr>}
+              {docs.length > 0 && colDocs.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-gray-400">No documents match the filters</td></tr>}
               {colDocs.map(doc => (
                 <tr key={doc.id} className="border-b last:border-0 hover:bg-gray-50">
                   <td className="px-4 py-3">{doc.file_name}</td>
                   <td className="px-4 py-3 font-mono text-gray-500 whitespace-nowrap">{doc.do_number || '—'}</td>
                   <td className="px-4 py-3 whitespace-nowrap">{isHO ? factoryName(doc.factory_code) : doc.factory_code}</td>
                   <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[doc.status] || 'bg-gray-100 text-gray-700'}`}>{doc.status}</span>{lineCounts[doc.id]?.total ? <span className="block text-xs text-gray-500 mt-1">{lineCounts[doc.id].recv}/{lineCounts[doc.id].total} received</span> : null}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">{(() => { const st = grStage(doc); return <button onClick={() => setTransportDoc(doc)} className={`px-2 py-0.5 rounded-full text-xs font-medium ${GR_STYLE[st]} hover:opacity-80`}>{GR_LABEL[st]}</button> })()}{!!doc.vehicle && !doc.driver_name && !doc.transport_received_at && <span className="block text-[11px] text-amber-600 mt-0.5">⚠ needs driver</span>}</td>
                   <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{new Date(doc.created_at).toLocaleString()}</td>
                   <td className="px-4 py-3 whitespace-nowrap flex gap-3 items-center">
                     <button onClick={() => viewLines(doc)} className="text-blue-600 hover:underline text-xs">View Lines</button>

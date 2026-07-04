@@ -24,6 +24,7 @@ export default function TransportPage() {
   const [lorries, setLorries] = useState<{ id: string; name: string; parked_at: string | null; lorry_type: string | null }[]>([])
   const [crew, setCrew] = useState<string[]>([])
   const [lorryReqs, setLorryReqs] = useState<{ id: string; factory_code: string; kind: string; lorry_type: string; note: string | null; destination: string | null; requested_by_name: string | null; requested_at: string }[]>([])
+  const [grNeedDriver, setGrNeedDriver] = useState<{ id: string; do_number: string | null; factory_code: string; vehicle: string | null }[]>([])
   const [search, setSearch] = useState('')
   const [facF, setFacF] = useState<Set<string>>(new Set())
   const [pendingOnly, setPendingOnly] = useState(true)
@@ -46,6 +47,20 @@ export default function TransportPage() {
     setCrew([...new Set((res || []).filter(r => r.kind !== 'lorry').map(r => r.name))].sort())
     setOrders((o as DOrder[]) || [])
     setLorryReqs(lr || [])
+    // Incoming (Goods Received) lorries assigned but still without a driver — assign one here.
+    const { data: gnd } = await supabase.from('delivery_orders')
+      .select('id, do_number, factory_code, vehicle')
+      .not('vehicle', 'is', null).is('driver_name', null).is('transport_received_at', null)
+      .order('created_at', { ascending: false })
+    setGrNeedDriver(gnd || [])
+  }
+  async function assignGrDriver(id: string, driver: string) {
+    if (!driver) return
+    setBusy('gr' + id); setError('')
+    const { error: e } = await supabase.rpc('assign_gr_transport', { p_doc_id: id, p_kind: 'driver', p_value: driver })
+    setBusy('')
+    if (e) { setError(e.message); return }
+    load()
   }
   async function fulfillLorry(id: string, lorry: string) {
     setBusy('lr' + id); setError('')
@@ -160,6 +175,26 @@ export default function TransportPage() {
                   </li>
                 )
               })}
+            </ul>
+          </div>
+        )}
+
+        {grNeedDriver.length > 0 && (
+          <div className="mb-4 bg-white rounded-xl shadow-sm border border-indigo-300 p-4">
+            <h2 className="font-medium mb-2">👤 Incoming lorries needing a driver</h2>
+            <p className="text-xs text-gray-500 mb-2">These warehouse lorries are loaded/assigned but have no driver yet. Assign one when available.</p>
+            <ul className="space-y-2">
+              {grNeedDriver.map(g => (
+                <li key={g.id} className="flex flex-wrap items-center gap-2 text-sm border-b last:border-0 pb-2 last:pb-0">
+                  <span className="inline-flex items-center gap-1 bg-teal-50 text-teal-800 rounded-full px-2.5 py-0.5 text-xs font-medium">🚚 {g.vehicle}</span>
+                  <span className="font-mono text-gray-600">{g.do_number || '—'}</span>
+                  <span className="text-gray-500">→ {factoryName(g.factory_code)}</span>
+                  <select value="" onChange={e => assignGrDriver(g.id, e.target.value)} disabled={busy === 'gr' + g.id} className="border rounded px-2 py-1 text-xs ml-auto">
+                    <option value="">Assign driver…</option>
+                    {crew.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </li>
+              ))}
             </ul>
           </div>
         )}
