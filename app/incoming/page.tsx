@@ -761,6 +761,10 @@ export default function IncomingPage() {
       {transportDoc && (() => {
         const doc = docs.find(d => d.id === transportDoc.id) || transportDoc
         const dest = isHO ? factoryName(doc.factory_code) : doc.factory_code
+        const isAdmin = profile?.role === 'admin'
+        // Warehouse people enter lorry/loaded/driver/send; the destination factory confirms received.
+        const canWh = isWarehouse || isHO || isAdmin
+        const canRcv = isHO || isAdmin || (!isWarehouse && (profile?.factory_code === doc.factory_code || (profile?.factory_codes || []).includes(doc.factory_code)))
         const onSite = lorries.filter(l => l.parked_at === doc.factory_code)   // parked at destination (rare)
         const atWh = lorries.filter(l => l.parked_at && l.parked_at !== doc.factory_code)
         const fmtT = (iso?: string | null) => iso ? new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
@@ -785,46 +789,57 @@ export default function IncomingPage() {
             </div>
 
             <div className="space-y-4">
+              <p className="text-xs text-gray-400">{canWh ? 'You (warehouse) set up the lorry, loaded, driver and send. The destination factory confirms receipt.' : canRcv ? 'The warehouse sets up the lorry & driver. You confirm when it arrives.' : 'View only.'}</p>
               {/* Lorry */}
               <div>
                 <label className="block text-sm font-medium mb-1">Lorry</label>
                 {doc.vehicle
-                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-teal-50 text-teal-800 rounded-full px-2.5 py-1 text-sm font-medium">🚚 {doc.vehicle}</span><button onClick={() => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'lorry', p_value: null })} disabled={tBusy} className="text-xs text-gray-400 hover:text-red-600">change</button></div>
-                  : <select value="" onChange={e => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'lorry', p_value: e.target.value })} disabled={tBusy} className="border rounded-lg px-2 py-1.5 text-sm w-full">
-                      <option value="">Assign a lorry…</option>
-                      {atWh.length > 0 && <optgroup label="🅿 Parked at a warehouse/site">{atWh.map(l => <option key={l.name} value={l.name}>{l.name}{l.lorry_type ? ` · ${l.lorry_type}` : ''} · at {factoryName(l.parked_at!)}</option>)}</optgroup>}
-                      {onSite.length > 0 && <optgroup label="🅿 Parked at destination">{onSite.map(l => <option key={l.name} value={l.name}>{l.name}</option>)}</optgroup>}
-                      <optgroup label="Other lorries">{lorries.filter(l => !l.parked_at).map(l => <option key={l.name} value={l.name}>{l.name}{l.lorry_type ? ` · ${l.lorry_type}` : ''}</option>)}</optgroup>
-                    </select>}
+                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-teal-50 text-teal-800 rounded-full px-2.5 py-1 text-sm font-medium">🚚 {doc.vehicle}</span>{canWh && <button onClick={() => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'lorry', p_value: null })} disabled={tBusy} className="text-xs text-gray-400 hover:text-red-600">change</button>}</div>
+                  : canWh
+                    ? <select value="" onChange={e => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'lorry', p_value: e.target.value })} disabled={tBusy} className="border rounded-lg px-2 py-1.5 text-sm w-full">
+                        <option value="">Assign a lorry…</option>
+                        {atWh.length > 0 && <optgroup label="🅿 Parked at a warehouse/site">{atWh.map(l => <option key={l.name} value={l.name}>{l.name}{l.lorry_type ? ` · ${l.lorry_type}` : ''} · at {factoryName(l.parked_at!)}</option>)}</optgroup>}
+                        {onSite.length > 0 && <optgroup label="🅿 Parked at destination">{onSite.map(l => <option key={l.name} value={l.name}>{l.name}</option>)}</optgroup>}
+                        <optgroup label="Other lorries">{lorries.filter(l => !l.parked_at).map(l => <option key={l.name} value={l.name}>{l.name}{l.lorry_type ? ` · ${l.lorry_type}` : ''}</option>)}</optgroup>
+                      </select>
+                    : <span className="text-sm text-gray-400">Not assigned yet</span>}
               </div>
 
               {/* Loaded */}
               <div>
                 <label className="block text-sm font-medium mb-1">Loaded</label>
                 {doc.loaded_at
-                  ? <button onClick={() => grTransport('mark_gr_loaded', { p_doc_id: doc.id, p_on: false })} disabled={tBusy} className="text-xs text-gray-400 hover:underline">✅ Loaded {fmtT(doc.loaded_at)} · undo</button>
-                  : <button onClick={() => grTransport('mark_gr_loaded', { p_doc_id: doc.id, p_on: true })} disabled={tBusy} className="bg-amber-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-amber-700 disabled:opacity-50">📦 Mark loaded</button>}
+                  ? <span className="text-sm text-green-700">✅ Loaded {fmtT(doc.loaded_at)}{canWh && <button onClick={() => grTransport('mark_gr_loaded', { p_doc_id: doc.id, p_on: false })} disabled={tBusy} className="ml-1 text-gray-400 hover:underline text-xs">undo</button>}</span>
+                  : canWh
+                    ? <button onClick={() => grTransport('mark_gr_loaded', { p_doc_id: doc.id, p_on: true })} disabled={tBusy} className="bg-amber-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-amber-700 disabled:opacity-50">📦 Mark loaded</button>
+                    : <span className="text-sm text-gray-400">Not loaded yet</span>}
               </div>
 
               {/* Driver */}
               <div>
                 <label className="block text-sm font-medium mb-1">Driver <span className="text-gray-400 font-normal">(can be assigned later)</span></label>
                 {doc.driver_name
-                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 rounded-full px-2.5 py-1 text-sm font-medium">👤 {doc.driver_name}</span><button onClick={() => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'driver', p_value: null })} disabled={tBusy} className="text-xs text-gray-400 hover:text-red-600">change</button></div>
-                  : <select value="" onChange={e => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'driver', p_value: e.target.value })} disabled={tBusy} className="border rounded-lg px-2 py-1.5 text-sm w-full">
-                      <option value="">Assign a driver…</option>
-                      {crew.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>}
+                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 rounded-full px-2.5 py-1 text-sm font-medium">👤 {doc.driver_name}</span>{canWh && <button onClick={() => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'driver', p_value: null })} disabled={tBusy} className="text-xs text-gray-400 hover:text-red-600">change</button>}</div>
+                  : canWh
+                    ? <select value="" onChange={e => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'driver', p_value: e.target.value })} disabled={tBusy} className="border rounded-lg px-2 py-1.5 text-sm w-full">
+                        <option value="">Assign a driver…</option>
+                        {crew.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    : <span className="text-sm text-gray-400">Not assigned yet</span>}
               </div>
 
               {/* Send + Receive */}
               <div className="flex items-center gap-3 pt-2 border-t">
                 {doc.gr_departed_at
-                  ? <span className="text-green-700 text-sm">✅ Sent {fmtT(doc.gr_departed_at)}<button onClick={() => grTransport('mark_gr_out', { p_doc_id: doc.id, p_out: false })} disabled={tBusy} className="ml-1 text-gray-400 hover:underline text-xs">undo</button></span>
-                  : <button onClick={() => grTransport('mark_gr_out', { p_doc_id: doc.id, p_out: true })} disabled={tBusy || !doc.vehicle} className="bg-teal-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-teal-700 disabled:opacity-50">🚚 Send to factory</button>}
+                  ? <span className="text-green-700 text-sm">✅ Sent {fmtT(doc.gr_departed_at)}{canWh && <button onClick={() => grTransport('mark_gr_out', { p_doc_id: doc.id, p_out: false })} disabled={tBusy} className="ml-1 text-gray-400 hover:underline text-xs">undo</button>}</span>
+                  : canWh
+                    ? <button onClick={() => grTransport('mark_gr_out', { p_doc_id: doc.id, p_out: true })} disabled={tBusy || !doc.vehicle} className="bg-teal-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-teal-700 disabled:opacity-50">🚚 Send to factory</button>
+                    : <span className="text-sm text-gray-400">Not sent yet</span>}
                 {doc.transport_received_at
                   ? <span className="text-green-700 text-sm font-medium ml-auto">✅ Received {fmtT(doc.transport_received_at)}</span>
-                  : <button onClick={() => grTransport('confirm_gr_received', { p_doc_id: doc.id })} disabled={tBusy} className="ml-auto bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-green-700 disabled:opacity-50">Confirm received</button>}
+                  : canRcv
+                    ? <button onClick={() => grTransport('confirm_gr_received', { p_doc_id: doc.id })} disabled={tBusy} className="ml-auto bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-green-700 disabled:opacity-50">Confirm received</button>
+                    : <span className="text-sm text-gray-400 ml-auto">Awaiting the factory to confirm</span>}
               </div>
             </div>
           </div>

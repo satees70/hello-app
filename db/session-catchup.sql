@@ -1959,14 +1959,23 @@ alter table public.delivery_orders add column if not exists gr_departed_at times
 alter table public.delivery_orders add column if not exists transport_received_at timestamptz;
 alter table public.delivery_orders add column if not exists transport_received_by uuid;
 
--- Shared guard: caller may act on Goods Received at this document's factory.
-create or replace function public._gr_can(p_fac text) returns boolean
+-- Warehouse side (assign lorry / load / driver / send): warehouse staff + HO/admin.
+create or replace function public._gr_warehouse() returns boolean
  language plpgsql security definer set search_path to 'public' as $function$
 begin
   if not has_perm('goods_received', 'view') then return false; end if;
-  if my_factory_code() = 'HEAD_OFFICE' then return true; end if;
-  if p_fac = any (my_factory_codes()) then return true; end if;
-  return coalesce((select warehouse_user from public.profiles where id = auth.uid()), false);
+  return coalesce((select warehouse_user or factory_code = 'HEAD_OFFICE' or role = 'admin'
+                   from public.profiles where id = auth.uid()), false);
+end; $function$;
+
+-- Receiving side (confirm received): the destination factory (not warehouse) + HO/admin.
+create or replace function public._gr_receiver(p_fac text) returns boolean
+ language plpgsql security definer set search_path to 'public' as $function$
+begin
+  if not has_perm('goods_received', 'view') then return false; end if;
+  if coalesce((select factory_code = 'HEAD_OFFICE' or role = 'admin' from public.profiles where id = auth.uid()), false) then return true; end if;
+  if coalesce((select warehouse_user from public.profiles where id = auth.uid()), false) then return false; end if;
+  return p_fac = my_factory_code() or p_fac = any (my_factory_codes());
 end; $function$;
 
 -- Assign a lorry or driver to an incoming document (driver assign notifies).
@@ -1977,7 +1986,7 @@ begin
   if p_kind not in ('lorry', 'driver') then raise exception 'Unknown assignment type'; end if;
   select factory_code, do_number into v_fac, v_no from public.delivery_orders where id = p_doc_id;
   if v_fac is null then raise exception 'Document not found'; end if;
-  if not public._gr_can(v_fac) then raise exception 'Not allowed'; end if;
+  if not public._gr_warehouse() then raise exception 'Not allowed'; end if;
   v_val := nullif(btrim(p_value), '');
   if p_kind = 'lorry' then
     update public.delivery_orders set vehicle = v_val where id = p_doc_id;
@@ -2006,7 +2015,7 @@ declare v_fac text; v_no text; v_veh text;
 begin
   select factory_code, do_number, vehicle into v_fac, v_no, v_veh from public.delivery_orders where id = p_doc_id;
   if v_fac is null then raise exception 'Document not found'; end if;
-  if not public._gr_can(v_fac) then raise exception 'Not allowed'; end if;
+  if not public._gr_warehouse() then raise exception 'Not allowed'; end if;
   update public.delivery_orders
      set loaded_at = case when p_on then now() else null end,
          loaded_by = case when p_on then auth.uid() else null end
@@ -2028,7 +2037,7 @@ declare v_fac text; v_no text; v_veh text; v_drv text;
 begin
   select factory_code, do_number, vehicle, driver_name into v_fac, v_no, v_veh, v_drv from public.delivery_orders where id = p_doc_id;
   if v_fac is null then raise exception 'Document not found'; end if;
-  if not public._gr_can(v_fac) then raise exception 'Not allowed'; end if;
+  if not public._gr_warehouse() then raise exception 'Not allowed'; end if;
   update public.delivery_orders set gr_departed_at = case when p_out then now() else null end where id = p_doc_id;
   if p_out then
     insert into public.notifications (factory_code, type, title, body, link, ref)
@@ -2047,7 +2056,7 @@ declare v_fac text; v_no text; v_by uuid;
 begin
   select factory_code, do_number, loaded_by into v_fac, v_no, v_by from public.delivery_orders where id = p_doc_id;
   if v_fac is null then raise exception 'Document not found'; end if;
-  if not public._gr_can(v_fac) then raise exception 'Not allowed'; end if;
+  if not public._gr_receiver(v_fac) then raise exception 'Not allowed'; end if;
   update public.delivery_orders
      set transport_received_at = now(), transport_received_by = auth.uid()
    where id = p_doc_id;
