@@ -16,6 +16,12 @@ export function tomorrowISO(): string {
   const d = malaysiaNow(); d.setDate(d.getDate() + 1)
   return fmtISO(d)
 }
+// Next delivery day: tomorrow, but skip Sunday (no deliveries on Sunday → Monday).
+export function nextDeliveryISO(): string {
+  const d = malaysiaNow(); d.setDate(d.getDate() + 1)
+  if (d.getDay() === 0) d.setDate(d.getDate() + 1)
+  return fmtISO(d)
+}
 
 // SO numbers scheduled for delivery tomorrow — used to show the TOMORROW DELIVERY tag.
 export async function fetchTomorrowDeliverySOs(): Promise<Set<string>> {

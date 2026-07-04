@@ -3,7 +3,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { supabase } from '@/lib/supabase'
-import { tomorrowISO } from '@/lib/delivery'
+import { tomorrowISO, nextDeliveryISO } from '@/lib/delivery'
 import * as XLSX from 'xlsx'
 
 interface Sched {
@@ -88,7 +88,7 @@ export default function DeliverySchedulePage() {
   const [colCust, setColCust] = useState('')
   const [sel, setSel] = useState<Set<number>>(new Set())   // selected source-row indices
   const [assignLine, setAssignLine] = useState(LINES[0])
-  const [date, setDate] = useState(tomorrowISO())
+  const [date, setDate] = useState(nextDeliveryISO())   // default = tomorrow, skipping Sunday
   const [routeFilter, setRouteFilter] = useState('all')
   const [dateFilter, setDateFilter] = useState('all')
   const [showScheduled, setShowScheduled] = useState(false)   // upload list: also show orders already scheduled
@@ -739,7 +739,7 @@ export default function DeliverySchedulePage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {g.rows.map(s => {
+                      {g.rows.slice().sort((a, b) => ((custKey && a.data?.[custKey]) || a.customer_name || '').localeCompare((custKey && b.data?.[custKey]) || b.customer_name || '') || a.so_number.localeCompare(b.so_number)).map(s => {
                         const isTomorrow = s.delivery_date === tomorrowISO()
                         const hold = !!holdKeyS && isHold(s.data?.[holdKeyS])
                         const its = soItems[s.so_number] || []
