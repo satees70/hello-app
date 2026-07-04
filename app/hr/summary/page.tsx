@@ -1,5 +1,6 @@
 'use client'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { apiFetch } from '@/lib/api'
 import {
   loadReport, prevMonthRange, leaveBreakdown, tripBreakdown, totalOtMinutes, type EmpBlock,
 } from '@/lib/attendanceReport'
@@ -92,7 +93,7 @@ export default function SummaryPage() {
   // means subtract late/early from Total OT; false exempts them for the month.
   async function saveDeduct(code: string, deduct: boolean) {
     setBlocks(bs => bs.map(b => b.code === code ? { ...b, noDeductLate: !deduct } : b))
-    const res = await fetch('/api/attendance/deduct-override', {
+    const res = await apiFetch('/api/attendance/deduct-override', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ employee_code: code, month: from.slice(0, 7), no_deduct: !deduct }),
     })
@@ -103,7 +104,7 @@ export default function SummaryPage() {
   // (ticked) is the default; unticking skips all of their OT.
   async function saveCountOt(code: string, count: boolean) {
     setBlocks(bs => bs.map(b => b.code === code ? { ...b, otMonthOff: !count } : b))
-    const res = await fetch('/api/attendance/ot-month', {
+    const res = await apiFetch('/api/attendance/ot-month', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ employee_code: code, month: from.slice(0, 7), off: !count }),
     })

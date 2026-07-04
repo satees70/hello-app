@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { fetchEmployees } from '@/lib/zklink'
+import { requirePerm } from '@/lib/apiAuth'
 
 // Pull the employee master from ZKLink and upsert into `employees` (name only —
 // shift_profile_id / is_driver set by hand are preserved). Needs the Employee
@@ -14,7 +15,10 @@ const admin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
 )
 
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requirePerm(request, 'hr', 'edit')
+  if (auth instanceof NextResponse) return auth
+
   let emps
   try {
     emps = await fetchEmployees()

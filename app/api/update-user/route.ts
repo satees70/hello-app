@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { requirePerm } from '@/lib/apiAuth'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -9,8 +10,19 @@ const supabaseAdmin = createClient(
 const LOGIN_DOMAIN = 'avina.local'
 
 export async function POST(request: Request) {
+  const auth = await requirePerm(request, 'users', 'view')
+  if (auth instanceof NextResponse) return auth
+
   const { id, username, full_name, factory_code, factory_codes, readonly_factories, warehouse_user, offsite_allowed, role, permissions, capabilities, location_perms, customer_filter, password } = await request.json()
   if (!id) return NextResponse.json({ error: 'Missing user id' }, { status: 400 })
+
+  // Non-admins may manage ordinary users (e.g. toggle HR/Driver access) but must
+  // not grant the admin role or modify an existing admin account.
+  if (auth.profile.role !== 'admin') {
+    if (role === 'admin') return NextResponse.json({ error: 'Only an admin can grant the admin role.' }, { status: 403 })
+    const { data: target } = await supabaseAdmin.from('profiles').select('role').eq('id', id).single()
+    if (target?.role === 'admin') return NextResponse.json({ error: 'Only an admin can modify an admin account.' }, { status: 403 })
+  }
 
   const profileUpdate: Record<string, unknown> = { full_name, factory_code, factory_codes: factory_codes ?? [factory_code], readonly_factories: readonly_factories ?? [], warehouse_user: !!warehouse_user, offsite_allowed: !!offsite_allowed, role, permissions: permissions ?? {}, capabilities: capabilities ?? {}, location_perms: location_perms ?? {}, customer_filter: (customer_filter ?? '').trim() || null }
 

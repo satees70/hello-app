@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { requirePerm } from '@/lib/apiAuth'
 
 // Set employees.active from attendance: active = punched within the last N days
 // of the latest punch. Anyone with no recent punch is marked inactive (a human
@@ -15,7 +16,10 @@ const admin = createClient(
 
 const WINDOW_DAYS = 14
 
-export async function POST() {
+export async function POST(request: Request) {
+  const auth = await requirePerm(request, 'hr', 'edit')
+  if (auth instanceof NextResponse) return auth
+
   // Last punch per employee (page newest-first).
   const last = new Map<string, string>()
   let from = 0

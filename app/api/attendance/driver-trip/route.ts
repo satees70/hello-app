@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { requirePerm } from '@/lib/apiAuth'
 
 // Set (or clear) a driver's trip type for one day — overrides the auto value
 // from the delivery schedule. Empty trip_type clears the override.
@@ -10,6 +11,9 @@ const admin = createClient(
 )
 
 export async function POST(request: Request) {
+  const auth = await requirePerm(request, 'hr', 'edit')
+  if (auth instanceof NextResponse) return auth
+
   const { employee_code, work_date, trip_type } = await request.json()
   if (!employee_code || !work_date) {
     return NextResponse.json({ error: 'Missing employee_code or work_date' }, { status: 400 })

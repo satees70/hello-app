@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { requirePerm } from '@/lib/apiAuth'
 
 // Per-day HR overrides for one employee/day: exclude_ot (don't count that day's
 // OT) and force_half (count the day as a half day). The caller sends only the
@@ -12,6 +13,9 @@ const admin = createClient(
 )
 
 export async function POST(request: Request) {
+  const auth = await requirePerm(request, 'hr', 'edit')
+  if (auth instanceof NextResponse) return auth
+
   const { employee_code, work_date, exclude_ot, force_half } = await request.json()
   if (!employee_code || !work_date) {
     return NextResponse.json({ error: 'Missing employee_code or work_date' }, { status: 400 })

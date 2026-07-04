@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
+import { requirePerm } from '@/lib/apiAuth'
 
 // Server-only clients — these keys must never reach the browser.
 const supabaseAdmin = createClient(
@@ -64,6 +65,9 @@ async function markError(doId: string) {
 }
 
 export async function POST(request: Request) {
+  const auth = await requirePerm(request, 'goods_received', 'edit')
+  if (auth instanceof NextResponse) return auth
+
   const { doId, filePath } = await request.json()
   if (!doId || !filePath) return NextResponse.json({ error: 'Missing document reference.' }, { status: 400 })
   if (!process.env.ANTHROPIC_API_KEY) { await markError(doId); return NextResponse.json({ error: 'Extraction is not configured (missing API key).' }, { status: 500 }) }

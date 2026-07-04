@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { requirePerm } from '@/lib/apiAuth'
 
 // Per-person, per-month override: no_deduct=true → never deduct that employee's
 // late-in / early-out from Total OT for the given month ('YYYY-MM'). Setting it
@@ -11,6 +12,9 @@ const admin = createClient(
 )
 
 export async function POST(request: Request) {
+  const auth = await requirePerm(request, 'hr', 'edit')
+  if (auth instanceof NextResponse) return auth
+
   const { employee_code, month, no_deduct } = await request.json()
   if (!employee_code || !month) {
     return NextResponse.json({ error: 'Missing employee_code or month' }, { status: 400 })

@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { requirePerm } from '@/lib/apiAuth'
 
 // Manage the public-holiday calendar. POST { holiday_date, name } adds/updates;
 // POST { action:'delete', holiday_date } removes.
@@ -10,6 +11,9 @@ const admin = createClient(
 )
 
 export async function POST(request: Request) {
+  const auth = await requirePerm(request, 'hr', 'edit')
+  if (auth instanceof NextResponse) return auth
+
   const body = await request.json()
   const date = (body.holiday_date ?? '').toString().trim()
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {

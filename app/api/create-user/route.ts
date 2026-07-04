@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { requirePerm } from '@/lib/apiAuth'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -9,7 +10,15 @@ const supabaseAdmin = createClient(
 const LOGIN_DOMAIN = 'avina.local'
 
 export async function POST(request: Request) {
+  const auth = await requirePerm(request, 'users', 'view')
+  if (auth instanceof NextResponse) return auth
+
   const { username, email, password, full_name, factory_code, factory_codes, readonly_factories, warehouse_user, offsite_allowed, role, permissions, capabilities, location_perms, customer_filter } = await request.json()
+
+  // Only an admin can create another admin.
+  if (role === 'admin' && auth.profile.role !== 'admin') {
+    return NextResponse.json({ error: 'Only an admin can grant the admin role.' }, { status: 403 })
+  }
 
   const uname = (username || '').trim().toLowerCase()
   if (!uname || !/^[a-z0-9._-]+$/.test(uname)) {

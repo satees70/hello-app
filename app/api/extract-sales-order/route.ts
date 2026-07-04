@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
+import { requirePerm } from '@/lib/apiAuth'
 
 // Server-only clients — these keys must never reach the browser.
 const supabaseAdmin = createClient(
@@ -63,6 +64,9 @@ Other rules:
 Call the record_sales_order_lines tool with one entry per numbered line item, in the order they appear.`
 
 export async function POST(request: Request) {
+  const auth = await requirePerm(request, 'sales', 'edit')
+  if (auth instanceof NextResponse) return auth
+
   const { importId, filePath } = await request.json()
 
   try {

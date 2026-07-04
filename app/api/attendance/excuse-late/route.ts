@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { requirePerm } from '@/lib/apiAuth'
 
 // Excuse (or un-excuse) one day's late-in / early-out so the Monthly Summary
 // doesn't deduct it from Total OT. excused=true → a row exists; false → removed.
@@ -10,6 +11,9 @@ const admin = createClient(
 )
 
 export async function POST(request: Request) {
+  const auth = await requirePerm(request, 'hr', 'edit')
+  if (auth instanceof NextResponse) return auth
+
   const { employee_code, work_date, excused, reason } = await request.json()
   if (!employee_code || !work_date) {
     return NextResponse.json({ error: 'Missing employee_code or work_date' }, { status: 400 })

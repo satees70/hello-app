@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { apiFetch } from '@/lib/api'
 import { todayISO } from '@/lib/delivery'
 
 interface Driver { id: string; name: string; phone: string | null }
@@ -119,7 +120,7 @@ export default function DriverTodayPage() {
         if (upErr) throw upErr
         photo_path = path
       }
-      const res = await fetch('/api/driver/deliver', {
+      const res = await apiFetch('/api/driver/deliver', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids, photo_path, note }),
       })
@@ -136,7 +137,7 @@ export default function DriverTodayPage() {
 
   async function undoDeliver(g: OutletGroup) {
     if (!confirm(`Undo delivery for ${g.customer}?`)) return
-    const res = await fetch('/api/driver/deliver', {
+    const res = await apiFetch('/api/driver/deliver', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids: g.orders.map(o => o.id), undo: true }),
     })
@@ -144,7 +145,7 @@ export default function DriverTodayPage() {
   }
 
   async function saveOdometer(trip: Trip, field: 'odometer_start' | 'odometer_end', value: string) {
-    const res = await fetch('/api/driver/odometer', {
+    const res = await apiFetch('/api/driver/odometer', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ route: trip.route, delivery_date: trip.delivery_date, [field]: value }),
     })

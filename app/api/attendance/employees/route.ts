@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { requirePerm } from '@/lib/apiAuth'
 
 // Upsert one employee (name / shift profile / is_driver / active), keyed by
 // employee_code. Used by the /hr/employees setup page.
@@ -10,6 +11,9 @@ const admin = createClient(
 )
 
 export async function POST(request: Request) {
+  const auth = await requirePerm(request, 'hr', 'edit')
+  if (auth instanceof NextResponse) return auth
+
   const { employee_code, name, shift_profile_id, is_driver, is_production, active, delivery_name, crew_role, join_date, resign_date } = await request.json()
   if (!employee_code) return NextResponse.json({ error: 'Missing employee_code' }, { status: 400 })
 

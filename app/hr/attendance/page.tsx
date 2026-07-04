@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { apiFetch } from '@/lib/api'
 import { klTime, fmtMinutes } from '@/lib/attendance'
 import {
   loadReport, prevMonthRange, leaveWeight, dayNeedsAttn, weekdayOf, addDay, DOW_SHORT,
@@ -77,7 +78,7 @@ export default function AttendancePage() {
   async function syncNow() {
     setSyncing(true); setMsg(null); setError(null)
     try {
-      const res = await fetch('/api/attendance/sync')
+      const res = await apiFetch('/api/attendance/sync')
       const json = await res.json()
       if (!res.ok) setError(json.error || 'Sync failed')
       else { setMsg(`Synced ${json.range?.from} → ${json.range?.to}: pulled ${json.pulled}, added ${json.inserted}.`); await load() }
@@ -86,14 +87,14 @@ export default function AttendancePage() {
   }
 
   async function saveReview(code: string, date: string, decision: string, manual_minutes?: number) {
-    const res = await fetch('/api/attendance/review', {
+    const res = await apiFetch('/api/attendance/review', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ employee_code: code, work_date: date, lunch_decision: decision, manual_minutes }),
     })
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Review save failed') } else await load()
   }
   async function clearReview(code: string, date: string) {
-    const res = await fetch('/api/attendance/review', {
+    const res = await apiFetch('/api/attendance/review', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ employee_code: code, work_date: date, action: 'clear' }),
     })
@@ -110,7 +111,7 @@ export default function AttendancePage() {
     const m = /^(\d{1,2}):(\d{2})/.exec(v.trim())
     if (!m) { setError('Please enter the time as HH:mm, e.g. 19:00'); return }
     const time = `${m[1].padStart(2, '0')}:${m[2]}`
-    const res = await fetch('/api/attendance/review', {
+    const res = await apiFetch('/api/attendance/review', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ employee_code: code, work_date: date, lunch_decision: 'manual_time', manual_time: time }),
     })
@@ -125,7 +126,7 @@ export default function AttendancePage() {
     const toks = v.match(/\d{1,2}:\d{2}/g)
     if (!toks || toks.length === 0) { setError('Enter times as HH:mm, e.g. 08:30 19:00'); return }
     const span = toks.map(t => t.padStart(5, '0')).join(', ')
-    const res = await fetch('/api/attendance/review', {
+    const res = await apiFetch('/api/attendance/review', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ employee_code: code, work_date: date, lunch_decision: 'manual_time', manual_time: span }),
     })
@@ -138,7 +139,7 @@ export default function AttendancePage() {
     const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(v.trim())
     if (!m) { setError('Enter the return date as dd/mm/yyyy'); return }
     const end = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
-    const res = await fetch('/api/attendance/outstation', {
+    const res = await apiFetch('/api/attendance/outstation', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ employee_code: code, start_date: departure, end_date: end }),
     })
@@ -146,7 +147,7 @@ export default function AttendancePage() {
   }
   async function removeOutstation(id: string) {
     if (!confirm('Remove this outstation trip?')) return
-    const res = await fetch('/api/attendance/outstation', {
+    const res = await apiFetch('/api/attendance/outstation', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'delete', id }),
     })
@@ -157,7 +158,7 @@ export default function AttendancePage() {
   async function saveTrip(code: string, date: string, tripType: string) {
     setBlocks(bs => bs.map(b => b.code === code
       ? { ...b, days: b.days.map(d => d.dateKey === date ? { ...d, trip: tripType || null } : d) } : b))
-    const res = await fetch('/api/attendance/driver-trip', {
+    const res = await apiFetch('/api/attendance/driver-trip', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ employee_code: code, work_date: date, trip_type: tripType }),
     })
@@ -186,7 +187,7 @@ export default function AttendancePage() {
       }
       return b
     }))
-    const res = await fetch('/api/attendance/leave', {
+    const res = await apiFetch('/api/attendance/leave', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ employee_code: code, work_date: date, leave_type: leaveType }),
     })
@@ -198,7 +199,7 @@ export default function AttendancePage() {
   async function saveExcuse(code: string, date: string, excused: boolean) {
     setBlocks(bs => bs.map(b => b.code === code
       ? { ...b, days: b.days.map(d => d.dateKey === date ? { ...d, lateExcused: excused } : d) } : b))
-    const res = await fetch('/api/attendance/excuse-late', {
+    const res = await apiFetch('/api/attendance/excuse-late', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ employee_code: code, work_date: date, excused }),
     })
@@ -208,7 +209,7 @@ export default function AttendancePage() {
   // Per-day flags: exclude that day's OT (exclude_ot) and/or force it to a half
   // day (force_half). A full reload keeps totals + half-day counting correct.
   async function saveDayFlag(code: string, date: string, patch: { exclude_ot?: boolean; force_half?: boolean }) {
-    const res = await fetch('/api/attendance/day-flag', {
+    const res = await apiFetch('/api/attendance/day-flag', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ employee_code: code, work_date: date, ...patch }),
     })
