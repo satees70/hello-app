@@ -19,6 +19,7 @@ export default function DiscussionPage() {
   const [members, setMembers] = useState<string[]>([])   // user ids in the group being managed
   const [users, setUsers] = useState<{ id: string; full_name: string }[]>([])
   const [addPick, setAddPick] = useState('')
+  const [selMembers, setSelMembers] = useState<string[]>([])   // member ids of the selected group (for tag restriction)
   const [err, setErr] = useState('')
 
   useEffect(() => { setFilterSo(new URLSearchParams(window.location.search).get('so') || '') }, [])
@@ -34,6 +35,14 @@ export default function DiscussionPage() {
     const { data } = await supabase.from('discussion_groups').select('id, name, created_by, created_by_name').order('created_at')
     setGroups((data as Group[]) || [])
   }, [])
+
+  // Load the selected group's members so only they can be tagged.
+  useEffect(() => {
+    const g = groups.find(x => x.id === sel)
+    if (!g) { setSelMembers([]); return }
+    supabase.from('discussion_group_members').select('user_id').eq('group_id', g.id)
+      .then(({ data }) => setSelMembers((data || []).map(r => r.user_id)))
+  }, [sel, groups])
 
   const nameOf = (id: string) => users.find(u => u.id === id)?.full_name || 'someone'
   const isManager = (g: Group) => !!profile && (g.created_by === profile.id || profile.role === 'admin' || profile.factory_code === 'HEAD_OFFICE')
@@ -56,12 +65,14 @@ export default function DiscussionPage() {
     const { error } = await supabase.rpc('add_group_member', { p_group: manageFor.id, p_user: uid })
     if (error) { setErr(error.message); return }
     setMembers(m => [...new Set([...m, uid])]); setAddPick('')
+    if (manageFor.id === sel) setSelMembers(m => [...new Set([...m, uid])])
   }
   async function removeMember(uid: string) {
     if (!manageFor) return
     const { error } = await supabase.rpc('remove_group_member', { p_group: manageFor.id, p_user: uid })
     if (error) { setErr(error.message); return }
     setMembers(m => m.filter(x => x !== uid))
+    if (manageFor.id === sel) setSelMembers(m => m.filter(x => x !== uid))
   }
   async function deleteGroup(g: Group) {
     if (!confirm(`Delete the group “${g.name}” and all its messages? This can't be undone.`)) return
@@ -107,7 +118,8 @@ export default function DiscussionPage() {
         )}
 
         <DiscussionPanel key={channel} channel={channel} me={profile.id} meName={profile.full_name} title={title}
-          soOptions={soOptions} filterSo={selGroup ? '' : filterSo} onFilterChange={selGroup ? undefined : setFilterSo} />
+          soOptions={soOptions} filterSo={selGroup ? '' : filterSo} onFilterChange={selGroup ? undefined : setFilterSo}
+          restrictToUserIds={selGroup ? selMembers : undefined} />
       </div>
 
       {manageFor && (

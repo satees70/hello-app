@@ -13,10 +13,13 @@ const rawId = (key: string) => (key.startsWith('s:') || key.startsWith('t:')) ? 
 // Discussion, WhatsApp-style: thread list on the left, the open chat on the right.
 // Threads are per-order (SO), free-form tickets/topics, or the General thread.
 // Any thread can be marked "completed" to archive it.
-export default function DiscussionPanel({ channel = 'warehouse', me, meName, title = 'Discussion', soOptions = [], filterSo: filterSoProp, onFilterChange, panelId, onPosted }: {
+export default function DiscussionPanel({ channel = 'warehouse', me, meName, title = 'Discussion', soOptions = [], filterSo: filterSoProp, onFilterChange, panelId, onPosted, restrictToUserIds }: {
   channel?: string; me: string; meName?: string | null; title?: string; soOptions?: string[]
   filterSo?: string; onFilterChange?: (so: string) => void; panelId?: string; onPosted?: () => void
+  // When set (e.g. a private group), only these users can be tagged and location-tagging is hidden.
+  restrictToUserIds?: string[] | null
 }) {
+  const restricted = Array.isArray(restrictToUserIds)
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [body, setBody] = useState('')
   const [sending, setSending] = useState(false)
@@ -199,13 +202,13 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
             )}
             <div className="flex flex-wrap gap-2 p-3 border-t">
               {(users.length > 0 || factories.length > 0) && (
-                <select value="" onChange={e => { const v = e.target.value; if (!v) return; if (v.startsWith('fac:')) { const c = v.slice(4); setFacMentions(f => f.includes(c) ? f : [...f, c]) } else { setMentions(m => m.includes(v) ? m : [...m, v]) } }} className="w-32 border rounded-lg px-2 py-2 text-sm bg-white" title="Tag a person or location">
+                <select value="" onChange={e => { const v = e.target.value; if (!v) return; if (v.startsWith('fac:')) { const c = v.slice(4); setFacMentions(f => f.includes(c) ? f : [...f, c]) } else { setMentions(m => m.includes(v) ? m : [...m, v]) } }} className="w-32 border rounded-lg px-2 py-2 text-sm bg-white" title={restricted ? 'Tag a group member' : 'Tag a person or location'}>
                   <option value="">＠ Tag…</option>
-                  {factories.length > 0 && <optgroup label="Locations (all users)">
+                  {!restricted && factories.length > 0 && <optgroup label="Locations (all users)">
                     {factories.filter(f => f.code !== 'HEAD_OFFICE' && !facMentions.includes(f.code)).map(f => <option key={f.code} value={`fac:${f.code}`}>{f.code}{f.name && f.name !== f.code ? ` — ${f.name}` : ''}</option>)}
                   </optgroup>}
-                  {users.length > 0 && <optgroup label="People">
-                    {users.filter(u => u.id !== me && !mentions.includes(u.id)).map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+                  {users.length > 0 && <optgroup label={restricted ? 'Group members' : 'People'}>
+                    {users.filter(u => u.id !== me && !mentions.includes(u.id) && (!restricted || restrictToUserIds!.includes(u.id))).map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
                   </optgroup>}
                 </select>
               )}
