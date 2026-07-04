@@ -358,7 +358,7 @@ export default function AttendancePage() {
                 </tr>
               </thead>
               <tbody>
-                {(onlyReview ? b.days.filter(dayNeedsAttn) : b.days).map(({ dateKey, result, trip, manualTime, outstationId, kind, leaveType, lateExcused }) => (
+                {(onlyReview ? b.days.filter(dayNeedsAttn) : b.days).map(({ dateKey, result, trip, manualTime, outstationId, kind, leaveType, lateExcused, otInTrip }) => (
                   <tr key={dateKey} className={`border-b border-gray-50 align-top ${result.needsReview ? 'bg-amber-50' : kind === 'absent' ? 'bg-rose-50' : kind === 'off' || kind === 'holiday' ? 'text-gray-400' : ''}`}>
                     <td className="px-4 py-2 whitespace-nowrap">
                       {fmtDate(dateKey)} <span className={`ml-1 ${[0, 6].includes(weekdayOf(dateKey)) ? 'text-rose-500' : 'text-gray-400'}`}>{DOW_SHORT[weekdayOf(dateKey)]}</span>
@@ -376,7 +376,13 @@ export default function AttendancePage() {
                       ))}
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap">{kind === 'worked' ? (result.needsReview ? '—' : fmtMinutes(result.workedMinutes)) : '—'}</td>
-                    <td className="px-4 py-2 whitespace-nowrap">{kind === 'worked' && !result.needsReview && result.otMinutes > 0 ? <span className="font-medium">{fmtMinutes(result.otMinutes)}</span> : '—'}</td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {kind === 'worked' && !result.needsReview && result.otMinutes > 0
+                        ? (otInTrip
+                          ? <span className="text-gray-400 line-through" title={`Driver on ${trip} — OT paid under the trip, not counted here`}>{fmtMinutes(result.otMinutes)}</span>
+                          : <span className="font-medium">{fmtMinutes(result.otMinutes)}</span>)
+                        : '—'}
+                    </td>
                     {b.deliveryName && (
                       <td className="px-4 py-2 whitespace-nowrap">
                         {kind === 'worked' || kind === 'outstation' ? (
