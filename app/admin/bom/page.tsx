@@ -50,6 +50,8 @@ export default function BomPage() {
   const router = useRouter()
   const [items, setItems] = useState<Item[]>([])
   const [parentId, setParentId] = useState('')
+  const [traceId, setTraceId] = useState('')            // "where used": a component to trace back
+  const [traceParents, setTraceParents] = useState<Item[]>([])
   const [showDone, setShowDone] = useState(false)   // BOM-status panel: reveal items that already have a recipe
   const [groupFilter, setGroupFilter] = useState('')   // BOM-status panel: filter chips by stock group
   const [components, setComponents] = useState<BomComponent[]>([])
@@ -99,6 +101,15 @@ export default function BomPage() {
     setComponents(data || [])
     setDirty(false)
   }
+
+  // "Where used": every product whose recipe includes the traced component.
+  useEffect(() => {
+    if (!traceId) { setTraceParents([]); return }
+    supabase.from('bom_components').select('parent_item_id').eq('component_item_id', traceId).then(({ data }) => {
+      const ids = new Set((data || []).map(r => r.parent_item_id))
+      setTraceParents(items.filter(i => ids.has(i.id)))
+    })
+  }, [traceId, items])
 
   const itemById = (id: string) => items.find(i => i.id === id)
   const manufactured = items.filter(i => i.type === 'Manufactured')
@@ -280,6 +291,24 @@ export default function BomPage() {
             {bulkBusy && <span className="text-blue-600 text-sm">Importing…</span>}
           </div>
           {bulkMsg && <p className="text-sm mt-3 bg-gray-50 border rounded p-2">{bulkMsg}</p>}
+        </div>
+
+        {/* Where used — trace a material back to the products that use it */}
+        <div className="bg-amber-50 rounded-xl shadow-sm border border-amber-200 p-6 mb-6">
+          <label className="block text-sm font-medium mb-1">🔎 Where is a material used? <span className="text-gray-500 font-normal">— trace a BOM component back to its products (helps catch wrong BOM)</span></label>
+          <div className="w-full sm:w-[28rem]">
+            <ItemCombo items={items} value={traceId} placeholder="Type a material code or name…" onChange={setTraceId} />
+          </div>
+          {traceId && (traceParents.length === 0
+            ? <p className="text-gray-500 text-sm mt-3">Not used in any product recipe.</p>
+            : <div className="mt-3">
+                <p className="text-sm text-gray-600 mb-1">Used in <strong>{traceParents.length}</strong> product recipe(s) — click to open:</p>
+                <ul className="space-y-0.5">
+                  {traceParents.map(p => (
+                    <li key={p.id}><button onClick={() => { setParentId(p.id); setError(''); setSuccess(''); window.scrollTo({ top: 0, behavior: 'smooth' }) }} className="text-blue-600 hover:underline text-sm text-left"><span className="font-mono">{p.code}</span> — {p.description}</button></li>
+                  ))}
+                </ul>
+              </div>)}
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border p-6 mb-6">

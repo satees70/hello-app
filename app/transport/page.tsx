@@ -193,7 +193,7 @@ export default function TransportPage() {
               {grNeedDriver.map(g => (
                 <li key={g.id} className="flex flex-wrap items-center gap-2 text-sm border-b last:border-0 pb-2 last:pb-0">
                   <span className="inline-flex items-center gap-1 bg-teal-50 text-teal-800 rounded-full px-2.5 py-0.5 text-xs font-medium">🚚 {g.vehicle}</span>
-                  <span className="font-mono text-gray-600">{g.do_number || '—'}</span>
+                  <a href={`/incoming?transport=${g.id}`} className="font-mono text-blue-600 hover:underline" title="Open this delivery on Goods Received">{g.do_number || '—'} ↗</a>
                   <span className="text-gray-500">→ {factoryName(g.factory_code)}</span>
                   <select value="" onChange={e => assignGrDriver(g.id, e.target.value)} disabled={busy === 'gr' + g.id} className="border rounded px-2 py-1 text-xs ml-auto">
                     <option value="">Assign driver…</option>

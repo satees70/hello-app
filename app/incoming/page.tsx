@@ -219,6 +219,11 @@ export default function IncomingPage() {
   }
 
   useEffect(() => { if (profile) { loadDocs(); loadFactories(); loadItemsMaster(); loadResources() } }, [profile])
+  // Deep link: /incoming?transport=<docId> opens that document's Transport view (from Lorry Internal Transfer).
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('transport'); if (!id) return
+    const d = docs.find(x => x.id === id); if (d) setTransportDoc(d)
+  }, [docs])
 
   async function loadResources() {
     const { data } = await supabase.from('delivery_resources').select('kind, name, parked_at, lorry_type').eq('active', true).order('name')
@@ -822,7 +827,7 @@ export default function IncomingPage() {
               <div>
                 <label className="block text-sm font-medium mb-1">Lorry</label>
                 {doc.vehicle
-                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-teal-50 text-teal-800 rounded-full px-2.5 py-1 text-sm font-medium">🚚 {doc.vehicle}</span><span className="text-xs text-gray-400">{by(doc.lorry_assigned_by)}</span>{canWh && <button onClick={() => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'lorry', p_value: null })} disabled={tBusy} className="text-xs text-gray-400 hover:text-red-600">change</button>}</div>
+                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-teal-50 text-teal-800 rounded-full px-2.5 py-1 text-sm font-medium">🚚 {doc.vehicle}</span><span className="text-xs text-gray-400">{by(doc.lorry_assigned_by)}</span></div>
                   : canWh
                     ? <select value="" onChange={e => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'lorry', p_value: e.target.value })} disabled={tBusy} className="border rounded-lg px-2 py-1.5 text-sm w-full">
                         <option value="">Assign a lorry…</option>
@@ -847,7 +852,7 @@ export default function IncomingPage() {
               <div>
                 <label className="block text-sm font-medium mb-1">Driver <span className="text-gray-400 font-normal">(can be assigned later)</span></label>
                 {doc.driver_name
-                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 rounded-full px-2.5 py-1 text-sm font-medium">👤 {doc.driver_name}</span><span className="text-xs text-gray-400">{by(doc.driver_assigned_by)}</span>{canWh && <button onClick={() => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'driver', p_value: null })} disabled={tBusy} className="text-xs text-gray-400 hover:text-red-600">change</button>}</div>
+                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 rounded-full px-2.5 py-1 text-sm font-medium">👤 {doc.driver_name}</span><span className="text-xs text-gray-400">{by(doc.driver_assigned_by)}</span></div>
                   : canWh
                     ? <select value="" onChange={e => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'driver', p_value: e.target.value })} disabled={tBusy} className="border rounded-lg px-2 py-1.5 text-sm w-full">
                         <option value="">Assign a driver…</option>
