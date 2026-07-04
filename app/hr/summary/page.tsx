@@ -12,6 +12,9 @@ import {
 const hrs = (min: number) => (min / 60).toFixed(2)
 // Round days sensibly (0.5 kept, whole numbers clean).
 const days = (d: number) => (Number.isInteger(d) ? String(d) : d.toFixed(1))
+// On-screen display: blank a zero so the table is easy to scan (CSV keeps the 0).
+const hb = (min: number) => (min ? hrs(min) : '')
+const db = (d: number) => (d ? days(d) : '')
 const fmtDate = (k: string) => { const [y, m, d] = k.split('-'); return `${d}/${m}/${y}` }
 const breakStr = (rec: Record<string, number>) => Object.entries(rec).map(([k, v]) => `${k} ${v}`).join(', ')
 
@@ -45,7 +48,7 @@ type Row = ReturnType<typeof rowFor>
 
 // The report columns, driving both the on-screen table and the CSV/print export.
 // `csv` returns the raw cell value for a row; `num` right-aligns the column.
-const COLS: { key: string; label: string; num?: boolean; csv: (r: Row) => string | number }[] = [
+const COLS: { key: string; label: string; num?: boolean; title?: string; csv: (r: Row) => string | number }[] = [
   { key: 'code', label: 'Code', csv: r => r.code },
   { key: 'name', label: 'Name', csv: r => r.name },
   { key: 'workDays', label: 'Work d', num: true, csv: r => days(r.workDays) },
@@ -58,8 +61,8 @@ const COLS: { key: string; label: string; num?: boolean; csv: (r: Row) => string
   { key: 'earlyMin', label: 'Early-out h', num: true, csv: r => hrs(r.earlyMin) },
   { key: 'totalOtMin', label: 'Total OT h', num: true, csv: r => hrs(r.totalOtMin) },
   { key: 'deduct', label: 'Deduct late/early', csv: r => (r.noDeductLate ? 'no' : 'yes') },
-  { key: 'phDays', label: 'PH d', num: true, csv: r => days(r.phDays) },
-  { key: 'restDays', label: 'Rest d', num: true, csv: r => days(r.restDays) },
+  { key: 'phDays', label: 'PH d', num: true, title: 'Days actually worked on a public holiday', csv: r => days(r.phDays) },
+  { key: 'restDays', label: 'Rest d', num: true, title: 'Days actually worked on a rest day (e.g. Sunday)', csv: r => days(r.restDays) },
   { key: 'outstationDays', label: 'Outstation d', num: true, csv: r => days(r.outstationDays) },
   { key: 'trips', label: 'Trips', csv: r => r.trips },
 ]
@@ -214,7 +217,7 @@ export default function SummaryPage() {
             <thead className="text-left text-gray-500 bg-gray-50">
               <tr className="border-b border-gray-200">
                 {COLS.map(c => (
-                  <th key={c.key} className={`px-3 py-2 font-medium whitespace-nowrap ${c.num ? 'text-right' : ''}`}>{c.label}</th>
+                  <th key={c.key} title={c.title} className={`px-3 py-2 font-medium whitespace-nowrap ${c.num ? 'text-right' : ''}`}>{c.label}</th>
                 ))}
               </tr>
             </thead>
@@ -226,35 +229,35 @@ export default function SummaryPage() {
                     {r.name}
                     {r.needsReview > 0 && <span className="ml-2 text-xs text-amber-600" title="Days still needing review on the Attendance page">⚠ {r.needsReview}</span>}
                   </td>
-                  <td className="px-3 py-2 text-right">{days(r.workDays)}</td>
-                  <td className="px-3 py-2 text-right">{days(r.leaveDays)}</td>
+                  <td className="px-3 py-2 text-right">{db(r.workDays)}</td>
+                  <td className="px-3 py-2 text-right">{db(r.leaveDays)}</td>
                   <td className="px-3 py-2 text-rose-600 whitespace-nowrap">{r.leaveBreak}</td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap">{hrs(r.workedMin)}</td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap font-medium">{hrs(r.otMin)}</td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">{hb(r.workedMin)}</td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap font-medium">{hb(r.otMin)}</td>
                   <td className="px-3 py-2 text-center">
                     <input type="checkbox" checked={!r.otMonthOff} onChange={e => saveCountOt(r.code, e.target.checked)}
                       title="Untick to NOT count this person's OT for the month" className="cursor-pointer" />
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap text-rose-600">
-                    {hrs(r.lateMin)}
+                    {hb(r.lateMin)}
                     {r.noDeductLate && r.lateMin > 0
                       ? <div className="text-xs text-gray-400">not deducted</div>
                       : r.excusedLateMin > 0 && <div className="text-xs text-gray-400">exc {hrs(r.excusedLateMin)}</div>}
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap text-rose-600">
-                    {hrs(r.earlyMin)}
+                    {hb(r.earlyMin)}
                     {r.noDeductLate && r.earlyMin > 0
                       ? <div className="text-xs text-gray-400">not deducted</div>
                       : r.excusedEarlyMin > 0 && <div className="text-xs text-gray-400">exc {hrs(r.excusedEarlyMin)}</div>}
                   </td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap font-medium text-gray-900">{hrs(r.totalOtMin)}</td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap font-medium text-gray-900">{hb(r.totalOtMin)}</td>
                   <td className="px-3 py-2 text-center">
                     <input type="checkbox" checked={!r.noDeductLate} onChange={e => saveDeduct(r.code, e.target.checked)}
                       title="Untick to stop deducting this person's late/early from Total OT for the month" className="cursor-pointer" />
                   </td>
-                  <td className="px-3 py-2 text-right">{days(r.phDays)}</td>
-                  <td className="px-3 py-2 text-right">{days(r.restDays)}</td>
-                  <td className="px-3 py-2 text-right">{days(r.outstationDays)}</td>
+                  <td className="px-3 py-2 text-right">{db(r.phDays)}</td>
+                  <td className="px-3 py-2 text-right">{db(r.restDays)}</td>
+                  <td className="px-3 py-2 text-right">{db(r.outstationDays)}</td>
                   <td className="px-3 py-2 text-indigo-700 whitespace-nowrap">{r.trips}</td>
                 </tr>
               ))}
@@ -262,19 +265,19 @@ export default function SummaryPage() {
             <tfoot className="bg-gray-50 font-medium border-t-2 border-gray-200">
               <tr>
                 <td className="px-3 py-2" colSpan={2}>Total ({rows.length})</td>
-                <td className="px-3 py-2 text-right">{days(totals.workDays)}</td>
-                <td className="px-3 py-2 text-right">{days(totals.leaveDays)}</td>
+                <td className="px-3 py-2 text-right">{db(totals.workDays)}</td>
+                <td className="px-3 py-2 text-right">{db(totals.leaveDays)}</td>
                 <td className="px-3 py-2"></td>
-                <td className="px-3 py-2 text-right">{hrs(totals.workedMin)}</td>
-                <td className="px-3 py-2 text-right">{hrs(totals.otMin)}</td>
+                <td className="px-3 py-2 text-right">{hb(totals.workedMin)}</td>
+                <td className="px-3 py-2 text-right">{hb(totals.otMin)}</td>
                 <td className="px-3 py-2"></td>
-                <td className="px-3 py-2 text-right">{hrs(totals.lateMin)}</td>
-                <td className="px-3 py-2 text-right">{hrs(totals.earlyMin)}</td>
-                <td className="px-3 py-2 text-right">{hrs(totals.totalOtMin)}</td>
+                <td className="px-3 py-2 text-right">{hb(totals.lateMin)}</td>
+                <td className="px-3 py-2 text-right">{hb(totals.earlyMin)}</td>
+                <td className="px-3 py-2 text-right">{hb(totals.totalOtMin)}</td>
                 <td className="px-3 py-2"></td>
-                <td className="px-3 py-2 text-right">{days(totals.phDays)}</td>
-                <td className="px-3 py-2 text-right">{days(totals.restDays)}</td>
-                <td className="px-3 py-2 text-right">{days(totals.outstationDays)}</td>
+                <td className="px-3 py-2 text-right">{db(totals.phDays)}</td>
+                <td className="px-3 py-2 text-right">{db(totals.restDays)}</td>
+                <td className="px-3 py-2 text-right">{db(totals.outstationDays)}</td>
                 <td className="px-3 py-2"></td>
               </tr>
             </tfoot>

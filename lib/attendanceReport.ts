@@ -246,17 +246,18 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
         dayRows.push({ dateKey, result, trip, manualTime, outstationId: null, kind: 'worked', leaveType: result.halfDay ? leaveType : null, lateExcused, otInTrip, otExcludedDay, forceHalf })
         continue
       }
-      // No punches. Public holiday → shown, counted, not leave.
+      // No punches on a public holiday → shown as a row, but NOT counted: PH d
+      // means days actually WORKED on a public holiday (added in the worked branch
+      // above via dayUnits), not that the holiday merely exists.
       if (isHol) {
-        totalHolidayDays += 1
         dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'holiday', leaveType: null, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false })
         continue
       }
       // No profile → we can't tell work day from rest day, so skip empty days.
       if (scheduledWorking === null) continue
-      // Rest / off day.
+      // Rest / off day with no punches → shown but NOT counted (Rest d = days
+      // actually worked on a rest day / Sunday, counted in the worked branch).
       if (!scheduledWorking) {
-        totalRestDays += 1
         dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'off', leaveType: null, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false })
         continue
       }
