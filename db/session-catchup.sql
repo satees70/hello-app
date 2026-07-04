@@ -1238,16 +1238,56 @@ create trigger notify_dispatch after update of dispatched_at on public.productio
 alter table public.notifications add column if not exists author_id uuid;
 create or replace function public.tg_notify_discussion() returns trigger
  language plpgsql security definer set search_path to 'public' as $function$
+declare v_link text; v_label text; uid uuid; fac text;
 begin
+  if NEW.so_number is not null then v_link := '/discussion?so=' || NEW.so_number; v_label := 'SO ' || NEW.so_number;
+  elsif NEW.topic is not null then v_link := '/discussion?topic=' || NEW.topic; v_label := NEW.topic;
+  else v_link := '/discussion'; v_label := 'General'; end if;
+
+  -- SO threads broadcast to the SO's factories (never for private groups).
   if NEW.so_number is not null and NEW.channel not like 'group:%' then
     insert into public.notifications (author_id, factory_code, type, title, body, link, ref)
     select distinct NEW.author_id, sol.factory_code, 'discussion', 'New message · SO ' || NEW.so_number,
-           coalesce(NEW.author_name, 'Someone') || ': ' || left(NEW.body, 80),
-           '/discussion?so=' || NEW.so_number,
+           coalesce(NEW.author_name, 'Someone') || ': ' || left(NEW.body, 80), v_link,
            'disc:' || NEW.id::text || ':' || sol.factory_code
     from public.sales_order_lines sol
     where sol.so_number = NEW.so_number and coalesce(sol.factory_code, '') <> ''
     on conflict (ref) do nothing;
+  end if;
+
+  -- Non-SO threads (tickets / pick runs / general): notify everyone who has
+  -- already posted in this exact thread, so replies reach the participants.
+  if NEW.so_number is null then
+    insert into public.notifications (author_id, factory_code, user_id, type, title, body, link, ref)
+    select distinct NEW.author_id, '', d.author_id, 'discussion', 'Reply · ' || v_label,
+           coalesce(NEW.author_name, 'Someone') || ': ' || left(NEW.body, 80), v_link,
+           'discp:' || NEW.id::text || ':' || d.author_id::text
+    from public.discussions d
+    where d.channel = NEW.channel and coalesce(d.topic, '') = coalesce(NEW.topic, '')
+      and d.author_id is not null and d.author_id <> NEW.author_id
+    on conflict (ref) do nothing;
+  end if;
+
+  -- Personal @mentions (any thread type, but not to the author).
+  if NEW.mention_ids is not null then
+    foreach uid in array NEW.mention_ids loop
+      if uid <> NEW.author_id then
+        insert into public.notifications (author_id, factory_code, user_id, type, title, body, link, ref)
+        values (NEW.author_id, '', uid, 'mention', coalesce(NEW.author_name, 'Someone') || ' mentioned you',
+                left(NEW.body, 100), v_link, 'mention:' || NEW.id::text || ':' || uid::text)
+        on conflict (ref) do nothing;
+      end if;
+    end loop;
+  end if;
+
+  -- @factory (location) mentions — everyone there (never for private groups).
+  if NEW.mention_factories is not null and NEW.channel not like 'group:%' then
+    foreach fac in array NEW.mention_factories loop
+      insert into public.notifications (author_id, factory_code, type, title, body, link, ref)
+      values (NEW.author_id, fac, 'mention', coalesce(NEW.author_name, 'Someone') || ' tagged @' || fac,
+              left(NEW.body, 100), v_link, 'mentionfac:' || NEW.id::text || ':' || fac)
+      on conflict (ref) do nothing;
+    end loop;
   end if;
   return NEW;
 end; $function$;
