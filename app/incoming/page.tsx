@@ -23,6 +23,11 @@ interface DeliveryOrder {
   driver_assigned_at?: string | null
   gr_departed_at?: string | null
   transport_received_at?: string | null
+  lorry_assigned_by?: string | null
+  loaded_by?: string | null
+  driver_assigned_by?: string | null
+  gr_departed_by?: string | null
+  transport_received_by?: string | null
 }
 interface DoLine { id: string; item_code: string; description: string; quantity: number; unit: string; batch_no: string; qc_checked: boolean; photo_path: string | null; received_at: string | null; stock_lot_id?: string | null; received_qty?: number | null }
 interface MRItem { id: string; item_code: string; unit: string; requested_qty: number; received_qty: number }
@@ -104,6 +109,7 @@ export default function IncomingPage() {
   const [transportDoc, setTransportDoc] = useState<DeliveryOrder | null>(null)
   const [lorries, setLorries] = useState<{ name: string; parked_at: string | null; lorry_type: string | null }[]>([])
   const [crew, setCrew] = useState<string[]>([])
+  const [userNames, setUserNames] = useState<Record<string, string>>({})   // user id -> name, for "by whom" on transport steps
   const [tBusy, setTBusy] = useState(false)
 
   // Lines / review state for the currently opened document
@@ -218,6 +224,8 @@ export default function IncomingPage() {
     const { data } = await supabase.from('delivery_resources').select('kind, name, parked_at, lorry_type').eq('active', true).order('name')
     setLorries((data || []).filter(r => r.kind === 'lorry').map(r => ({ name: r.name, parked_at: r.parked_at, lorry_type: r.lorry_type })))
     setCrew([...new Set((data || []).filter(r => r.kind !== 'lorry').map(r => r.name))].sort())
+    const { data: us } = await supabase.rpc('list_users')
+    setUserNames(Object.fromEntries(((us as { id: string; full_name: string }[]) || []).map(u => [u.id, u.full_name])))
   }
   // Transport-step actions on a Goods-Received document.
   async function grTransport(rpc: string, args: Record<string, unknown>) {
@@ -787,6 +795,7 @@ export default function IncomingPage() {
         const onSite = lorries.filter(l => l.parked_at === doc.factory_code)   // parked at destination (rare)
         const atWh = lorries.filter(l => l.parked_at && l.parked_at !== doc.factory_code)
         const fmtT = (iso?: string | null) => iso ? new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
+        const by = (uid?: string | null) => uid && userNames[uid] ? ` · by ${userNames[uid]}` : ''
         const step = (done: boolean, label: string, when?: string | null) => (
           <span className={`inline-flex items-center gap-1 text-xs ${done ? 'text-green-700' : 'text-gray-400'}`}>{done ? '✅' : '○'} {label}{done && when ? ` · ${fmtT(when)}` : ''}</span>
         )
@@ -813,7 +822,7 @@ export default function IncomingPage() {
               <div>
                 <label className="block text-sm font-medium mb-1">Lorry</label>
                 {doc.vehicle
-                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-teal-50 text-teal-800 rounded-full px-2.5 py-1 text-sm font-medium">🚚 {doc.vehicle}</span>{canWh && <button onClick={() => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'lorry', p_value: null })} disabled={tBusy} className="text-xs text-gray-400 hover:text-red-600">change</button>}</div>
+                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-teal-50 text-teal-800 rounded-full px-2.5 py-1 text-sm font-medium">🚚 {doc.vehicle}</span><span className="text-xs text-gray-400">{by(doc.lorry_assigned_by)}</span>{canWh && <button onClick={() => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'lorry', p_value: null })} disabled={tBusy} className="text-xs text-gray-400 hover:text-red-600">change</button>}</div>
                   : canWh
                     ? <select value="" onChange={e => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'lorry', p_value: e.target.value })} disabled={tBusy} className="border rounded-lg px-2 py-1.5 text-sm w-full">
                         <option value="">Assign a lorry…</option>
@@ -828,7 +837,7 @@ export default function IncomingPage() {
               <div>
                 <label className="block text-sm font-medium mb-1">Loaded</label>
                 {doc.loaded_at
-                  ? <span className="text-sm text-green-700">✅ Loaded {fmtT(doc.loaded_at)}{canWh && <button onClick={() => grTransport('mark_gr_loaded', { p_doc_id: doc.id, p_on: false })} disabled={tBusy} className="ml-1 text-gray-400 hover:underline text-xs">undo</button>}</span>
+                  ? <span className="text-sm text-green-700">✅ Loaded {fmtT(doc.loaded_at)}<span className="text-gray-400 text-xs">{by(doc.loaded_by)}</span>{canWh && <button onClick={() => grTransport('mark_gr_loaded', { p_doc_id: doc.id, p_on: false })} disabled={tBusy} className="ml-1 text-gray-400 hover:underline text-xs">undo</button>}</span>
                   : canWh
                     ? <div className="flex items-center gap-2"><button onClick={() => grTransport('mark_gr_loaded', { p_doc_id: doc.id, p_on: true })} disabled={tBusy || !doc.vehicle} className="bg-amber-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-amber-700 disabled:opacity-50">📦 Mark loaded</button>{!doc.vehicle && <span className="text-xs text-gray-400">assign a lorry first</span>}</div>
                     : <span className="text-sm text-gray-400">Not loaded yet</span>}
@@ -838,7 +847,7 @@ export default function IncomingPage() {
               <div>
                 <label className="block text-sm font-medium mb-1">Driver <span className="text-gray-400 font-normal">(can be assigned later)</span></label>
                 {doc.driver_name
-                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 rounded-full px-2.5 py-1 text-sm font-medium">👤 {doc.driver_name}</span>{canWh && <button onClick={() => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'driver', p_value: null })} disabled={tBusy} className="text-xs text-gray-400 hover:text-red-600">change</button>}</div>
+                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 rounded-full px-2.5 py-1 text-sm font-medium">👤 {doc.driver_name}</span><span className="text-xs text-gray-400">{by(doc.driver_assigned_by)}</span>{canWh && <button onClick={() => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'driver', p_value: null })} disabled={tBusy} className="text-xs text-gray-400 hover:text-red-600">change</button>}</div>
                   : canWh
                     ? <select value="" onChange={e => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'driver', p_value: e.target.value })} disabled={tBusy} className="border rounded-lg px-2 py-1.5 text-sm w-full">
                         <option value="">Assign a driver…</option>
@@ -850,12 +859,12 @@ export default function IncomingPage() {
               {/* Send + Receive */}
               <div className="flex items-center gap-3 pt-2 border-t">
                 {doc.gr_departed_at
-                  ? <span className="text-green-700 text-sm">✅ Sent {fmtT(doc.gr_departed_at)}{canWh && <button onClick={() => grTransport('mark_gr_out', { p_doc_id: doc.id, p_out: false })} disabled={tBusy} className="ml-1 text-gray-400 hover:underline text-xs">undo</button>}</span>
+                  ? <span className="text-green-700 text-sm">✅ Sent {fmtT(doc.gr_departed_at)}<span className="text-gray-400 text-xs">{by(doc.gr_departed_by)}</span>{canWh && <button onClick={() => grTransport('mark_gr_out', { p_doc_id: doc.id, p_out: false })} disabled={tBusy} className="ml-1 text-gray-400 hover:underline text-xs">undo</button>}</span>
                   : canWh
                     ? <button onClick={() => grTransport('mark_gr_out', { p_doc_id: doc.id, p_out: true })} disabled={tBusy || !doc.vehicle} className="bg-teal-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-teal-700 disabled:opacity-50">🚚 Send to factory</button>
                     : <span className="text-sm text-gray-400">Not sent yet</span>}
                 {doc.transport_received_at
-                  ? <span className="text-green-700 text-sm font-medium ml-auto">✅ Received {fmtT(doc.transport_received_at)}</span>
+                  ? <span className="text-green-700 text-sm font-medium ml-auto">✅ Received {fmtT(doc.transport_received_at)}<span className="text-gray-400 text-xs font-normal">{by(doc.transport_received_by)}</span></span>
                   : canRcv
                     ? <button onClick={() => grTransport('confirm_gr_received', { p_doc_id: doc.id })} disabled={tBusy} className="ml-auto bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-green-700 disabled:opacity-50">Confirm received</button>
                     : <span className="text-sm text-gray-400 ml-auto">Awaiting the factory to confirm</span>}

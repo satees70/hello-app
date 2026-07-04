@@ -1989,13 +1989,14 @@ begin
   if not public._gr_warehouse() then raise exception 'Not allowed'; end if;
   v_val := nullif(btrim(p_value), '');
   if p_kind = 'lorry' then
-    update public.delivery_orders set vehicle = v_val where id = p_doc_id;
+    update public.delivery_orders set vehicle = v_val, lorry_assigned_by = case when v_val is null then null else auth.uid() end where id = p_doc_id;
     if v_val is not null then
       update public.delivery_resources set parked_at = null where kind = 'lorry' and lower(name) = lower(v_val);
     end if;
   else
     update public.delivery_orders
-       set driver_name = v_val, driver_assigned_at = case when v_val is null then null else now() end
+       set driver_name = v_val, driver_assigned_at = case when v_val is null then null else now() end,
+           driver_assigned_by = case when v_val is null then null else auth.uid() end
      where id = p_doc_id;
     if v_val is not null then
       insert into public.notifications (factory_code, type, title, body, link, ref)
@@ -2039,7 +2040,8 @@ begin
   select factory_code, do_number, vehicle, driver_name into v_fac, v_no, v_veh, v_drv from public.delivery_orders where id = p_doc_id;
   if v_fac is null then raise exception 'Document not found'; end if;
   if not public._gr_warehouse() then raise exception 'Not allowed'; end if;
-  update public.delivery_orders set gr_departed_at = case when p_out then now() else null end where id = p_doc_id;
+  update public.delivery_orders set gr_departed_at = case when p_out then now() else null end,
+         gr_departed_by = case when p_out then auth.uid() else null end where id = p_doc_id;
   if p_out then
     insert into public.notifications (factory_code, type, title, body, link, ref)
     values (v_fac, 'transport', 'Incoming lorry on the way: ' || coalesce(v_no, ''),
@@ -2241,3 +2243,8 @@ insert into storage.buckets (id, name, public) values ('discussion-files', 'disc
 drop policy if exists discfiles_all on storage.objects;
 create policy discfiles_all on storage.objects for all to authenticated
   using (bucket_id = 'discussion-files') with check (bucket_id = 'discussion-files');
+
+-- 2026-07 · Track who did each GR transport step (show attribution in the modal).
+alter table public.delivery_orders add column if not exists lorry_assigned_by uuid;
+alter table public.delivery_orders add column if not exists driver_assigned_by uuid;
+alter table public.delivery_orders add column if not exists gr_departed_by uuid;
