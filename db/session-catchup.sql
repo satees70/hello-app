@@ -2310,3 +2310,39 @@ grant execute on function public.send_test_notification() to authenticated;
 -- 2026-07 · Set which trip in a driver's day a line is (1st / 2nd …). Overrides
 -- the auto line-order numbering in the Driver trips summary.
 alter table public.delivery_trips add column if not exists trip_no int;
+
+-- 2026-07 · Late-in / early-out deduction control for the HR Monthly Summary.
+-- Total OT = OT − (late + early). These let a valid reason skip that deduction.
+--   late_excuses            : per DAY — a row means that day's late/early is
+--                             EXCUSED (not deducted). Absent row = deducted.
+--   late_deduction_overrides: per PERSON per MONTH ('YYYY-MM') — no_deduct=true
+--                             means never deduct any late/early for that month.
+create table if not exists public.late_excuses (
+  employee_code text not null,
+  work_date date not null,
+  reason text,
+  updated_at timestamptz not null default now(),
+  primary key (employee_code, work_date)
+);
+grant select, insert, update, delete on public.late_excuses to authenticated;
+grant all on public.late_excuses to service_role;
+alter table public.late_excuses enable row level security;
+drop policy if exists lex_read on public.late_excuses;
+create policy lex_read on public.late_excuses for select using (true);
+drop policy if exists lex_write on public.late_excuses;
+create policy lex_write on public.late_excuses for all using (true) with check (true);
+
+create table if not exists public.late_deduction_overrides (
+  employee_code text not null,
+  month text not null,                 -- 'YYYY-MM'
+  no_deduct boolean not null default true,
+  updated_at timestamptz not null default now(),
+  primary key (employee_code, month)
+);
+grant select, insert, update, delete on public.late_deduction_overrides to authenticated;
+grant all on public.late_deduction_overrides to service_role;
+alter table public.late_deduction_overrides enable row level security;
+drop policy if exists ldo_read on public.late_deduction_overrides;
+create policy ldo_read on public.late_deduction_overrides for select using (true);
+drop policy if exists ldo_write on public.late_deduction_overrides;
+create policy ldo_write on public.late_deduction_overrides for all using (true) with check (true);

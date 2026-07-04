@@ -182,6 +182,18 @@ export default function AttendancePage() {
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Leave save failed') }
   }
 
+  // Excuse (or un-excuse) one day's late/early so it isn't deducted from Total OT
+  // on the Monthly Summary (optimistic — no full reload).
+  async function saveExcuse(code: string, date: string, excused: boolean) {
+    setBlocks(bs => bs.map(b => b.code === code
+      ? { ...b, days: b.days.map(d => d.dateKey === date ? { ...d, lateExcused: excused } : d) } : b))
+    const res = await fetch('/api/attendance/excuse-late', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employee_code: code, work_date: date, excused }),
+    })
+    if (!res.ok) { const j = await res.json(); setError(j.error || 'Excuse save failed') }
+  }
+
   // Build the printable HTML for one employee's attendance card.
   function cardHtml(b: EmpBlock): string {
     const leaveBreak = Object.entries(leaveBreakdown(b)).map(([k, v]) => `${k} ${v}`).join(', ')
@@ -346,7 +358,7 @@ export default function AttendancePage() {
                 </tr>
               </thead>
               <tbody>
-                {(onlyReview ? b.days.filter(dayNeedsAttn) : b.days).map(({ dateKey, result, trip, manualTime, outstationId, kind, leaveType }) => (
+                {(onlyReview ? b.days.filter(dayNeedsAttn) : b.days).map(({ dateKey, result, trip, manualTime, outstationId, kind, leaveType, lateExcused }) => (
                   <tr key={dateKey} className={`border-b border-gray-50 align-top ${result.needsReview ? 'bg-amber-50' : kind === 'absent' ? 'bg-rose-50' : kind === 'off' || kind === 'holiday' ? 'text-gray-400' : ''}`}>
                     <td className="px-4 py-2 whitespace-nowrap">
                       {fmtDate(dateKey)} <span className={`ml-1 ${[0, 6].includes(weekdayOf(dateKey)) ? 'text-rose-500' : 'text-gray-400'}`}>{DOW_SHORT[weekdayOf(dateKey)]}</span>
@@ -376,10 +388,18 @@ export default function AttendancePage() {
                         ) : <span className="text-gray-300">—</span>}
                       </td>
                     )}
-                    <td className="px-4 py-2 whitespace-nowrap text-xs text-rose-600">
-                      {result.lateMinutes > 0 && <span>late {fmtMinutes(result.lateMinutes)}</span>}
-                      {result.lateMinutes > 0 && result.earlyOutMinutes > 0 && <span> · </span>}
-                      {result.earlyOutMinutes > 0 && <span>early {fmtMinutes(result.earlyOutMinutes)}</span>}
+                    <td className="px-4 py-2 whitespace-nowrap text-xs">
+                      <span className={lateExcused ? 'text-gray-400 line-through' : 'text-rose-600'}>
+                        {result.lateMinutes > 0 && <span>late {fmtMinutes(result.lateMinutes)}</span>}
+                        {result.lateMinutes > 0 && result.earlyOutMinutes > 0 && <span> · </span>}
+                        {result.earlyOutMinutes > 0 && <span>early {fmtMinutes(result.earlyOutMinutes)}</span>}
+                      </span>
+                      {kind === 'worked' && (result.lateMinutes > 0 || result.earlyOutMinutes > 0) && (
+                        <label className="mt-1 flex items-center gap-1 text-gray-500 cursor-pointer" title="Tick if there's a valid reason — this day's late/early won't be deducted from Total OT">
+                          <input type="checkbox" checked={lateExcused} onChange={e => saveExcuse(b.code, dateKey, e.target.checked)} />
+                          excuse
+                        </label>
+                      )}
                     </td>
                     <td className="px-4 py-2">
                       {kind === 'off' ? (

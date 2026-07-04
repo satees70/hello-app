@@ -14,7 +14,7 @@ export interface Punch { employee_code: string; punch_time: string; department_n
 export interface Review extends ReviewLite { employee_code: string; work_date: string; manual_time: string | null }
 
 export type DayKind = 'worked' | 'outstation' | 'holiday' | 'off' | 'absent'
-export interface DayRow { dateKey: string; result: DayResult; trip: string | null; manualTime: string | null; outstationId: string | null; kind: DayKind; leaveType: string | null }
+export interface DayRow { dateKey: string; result: DayResult; trip: string | null; manualTime: string | null; outstationId: string | null; kind: DayKind; leaveType: string | null; lateExcused: boolean }
 
 export const LEAVE_TYPES = ['AL', 'MC', 'EL', 'Unpaid', 'Half']
 // How much of a scheduled day a leave type consumes. A half-day is 0.5 leave +
@@ -29,7 +29,16 @@ export interface EmpBlock {
   days: DayRow[]; punches: number; totalWorked: number; totalOt: number; totalLate: number; totalEarlyOut: number
   totalRestDays: number; totalHolidayDays: number; totalPresentDays: number; totalOutstation: number
   workDays: number; leaveDays: number; needsReview: number
+  // Late/early deduction control (HR Monthly Summary). `excusedLate/Early` are the
+  // minutes on per-day-excused days; `noDeductLate` = the whole month is exempted.
+  excusedLate: number; excusedEarly: number; noDeductLate: boolean
 }
+
+// Late/early minutes actually deducted from Total OT, honouring per-day excuses
+// and the per-person monthly override. Total OT = OT − deductedLate − deductedEarly.
+export function deductedLate(b: EmpBlock): number { return b.noDeductLate ? 0 : Math.max(0, b.totalLate - b.excusedLate) }
+export function deductedEarly(b: EmpBlock): number { return b.noDeductLate ? 0 : Math.max(0, b.totalEarlyOut - b.excusedEarly) }
+export function totalOtMinutes(b: EmpBlock): number { return b.totalOt - deductedLate(b) - deductedEarly(b) }
 
 // Add one day to a 'yyyy-MM-dd' date string (UTC-stable).
 export function addDay(dk: string): string {
@@ -89,6 +98,13 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
   const { data: leaves } = await supabase.from('leave_days').select('employee_code, work_date, leave_type').gte('work_date', from).lte('work_date', to)
   const leaveByKey = new Map<string, string>()
   for (const l of leaves || []) if (l.leave_type) leaveByKey.set(`${l.employee_code}|${l.work_date}`, l.leave_type)
+  // Per-day late/early excuses (a row = that day's late/early is not deducted).
+  const { data: excuses } = await supabase.from('late_excuses').select('employee_code, work_date').gte('work_date', from).lte('work_date', to)
+  const excusedSet = new Set<string>((excuses || []).map(e => `${e.employee_code}|${e.work_date}`))
+  // Per-person monthly override (no_deduct = never deduct that person's late/early).
+  const month = from.slice(0, 7)
+  const { data: overrides } = await supabase.from('late_deduction_overrides').select('employee_code, no_deduct').eq('month', month)
+  const noDeductSet = new Set<string>((overrides || []).filter(o => o.no_deduct).map(o => o.employee_code))
   // Outstation trips overlapping the range → per-employee map of dateKey → trip id.
   const { data: ostrips } = await supabase.from('outstation_trips').select('id, employee_code, start_date, end_date')
     .lte('start_date', to).gte('end_date', from)
@@ -130,7 +146,7 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
     const osDates = outstationByEmp.get(code) ?? new Map<string, string>()
     const dayRows: DayRow[] = []
     let punchCount = 0, totalWorked = 0, totalOt = 0, totalLate = 0, totalEarlyOut = 0, totalRestDays = 0, totalHolidayDays = 0, totalPresentDays = 0, totalOutstation = 0, needsReview = 0
-    let workDays = 0, leaveDays = 0
+    let workDays = 0, leaveDays = 0, excusedLate = 0, excusedEarly = 0
     const ws = prof?.week_schedule ?? null
     // Walk every calendar day in the range, so absent (leave) days show as rows too.
     for (const dateKey of rangeDates) {
@@ -148,7 +164,7 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
         punchCount += times.length
         totalOutstation++
         if (scheduledWorking && !isHol) workDays++
-        dayRows.push({ dateKey, result: outstationResult(times), trip, manualTime: null, outstationId: osDates.get(dateKey)!, kind: 'outstation', leaveType: null })
+        dayRows.push({ dateKey, result: outstationResult(times), trip, manualTime: null, outstationId: osDates.get(dateKey)!, kind: 'outstation', leaveType: null, lateExcused: false })
         continue
       }
       // Resolve any human review + hand-entered times. Each HH:mm in manual_time
@@ -171,6 +187,8 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
         totalOt += result.otMinutes
         totalLate += result.lateMinutes
         totalEarlyOut += result.earlyOutMinutes
+        const lateExcused = excusedSet.has(`${code}|${dateKey}`)
+        if (lateExcused) { excusedLate += result.lateMinutes; excusedEarly += result.earlyOutMinutes }
         if (result.dayType === 'rest') totalRestDays += result.dayUnits
         if (result.dayType === 'holiday') totalHolidayDays += result.dayUnits
         if (result.presentDay) totalPresentDays++
@@ -178,13 +196,13 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
           if (result.halfDay) { workDays += 0.5; leaveDays += 0.5 }
           else workDays++
         }
-        dayRows.push({ dateKey, result, trip, manualTime, outstationId: null, kind: 'worked', leaveType: null })
+        dayRows.push({ dateKey, result, trip, manualTime, outstationId: null, kind: 'worked', leaveType: null, lateExcused })
         continue
       }
       // No punches. Public holiday → shown, counted, not leave.
       if (isHol) {
         totalHolidayDays += 1
-        dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'holiday', leaveType: null })
+        dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'holiday', leaveType: null, lateExcused: false })
         continue
       }
       // No profile → we can't tell work day from rest day, so skip empty days.
@@ -192,18 +210,19 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
       // Rest / off day.
       if (!scheduledWorking) {
         totalRestDays += 1
-        dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'off', leaveType: null })
+        dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'off', leaveType: null, lateExcused: false })
         continue
       }
       // Scheduled work day with no attendance → absent / leave (half-day = 0.5).
       const w = leaveWeight(leaveType)
       leaveDays += w
       workDays += 1 - w
-      dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'absent', leaveType })
+      dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'absent', leaveType, lateExcused: false })
     }
     out.push({
       code, name: emp?.name || code, department: deptByCode.get(code) ?? null,
       profile: prof, deliveryName, days: dayRows, punches: punchCount, totalWorked, totalOt, totalLate, totalEarlyOut, totalRestDays, totalHolidayDays, totalPresentDays, totalOutstation, workDays, leaveDays, needsReview,
+      excusedLate, excusedEarly, noDeductLate: noDeductSet.has(code),
     })
   }
   out.sort((a, b) => a.name.localeCompare(b.name))

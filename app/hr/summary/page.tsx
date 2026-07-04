@@ -1,7 +1,7 @@
 'use client'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  loadReport, prevMonthRange, leaveBreakdown, tripBreakdown, type EmpBlock,
+  loadReport, prevMonthRange, leaveBreakdown, tripBreakdown, totalOtMinutes, type EmpBlock,
 } from '@/lib/attendanceReport'
 
 // Monthly Summary — one row per employee, the payroll-ready totals for a month.
@@ -15,9 +15,9 @@ const days = (d: number) => (Number.isInteger(d) ? String(d) : d.toFixed(1))
 const fmtDate = (k: string) => { const [y, m, d] = k.split('-'); return `${d}/${m}/${y}` }
 const breakStr = (rec: Record<string, number>) => Object.entries(rec).map(([k, v]) => `${k} ${v}`).join(', ')
 
-// The one row of numbers for an employee. `totalOt` = OT minus late/early time.
+// The one row of numbers for an employee. `totalOtMin` = OT minus late/early time
+// that is ACTUALLY deducted (excused days + a per-person exemption are skipped).
 function rowFor(b: EmpBlock) {
-  const totalOtMin = b.totalOt - b.totalLate - b.totalEarlyOut
   return {
     code: b.code,
     name: b.name,
@@ -29,7 +29,10 @@ function rowFor(b: EmpBlock) {
     otMin: b.totalOt,
     lateMin: b.totalLate,
     earlyMin: b.totalEarlyOut,
-    totalOtMin,
+    excusedLateMin: b.excusedLate,
+    excusedEarlyMin: b.excusedEarly,
+    noDeductLate: b.noDeductLate,
+    totalOtMin: totalOtMinutes(b),
     phDays: b.totalHolidayDays,
     restDays: b.totalRestDays,
     outstationDays: b.totalOutstation,
@@ -52,6 +55,7 @@ const COLS: { key: string; label: string; num?: boolean; csv: (r: Row) => string
   { key: 'lateMin', label: 'Late h', num: true, csv: r => hrs(r.lateMin) },
   { key: 'earlyMin', label: 'Early-out h', num: true, csv: r => hrs(r.earlyMin) },
   { key: 'totalOtMin', label: 'Total OT h', num: true, csv: r => hrs(r.totalOtMin) },
+  { key: 'deduct', label: 'Deduct late/early', csv: r => (r.noDeductLate ? 'no' : 'yes') },
   { key: 'phDays', label: 'PH d', num: true, csv: r => days(r.phDays) },
   { key: 'restDays', label: 'Rest d', num: true, csv: r => days(r.restDays) },
   { key: 'outstationDays', label: 'Outstation d', num: true, csv: r => days(r.outstationDays) },
@@ -78,6 +82,17 @@ export default function SummaryPage() {
     }
   }, [from, to])
   useEffect(() => { load() }, [load])
+
+  // Toggle the per-person monthly late/early deduction (optimistic). deduct=true
+  // means subtract late/early from Total OT; false exempts them for the month.
+  async function saveDeduct(code: string, deduct: boolean) {
+    setBlocks(bs => bs.map(b => b.code === code ? { ...b, noDeductLate: !deduct } : b))
+    const res = await fetch('/api/attendance/deduct-override', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employee_code: code, month: from.slice(0, 7), no_deduct: !deduct }),
+    })
+    if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') }
+  }
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -203,9 +218,23 @@ export default function SummaryPage() {
                   <td className="px-3 py-2 text-rose-600 whitespace-nowrap">{r.leaveBreak}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">{hrs(r.workedMin)}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap font-medium">{hrs(r.otMin)}</td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap text-rose-600">{hrs(r.lateMin)}</td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap text-rose-600">{hrs(r.earlyMin)}</td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap text-rose-600">
+                    {hrs(r.lateMin)}
+                    {r.noDeductLate && r.lateMin > 0
+                      ? <div className="text-xs text-gray-400">not deducted</div>
+                      : r.excusedLateMin > 0 && <div className="text-xs text-gray-400">exc {hrs(r.excusedLateMin)}</div>}
+                  </td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap text-rose-600">
+                    {hrs(r.earlyMin)}
+                    {r.noDeductLate && r.earlyMin > 0
+                      ? <div className="text-xs text-gray-400">not deducted</div>
+                      : r.excusedEarlyMin > 0 && <div className="text-xs text-gray-400">exc {hrs(r.excusedEarlyMin)}</div>}
+                  </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap font-medium text-gray-900">{hrs(r.totalOtMin)}</td>
+                  <td className="px-3 py-2 text-center">
+                    <input type="checkbox" checked={!r.noDeductLate} onChange={e => saveDeduct(r.code, e.target.checked)}
+                      title="Untick to stop deducting this person's late/early from Total OT for the month" className="cursor-pointer" />
+                  </td>
                   <td className="px-3 py-2 text-right">{days(r.phDays)}</td>
                   <td className="px-3 py-2 text-right">{days(r.restDays)}</td>
                   <td className="px-3 py-2 text-right">{days(r.outstationDays)}</td>
@@ -224,6 +253,7 @@ export default function SummaryPage() {
                 <td className="px-3 py-2 text-right">{hrs(totals.lateMin)}</td>
                 <td className="px-3 py-2 text-right">{hrs(totals.earlyMin)}</td>
                 <td className="px-3 py-2 text-right">{hrs(totals.totalOtMin)}</td>
+                <td className="px-3 py-2"></td>
                 <td className="px-3 py-2 text-right">{days(totals.phDays)}</td>
                 <td className="px-3 py-2 text-right">{days(totals.restDays)}</td>
                 <td className="px-3 py-2 text-right">{days(totals.outstationDays)}</td>
