@@ -2176,3 +2176,13 @@ update public.dispatch_orders
    set departed_at = coalesce(departed_at, created_at)
  where departed_at is null
    and created_at < '2026-07-03T16:00:00Z';
+
+-- Delete a discussion group (owner or HO/admin): removes its messages + members.
+create or replace function public.delete_discussion_group(p_group uuid) returns void
+ language plpgsql security definer set search_path to 'public' as $$
+begin
+  if not public.dg_is_manager(p_group) then raise exception 'Only the group owner or Head Office can delete this group'; end if;
+  delete from public.discussions where channel = 'group:' || p_group::text;
+  delete from public.discussion_groups where id = p_group;   -- members cascade
+end; $$;
+grant execute on function public.delete_discussion_group(uuid) to authenticated;

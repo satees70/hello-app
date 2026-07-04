@@ -63,6 +63,12 @@ export default function DiscussionPage() {
     if (error) { setErr(error.message); return }
     setMembers(m => m.filter(x => x !== uid))
   }
+  async function deleteGroup(g: Group) {
+    if (!confirm(`Delete the group “${g.name}” and all its messages? This can't be undone.`)) return
+    const { error } = await supabase.rpc('delete_discussion_group', { p_group: g.id })
+    if (error) { setErr(error.message); return }
+    setManageFor(null); setSel('warehouse'); await loadGroups()
+  }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
   if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
@@ -96,6 +102,7 @@ export default function DiscussionPage() {
           <div className="flex items-center gap-3 mb-3 text-sm text-gray-500">
             <span>Private group · created by {selGroup.created_by_name || '—'}</span>
             {isManager(selGroup) && <button onClick={() => openManage(selGroup)} className="text-blue-600 hover:underline">👥 Manage members</button>}
+            {isManager(selGroup) && <button onClick={() => deleteGroup(selGroup)} className="text-red-600 hover:underline">🗑 Delete group</button>}
           </div>
         )}
 
