@@ -2248,3 +2248,17 @@ create policy discfiles_all on storage.objects for all to authenticated
 alter table public.delivery_orders add column if not exists lorry_assigned_by uuid;
 alter table public.delivery_orders add column if not exists driver_assigned_by uuid;
 alter table public.delivery_orders add column if not exists gr_departed_by uuid;
+
+-- 2026-07 · Self-test notification: insert a personal notification for the caller
+-- (also fires the web-push trigger), so a user can test push on their own device.
+create or replace function public.send_test_notification() returns void
+ language plpgsql security definer set search_path to 'public' as $function$
+declare v_fac text;
+begin
+  select coalesce(factory_code, 'HEAD_OFFICE') into v_fac from public.profiles where id = auth.uid();
+  insert into public.notifications (user_id, factory_code, type, title, body, link, ref)
+  values (auth.uid(), coalesce(v_fac, 'HEAD_OFFICE'), 'test', '🔔 Test notification',
+          'If you see this on your phone, push notifications are working.', '/dashboard',
+          'test:' || auth.uid()::text || ':' || floor(extract(epoch from now()))::text);
+end; $function$;
+grant execute on function public.send_test_notification() to authenticated;

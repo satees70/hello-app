@@ -71,6 +71,12 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const unseenCount = notifSeenAt ? notifs.filter(n => n.created_at > notifSeenAt).length : notifs.length
   function openNotifs() { setNotifOpen(o => !o) }   // opening no longer marks all read — use the button
   async function markAllRead() { await supabase.rpc('mark_notifications_seen'); setNotifSeenAt(new Date().toISOString()) }
+  async function sendTest() {
+    const { error } = await supabase.rpc('send_test_notification')
+    if (error) { addToast('Test failed', error.message); return }
+    addToast('🔔 Test sent', 'Watch this device (and your phone if push is on).')
+    setTimeout(loadNotifs, 800)
+  }
 
   // Top-bar label: Head Office, "Multi-site (N)", or the single factory code.
   const factoryLabel = isHO ? 'Head Office'
@@ -303,6 +309,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
                   <div className="px-4 py-2 border-b sticky top-0 bg-white flex items-center justify-between gap-2">
                     <span className="font-semibold text-sm">Notifications</span>
                     <span className="flex items-center gap-2">
+                      <button onClick={sendTest} className="text-blue-600 hover:underline text-xs">Send test</button>
                       {unseenCount > 0 && <button onClick={markAllRead} className="text-blue-600 hover:underline text-xs">Mark all read</button>}
                       {pushSupported() && (pushOn
                         ? <span className="text-green-600 text-xs">✓ On this device</span>
