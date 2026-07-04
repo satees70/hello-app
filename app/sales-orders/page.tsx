@@ -187,6 +187,8 @@ export default function SalesOrdersPage() {
   const [submitting, setSubmitting] = useState(false)
 
   const [tomorrowSOs, setTomorrowSOs] = useState<Set<string>>(new Set())
+  // Deep link: /sales-orders?so=SO-41217 focuses that order (from the Discussion page).
+  useEffect(() => { const so = new URLSearchParams(window.location.search).get('so'); if (so) setDocSearch(so) }, [])
   useEffect(() => {
     if (profile) { loadImports(); loadRefs(); loadSummary(); loadDiscCounts(); fetchTomorrowDeliverySOs().then(setTomorrowSOs) }
   }, [profile])
@@ -771,7 +773,7 @@ export default function SalesOrdersPage() {
   const tomorrowDocCount = imports.filter(docIsTomorrow).length
   const urgentDocCount = imports.filter(d => d.urgent).length
   const shownImports = imports.filter(d =>
-    (!docSearch || d.file_name.toLowerCase().includes(docSearch.toLowerCase()) || (docLineText[d.id] || '').includes(docSearch.toLowerCase())) &&
+    (!docSearch || d.file_name.toLowerCase().includes(docSearch.toLowerCase()) || (docLineText[d.id] || '').includes(docSearch.toLowerCase()) || (importSos[d.id] || []).some(so => so.toLowerCase().includes(docSearch.toLowerCase()))) &&
     docPass(docFilters.status, [d.status]) &&
     docPass(docFilters.locations, docSummary[d.id]?.locations || []) &&
     docPass(docFilters.issues, docIssueTags(d)) &&

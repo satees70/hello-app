@@ -174,7 +174,9 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
             <div className="flex-1 flex items-center justify-center text-gray-400 text-sm p-8">Pick a conversation on the left, or raise a ticket.</div>
           ) : (<>
             <div className="px-4 py-2.5 border-b flex items-center gap-2">
-              <span className="font-semibold">{labelOf(thread!)}</span>
+              {thread!.startsWith('s:')
+                ? <a href={`/sales-orders?so=${encodeURIComponent(thread!.slice(2))}`} className="font-semibold text-blue-600 hover:underline" title="Open this order in Sales Orders">{labelOf(thread!)} ↗</a>
+                : <span className="font-semibold">{labelOf(thread!)}</span>}
               {custOf(thread!) && <span className="text-gray-500 text-sm">· {custOf(thread!)}</span>}
               <span className="text-gray-400 text-sm">· {shown.length} msg</span>
               {rawId(thread!) && (
