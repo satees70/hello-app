@@ -2214,7 +2214,8 @@ begin
   elsif TG_OP = 'UPDATE' and OLD.released_at is null and NEW.released_at is not null then
     insert into public.notifications (factory_code, type, title, body, link, ref)
     values (NEW.factory_code, 'mr', 'Pick run released ' || coalesce(NEW.pick_run_no, ''),
-            'Materials were released to the warehouse to pick.', '/material-requests',
+            'Materials released to the warehouse. Tap to reply the SO number / discuss.',
+            case when NEW.pick_run_no is not null then '/discussion?topic=' || NEW.pick_run_no else '/material-requests' end,
             'mrrel:' || coalesce(NEW.pick_run_no, NEW.id::text))
     on conflict (ref) do nothing;
   end if;
