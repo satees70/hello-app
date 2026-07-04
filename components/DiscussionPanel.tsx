@@ -7,7 +7,11 @@ interface Msg { id: string; author_id: string | null; author_name: string | null
 const GENERAL = '__general__'
 // Thread key: an order (s:SO#), a ticket/topic (t:Name), or the General thread.
 const keyOf = (m: Msg) => m.so_number ? 's:' + m.so_number : m.topic ? 't:' + m.topic : GENERAL
-const labelOf = (key: string) => key === GENERAL ? 'General' : key.startsWith('s:') ? `SO ${key.slice(2)}` : `🎫 ${key.slice(2)}`
+const labelOf = (key: string) => {
+  if (key === GENERAL) return 'General'
+  const v = key.slice(2)
+  return key.startsWith('s:') ? (/^so/i.test(v) ? v : `SO ${v}`) : `🎫 ${v}`   // don't double-print "SO"
+}
 const rawId = (key: string) => (key.startsWith('s:') || key.startsWith('t:')) ? key.slice(2) : ''   // for done-tracking
 
 // Discussion, WhatsApp-style: thread list on the left, the open chat on the right.
@@ -148,13 +152,13 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
               return (
                 <button key={t.key} onClick={() => openThread(t.key)} className={`w-full text-left px-3 py-2.5 flex items-start gap-2 ${active ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-semibold text-gray-800 text-sm truncate">{labelOf(t.key)}</span>
-                      {custOf(t.key) && <span className="text-gray-500 text-xs truncate">· {custOf(t.key)}</span>}
+                    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                      <span className="font-semibold text-gray-800 text-sm break-words">{labelOf(t.key)}</span>
+                      {custOf(t.key) && <span className="text-gray-500 text-xs break-words">· {custOf(t.key)}</span>}
                       {isDone(t.key) && <span className="text-green-600 text-[10px] font-semibold">✓ done</span>}
                       {t.unread > 0 && <span className="ml-auto bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 shrink-0">{t.unread}</span>}
                     </div>
-                    <div className={`text-xs truncate ${t.unread > 0 ? 'text-gray-800 font-medium' : 'text-gray-500'}`}><span className="text-gray-400">{t.last.author_name || 'Someone'}:</span> {t.last.body}</div>
+                    <div className={`text-xs break-words ${t.unread > 0 ? 'text-gray-800 font-medium' : 'text-gray-500'}`}><span className="text-gray-400">{t.last.author_name || 'Someone'}:</span> {t.last.body}</div>
                     <div className="text-[10px] text-gray-400">{fmt(t.last.created_at)}</div>
                   </div>
                 </button>
