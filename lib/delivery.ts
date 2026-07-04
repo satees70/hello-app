@@ -23,8 +23,9 @@ export function nextDeliveryISO(): string {
   return fmtISO(d)
 }
 
-// SO numbers scheduled for delivery tomorrow — used to show the TOMORROW DELIVERY tag.
+// SO numbers scheduled for the next delivery day (tomorrow, skipping Sunday) —
+// used to show the TOMORROW DELIVERY tag. On a Saturday this is Monday's list.
 export async function fetchTomorrowDeliverySOs(): Promise<Set<string>> {
-  const { data } = await supabase.from('delivery_schedule').select('so_number').eq('delivery_date', tomorrowISO())
+  const { data } = await supabase.from('delivery_schedule').select('so_number').eq('delivery_date', nextDeliveryISO())
   return new Set((data || []).map(r => r.so_number).filter(Boolean) as string[])
 }

@@ -501,7 +501,7 @@ export default function DeliverySchedulePage() {
                   <tbody>
                     {mapped.length === 0 && <tr><td colSpan={headers.length + 1} className="px-3 py-4 text-gray-400 text-center">Nothing left to assign — pick the SO column above, or all rows are assigned.</td></tr>}
                     {mapped.map(m => {
-                      const dueT = !!podelKey && m.data[podelKey] === tomorrowISO()
+                      const dueT = !!podelKey && m.data[podelKey] === nextDeliveryISO()
                       const hold = !!holdKey && isHold(m.data[holdKey])
                       const schedSome = scheduledSOs.has(m.so)   // scheduled on some day
                       const carry = isCarry(m.so)                // scheduled exactly the day before → green
@@ -740,7 +740,7 @@ export default function DeliverySchedulePage() {
                     </thead>
                     <tbody>
                       {g.rows.slice().sort((a, b) => ((custKey && a.data?.[custKey]) || a.customer_name || '').localeCompare((custKey && b.data?.[custKey]) || b.customer_name || '') || a.so_number.localeCompare(b.so_number)).map(s => {
-                        const isTomorrow = s.delivery_date === tomorrowISO()
+                        const isTomorrow = s.delivery_date === nextDeliveryISO()
                         const hold = !!holdKeyS && isHold(s.data?.[holdKeyS])
                         const its = soItems[s.so_number] || []
                         const pend = its.filter(i => !i.done)
