@@ -47,6 +47,8 @@ export default function AttendancePage() {
   const [from, setFrom] = useState(() => prevMonthRange().from)
   const [to, setTo] = useState(() => prevMonthRange().to)
   const [onlyReview, setOnlyReview] = useState(false)
+  const [search, setSearch] = useState('')
+  const [location, setLocation] = useState('')   // '' = all locations/departments
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [tripOptions, setTripOptions] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
@@ -270,7 +272,14 @@ export default function AttendancePage() {
   const fmtDate = (k: string) => { const [y, m, d] = k.split('-'); return `${d}/${m}/${y}` }
   const grandOt = blocks.reduce((s, b) => s + b.totalOt, 0)
   const totalToReview = blocks.reduce((s, b) => s + b.days.filter(dayNeedsAttn).length, 0)
-  const shown = blocks.filter(b => !onlyReview || b.days.some(dayNeedsAttn))
+  // Location list = the distinct departments present, for the filter dropdown.
+  const locations = [...new Set(blocks.map(b => b.department).filter(Boolean) as string[])].sort()
+  const q = search.trim().toLowerCase()
+  const shown = blocks.filter(b =>
+    (!onlyReview || b.days.some(dayNeedsAttn)) &&
+    (!location || b.department === location) &&
+    (!q || b.name.toLowerCase().includes(q) || b.code.toLowerCase().includes(q))
+  )
   const toggleSelect = (code: string) => setSelected(s => { const n = new Set(s); if (n.has(code)) n.delete(code); else n.add(code); return n })
   const selectAllShown = () => setSelected(new Set(shown.map(b => b.code)))
 
@@ -305,6 +314,16 @@ export default function AttendancePage() {
           <input type="checkbox" checked={onlyReview} onChange={e => setOnlyReview(e.target.checked)} />
           Only needs review{totalToReview > 0 ? ` (${totalToReview})` : ''}
         </label>
+        <label className="text-sm">Find person
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="name or code"
+            className="block mt-1 rounded border border-gray-300 px-2 py-1" />
+        </label>
+        <label className="text-sm">Location
+          <select value={location} onChange={e => setLocation(e.target.value)} className="block mt-1 rounded border border-gray-300 px-2 py-1">
+            <option value="">All locations</option>
+            {locations.map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+        </label>
         <div className="flex items-center gap-2 ml-auto">
           <button onClick={selectAllShown} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">Select all</button>
           {selected.size > 0 && <button onClick={() => setSelected(new Set())} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">Clear</button>}
@@ -319,7 +338,7 @@ export default function AttendancePage() {
       {error && <div className="mb-4 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{error}</div>}
 
       <p className="text-sm text-gray-500 mb-4">
-        {loading ? 'Loading…' : `${punchCount} punches · ${blocks.length} people · OT total ${fmtMinutes(grandOt)} · ${fmtDate(from)} – ${fmtDate(to)}`}
+        {loading ? 'Loading…' : `${punchCount} punches · ${shown.length === blocks.length ? blocks.length : `${shown.length} of ${blocks.length}`} people · OT total ${fmtMinutes(grandOt)} · ${fmtDate(from)} – ${fmtDate(to)}`}
       </p>
 
       {!loading && punchCount === 0 && (
