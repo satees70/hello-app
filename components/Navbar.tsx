@@ -77,6 +77,16 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     addToast('🔔 Test sent', 'Watch this device (and your phone if push is on).')
     setTimeout(loadNotifs, 800)
   }
+  async function diagnosePush() {
+    const { data } = await supabase.auth.getSession()
+    const token = data.session?.access_token
+    if (!token) { addToast('Push check', 'Not signed in.'); return }
+    try {
+      const r = await fetch('/api/push/diag', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+      const j = await r.json()
+      addToast('Phone push check', j.message || 'No response.')
+    } catch { addToast('Phone push check', 'Could not reach the server.') }
+  }
 
   // Top-bar label: Head Office, "Multi-site (N)", or the single factory code.
   const factoryLabel = isHO ? 'Head Office'
@@ -310,6 +320,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
                     <span className="font-semibold text-sm">Notifications</span>
                     <span className="flex items-center gap-2">
                       <button onClick={sendTest} className="text-blue-600 hover:underline text-xs">Send test</button>
+                      <button onClick={diagnosePush} className="text-blue-600 hover:underline text-xs">Check phone push</button>
                       {unseenCount > 0 && <button onClick={markAllRead} className="text-blue-600 hover:underline text-xs">Mark all read</button>}
                       {pushSupported() && (pushOn
                         ? <span className="text-green-600 text-xs">✓ On this device</span>
