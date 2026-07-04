@@ -40,6 +40,7 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
   const [showCompleted, setShowCompleted] = useState(false)
   const [newSo, setNewSo] = useState('')
   const [newTicket, setNewTicket] = useState('')
+  const [threadTab, setThreadTab] = useState<'all' | 'so' | 'pr' | 'other'>('all')
   const [file, setFile] = useState<File | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const seenKey = `disc_seen_${channel}`
@@ -84,6 +85,11 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
   const threads = allThreads.filter(t => showCompleted ? true : !isDone(t.key))
   const doneCount = allThreads.filter(t => isDone(t.key)).length
   const totalUnread = threads.reduce((s, t) => s + t.unread, 0)
+  // Thread type, so each team can filter to what they need to check.
+  const threadKind = (key: string): 'so' | 'pr' | 'other' => key.startsWith('s:') ? 'so' : /^t:pr/i.test(key) ? 'pr' : 'other'
+  const tabCount: Record<'so' | 'pr' | 'other', number> = { so: 0, pr: 0, other: 0 }
+  threads.forEach(t => { tabCount[threadKind(t.key)]++ })
+  const shownThreads = threadTab === 'all' ? threads : threads.filter(t => threadKind(t.key) === threadTab)
 
   function markSeen(key: string) {
     const latest = msgs.filter(x => keyOf(x) === key).reduce((mx, x) => x.created_at > mx ? x.created_at : mx, new Date().toISOString())
@@ -160,9 +166,14 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
               <button onClick={() => { if (newTicket.trim()) { openThread('t:' + newTicket.trim()); setNewTicket('') } }} disabled={!newTicket.trim()} className="bg-amber-600 text-white px-2.5 py-1.5 rounded-lg hover:bg-amber-700 disabled:opacity-50 text-sm">🎫 Raise</button>
             </div>
           </div>
+          <div className="flex gap-1 px-2 py-1.5 border-b text-xs overflow-x-auto">
+            {([['all', 'All', threads.length], ['so', '🧾 SO', tabCount.so], ['pr', '📦 Material Req', tabCount.pr], ['other', '🎫 Other', tabCount.other]] as const).map(([k, lbl, n]) => (
+              <button key={k} onClick={() => setThreadTab(k)} className={`px-2 py-1 rounded-lg whitespace-nowrap border ${threadTab === k ? 'bg-blue-600 text-white border-blue-600' : 'bg-white hover:bg-gray-50'}`}>{lbl}{n ? ` (${n})` : ''}</button>
+            ))}
+          </div>
           <div className="flex-1 overflow-y-auto divide-y">
-            {threads.length === 0 && <p className="text-gray-400 text-sm text-center py-8 px-3">No conversations yet — open an order or raise a ticket above.</p>}
-            {threads.map(t => {
+            {shownThreads.length === 0 && <p className="text-gray-400 text-sm text-center py-8 px-3">{threads.length === 0 ? 'No conversations yet — open an order or raise a ticket above.' : 'Nothing in this tab.'}</p>}
+            {shownThreads.map(t => {
               const active = thread === t.key
               return (
                 <button key={t.key} onClick={() => openThread(t.key)} className={`w-full text-left px-3 py-2.5 flex items-start gap-2 ${active ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
