@@ -32,10 +32,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid lunch_decision' }, { status: 400 })
   }
 
-  // manual_time = the missing punch typed in by hand (HH:mm) — the day is then
-  // paired with it and shown as manually edited.
-  const mt = (body.manual_time ?? '').toString().trim()
-  const manual_time = body.lunch_decision === 'manual_time' && /^\d{1,2}:\d{2}/.test(mt) ? mt.slice(0, 5) : null
+  // manual_time = one or more clock times typed by hand (HH:mm) — the day is then
+  // paired with them and shown as manually edited. Keep EVERY time (e.g. a full
+  // "08:30, 17:00" pair), not just the first, so a whole day can be entered.
+  const times = body.lunch_decision === 'manual_time'
+    ? ((body.manual_time ?? '').toString().match(/\d{1,2}:\d{2}/g) || []).map((t: string) => t.padStart(5, '0'))
+    : []
+  const manual_time = times.length ? times.join(', ') : null
 
   const row = {
     employee_code,
