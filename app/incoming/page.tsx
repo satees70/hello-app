@@ -830,7 +830,7 @@ export default function IncomingPage() {
                 {doc.loaded_at
                   ? <span className="text-sm text-green-700">✅ Loaded {fmtT(doc.loaded_at)}{canWh && <button onClick={() => grTransport('mark_gr_loaded', { p_doc_id: doc.id, p_on: false })} disabled={tBusy} className="ml-1 text-gray-400 hover:underline text-xs">undo</button>}</span>
                   : canWh
-                    ? <button onClick={() => grTransport('mark_gr_loaded', { p_doc_id: doc.id, p_on: true })} disabled={tBusy} className="bg-amber-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-amber-700 disabled:opacity-50">📦 Mark loaded</button>
+                    ? <div className="flex items-center gap-2"><button onClick={() => grTransport('mark_gr_loaded', { p_doc_id: doc.id, p_on: true })} disabled={tBusy || !doc.vehicle} className="bg-amber-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-amber-700 disabled:opacity-50">📦 Mark loaded</button>{!doc.vehicle && <span className="text-xs text-gray-400">assign a lorry first</span>}</div>
                     : <span className="text-sm text-gray-400">Not loaded yet</span>}
               </div>
 

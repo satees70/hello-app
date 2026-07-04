@@ -2016,6 +2016,7 @@ begin
   select factory_code, do_number, vehicle into v_fac, v_no, v_veh from public.delivery_orders where id = p_doc_id;
   if v_fac is null then raise exception 'Document not found'; end if;
   if not public._gr_warehouse() then raise exception 'Not allowed'; end if;
+  if p_on and nullif(btrim(v_veh), '') is null then raise exception 'Assign a lorry first'; end if;
   update public.delivery_orders
      set loaded_at = case when p_on then now() else null end,
          loaded_by = case when p_on then auth.uid() else null end

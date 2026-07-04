@@ -9,8 +9,8 @@ import { VEHICLE_TYPES, lorryTypeLabel } from '@/lib/lorryTypes'
 import MultiFilter from '@/components/MultiFilter'
 
 // Go-live cutoff: delivery orders before this were transferred outside the system,
-// so they don't need lorry/driver assignment here. (4 Jul 2026 00:00 Malaysia.)
-const TRANSPORT_SINCE = '2026-07-03T16:00:00Z'
+// so they don't need lorry/driver assignment here. (3 Jul 2026 00:00 Malaysia.)
+const TRANSPORT_SINCE = '2026-07-02T16:00:00Z'
 
 interface DOrder {
   id: string; do_number: string | null; factory_code: string; created_at: string; created_by_name: string | null
