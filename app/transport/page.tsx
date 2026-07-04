@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
@@ -17,8 +17,8 @@ interface DOrder {
   id: string; do_number: string | null; factory_code: string; created_at: string; created_by_name: string | null
   vehicle: string | null; lorry_requested_at: string | null
   driver_name: string | null; driver_requested_at: string | null
-  dispatch_order_lines?: { item_code: string; quantity: number }[]
-  material_returns?: { item_code: string; quantity: number }[]
+  dispatch_order_lines?: { item_code: string; description: string | null; quantity: number }[]
+  material_returns?: { item_code: string; description: string | null; quantity: number }[]
 }
 
 export default function TransportPage() {
@@ -34,6 +34,7 @@ export default function TransportPage() {
   const [facF, setFacF] = useState<Set<string>>(new Set())
   const [pendingOnly, setPendingOnly] = useState(true)
   const [showParking, setShowParking] = useState(false)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())   // DO ids showing their item list
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
 
@@ -43,7 +44,7 @@ export default function TransportPage() {
       supabase.from('factories').select('code, name').order('code'),
       supabase.from('delivery_resources').select('id, kind, name, parked_at, lorry_type').eq('active', true).order('name'),
       supabase.from('dispatch_orders')
-        .select('id, do_number, factory_code, created_at, created_by_name, vehicle, lorry_requested_at, driver_name, driver_requested_at, dispatch_order_lines(item_code, quantity), material_returns(item_code, quantity)')
+        .select('id, do_number, factory_code, created_at, created_by_name, vehicle, lorry_requested_at, driver_name, driver_requested_at, dispatch_order_lines(item_code, description, quantity), material_returns(item_code, description, quantity)')
         .gte('created_at', TRANSPORT_SINCE).order('created_at', { ascending: false }).limit(100),
       supabase.from('lorry_requests').select('id, factory_code, kind, lorry_type, note, destination, requested_by_name, requested_at').eq('status', 'open').order('requested_at', { ascending: false }),
     ])
@@ -240,8 +241,13 @@ export default function TransportPage() {
               {shown.map(o => {
                 const editable = canEditFac(o.factory_code)
                 return (
-                  <tr key={o.id} className="border-b last:border-0 align-top">
-                    <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{o.do_number || '—'}</td>
+                  <Fragment key={o.id}>
+                  <tr className="border-b last:border-0 align-top">
+                    <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">
+                      <button onClick={() => setExpanded(s => { const n = new Set(s); n.has(o.id) ? n.delete(o.id) : n.add(o.id); return n })} className="text-blue-600 hover:underline" title="Show items">
+                        {expanded.has(o.id) ? '▾ ' : '▸ '}{o.do_number || '—'}
+                      </button>
+                    </td>
                     <td className="px-3 py-2 whitespace-nowrap text-gray-600">{factoryName(o.factory_code)}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-gray-500">{itemCount(o)} item(s)</td>
 
@@ -297,6 +303,23 @@ export default function TransportPage() {
                     <td className="px-3 py-2 whitespace-nowrap text-gray-400">{fmt(o.created_at)}{o.created_by_name && <span className="block text-[11px]">by {o.created_by_name}</span>}</td>
                     <td className="px-3 py-2 whitespace-nowrap">{o.vehicle && o.driver_name && <span className="text-green-600 text-xs">✓ ready</span>}</td>
                   </tr>
+                  {expanded.has(o.id) && (
+                    <tr className="border-b last:border-0 bg-gray-50">
+                      <td colSpan={7} className="px-6 py-2">
+                        <div className="text-xs font-medium text-gray-500 mb-1">Items in {o.do_number}</div>
+                        <ul className="space-y-0.5 text-sm">
+                          {(o.dispatch_order_lines || []).map((l, i) => (
+                            <li key={`f${i}`}>📦 <span className="font-mono">{l.item_code}</span>{l.description ? ` — ${l.description}` : ''} <span className="text-gray-500">× {l.quantity}</span></li>
+                          ))}
+                          {(o.material_returns || []).map((l, i) => (
+                            <li key={`r${i}`} className="text-orange-600">↩ <span className="font-mono">{l.item_code}</span>{l.description ? ` — ${l.description}` : ''} <span className="text-gray-500">× {l.quantity}</span></li>
+                          ))}
+                          {itemCount(o) === 0 && <li className="text-gray-400">No items.</li>}
+                        </ul>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 )
               })}
             </tbody>
