@@ -2165,3 +2165,14 @@ update public.delivery_orders
    set transport_received_at = coalesce(transport_received_at, created_at)
  where transport_received_at is null
    and created_at < '2026-07-03T16:00:00Z';
+
+-- ============================================================================
+-- 2026-07 · Backfill: every dispatch delivery order up to 3 Jul 2026 already went
+-- out before this transport system, so mark it "lorry out" (departed). Transport
+-- tracking then starts fresh with today's (4 Jul) DOs. Safe to re-run — only
+-- fills empty ones. Cutoff = 4 Jul 2026 00:00 Malaysia (covers through 3 Jul).
+-- ============================================================================
+update public.dispatch_orders
+   set departed_at = coalesce(departed_at, created_at)
+ where departed_at is null
+   and created_at < '2026-07-03T16:00:00Z';
