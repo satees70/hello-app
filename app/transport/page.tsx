@@ -8,6 +8,10 @@ import { can } from '@/lib/permissions'
 import { VEHICLE_TYPES, lorryTypeLabel } from '@/lib/lorryTypes'
 import MultiFilter from '@/components/MultiFilter'
 
+// Go-live cutoff: delivery orders before this were transferred outside the system,
+// so they don't need lorry/driver assignment here. (4 Jul 2026 00:00 Malaysia.)
+const TRANSPORT_SINCE = '2026-07-03T16:00:00Z'
+
 interface DOrder {
   id: string; do_number: string | null; factory_code: string; created_at: string; created_by_name: string | null
   vehicle: string | null; lorry_requested_at: string | null
@@ -39,7 +43,7 @@ export default function TransportPage() {
       supabase.from('delivery_resources').select('id, kind, name, parked_at, lorry_type').eq('active', true).order('name'),
       supabase.from('dispatch_orders')
         .select('id, do_number, factory_code, created_at, created_by_name, vehicle, lorry_requested_at, driver_name, driver_requested_at, dispatch_order_lines(item_code, quantity), material_returns(item_code, quantity)')
-        .order('created_at', { ascending: false }).limit(100),
+        .gte('created_at', TRANSPORT_SINCE).order('created_at', { ascending: false }).limit(100),
       supabase.from('lorry_requests').select('id, factory_code, kind, lorry_type, note, destination, requested_by_name, requested_at').eq('status', 'open').order('requested_at', { ascending: false }),
     ])
     setFactories(f || [])
@@ -51,7 +55,7 @@ export default function TransportPage() {
     const { data: gnd } = await supabase.from('delivery_orders')
       .select('id, do_number, factory_code, vehicle')
       .not('vehicle', 'is', null).is('driver_name', null).is('transport_received_at', null)
-      .order('created_at', { ascending: false })
+      .gte('created_at', TRANSPORT_SINCE).order('created_at', { ascending: false })
     setGrNeedDriver(gnd || [])
   }
   async function assignGrDriver(id: string, driver: string) {
