@@ -773,6 +773,7 @@ export default function MaterialRequestsPage() {
                           <div className="flex flex-wrap items-center gap-3 mb-4">
                             <span className="font-semibold">{isHO ? factoryName(run.factory) : run.factory}</span>
                             <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 font-mono">{run.runNo}</span>
+                            <a href={`/discussion?topic=${encodeURIComponent(run.runNo)}`} className="text-blue-600 hover:underline text-xs" title="Discuss this pick run — reply the SO, or question a wrong PR">💬 Discuss</a>
                             <span className="text-sm text-gray-400">released {new Date(run.released_at).toLocaleString()}{run.reqs[0]?.created_by_name ? ` · raised by ${run.reqs[0].created_by_name}` : ''}</span>
                             {filter !== 'Labels' && <>
                             <span className="flex items-center gap-2 ml-auto shrink-0">

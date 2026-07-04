@@ -17,10 +17,10 @@ const rawId = (key: string) => (key.startsWith('s:') || key.startsWith('t:')) ? 
 // Discussion, WhatsApp-style: thread list on the left, the open chat on the right.
 // Threads are per-order (SO), free-form tickets/topics, or the General thread.
 // Any thread can be marked "completed" to archive it.
-export default function DiscussionPanel({ channel = 'warehouse', me, meName, title = 'Discussion', soOptions = [], soCustomers = {}, filterSo: filterSoProp, onFilterChange, panelId, onPosted, restrictToUserIds }: {
+export default function DiscussionPanel({ channel = 'warehouse', me, meName, title = 'Discussion', soOptions = [], soCustomers = {}, filterSo: filterSoProp, filterTopic, onFilterChange, panelId, onPosted, restrictToUserIds }: {
   channel?: string; me: string; meName?: string | null; title?: string; soOptions?: string[]
   soCustomers?: Record<string, string>   // SO# -> customer name, shown on order threads
-  filterSo?: string; onFilterChange?: (so: string) => void; panelId?: string; onPosted?: () => void
+  filterSo?: string; filterTopic?: string; onFilterChange?: (so: string) => void; panelId?: string; onPosted?: () => void
   // When set (e.g. a private group), only these users can be tagged and location-tagging is hidden.
   restrictToUserIds?: string[] | null
 }) {
@@ -59,6 +59,7 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
     supabase.from('factories').select('code, name').order('code').then(({ data }) => setFactories((data as { code: string; name: string }[]) || []))
   }, [])
   useEffect(() => { if (filterSoProp) openThread('s:' + filterSoProp) }, [filterSoProp]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (filterTopic) openThread('t:' + filterTopic) }, [filterTopic]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const nameOf = (id: string) => users.find(u => u.id === id)?.full_name || 'someone'
   const fmt = (iso: string) => new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })

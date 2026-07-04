@@ -12,6 +12,7 @@ export default function DiscussionPage() {
   const [soOptions, setSoOptions] = useState<string[]>([])
   const [soCustomers, setSoCustomers] = useState<Record<string, string>>({})
   const [filterSo, setFilterSo] = useState('')
+  const [filterTopic, setFilterTopic] = useState('')   // deep link ?topic= (e.g. a pick run PR-…)
   const [groups, setGroups] = useState<Group[]>([])
   const [sel, setSel] = useState('warehouse')   // 'warehouse' or a group id
   const [newName, setNewName] = useState('')
@@ -23,7 +24,7 @@ export default function DiscussionPage() {
   const [selMembers, setSelMembers] = useState<string[]>([])   // member ids of the selected group (for tag restriction)
   const [err, setErr] = useState('')
 
-  useEffect(() => { setFilterSo(new URLSearchParams(window.location.search).get('so') || '') }, [])
+  useEffect(() => { const p = new URLSearchParams(window.location.search); setFilterSo(p.get('so') || ''); setFilterTopic(p.get('topic') || '') }, [])
   useEffect(() => {
     if (!profile) return
     fetchAll<{ so_number: string | null; customer_name: string | null }>('sales_order_lines', 'so_number, customer_name').then(rows => {
@@ -123,7 +124,7 @@ export default function DiscussionPage() {
         )}
 
         <DiscussionPanel key={channel} channel={channel} me={profile.id} meName={profile.full_name} title={title}
-          soOptions={soOptions} soCustomers={soCustomers} filterSo={selGroup ? '' : filterSo} onFilterChange={selGroup ? undefined : setFilterSo}
+          soOptions={soOptions} soCustomers={soCustomers} filterSo={selGroup ? '' : filterSo} filterTopic={selGroup ? '' : filterTopic} onFilterChange={selGroup ? undefined : setFilterSo}
           restrictToUserIds={selGroup ? selMembers : undefined} />
       </div>
 
