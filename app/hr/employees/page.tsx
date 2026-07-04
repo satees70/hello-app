@@ -363,7 +363,7 @@ export default function EmployeesSetupPage() {
                   <td className="px-3 py-2">
                     <input defaultValue={r.name ?? ''} placeholder="name…"
                       onBlur={e => { if (e.target.value !== (r.name ?? '')) saveEmployee(r, { name: e.target.value }) }}
-                      className="w-full rounded border border-gray-200 px-2 py-1" />
+                      className="w-full min-w-[16rem] rounded border border-gray-200 px-2 py-1" />
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500">{r.department || '—'}</td>
                   <td className="px-3 py-2">
