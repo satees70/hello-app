@@ -1233,12 +1233,15 @@ create trigger notify_dispatch after update of dispatched_at on public.productio
   for each row execute function public.tg_notify_dispatch();
 
 -- New discussion message linked to an SO → notify that order's location(s)
+-- Stamp who wrote the message so we can skip notifying the author about their own
+-- message; and skip private group channels (they must not broadcast to a factory).
+alter table public.notifications add column if not exists author_id uuid;
 create or replace function public.tg_notify_discussion() returns trigger
  language plpgsql security definer set search_path to 'public' as $function$
 begin
-  if NEW.so_number is not null then
-    insert into public.notifications (factory_code, type, title, body, link, ref)
-    select distinct sol.factory_code, 'discussion', 'New message · SO ' || NEW.so_number,
+  if NEW.so_number is not null and NEW.channel not like 'group:%' then
+    insert into public.notifications (author_id, factory_code, type, title, body, link, ref)
+    select distinct NEW.author_id, sol.factory_code, 'discussion', 'New message · SO ' || NEW.so_number,
            coalesce(NEW.author_name, 'Someone') || ': ' || left(NEW.body, 80),
            '/discussion?so=' || NEW.so_number,
            'disc:' || NEW.id::text || ':' || sol.factory_code

@@ -25,7 +25,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [perms, setPerms] = useState<Permissions | null>(null)
   const [myFactories, setMyFactories] = useState<string[]>([])
-  interface Notif { id: string; factory_code: string; user_id: string | null; type: string; title: string; body: string | null; link: string | null; created_at: string }
+  interface Notif { id: string; factory_code: string; user_id: string | null; author_id: string | null; type: string; title: string; body: string | null; link: string | null; created_at: string }
   const [me, setMe] = useState('')
   const [offsiteAllowed, setOffsiteAllowed] = useState(false)   // may use the app outside the office
   const [notifs, setNotifs] = useState<Notif[]>([])
@@ -64,7 +64,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     if (isHO) q = q.or(`user_id.eq.${me},user_id.is.null`)
     else q = q.or(`user_id.eq.${me},and(user_id.is.null,factory_code.in.(${myFacs.join(',')}))`)
     const { data } = await q
-    setNotifs((data as Notif[]) || [])
+    setNotifs(((data as Notif[]) || []).filter(n => n.author_id !== me))   // don't show me my own messages
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHO, me, myFacs.join(',')])
   useEffect(() => { loadNotifs(); const t = setInterval(loadNotifs, 30000); return () => clearInterval(t) }, [loadNotifs, pathname])
@@ -166,6 +166,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       channel = supabase.channel('notif-feed')
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, payload => {
           const n = payload.new as Notif
+          if (n.author_id === me) return   // don't notify me of my own message
           const forMe = n.user_id ? n.user_id === me : (isHO || myFacs.includes(n.factory_code))
           if (!forMe) return
           setNotifs(prev => prev.some(x => x.id === n.id) ? prev : [n, ...prev].slice(0, 40))
