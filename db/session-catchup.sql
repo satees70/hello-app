@@ -2374,3 +2374,10 @@ create or replace function public._gr_log(p_doc uuid, p_action text, p_detail te
   insert into public.gr_transport_log (doc_id, action, detail, actor, actor_name)
   values (p_doc, p_action, p_detail, auth.uid(), (select full_name from public.profiles where id = auth.uid()));
 $$;
+
+-- 2026-07 · Delivery role for HR OT: 'driver' or 'kelindan'. A DRIVER earns an
+-- OS1/OS2 trip day under the trip (no OT here) even when riding as a kelindan; a
+-- KELINDAN (or unset) earns OT normally. Kept separate from is_driver, which is
+-- ticked for all delivery crew (drivers + kelindan) just to link them.
+alter table public.employees add column if not exists crew_role text
+  check (crew_role in ('driver', 'kelindan'));

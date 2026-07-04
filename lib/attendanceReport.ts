@@ -9,7 +9,7 @@ import {
 // always matches the detail exactly.
 
 export interface ShiftProfile extends ShiftProfileLite { id: string; name: string }
-export interface Employee { employee_code: string; name: string | null; shift_profile_id: string | null; delivery_name: string | null }
+export interface Employee { employee_code: string; name: string | null; shift_profile_id: string | null; delivery_name: string | null; crew_role: string | null }
 export interface Punch { employee_code: string; punch_time: string; department_name: string | null }
 export interface Review extends ReviewLite { employee_code: string; work_date: string; manual_time: string | null }
 
@@ -77,7 +77,7 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
   const [punches, { data: emps }, { data: profs }, { data: reviews }] = await Promise.all([
     fetchAll<Punch>('attendance_punches', 'employee_code, punch_time, department_name',
       q => q.gte('punch_time', fromUtc).lte('punch_time', toUtc).order('punch_time')),
-    supabase.from('employees').select('employee_code, name, shift_profile_id, delivery_name'),
+    supabase.from('employees').select('employee_code, name, shift_profile_id, delivery_name, crew_role'),
     supabase.from('shift_profiles').select('id, name, normal_hours, lunch_rule, lunch_minutes, shift_start, shift_end, week_schedule, attendance_mode'),
     supabase.from('attendance_reviews').select('employee_code, work_date, lunch_decision, manual_minutes, manual_time')
       .gte('work_date', from).lte('work_date', to),
@@ -85,14 +85,20 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
   const { data: hols } = await supabase.from('public_holidays').select('holiday_date').gte('holiday_date', from).lte('holiday_date', to)
   const holidaySet = new Set((hols || []).map(h => h.holiday_date))
   // Driver trips from the delivery schedule: (driver name | date) → category.
-  const { data: trips } = await supabase.from('delivery_trips').select('driver, delivery_date, category').gte('delivery_date', from).lte('delivery_date', to)
-  const tripByKey = new Map<string, string>()
-  for (const t of trips || []) if (t.driver && t.category) tripByKey.set(`${t.driver}|${t.delivery_date}`, t.category)
-  // Who actually DROVE on a date (the trip's Driver slot) → 'name|date' (lowercased).
-  // Used to decide who loses OS1/OS2 OT: the driver does, the kelindan doesn't —
-  // independent of the is_driver tag, which drivers and kelindan can share.
-  const droveByKey = new Set<string>()
-  for (const t of trips || []) if (t.driver && t.delivery_date) droveByKey.add(`${t.driver.trim().toLowerCase()}|${t.delivery_date}`)
+  const { data: trips } = await supabase.from('delivery_trips').select('driver, kelindan, delivery_date, category').gte('delivery_date', from).lte('delivery_date', to)
+  // Trip category per person per date — from BOTH the Driver slot and every name
+  // in the Kelindan slot (comma-separated). Keyed by lowercased name so a person
+  // is caught whether they drove or rode as a kelindan. Whether that trip costs
+  // them their OT is decided later by their crew_role, not by which slot.
+  const tripByKey = new Map<string, string>()   // `${nameLower}|${date}` -> category
+  for (const t of trips || []) {
+    if (!t.category || !t.delivery_date) continue
+    if (t.driver) tripByKey.set(`${t.driver.trim().toLowerCase()}|${t.delivery_date}`, t.category)
+    for (const k of (t.kelindan || '').split(',')) {
+      const kn = k.trim().toLowerCase()
+      if (kn) tripByKey.set(`${kn}|${t.delivery_date}`, t.category)
+    }
+  }
   // Manual per-day trip overrides (employee_code | date) → trip_type.
   const { data: tripOv } = await supabase.from('driver_trip_overrides').select('employee_code, work_date, trip_type').gte('work_date', from).lte('work_date', to)
   const overrideByKey = new Map<string, string>()
@@ -152,6 +158,7 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
     const prof = emp?.shift_profile_id ? profById.get(emp.shift_profile_id) ?? null : null
     const deliveryName = emp?.delivery_name ?? null
     const deliveryKey = deliveryName ? deliveryName.trim().toLowerCase() : null
+    const crewRole = emp?.crew_role ?? null
     const osDates = outstationByEmp.get(code) ?? new Map<string, string>()
     const dayRows: DayRow[] = []
     let punchCount = 0, totalWorked = 0, totalOt = 0, totalLate = 0, totalEarlyOut = 0, totalRestDays = 0, totalHolidayDays = 0, totalPresentDays = 0, totalOutstation = 0, needsReview = 0
@@ -164,7 +171,7 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
       const win = ws ? ws[String(weekdayOf(dateKey))] : null
       // true = scheduled work day, false = rest/off, null = unknown (no profile).
       const scheduledWorking = ws ? !!(win && win.start && win.end) : null
-      const autoTrip = deliveryName ? (tripByKey.get(`${deliveryName}|${dateKey}`) ?? null) : null
+      const autoTrip = deliveryKey ? (tripByKey.get(`${deliveryKey}|${dateKey}`) ?? null) : null
       const trip = overrideByKey.get(`${code}|${dateKey}`) ?? autoTrip
       const leaveType = leaveByKey.get(`${code}|${dateKey}`) ?? null
 
@@ -192,11 +199,10 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
         punchCount += times.length
         const result = computeDay(dayTimes, prof, review, { weekday: weekdayOf(dateKey), isHoliday: isHol })
         if (result.needsReview) needsReview++
-        // Whoever DROVE on an OS1/OS2 trip earns that day's OT under the trip, not
-        // as OT here — so it's excluded. The kelindan on the same trip (not in the
-        // Driver slot) still earns OT normally.
-        const droveThatDay = !!deliveryKey && droveByKey.has(`${deliveryKey}|${dateKey}`)
-        const otInTrip = droveThatDay && result.otMinutes > 0 && !!trip && OT_IN_TRIP_CATEGORIES.has(trip)
+        // A person whose delivery role is DRIVER earns an OS1/OS2 trip day under
+        // the trip, not as OT here — even on a day he rode as a kelindan. A
+        // kelindan (or anyone without the driver role) still earns OT normally.
+        const otInTrip = crewRole === 'driver' && result.otMinutes > 0 && !!trip && OT_IN_TRIP_CATEGORIES.has(trip)
         totalWorked += result.workedMinutes
         totalOt += otInTrip ? 0 : result.otMinutes
         totalLate += result.lateMinutes

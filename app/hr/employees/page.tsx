@@ -4,7 +4,7 @@ import { supabase, fetchAll } from '@/lib/supabase'
 
 type DayWin = { start: string; end: string } | null
 interface ShiftProfile { id: string; name: string; normal_hours: number; lunch_rule: string; lunch_minutes: number; week_schedule: Record<string, DayWin> | null; attendance_mode: string | null }
-interface Employee { employee_code: string; name: string | null; shift_profile_id: string | null; is_driver: boolean; is_production: boolean; active: boolean; department: string | null; delivery_name: string | null }
+interface Employee { employee_code: string; name: string | null; shift_profile_id: string | null; is_driver: boolean; is_production: boolean; active: boolean; department: string | null; delivery_name: string | null; crew_role: string | null }
 interface Row extends Employee { seenInPunches: boolean; lastSeen: string | null }
 interface Holiday { holiday_date: string; name: string | null }
 
@@ -41,7 +41,7 @@ export default function EmployeesSetupPage() {
     setLoading(true); setError(null)
     const [{ data: profs }, { data: emps }, codes, { data: hols }, { data: drv }] = await Promise.all([
       supabase.from('shift_profiles').select('id, name, normal_hours, lunch_rule, lunch_minutes, week_schedule, attendance_mode').order('name'),
-      supabase.from('employees').select('employee_code, name, shift_profile_id, is_driver, is_production, active, department, delivery_name'),
+      supabase.from('employees').select('employee_code, name, shift_profile_id, is_driver, is_production, active, department, delivery_name, crew_role'),
       fetchAll<{ employee_code: string; punch_time: string }>('attendance_punches', 'employee_code, punch_time'),
       supabase.from('public_holidays').select('holiday_date, name').order('holiday_date'),
       // Delivery link comes from the unified crew pool (kind 'crew' + legacy 'driver'/'kelindan'), not just 'driver'.
@@ -67,6 +67,7 @@ export default function EmployeesSetupPage() {
         active: e?.active ?? true,
         department: e?.department ?? null,
         delivery_name: e?.delivery_name ?? null,
+        crew_role: e?.crew_role ?? null,
         seenInPunches: punchCodes.has(code),
         lastSeen: lastByCode.get(code) ?? null,
       }
@@ -88,7 +89,7 @@ export default function EmployeesSetupPage() {
       body: JSON.stringify({
         employee_code: r.employee_code, name: next.name,
         shift_profile_id: next.shift_profile_id, is_driver: next.is_driver, is_production: next.is_production, active: next.active,
-        delivery_name: next.delivery_name,
+        delivery_name: next.delivery_name, crew_role: next.crew_role,
       }),
     })
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') }
@@ -376,11 +377,20 @@ export default function EmployeesSetupPage() {
                   </td>
                   <td className="px-3 py-2">
                     {r.is_driver ? (
-                      <select value={r.delivery_name ?? ''} onChange={e => saveEmployee(r, { delivery_name: e.target.value || null })}
-                        className="rounded border border-gray-200 px-2 py-1 text-xs" title="Which name this driver uses in the delivery schedule">
-                        <option value="">— link —</option>
-                        {deliveryDrivers.map(d => <option key={d} value={d}>{d}</option>)}
-                      </select>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <select value={r.delivery_name ?? ''} onChange={e => saveEmployee(r, { delivery_name: e.target.value || null })}
+                          className="rounded border border-gray-200 px-2 py-1 text-xs" title="Which name this person uses in the delivery schedule">
+                          <option value="">— link —</option>
+                          {deliveryDrivers.map(d => <option key={d} value={d}>{d}</option>)}
+                        </select>
+                        <select value={r.crew_role ?? ''} onChange={e => saveEmployee(r, { crew_role: e.target.value || null })}
+                          className={`rounded border px-2 py-1 text-xs ${r.crew_role === 'driver' ? 'border-indigo-300 bg-indigo-50 text-indigo-800' : 'border-gray-200 text-gray-500'}`}
+                          title="Driver = OS1/OS2 trip days paid under the trip, no OT (even riding as kelindan). Kelindan = OT as normal.">
+                          <option value="">role…</option>
+                          <option value="driver">Driver</option>
+                          <option value="kelindan">Kelindan</option>
+                        </select>
+                      </div>
                     ) : <span className="text-gray-300 text-xs">—</span>}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500">
