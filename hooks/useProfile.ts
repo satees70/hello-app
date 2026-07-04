@@ -31,21 +31,42 @@ export function useProfile() {
   const router = useRouter()
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!session) { router.replace('/login'); return }
-      const { data, error: profileError } = await supabase
-        .from('profiles').select('*').eq('id', session.user.id).single()
-      if (profileError) { setError(`Profile error: ${profileError.message}`); setLoading(false); return }
-      if (!data) { setError('No profile found for this user.'); setLoading(false); return }
-      setProfile(data)
+    let done = false
+    // Guard: never spin on "Checking sign-in…" forever. If the session/profile
+    // check errors or stalls, surface a message so the user can refresh/retry.
+    const timer = setTimeout(() => {
+      if (done) return
+      done = true
+      setError('Sign-in is taking too long — please refresh the page.')
       setLoading(false)
-    })
+    }, 15000)
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    ;(async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (done) return
+        if (!session) { done = true; clearTimeout(timer); router.replace('/login'); return }
+        const { data, error: profileError } = await supabase
+          .from('profiles').select('*').eq('id', session.user.id).single()
+        if (done) return
+        done = true; clearTimeout(timer)
+        if (profileError) { setError(`Profile error: ${profileError.message}`); setLoading(false); return }
+        if (!data) { setError('No profile found for this user.'); setLoading(false); return }
+        setProfile(data)
+        setLoading(false)
+      } catch (e) {
+        if (done) return
+        done = true; clearTimeout(timer)
+        setError(e instanceof Error ? e.message : 'Could not check sign-in — please refresh.')
+        setLoading(false)
+      }
+    })()
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event) => {
       if (event === 'SIGNED_OUT') { router.replace('/login') }
     })
 
-    return () => subscription.unsubscribe()
+    return () => { done = true; clearTimeout(timer); subscription.unsubscribe() }
   }, [router])
 
   return { profile, loading, error }
