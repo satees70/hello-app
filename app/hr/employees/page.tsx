@@ -338,7 +338,8 @@ export default function EmployeesSetupPage() {
         </div>
 
         {loading ? <p className="p-4 text-sm text-gray-500">Loading…</p> : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[64rem]">
             <thead className="text-left text-gray-500">
               <tr className="border-b border-gray-100">
                 <th className="px-3 py-2 font-medium">Code</th>
@@ -415,6 +416,7 @@ export default function EmployeesSetupPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </section>
     </main>
