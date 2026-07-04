@@ -2232,3 +2232,12 @@ delete from public.notifications
 -- 2026-07 · Per-user off-office access: bypass the office-only IP guard, so
 -- trusted people (managers) can use the app + get notifications from a phone.
 alter table public.profiles add column if not exists offsite_allowed boolean not null default false;
+
+-- 2026-07 · Discussion attachments (PDF / image). Files go in a private
+-- 'discussion-files' bucket; the message stores the path + original name.
+alter table public.discussions add column if not exists attachment_path text;
+alter table public.discussions add column if not exists attachment_name text;
+insert into storage.buckets (id, name, public) values ('discussion-files', 'discussion-files', false) on conflict (id) do nothing;
+drop policy if exists discfiles_all on storage.objects;
+create policy discfiles_all on storage.objects for all to authenticated
+  using (bucket_id = 'discussion-files') with check (bucket_id = 'discussion-files');

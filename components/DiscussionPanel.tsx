@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
-interface Msg { id: string; author_id: string | null; author_name: string | null; body: string; created_at: string; so_number: string | null; topic: string | null; mention_ids: string[] | null; mention_factories: string[] | null; reply_to: string | null }
+interface Msg { id: string; author_id: string | null; author_name: string | null; body: string; created_at: string; so_number: string | null; topic: string | null; mention_ids: string[] | null; mention_factories: string[] | null; reply_to: string | null; attachment_path: string | null; attachment_name: string | null }
 
 const GENERAL = '__general__'
 // Thread key: an order (s:SO#), a ticket/topic (t:Name), or the General thread.
@@ -40,6 +40,7 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
   const [showCompleted, setShowCompleted] = useState(false)
   const [newSo, setNewSo] = useState('')
   const [newTicket, setNewTicket] = useState('')
+  const [file, setFile] = useState<File | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const seenKey = `disc_seen_${channel}`
 
@@ -109,18 +110,31 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
   useEffect(() => { if (inThread) endRef.current?.scrollIntoView({ block: 'nearest' }) }, [shown.length, inThread])
   useEffect(() => { if (inThread && shown.length && thread) markSeen(thread) }, [shown.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  async function openAttachment(path: string) {
+    const { data } = await supabase.storage.from('discussion-files').createSignedUrl(path, 300)
+    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+  }
+
   async function send() {
-    const text = body.trim(); if (!text || !thread) return
+    const text = body.trim(); if ((!text && !file) || !thread) return
     setSending(true); setErr('')
+    let attachment_path: string | null = null, attachment_name: string | null = null
+    if (file) {
+      const safe = file.name.replace(/[^\w.\-]+/g, '_')
+      const path = `${channel}/${Date.now()}-${safe}`
+      const { error: upErr } = await supabase.storage.from('discussion-files').upload(path, file, { upsert: true, contentType: file.type || 'application/octet-stream' })
+      if (upErr) { setErr('Upload failed: ' + upErr.message); setSending(false); return }
+      attachment_path = path; attachment_name = file.name
+    }
     const so = thread.startsWith('s:') ? thread.slice(2) : null
     const topic = thread.startsWith('t:') ? thread.slice(2) : null
-    let { error } = await supabase.from('discussions').insert({ channel, author_id: me, author_name: meName || null, body: text, so_number: so, topic, mention_ids: mentions, mention_factories: facMentions })
-    if (error && /column|schema cache|mention_|so_number|topic/i.test(error.message)) {
-      const res = await supabase.from('discussions').insert({ channel, author_id: me, author_name: meName || null, body: text }); error = res.error
+    let { error } = await supabase.from('discussions').insert({ channel, author_id: me, author_name: meName || null, body: text, so_number: so, topic, mention_ids: mentions, mention_factories: facMentions, attachment_path, attachment_name })
+    if (error && /column|schema cache|mention_|so_number|topic|attachment/i.test(error.message)) {
+      const res = await supabase.from('discussions').insert({ channel, author_id: me, author_name: meName || null, body: text || (attachment_name ? '📎 ' + attachment_name : '') }); error = res.error
     }
     setSending(false)
     if (error) { setErr(error.message); return }
-    setBody(''); setMentions([]); setFacMentions([]); await load(); markSeen(thread); onPosted?.()
+    setBody(''); setFile(null); setMentions([]); setFacMentions([]); await load(); markSeen(thread); onPosted?.()
   }
 
   return (
@@ -158,7 +172,7 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
                       {isDone(t.key) && <span className="text-green-600 text-[10px] font-semibold">✓ done</span>}
                       {t.unread > 0 && <span className="ml-auto bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 shrink-0">{t.unread}</span>}
                     </div>
-                    <div className={`text-xs break-words ${t.unread > 0 ? 'text-gray-800 font-medium' : 'text-gray-500'}`}><span className="text-gray-400">{t.last.author_name || 'Someone'}:</span> {t.last.body}</div>
+                    <div className={`text-xs break-words ${t.unread > 0 ? 'text-gray-800 font-medium' : 'text-gray-500'}`}><span className="text-gray-400">{t.last.author_name || 'Someone'}:</span> {t.last.body || (t.last.attachment_name ? '📎 ' + t.last.attachment_name : '')}</div>
                     <div className="text-[10px] text-gray-400">{fmt(t.last.created_at)}</div>
                   </div>
                 </button>
@@ -195,7 +209,8 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
                         {(m.mention_ids || []).map(id => <span key={id} className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${mine ? 'bg-blue-500 text-white' : 'bg-amber-100 text-amber-800'}`}>@{nameOf(id)}</span>)}
                         {(m.mention_factories || []).map(fc => <span key={fc} className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${mine ? 'bg-blue-500 text-white' : 'bg-teal-100 text-teal-800'}`}>@{fc} (all)</span>)}
                       </div>}
-                      <div className="whitespace-pre-wrap break-words">{m.body}</div>
+                      {m.body && <div className="whitespace-pre-wrap break-words">{m.body}</div>}
+                      {m.attachment_path && <button onClick={() => openAttachment(m.attachment_path!)} className={`mt-1 inline-flex items-center gap-1 text-xs underline break-all ${mine ? 'text-blue-100' : 'text-blue-600'}`}>📎 {m.attachment_name || 'attachment'}</button>}
                       <div className={`text-[10px] mt-0.5 ${mine ? 'text-blue-100' : 'text-gray-400'}`}>{fmt(m.created_at)}</div>
                     </div>
                   </div>
@@ -210,7 +225,15 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
                 {facMentions.map(fc => <span key={fc} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-teal-100 text-teal-800 font-medium">@{fc} (all)<button onClick={() => setFacMentions(f => f.filter(x => x !== fc))} className="text-teal-600">✕</button></span>)}
               </div>
             )}
+            {file && (
+              <div className="flex items-center gap-2 px-3 pt-2 text-xs">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-gray-100 text-gray-700 font-medium">📎 {file.name}<button onClick={() => setFile(null)} className="text-gray-500">✕</button></span>
+              </div>
+            )}
             <div className="flex flex-wrap gap-2 p-3 border-t">
+              <label className="flex items-center justify-center w-10 border rounded-lg cursor-pointer bg-white hover:bg-gray-50 text-lg" title="Attach a PDF or image">📎
+                <input type="file" accept="application/pdf,image/*" className="hidden" onChange={e => { setFile(e.target.files?.[0] || null); e.target.value = '' }} />
+              </label>
               {(users.length > 0 || factories.length > 0) && (
                 <select value="" onChange={e => { const v = e.target.value; if (!v) return; if (v.startsWith('fac:')) { const c = v.slice(4); setFacMentions(f => f.includes(c) ? f : [...f, c]) } else { setMentions(m => m.includes(v) ? m : [...m, v]) } }} className="w-32 border rounded-lg px-2 py-2 text-sm bg-white" title={restricted ? 'Tag a group member' : 'Tag a person or location'}>
                   <option value="">＠ Tag…</option>
@@ -224,7 +247,7 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
               )}
               <input value={body} onChange={e => setBody(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
                 placeholder={thread === GENERAL ? 'Type a message…' : `Message · ${labelOf(thread!)}…`} className="flex-1 min-w-[10rem] border rounded-lg px-3 py-2 text-sm" />
-              <button onClick={send} disabled={sending || !body.trim()} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{sending ? 'Sending…' : 'Send'}</button>
+              <button onClick={send} disabled={sending || (!body.trim() && !file)} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{sending ? 'Sending…' : 'Send'}</button>
             </div>
             {err && <p className="text-red-500 text-xs px-3 pb-2">Couldn’t send: {err}</p>}
           </>)}
