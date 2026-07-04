@@ -42,7 +42,8 @@ export async function POST(req: Request) {
       sent++
     } catch (e) {
       const code = (e as { statusCode?: number })?.statusCode
-      if (code === 404 || code === 410) await admin.from('push_subscriptions').delete().eq('endpoint', s.endpoint)
+      // 400/403 = stale/mismatched key (e.g. after rotation), 404/410 = gone → drop it so it re-subscribes clean.
+      if (code && [400, 403, 404, 410].includes(code)) await admin.from('push_subscriptions').delete().eq('endpoint', s.endpoint)
     }
   }))
   return NextResponse.json({ sent })

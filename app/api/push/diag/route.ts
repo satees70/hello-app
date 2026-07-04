@@ -29,7 +29,7 @@ export async function POST(req: Request) {
   let sent = 0; const errs: number[] = []
   for (const s of subs!) {
     try { await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload); sent++ }
-    catch (e) { const c = (e as { statusCode?: number }).statusCode; if (c) errs.push(c); if (c === 404 || c === 410) await admin.from('push_subscriptions').delete().eq('endpoint', s.endpoint) }
+    catch (e) { const c = (e as { statusCode?: number }).statusCode; if (c) errs.push(c); if (c && [400, 403, 404, 410].includes(c)) await admin.from('push_subscriptions').delete().eq('endpoint', s.endpoint) }
   }
   if (sent > 0) return NextResponse.json({ message: `✅ Sent a push to ${sent} device(s). If you don't see a banner, open iPhone Settings → the app → Notifications and turn them on.` })
   return NextResponse.json({ message: `⚠️ Server tried but all sends failed (codes: ${errs.join(', ') || 'unknown'}). Usually the VAPID keys don't match the saved subscription — the keys need regenerating and re-subscribing.` })
