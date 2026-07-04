@@ -2186,3 +2186,8 @@ begin
   delete from public.discussion_groups where id = p_group;   -- members cascade
 end; $$;
 grant execute on function public.delete_discussion_group(uuid) to authenticated;
+
+-- 2026-07 · Discussion tickets/topics: a free-form thread (not tied to an order),
+-- so anyone can raise a ticket and others reply. Stored alongside so_number.
+alter table public.discussions add column if not exists topic text;
+create index if not exists discussions_topic on public.discussions (topic);
