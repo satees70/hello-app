@@ -2191,3 +2191,40 @@ grant execute on function public.delete_discussion_group(uuid) to authenticated;
 -- so anyone can raise a ticket and others reply. Stored alongside so_number.
 alter table public.discussions add column if not exists topic text;
 create index if not exists discussions_topic on public.discussions (topic);
+
+-- ============================================================================
+-- 2026-07 · Fix duplicate "Pick run released" notifications. A pick run covers
+-- many material requests; the trigger fired per request with a per-request ref,
+-- so one notification appeared per request. Dedup by pick_run_no instead → one
+-- notification per pick run.
+-- ============================================================================
+create or replace function public.tg_notify_material_request() returns trigger
+ language plpgsql security definer set search_path to 'public' as $function$
+begin
+  if TG_OP = 'INSERT' then
+    insert into public.notifications (factory_code, type, title, body, link, ref)
+    values (NEW.factory_code, 'mr', 'Material request raised ' || coalesce(NEW.request_no, ''),
+            'A material request was created for your location.', '/material-requests', 'mrnew:' || NEW.id::text)
+    on conflict (ref) do nothing;
+  elsif TG_OP = 'UPDATE' and OLD.released_at is null and NEW.released_at is not null then
+    insert into public.notifications (factory_code, type, title, body, link, ref)
+    values (NEW.factory_code, 'mr', 'Pick run released ' || coalesce(NEW.pick_run_no, ''),
+            'Materials were released to the warehouse to pick.', '/material-requests',
+            'mrrel:' || coalesce(NEW.pick_run_no, NEW.id::text))
+    on conflict (ref) do nothing;
+  end if;
+  return NEW;
+end; $function$;
+drop trigger if exists notify_material_request on public.material_requests;
+create trigger notify_material_request after insert or update of released_at on public.material_requests
+  for each row execute function public.tg_notify_material_request();
+
+-- One-time cleanup: keep the earliest "Pick run released" notification per run.
+delete from public.notifications
+ where id in (
+   select id from (
+     select id, row_number() over (partition by factory_code, title order by created_at) rn
+       from public.notifications
+      where type = 'mr' and title like 'Pick run released %'
+   ) s where rn > 1
+ );
