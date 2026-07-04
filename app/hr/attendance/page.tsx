@@ -198,7 +198,7 @@ export default function AttendancePage() {
   function cardHtml(b: EmpBlock): string {
     const leaveBreak = Object.entries(leaveBreakdown(b)).map(([k, v]) => `${k} ${v}`).join(', ')
     const rows = b.days.map(d => {
-      const wend = [0, 6].includes(weekdayOf(d.dateKey))
+      const wend = weekdayOf(d.dateKey) === 0   // Sunday only (Saturday is a normal work day)
       const sessions = d.result.pairing.sessions
         .map(s => `${klTime(s.in)}–${s.out ? klTime(s.out) : '??'}`).join('<br>')
       const worked = d.kind === 'worked' && !d.result.needsReview ? fmtMinutes(d.result.workedMinutes) : ''
@@ -361,7 +361,7 @@ export default function AttendancePage() {
                 {(onlyReview ? b.days.filter(dayNeedsAttn) : b.days).map(({ dateKey, result, trip, manualTime, outstationId, kind, leaveType, lateExcused, otInTrip }) => (
                   <tr key={dateKey} className={`border-b border-gray-50 align-top ${result.needsReview ? 'bg-amber-50' : kind === 'absent' ? 'bg-rose-50' : kind === 'off' || kind === 'holiday' ? 'text-gray-400' : ''}`}>
                     <td className="px-4 py-2 whitespace-nowrap">
-                      {fmtDate(dateKey)} <span className={`ml-1 ${[0, 6].includes(weekdayOf(dateKey)) ? 'text-rose-500' : 'text-gray-400'}`}>{DOW_SHORT[weekdayOf(dateKey)]}</span>
+                      {fmtDate(dateKey)} <span className={`ml-1 ${weekdayOf(dateKey) === 0 ? 'text-rose-500' : 'text-gray-400'}`}>{DOW_SHORT[weekdayOf(dateKey)]}</span>
                     </td>
                     <td className="px-4 py-2">
                       <div className="flex flex-wrap gap-1">
