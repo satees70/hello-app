@@ -2033,6 +2033,7 @@ begin
   v_val := nullif(btrim(p_value), '');
   if p_kind = 'lorry' then
     update public.delivery_orders set vehicle = v_val, lorry_assigned_by = case when v_val is null then null else auth.uid() end where id = p_doc_id;
+    perform public._gr_log(p_doc_id, case when v_val is null then 'Lorry cleared' else 'Lorry assigned' end, v_val);
     if v_val is not null then
       update public.delivery_resources set parked_at = null where kind = 'lorry' and lower(name) = lower(v_val);
     end if;
@@ -2041,6 +2042,7 @@ begin
        set driver_name = v_val, driver_assigned_at = case when v_val is null then null else now() end,
            driver_assigned_by = case when v_val is null then null else auth.uid() end
      where id = p_doc_id;
+    perform public._gr_log(p_doc_id, case when v_val is null then 'Driver cleared' else 'Driver assigned' end, v_val);
     if v_val is not null then
       insert into public.notifications (factory_code, type, title, body, link, ref)
       values (v_fac, 'transport', 'Driver assigned: ' || coalesce(v_no, 'incoming'),
@@ -2065,6 +2067,7 @@ begin
      set loaded_at = case when p_on then now() else null end,
          loaded_by = case when p_on then auth.uid() else null end
    where id = p_doc_id;
+  perform public._gr_log(p_doc_id, case when p_on then 'Marked loaded' else 'Loaded undone' end, v_veh);
   if p_on then
     insert into public.notifications (factory_code, type, title, body, link, ref)
     values (v_fac, 'transport', 'Goods loaded: ' || coalesce(v_no, 'incoming'),
@@ -2085,6 +2088,7 @@ begin
   if not public._gr_warehouse() then raise exception 'Not allowed'; end if;
   update public.delivery_orders set gr_departed_at = case when p_out then now() else null end,
          gr_departed_by = case when p_out then auth.uid() else null end where id = p_doc_id;
+  perform public._gr_log(p_doc_id, case when p_out then 'Sent to factory' else 'Send undone' end, coalesce(v_veh, '') || coalesce(' · ' || v_drv, ''));
   if p_out then
     insert into public.notifications (factory_code, type, title, body, link, ref)
     values (v_fac, 'transport', 'Incoming lorry on the way: ' || coalesce(v_no, ''),
@@ -2106,6 +2110,7 @@ begin
   update public.delivery_orders
      set transport_received_at = now(), transport_received_by = auth.uid()
    where id = p_doc_id;
+  perform public._gr_log(p_doc_id, 'Confirmed received', null);
   if v_by is not null then
     insert into public.notifications (user_id, factory_code, type, title, body, link, ref)
     values (v_by, v_fac, 'transport', 'Lorry received: ' || coalesce(v_no, ''),
@@ -2346,3 +2351,26 @@ drop policy if exists ldo_read on public.late_deduction_overrides;
 create policy ldo_read on public.late_deduction_overrides for select using (true);
 drop policy if exists ldo_write on public.late_deduction_overrides;
 create policy ldo_write on public.late_deduction_overrides for all using (true) with check (true);
+
+-- ============================================================================
+-- 2026-07 · GR transport history log (audit/back-up of every transport action).
+-- ============================================================================
+create table if not exists public.gr_transport_log (
+  id uuid primary key default gen_random_uuid(),
+  doc_id uuid not null references public.delivery_orders(id) on delete cascade,
+  action text not null,
+  detail text,
+  actor uuid,
+  actor_name text,
+  at timestamptz not null default now()
+);
+create index if not exists gr_transport_log_doc on public.gr_transport_log (doc_id, at);
+alter table public.gr_transport_log enable row level security;
+drop policy if exists grlog_read on public.gr_transport_log;
+create policy grlog_read on public.gr_transport_log for select to authenticated using (has_perm('goods_received', 'view'));
+
+create or replace function public._gr_log(p_doc uuid, p_action text, p_detail text) returns void
+ language sql security definer set search_path to 'public' as $$
+  insert into public.gr_transport_log (doc_id, action, detail, actor, actor_name)
+  values (p_doc, p_action, p_detail, auth.uid(), (select full_name from public.profiles where id = auth.uid()));
+$$;

@@ -110,6 +110,7 @@ export default function IncomingPage() {
   const [lorries, setLorries] = useState<{ name: string; parked_at: string | null; lorry_type: string | null }[]>([])
   const [crew, setCrew] = useState<string[]>([])
   const [userNames, setUserNames] = useState<Record<string, string>>({})   // user id -> name, for "by whom" on transport steps
+  const [grLog, setGrLog] = useState<{ action: string; detail: string | null; actor_name: string | null; at: string }[]>([])
   const [tBusy, setTBusy] = useState(false)
 
   // Lines / review state for the currently opened document
@@ -224,6 +225,7 @@ export default function IncomingPage() {
     const id = new URLSearchParams(window.location.search).get('transport'); if (!id) return
     const d = docs.find(x => x.id === id); if (d) setTransportDoc(d)
   }, [docs])
+  useEffect(() => { if (transportDoc) loadGrLog(transportDoc.id); else setGrLog([]) }, [transportDoc]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadResources() {
     const { data } = await supabase.from('delivery_resources').select('kind, name, parked_at, lorry_type').eq('active', true).order('name')
@@ -232,6 +234,10 @@ export default function IncomingPage() {
     const { data: us } = await supabase.rpc('list_users')
     setUserNames(Object.fromEntries(((us as { id: string; full_name: string }[]) || []).map(u => [u.id, u.full_name])))
   }
+  async function loadGrLog(id: string) {
+    const { data } = await supabase.from('gr_transport_log').select('action, detail, actor_name, at').eq('doc_id', id).order('at', { ascending: false })
+    setGrLog(data || [])
+  }
   // Transport-step actions on a Goods-Received document.
   async function grTransport(rpc: string, args: Record<string, unknown>) {
     setTBusy(true); setError('')
@@ -239,6 +245,7 @@ export default function IncomingPage() {
     setTBusy(false)
     if (e) { setError(e.message); return false }
     await loadDocs()
+    if (typeof args.p_doc_id === 'string') loadGrLog(args.p_doc_id)
     return true
   }
 
@@ -827,7 +834,7 @@ export default function IncomingPage() {
               <div>
                 <label className="block text-sm font-medium mb-1">Lorry</label>
                 {doc.vehicle
-                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-teal-50 text-teal-800 rounded-full px-2.5 py-1 text-sm font-medium">🚚 {doc.vehicle}</span><span className="text-xs text-gray-400">{by(doc.lorry_assigned_by)}</span></div>
+                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-teal-50 text-teal-800 rounded-full px-2.5 py-1 text-sm font-medium">🚚 {doc.vehicle}</span><span className="text-xs text-gray-400">{by(doc.lorry_assigned_by)}</span>{canWh && <button onClick={() => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'lorry', p_value: null })} disabled={tBusy} className="text-xs text-blue-600 hover:underline">change</button>}</div>
                   : canWh
                     ? <select value="" onChange={e => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'lorry', p_value: e.target.value })} disabled={tBusy} className="border rounded-lg px-2 py-1.5 text-sm w-full">
                         <option value="">Assign a lorry…</option>
@@ -852,7 +859,7 @@ export default function IncomingPage() {
               <div>
                 <label className="block text-sm font-medium mb-1">Driver <span className="text-gray-400 font-normal">(can be assigned later)</span></label>
                 {doc.driver_name
-                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 rounded-full px-2.5 py-1 text-sm font-medium">👤 {doc.driver_name}</span><span className="text-xs text-gray-400">{by(doc.driver_assigned_by)}</span></div>
+                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 rounded-full px-2.5 py-1 text-sm font-medium">👤 {doc.driver_name}</span><span className="text-xs text-gray-400">{by(doc.driver_assigned_by)}</span>{canWh && <button onClick={() => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'driver', p_value: null })} disabled={tBusy} className="text-xs text-blue-600 hover:underline">change</button>}</div>
                   : canWh
                     ? <select value="" onChange={e => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'driver', p_value: e.target.value })} disabled={tBusy} className="border rounded-lg px-2 py-1.5 text-sm w-full">
                         <option value="">Assign a driver…</option>
@@ -873,6 +880,18 @@ export default function IncomingPage() {
                   : canRcv
                     ? <button onClick={() => grTransport('confirm_gr_received', { p_doc_id: doc.id })} disabled={tBusy} className="ml-auto bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-green-700 disabled:opacity-50">Confirm received</button>
                     : <span className="text-sm text-gray-400 ml-auto">Awaiting the factory to confirm</span>}
+              </div>
+
+              {/* History — audit/back-up of every change */}
+              <div className="pt-3 border-t">
+                <div className="text-xs font-medium text-gray-500 mb-1">🕘 History</div>
+                {grLog.length === 0
+                  ? <p className="text-xs text-gray-400">No actions yet.</p>
+                  : <ul className="space-y-0.5 max-h-40 overflow-auto text-xs">
+                      {grLog.map((h, i) => (
+                        <li key={i} className="text-gray-600"><span className="font-medium">{h.action}</span>{h.detail ? `: ${h.detail}` : ''} <span className="text-gray-400">· {h.actor_name || '—'} · {fmtT(h.at)}</span></li>
+                      ))}
+                    </ul>}
               </div>
             </div>
           </div>
