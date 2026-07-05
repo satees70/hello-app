@@ -13,8 +13,17 @@ const COMPARE: { key: string; label: string }[] = [
   { key: 'MC', label: 'MC' },
 ]
 
-// Normalise a name for matching (case + spacing insensitive).
-const norm = (s: string) => (s || '').toUpperCase().replace(/\s+/g, ' ').trim()
+// Normalise a name for matching across the two systems. Malaysian patronymic
+// connectors ("A/L", "A/P", "S/O", "D/O") aren't stored the same way — ZKLink
+// strips the slash (→ "AL"), payroll keeps "A/L" — so drop the connector entirely
+// (any of "A/L", "A / L", or a bare "AL"/"AP" token) before comparing.
+const norm = (s: string) => (s || '').toUpperCase()
+  .replace(/\bA\s*\/\s*[LP]\b/g, ' ')   // A/L, A/P (slash form)
+  .replace(/\b[SD]\s*\/\s*O\b/g, ' ')   // S/O, D/O
+  .replace(/\//g, ' ')                   // any remaining slash
+  .replace(/\b(AL|AP)\b/g, ' ')          // bare AL / AP (slash was stripped upstream)
+  .replace(/[^A-Z0-9 ]/g, ' ')           // other punctuation
+  .replace(/\s+/g, ' ').trim()
 const near = (a: number, b: number) => Math.abs(a - b) < 0.01
 
 interface PayRow { name: string; AL: number; UL: number; MC: number; RL: number; SL: number; TO: number; attended: number | null }
