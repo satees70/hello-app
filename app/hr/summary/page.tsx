@@ -169,24 +169,21 @@ export default function SummaryPage() {
   // Export in the SQL Payroll import format: one HW15 row per person's net Total
   // OT (hours) and one S row per person's Sundays-to-pay (Sun @rate). Both dates =
   // the month-end; rate 1.5. OT rows first, then Sunday rows, matching payroll.
-  function exportPayroll() {
+  async function exportPayroll() {
     const [y, m, d] = to.split('-')
     const eom = `${Number(d)}/${Number(m)}/${y}`   // e.g. 30/6/2026
     const header = ['No', 'Code', 'Pay Code', 'Quantity', 'Name', 'Start Date', 'End Date', 'Description', 'Rate']
+    // OT hours and Sunday counts as NUMBERS (2dp) so they import as numeric cells.
     const otRows = rows.filter(r => r.totalOtMin > 0)
-      .map(r => [r.code, 'HW15', (r.totalOtMin / 60).toFixed(2), r.name, eom, eom, 'OT HOURLY', '1.5'])
+      .map(r => [r.code, 'HW15', Number((r.totalOtMin / 60).toFixed(2)), r.name, eom, eom, 'OT HOURLY', 1.5])
     const sunRows = rows.filter(r => r.sundayPaid > 0)
-      .map(r => [r.code, 'S', r.sundayPaid.toFixed(2), r.name, eom, eom, 'SUNDAY', '1.5'])
-    const body = [...otRows, ...sunRows].map((row, i) => [String(i + 1), ...row])
-    const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v)
-    const csv = [header, ...body].map(l => l.map(esc).join(',')).join('\r\n')
-    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `payroll-import_${from.slice(0, 7)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+      .map(r => [r.code, 'S', Number(r.sundayPaid.toFixed(2)), r.name, eom, eom, 'SUNDAY', 1.5])
+    const aoa: (string | number)[][] = [header, ...[...otRows, ...sunRows].map((row, i) => [i + 1, ...row])]
+    const XLSX = await import('xlsx')
+    const ws = XLSX.utils.aoa_to_sheet(aoa)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Payroll')
+    XLSX.writeFile(wb, `payroll-import_${from.slice(0, 7)}.xlsx`)
   }
 
   function printTable() {
