@@ -260,10 +260,15 @@ export function computeDay(times: Date[], profile: ShiftProfileLite | null, revi
   const lateMinutes = Math.max(0, firstIn - shiftStart!)
   const earlyOutMinutes = lastOut != null ? Math.max(0, shiftEnd! - lastOut) : 0
 
-  // Half day: worked only about half the scheduled hours — e.g. a 08:30–17:00
-  // shift where they were present 08:30–13:00 (morning) or 14:00–17:00 (afternoon).
-  // Then it's a planned half, not lateness/early-out, so those flags are dropped.
-  const halfDay = normal > 0 && normal >= normalMin * 0.3 && normal <= normalMin * 0.7
+  // Half day: worked only about half of THIS DAY'S scheduled hours — e.g. a
+  // 08:30–17:00 shift where they were present 08:30–13:00 (morning) only. Judged
+  // against the day's own window (not the global 7.5h), so a day that is scheduled
+  // short — like an Office SEM Saturday 08:30–13:00 — counts as a FULL day when
+  // fully worked, not a half. Then it's a planned half, so late/early are dropped.
+  const dayWindowMin = shiftEnd! - shiftStart!
+  // A short scheduled day has no lunch break; a full-length one does.
+  const dayExpectedWork = dayWindowMin <= normalMin ? dayWindowMin : Math.max(0, dayWindowMin - lunchMin)
+  const halfDay = normal > 0 && normal >= dayExpectedWork * 0.3 && normal <= dayExpectedWork * 0.7
   const r = result(normal, ot, halfDay ? 0 : lateMinutes, halfDay ? 0 : earlyOutMinutes, pairing, !!review)
   r.halfDay = halfDay
   return r
