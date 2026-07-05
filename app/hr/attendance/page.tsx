@@ -216,6 +216,15 @@ export default function AttendancePage() {
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') } else await load()
   }
 
+  // Ignore (or restore) one punch time on a day — drops a stray tap from pairing.
+  async function toggleIgnorePunch(code: string, date: string, hm: string, ignore: boolean) {
+    const res = await fetch('/api/attendance/ignore-punch', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employee_code: code, work_date: date, punch_hm: hm, ignore }),
+    })
+    if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') } else await load()
+  }
+
   // Build the printable HTML for one employee's attendance card.
   function cardHtml(b: EmpBlock): string {
     const leaveBreak = Object.entries(leaveBreakdown(b)).map(([k, v]) => `${k} ${v}`).join(', ')
@@ -397,16 +406,23 @@ export default function AttendancePage() {
                 </tr>
               </thead>
               <tbody>
-                {(onlyReview ? b.days.filter(dayNeedsAttn) : b.days).map(({ dateKey, result, trip, manualTime, outstationId, kind, leaveType, lateExcused, otInTrip, otExcludedDay, forceHalf }) => (
+                {(onlyReview ? b.days.filter(dayNeedsAttn) : b.days).map(({ dateKey, result, trip, manualTime, outstationId, kind, leaveType, lateExcused, otInTrip, otExcludedDay, forceHalf, punchTimes, ignoredTimes }) => (
                   <tr key={dateKey} className={`border-b border-gray-50 align-top ${result.needsReview ? 'bg-amber-50' : kind === 'absent' ? 'bg-rose-50' : kind === 'off' || kind === 'holiday' || kind === 'notEmployed' ? 'text-gray-400' : ''}`}>
                     <td className="px-4 py-2 whitespace-nowrap">
                       {fmtDate(dateKey)} <span className={`ml-1 ${weekdayOf(dateKey) === 0 ? 'text-rose-500' : 'text-gray-400'}`}>{DOW_SHORT[weekdayOf(dateKey)]}</span>
                     </td>
                     <td className="px-4 py-2">
                       <div className="flex flex-wrap gap-1">
-                        {result.pairing.sessions.flatMap(s => [s.in, s.out].filter(Boolean) as Date[]).map((t, i) => (
-                          <span key={i} className="rounded bg-gray-100 px-1.5 py-0.5 text-xs">{klTime(t)}</span>
-                        ))}
+                        {punchTimes.map((hm, i) => {
+                          const ign = ignoredTimes.includes(hm)
+                          return (
+                            <button key={i} type="button" onClick={() => toggleIgnorePunch(b.code, dateKey, hm, !ign)}
+                              title={ign ? 'Ignored — click to use this punch again' : 'Click to ignore this punch (e.g. a fingerprint set-up tap)'}
+                              className={`rounded px-1.5 py-0.5 text-xs cursor-pointer ${ign ? 'bg-gray-50 text-gray-400 line-through' : 'bg-gray-100 hover:bg-rose-100'}`}>
+                              {hm}
+                            </button>
+                          )
+                        })}
                       </div>
                     </td>
                     <td className="px-4 py-2">

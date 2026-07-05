@@ -1,6 +1,6 @@
 import { supabase, fetchAll } from '@/lib/supabase'
 import {
-  computeDay, outstationResult, emptyDay, klDateKey,
+  computeDay, outstationResult, emptyDay, klDateKey, klTime,
   type DayResult, type ShiftProfileLite, type ReviewLite,
 } from '@/lib/attendance'
 
@@ -14,7 +14,7 @@ export interface Punch { employee_code: string; punch_time: string; department_n
 export interface Review extends ReviewLite { employee_code: string; work_date: string; manual_time: string | null }
 
 export type DayKind = 'worked' | 'outstation' | 'holiday' | 'off' | 'absent' | 'notEmployed'
-export interface DayRow { dateKey: string; result: DayResult; trip: string | null; manualTime: string | null; outstationId: string | null; kind: DayKind; leaveType: string | null; lateExcused: boolean; otInTrip: boolean; otExcludedDay: boolean; forceHalf: boolean }
+export interface DayRow { dateKey: string; result: DayResult; trip: string | null; manualTime: string | null; outstationId: string | null; kind: DayKind; leaveType: string | null; lateExcused: boolean; otInTrip: boolean; otExcludedDay: boolean; forceHalf: boolean; punchTimes: string[]; ignoredTimes: string[] }
 
 // Trip categories whose overtime a DRIVER earns under the trip, not as OT here.
 const OT_IN_TRIP_CATEGORIES = new Set(['OS1', 'OS2'])
@@ -128,6 +128,15 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
   // Per-person monthly "Count OT" switch off → skip all of that person's OT.
   const { data: otOff } = await supabase.from('ot_month_off').select('employee_code').eq('month', month)
   const otMonthOffSet = new Set<string>((otOff || []).map(o => o.employee_code))
+  // Ignored punches: a stray tap (e.g. a fingerprint enrolment) to drop from the
+  // day's pairing. (employee_code | date) → set of 'HH:mm' to remove.
+  const { data: ignRows } = await supabase.from('attendance_ignored_punches').select('employee_code, work_date, punch_hm').gte('work_date', from).lte('work_date', to)
+  const ignoredByKey = new Map<string, Set<string>>()
+  for (const r of ignRows || []) {
+    const k = `${r.employee_code}|${r.work_date}`
+    if (!ignoredByKey.has(k)) ignoredByKey.set(k, new Set())
+    ignoredByKey.get(k)!.add(r.punch_hm)
+  }
   // Outstation trips overlapping the range → per-employee map of dateKey → trip id.
   const { data: ostrips } = await supabase.from('outstation_trips').select('id, employee_code, start_date, end_date')
     .lte('start_date', to).gte('end_date', from)
@@ -182,9 +191,14 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
       // Outside the employment period → "Not employed": shown but never counted as
       // absent/leave/work (before a new joiner started, or after a leaver resigned).
       if ((joinDate && dateKey < joinDate) || (resignDate && dateKey > resignDate)) {
-        dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'notEmployed', leaveType: null, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false })
+        dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'notEmployed', leaveType: null, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false, punchTimes: [], ignoredTimes: [] })
         continue
       }
+      // Ignored punches for this day → shown struck-through, dropped from pairing.
+      const dayIgnored = ignoredByKey.get(`${code}|${dateKey}`)
+      const punchTimes = times.map(t => klTime(t)).sort()
+      const ignoredTimes = dayIgnored ? punchTimes.filter(hm => dayIgnored.has(hm)) : []
+      const activeTimes = dayIgnored ? times.filter(t => !dayIgnored.has(klTime(t))) : times
       const isHol = holidaySet.has(dateKey)
       const win = ws ? ws[String(weekdayOf(dateKey))] : null
       // true = scheduled work day, false = rest/off, null = unknown (no profile).
@@ -195,26 +209,26 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
 
       // Outstation day → present, no OT, no review (punches still shown).
       if (osDates.has(dateKey)) {
-        punchCount += times.length
+        punchCount += activeTimes.length
         totalOutstation++
         if (scheduledWorking && !isHol) workDays++
-        dayRows.push({ dateKey, result: outstationResult(times), trip, manualTime: null, outstationId: osDates.get(dateKey)!, kind: 'outstation', leaveType: null, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false })
+        dayRows.push({ dateKey, result: outstationResult(activeTimes), trip, manualTime: null, outstationId: osDates.get(dateKey)!, kind: 'outstation', leaveType: null, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false, punchTimes, ignoredTimes })
         continue
       }
       // Resolve any human review + hand-entered times. Each HH:mm in manual_time
       // is ADDED to the day's real punches, then re-paired — so one time fills a
       // missing punch, and a pair (e.g. 08:30 19:00) turns an absent day into a
-      // worked day with OT. Existing punches are kept, not replaced.
+      // worked day with OT. Existing (non-ignored) punches are kept, not replaced.
       const review = reviewByKey.get(`${code}|${dateKey}`) ?? null
       const manualTime = review?.lunch_decision === 'manual_time' ? (review.manual_time ?? null) : null
       const extra = manualTime
         ? (manualTime.match(/\d{1,2}:\d{2}/g) || []).map(t => new Date(`${dateKey}T${t.padStart(5, '0')}:00+08:00`))
         : []
-      const dayTimes = extra.length ? [...times, ...extra] : times
+      const dayTimes = extra.length ? [...activeTimes, ...extra] : activeTimes
 
       // A day with punches (real or hand-entered) → the normal computed row.
       if (dayTimes.length > 0) {
-        punchCount += times.length
+        punchCount += activeTimes.length
         const result = computeDay(dayTimes, prof, review, { weekday: weekdayOf(dateKey), isHoliday: isHol })
         if (result.needsReview) needsReview++
         // Force this day to a half day if the supervisor ticked it (overrides the
@@ -243,14 +257,14 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
         }
         // A half-worked day can carry a leave type for the missing half (e.g. MC
         // in the afternoon); the day counts 0.5 work + 0.5 leave either way.
-        dayRows.push({ dateKey, result, trip, manualTime, outstationId: null, kind: 'worked', leaveType: result.halfDay ? leaveType : null, lateExcused, otInTrip, otExcludedDay, forceHalf })
+        dayRows.push({ dateKey, result, trip, manualTime, outstationId: null, kind: 'worked', leaveType: result.halfDay ? leaveType : null, lateExcused, otInTrip, otExcludedDay, forceHalf, punchTimes, ignoredTimes })
         continue
       }
       // No punches on a public holiday → shown as a row, but NOT counted: PH d
       // means days actually WORKED on a public holiday (added in the worked branch
       // above via dayUnits), not that the holiday merely exists.
       if (isHol) {
-        dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'holiday', leaveType: null, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false })
+        dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'holiday', leaveType: null, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false, punchTimes, ignoredTimes })
         continue
       }
       // No profile → we can't tell work day from rest day, so skip empty days.
@@ -258,14 +272,14 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
       // Rest / off day with no punches → shown but NOT counted (Rest d = days
       // actually worked on a rest day / Sunday, counted in the worked branch).
       if (!scheduledWorking) {
-        dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'off', leaveType: null, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false })
+        dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'off', leaveType: null, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false, punchTimes, ignoredTimes })
         continue
       }
       // Scheduled work day with no attendance → absent / leave (half-day = 0.5).
       const w = leaveWeight(leaveType)
       leaveDays += w
       workDays += 1 - w
-      dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'absent', leaveType, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false })
+      dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'absent', leaveType, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false, punchTimes, ignoredTimes })
     }
     out.push({
       code, name: emp?.name || code, department: deptByCode.get(code) ?? null,

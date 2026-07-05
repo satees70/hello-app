@@ -2421,3 +2421,20 @@ drop policy if exists omo_read on public.ot_month_off;
 create policy omo_read on public.ot_month_off for select using (true);
 drop policy if exists omo_write on public.ot_month_off;
 create policy omo_write on public.ot_month_off for all using (true) with check (true);
+
+-- 2026-07 · Ignored punches: drop a stray tap (e.g. a fingerprint enrolment) from
+-- a day's pairing without deleting the raw punch. A row = that 'HH:mm' is ignored.
+create table if not exists public.attendance_ignored_punches (
+  employee_code text not null,
+  work_date date not null,
+  punch_hm text not null,
+  updated_at timestamptz not null default now(),
+  primary key (employee_code, work_date, punch_hm)
+);
+grant select, insert, update, delete on public.attendance_ignored_punches to authenticated;
+grant all on public.attendance_ignored_punches to service_role;
+alter table public.attendance_ignored_punches enable row level security;
+drop policy if exists aip_read on public.attendance_ignored_punches;
+create policy aip_read on public.attendance_ignored_punches for select using (true);
+drop policy if exists aip_write on public.attendance_ignored_punches;
+create policy aip_write on public.attendance_ignored_punches for all using (true) with check (true);
