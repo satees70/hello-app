@@ -239,16 +239,18 @@ export default function SummaryPage() {
           <table className="w-full text-sm">
             <thead className="text-left text-gray-500 bg-gray-50">
               <tr className="border-b border-gray-200">
-                {COLS.map(c => (
-                  <th key={c.key} title={c.title} className={`px-3 py-2 font-medium whitespace-nowrap ${c.num ? 'text-right' : ''}`}>{c.label}</th>
-                ))}
+                {COLS.map(c => {
+                  const sticky = c.key === 'code' ? 'sticky left-0 z-20 bg-gray-50 w-[5.5rem] min-w-[5.5rem]'
+                    : c.key === 'name' ? 'sticky left-[5.5rem] z-20 bg-gray-50 border-r border-gray-200' : ''
+                  return <th key={c.key} title={c.title} className={`px-3 py-2 font-medium whitespace-nowrap ${c.num ? 'text-right' : ''} ${sticky}`}>{c.label}</th>
+                })}
               </tr>
             </thead>
             <tbody>
               {rows.map(r => (
-                <tr key={r.code} className="border-b border-gray-50 hover:bg-gray-50">
-                  <td className="px-3 py-2 whitespace-nowrap text-gray-500">{r.code}</td>
-                  <td className="px-3 py-2 whitespace-nowrap font-medium">
+                <tr key={r.code} className="border-b border-gray-50 hover:bg-gray-50 group">
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-500 sticky left-0 z-10 bg-white group-hover:bg-gray-50 w-[5.5rem] min-w-[5.5rem]">{r.code}</td>
+                  <td className="px-3 py-2 whitespace-nowrap font-medium sticky left-[5.5rem] z-10 bg-white group-hover:bg-gray-50 border-r border-gray-200">
                     {r.name}
                     {r.needsReview > 0 && <span className="ml-2 text-xs text-amber-600" title="Days still needing review on the Attendance page">⚠ {r.needsReview}</span>}
                   </td>
@@ -296,7 +298,7 @@ export default function SummaryPage() {
             </tbody>
             <tfoot className="bg-gray-50 font-medium border-t-2 border-gray-200">
               <tr>
-                <td className="px-3 py-2" colSpan={2}>Total ({rows.length})</td>
+                <td className="px-3 py-2 sticky left-0 z-10 bg-gray-50 border-r border-gray-200" colSpan={2}>Total ({rows.length})</td>
                 <td className="px-3 py-2 text-right">{db(totals.workDays)}</td>
                 <td className="px-3 py-2 text-right">{db(totals.leaveDays)}</td>
                 <td className="px-3 py-2"></td>
