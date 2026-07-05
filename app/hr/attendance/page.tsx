@@ -539,11 +539,12 @@ export default function AttendancePage() {
                         <span className="inline-flex items-center gap-2">
                           <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">½ day</span>
                           <select value={leaveType ?? ''} onChange={e => saveLeave(b.code, dateKey, e.target.value)}
-                            title="Leave type for the other half of the day"
-                            className={`rounded border px-1 py-0.5 text-xs ${leaveType ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-gray-200 text-gray-400'}`}>
-                            <option value="">½ leave…</option>
+                            title="Choose what the OTHER half of the day is (e.g. Unpaid). Until you pick one it is NOT counted as that leave."
+                            className={`rounded border px-1 py-0.5 text-xs ${leaveType ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-red-400 bg-red-50 text-red-700 font-medium ring-1 ring-red-300'}`}>
+                            <option value="">⚠ pick leave type…</option>
                             {LEAVE_TYPES.filter(t => t !== 'Half').map(t => <option key={t} value={t}>{t}</option>)}
                           </select>
+                          {!leaveType && <span className="text-xs text-red-600">← other half not set</span>}
                           <button onClick={() => reviewSession(b.code, dateKey)} className="text-xs text-blue-600 underline">enter times…</button>
                           {forceHalf && <button onClick={() => saveDayFlag(b.code, dateKey, { force_half: false })} className="text-xs text-gray-400 underline" title="Undo — count as a full day again">undo ½</button>}
                         </span>
