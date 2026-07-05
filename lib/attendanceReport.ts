@@ -37,6 +37,19 @@ export interface EmpBlock {
   excusedLate: number; excusedEarly: number; noDeductLate: boolean
   // `otMonthOff` = the "Count OT" tick is off for the whole month (all OT skipped).
   otMonthOff: boolean
+  // Sunday↔UL contra: `sundayWorked` = day-units worked on Sundays; `noContra` =
+  // the "keep Sunday" tick (don't offset UL with Sundays this month).
+  sundayWorked: number; noContra: boolean
+}
+
+// Sunday↔unpaid-leave contra. By default (contra on) each Sunday worked cancels
+// one UL day (net UL can't go below 0); leftover Sundays stay paid at rate. When
+// `noContra` is set the UL stands in full and every Sunday is paid.
+export function sundayContra(b: EmpBlock): { ul: number; used: number; netUL: number; sundayPaid: number; contra: boolean } {
+  const ul = leaveBreakdown(b)['Unpaid'] || 0
+  const contra = !b.noContra
+  const used = contra ? Math.min(ul, b.sundayWorked) : 0
+  return { ul, used, netUL: ul - used, sundayPaid: b.sundayWorked - used, contra }
 }
 
 // Late/early minutes actually deducted from Total OT, honouring per-day excuses
@@ -128,6 +141,9 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
   // Per-person monthly "Count OT" switch off → skip all of that person's OT.
   const { data: otOff } = await supabase.from('ot_month_off').select('employee_code').eq('month', month)
   const otMonthOffSet = new Set<string>((otOff || []).map(o => o.employee_code))
+  // Per-person monthly "keep Sunday" (don't contra UL against Sunday work).
+  const { data: noContra } = await supabase.from('sunday_no_contra').select('employee_code').eq('month', month)
+  const noContraSet = new Set<string>((noContra || []).map(o => o.employee_code))
   // Ignored punches: a stray tap (e.g. a fingerprint enrolment) to drop from the
   // day's pairing. (employee_code | date) → set of 'HH:mm' to remove.
   const { data: ignRows } = await supabase.from('attendance_ignored_punches').select('employee_code, work_date, punch_hm').gte('work_date', from).lte('work_date', to)
@@ -183,7 +199,7 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
     const osDates = outstationByEmp.get(code) ?? new Map<string, string>()
     const dayRows: DayRow[] = []
     let punchCount = 0, totalWorked = 0, totalOt = 0, totalLate = 0, totalEarlyOut = 0, totalRestDays = 0, totalHolidayDays = 0, totalPresentDays = 0, totalOutstation = 0, needsReview = 0
-    let workDays = 0, leaveDays = 0, excusedLate = 0, excusedEarly = 0
+    let workDays = 0, leaveDays = 0, excusedLate = 0, excusedEarly = 0, sundayWorked = 0
     const ws = prof?.week_schedule ?? null
     // Walk every calendar day in the range, so absent (leave) days show as rows too.
     for (const dateKey of rangeDates) {
@@ -255,6 +271,7 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
         const lateExcused = excusedSet.has(`${code}|${dateKey}`)
         if (lateExcused) { excusedLate += result.lateMinutes; excusedEarly += result.earlyOutMinutes }
         if (result.dayType === 'rest') totalRestDays += result.dayUnits
+        if (result.dayType === 'rest' && weekdayOf(dateKey) === 0) sundayWorked += result.dayUnits
         if (result.dayType === 'holiday') totalHolidayDays += result.dayUnits
         if (result.presentDay) totalPresentDays++
         if (scheduledWorking && !isHol) {
@@ -291,6 +308,7 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
       code, name: emp?.name || code, department: deptByCode.get(code) ?? null,
       profile: prof, deliveryName, days: dayRows, punches: punchCount, totalWorked, totalOt, totalLate, totalEarlyOut, totalRestDays, totalHolidayDays, totalPresentDays, totalOutstation, workDays, leaveDays, needsReview,
       excusedLate, excusedEarly, noDeductLate: noDeductSet.has(code), otMonthOff,
+      sundayWorked, noContra: noContraSet.has(code),
     })
   }
   out.sort((a, b) => a.name.localeCompare(b.name))

@@ -2438,3 +2438,20 @@ drop policy if exists aip_read on public.attendance_ignored_punches;
 create policy aip_read on public.attendance_ignored_punches for select using (true);
 drop policy if exists aip_write on public.attendance_ignored_punches;
 create policy aip_write on public.attendance_ignored_punches for all using (true) with check (true);
+
+-- 2026-07 · Sunday↔unpaid-leave contra. By default a Sunday worked cancels one
+-- UL day (they made up the missed day). A row here = "keep Sunday" for that
+-- person/month: DON'T contra — the UL stands and the Sunday is paid at rate.
+create table if not exists public.sunday_no_contra (
+  employee_code text not null,
+  month text not null,
+  updated_at timestamptz not null default now(),
+  primary key (employee_code, month)
+);
+grant select, insert, update, delete on public.sunday_no_contra to authenticated;
+grant all on public.sunday_no_contra to service_role;
+alter table public.sunday_no_contra enable row level security;
+drop policy if exists snc_read on public.sunday_no_contra;
+create policy snc_read on public.sunday_no_contra for select using (true);
+drop policy if exists snc_write on public.sunday_no_contra;
+create policy snc_write on public.sunday_no_contra for all using (true) with check (true);

@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiFetch } from '@/lib/api'
 import {
-  loadReport, prevMonthRange, leaveBreakdown, tripBreakdown, totalOtMinutes, type EmpBlock,
+  loadReport, prevMonthRange, leaveBreakdown, tripBreakdown, totalOtMinutes, sundayContra, type EmpBlock,
 } from '@/lib/attendanceReport'
 
 // Monthly Summary — one row per employee, the payroll-ready totals for a month.
@@ -22,6 +22,7 @@ const breakStr = (rec: Record<string, number>) => Object.entries(rec).map(([k, v
 // The one row of numbers for an employee. `totalOtMin` = OT minus late/early time
 // that is ACTUALLY deducted (excused days + a per-person exemption are skipped).
 function rowFor(b: EmpBlock) {
+  const sc = sundayContra(b)
   return {
     code: b.code,
     name: b.name,
@@ -29,6 +30,11 @@ function rowFor(b: EmpBlock) {
     workDays: b.workDays,
     leaveDays: b.leaveDays,
     leaveBreak: breakStr(leaveBreakdown(b)),
+    sundayWorked: b.sundayWorked,
+    noContra: b.noContra,
+    ul: sc.ul,
+    netUL: sc.netUL,
+    sundayPaid: sc.sundayPaid,
     workedMin: b.totalWorked,
     otMin: b.totalOt,
     lateMin: b.totalLate,
@@ -55,6 +61,10 @@ const COLS: { key: string; label: string; num?: boolean; title?: string; csv: (r
   { key: 'workDays', label: 'Work d', num: true, csv: r => days(r.workDays) },
   { key: 'leaveDays', label: 'Leave d', num: true, csv: r => days(r.leaveDays) },
   { key: 'leaveBreak', label: 'Leave breakdown', csv: r => r.leaveBreak },
+  { key: 'sundayWorked', label: 'Sun wk', num: true, title: 'Sundays worked', csv: r => days(r.sundayWorked) },
+  { key: 'contra', label: 'Contra', title: 'On: a Sunday worked cancels an unpaid-leave day. Untick to keep the Sunday paid at rate.', csv: r => (r.noContra ? 'no' : 'yes') },
+  { key: 'netUL', label: 'Net UL', num: true, title: 'Unpaid leave after Sunday contra', csv: r => days(r.netUL) },
+  { key: 'sundayPaid', label: 'Sun @rate', num: true, title: 'Sundays to pay at Sunday rate (after contra)', csv: r => days(r.sundayPaid) },
   { key: 'workedMin', label: 'Worked h', num: true, csv: r => hrs(r.workedMin) },
   { key: 'otMin', label: 'OT h', num: true, csv: r => hrs(r.otMin) },
   { key: 'countOt', label: 'Count OT', csv: r => (r.otMonthOff ? 'no' : 'yes') },
@@ -111,6 +121,17 @@ export default function SummaryPage() {
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') } else await load()
   }
 
+  // Toggle the Sunday↔UL contra for a person (optimistic; Net UL recomputes from
+  // the block fields, no reload needed). contra=true is the default.
+  async function saveContra(code: string, contra: boolean) {
+    setBlocks(bs => bs.map(b => b.code === code ? { ...b, noContra: !contra } : b))
+    const res = await apiFetch('/api/attendance/sunday-contra', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employee_code: code, month: from.slice(0, 7), contra }),
+    })
+    if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') }
+  }
+
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase()
     return blocks.map(rowFor).filter(r => !q || r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q))
@@ -120,11 +141,12 @@ export default function SummaryPage() {
   const totals = useMemo(() => {
     const t = rows.reduce((a, r) => ({
       workDays: a.workDays + r.workDays, leaveDays: a.leaveDays + r.leaveDays,
+      sundayWorked: a.sundayWorked + r.sundayWorked, netUL: a.netUL + r.netUL, sundayPaid: a.sundayPaid + r.sundayPaid,
       workedMin: a.workedMin + r.workedMin, otMin: a.otMin + r.otMin,
       lateMin: a.lateMin + r.lateMin, earlyMin: a.earlyMin + r.earlyMin,
       totalOtMin: a.totalOtMin + r.totalOtMin, phDays: a.phDays + r.phDays,
       restDays: a.restDays + r.restDays, outstationDays: a.outstationDays + r.outstationDays,
-    }), { workDays: 0, leaveDays: 0, workedMin: 0, otMin: 0, lateMin: 0, earlyMin: 0, totalOtMin: 0, phDays: 0, restDays: 0, outstationDays: 0 })
+    }), { workDays: 0, leaveDays: 0, sundayWorked: 0, netUL: 0, sundayPaid: 0, workedMin: 0, otMin: 0, lateMin: 0, earlyMin: 0, totalOtMin: 0, phDays: 0, restDays: 0, outstationDays: 0 })
     return t
   }, [rows])
 
@@ -233,6 +255,15 @@ export default function SummaryPage() {
                   <td className="px-3 py-2 text-right">{db(r.workDays)}</td>
                   <td className="px-3 py-2 text-right">{db(r.leaveDays)}</td>
                   <td className="px-3 py-2 text-rose-600 whitespace-nowrap">{r.leaveBreak}</td>
+                  <td className="px-3 py-2 text-right">{db(r.sundayWorked)}</td>
+                  <td className="px-3 py-2 text-center">
+                    {(r.sundayWorked > 0 || r.ul > 0)
+                      ? <input type="checkbox" checked={!r.noContra} onChange={e => saveContra(r.code, e.target.checked)}
+                          title="On: a Sunday worked cancels an unpaid-leave day. Untick to keep the Sunday paid at rate." className="cursor-pointer" />
+                      : null}
+                  </td>
+                  <td className="px-3 py-2 text-right">{db(r.netUL)}</td>
+                  <td className="px-3 py-2 text-right">{db(r.sundayPaid)}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">{hb(r.workedMin)}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap font-medium">{hb(r.otMin)}</td>
                   <td className="px-3 py-2 text-center">
@@ -269,6 +300,10 @@ export default function SummaryPage() {
                 <td className="px-3 py-2 text-right">{db(totals.workDays)}</td>
                 <td className="px-3 py-2 text-right">{db(totals.leaveDays)}</td>
                 <td className="px-3 py-2"></td>
+                <td className="px-3 py-2 text-right">{db(totals.sundayWorked)}</td>
+                <td className="px-3 py-2"></td>
+                <td className="px-3 py-2 text-right">{db(totals.netUL)}</td>
+                <td className="px-3 py-2 text-right">{db(totals.sundayPaid)}</td>
                 <td className="px-3 py-2 text-right">{hb(totals.workedMin)}</td>
                 <td className="px-3 py-2 text-right">{hb(totals.otMin)}</td>
                 <td className="px-3 py-2"></td>

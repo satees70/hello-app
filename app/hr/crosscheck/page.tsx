@@ -1,6 +1,6 @@
 'use client'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { loadReport, prevMonthRange, leaveBreakdown, type EmpBlock } from '@/lib/attendanceReport'
+import { loadReport, prevMonthRange, leaveBreakdown, sundayContra, type EmpBlock } from '@/lib/attendanceReport'
 
 // Cross-check tab — reconcile the payroll software's manually-keyed leave against
 // the app's computed leave. Upload the "Attendance Listing Report" xlsx; people
@@ -84,7 +84,8 @@ export default function CrossCheckPage() {
   const rows = useMemo(() => pay.map(p => {
     const b = appByName.get(norm(p.name))
     const lb = b ? leaveBreakdown(b) : {}
-    const app = { AL: lb['AL'] || 0, UL: lb['Unpaid'] || 0, MC: lb['MC'] || 0 }
+    // UL compared is the NET after Sunday contra (matching payroll's UL).
+    const app = { AL: lb['AL'] || 0, UL: b ? sundayContra(b).netUL : 0, MC: lb['MC'] || 0 }
     const payv = { AL: p.AL, UL: p.UL, MC: p.MC }
     const diffs = COMPARE.filter(c => !near(app[c.label as 'AL' | 'UL' | 'MC'], payv[c.label as 'AL' | 'UL' | 'MC']))
     return { p, b, code: b?.code ?? '', app, payv, matched: !!b, ok: !!b && diffs.length === 0, diffs: diffs.map(d => d.label) }
