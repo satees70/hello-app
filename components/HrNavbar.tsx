@@ -8,6 +8,7 @@ import { can } from '@/lib/permissions'
 const LINKS = [
   { href: '/hr/attendance', label: 'Attendance & OT' },
   { href: '/hr/summary', label: 'Monthly summary' },
+  { href: '/hr/crosscheck', label: 'Cross-check' },
   { href: '/hr/employees', label: 'Employees & shifts' },
 ]
 
