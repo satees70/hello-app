@@ -99,6 +99,40 @@ export default function CrossCheckPage() {
   const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1))
   const fmtDate = (k: string) => { const [y, m, d] = k.split('-'); return `${d}/${m}/${y}` }
 
+  // Print the currently-shown comparison (respects the Only-differences filter),
+  // plus the "in app, not in payroll" list.
+  function printTable() {
+    const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
+    const stat = (r: typeof shown[number]) => !r.matched ? 'NOT IN APP' : r.ok ? 'match' : `DIFFER: ${r.diffs.join(', ')}`
+    const trs = shown.map(r => `<tr>
+      <td>${esc(r.p.name)}${r.code ? ` (${esc(r.code)})` : ''}</td>
+      <td class="n">${r.matched ? fmt(r.app.AL) : '—'} / ${fmt(r.payv.AL)}</td>
+      <td class="n">${r.matched ? fmt(r.app.UL) : '—'} / ${fmt(r.payv.UL)}</td>
+      <td class="n">${r.matched ? fmt(r.app.MC) : '—'} / ${fmt(r.payv.MC)}</td>
+      <td>${esc(stat(r))}</td></tr>`).join('')
+    const appOnlyHtml = appOnly.length ? `<h2>In the app with leave, not in payroll (${appOnly.length})</h2>
+      <table><thead><tr><th>Name</th><th>Code</th><th>Leave</th></tr></thead><tbody>${appOnly.map(b =>
+        `<tr><td>${esc(b.name)}</td><td>${esc(b.code)}</td><td>${esc(Object.entries(leaveBreakdown(b)).map(([k, v]) => `${k} ${fmt(v)}`).join(', ') || `${fmt(b.leaveDays)}d`)}</td></tr>`).join('')}</tbody></table>` : ''
+    const css = `* { font-family: -apple-system, Segoe UI, Arial, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      @page { size: A4; margin: 12mm; }
+      body { margin: 0; color: #111; }
+      h1 { font-size: 15px; margin: 0 0 2px; } h2 { font-size: 13px; margin: 14px 0 4px; }
+      .meta { font-size: 11px; color: #444; margin-bottom: 8px; }
+      table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 8px; }
+      th, td { border: 1px solid #bbb; padding: 3px 6px; text-align: left; }
+      th { background: #eee; } td.n, th.n { text-align: center; white-space: nowrap; }`
+    const win = window.open('', '_blank')
+    if (!win) { setError('Please allow pop-ups to print.'); return }
+    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Payroll cross-check</title><style>${css}</style></head><body>
+      <h1>Payroll cross-check — ${fmtDate(from)} – ${fmtDate(to)}</h1>
+      <div class="meta">${esc(fileName)} · ${shown.length} shown${onlyDiff ? ' (differences only)' : ''} of ${rows.length}</div>
+      <table><thead><tr><th>Name</th><th class="n">AL app/pay</th><th class="n">UL app/pay</th><th class="n">MC app/pay</th><th>Status</th></tr></thead><tbody>${trs}</tbody></table>
+      ${appOnlyHtml}
+    </body></html>`)
+    win.document.close(); win.focus()
+    setTimeout(() => win.print(), 350)
+  }
+
   return (
     <main className="max-w-full mx-auto p-4 sm:p-6">
       <h1 className="text-2xl font-semibold">Cross-check payroll</h1>
@@ -119,6 +153,9 @@ export default function CrossCheckPage() {
             <input type="checkbox" checked={onlyDiff} onChange={e => setOnlyDiff(e.target.checked)} />
             Only differences
           </label>
+        )}
+        {pay.length > 0 && (
+          <button onClick={printTable} className="rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">Print</button>
         )}
       </div>
 
