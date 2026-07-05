@@ -46,7 +46,10 @@ export interface EmpBlock {
 // one UL day (net UL can't go below 0); leftover Sundays stay paid at rate. When
 // `noContra` is set the UL stands in full and every Sunday is paid.
 export function sundayContra(b: EmpBlock): { ul: number; used: number; netUL: number; sundayPaid: number; contra: boolean } {
-  const ul = leaveBreakdown(b)['Unpaid'] || 0
+  const lb = leaveBreakdown(b)
+  // Unassigned half-days (the 'Half' bucket) default to unpaid, so they count in
+  // UL. If a half is really AL/MC, assigning it moves it out of 'Half'.
+  const ul = (lb['Unpaid'] || 0) + (lb['Half'] || 0)
   const contra = !b.noContra
   const used = contra ? Math.min(ul, b.sundayWorked) : 0
   return { ul, used, netUL: ul - used, sundayPaid: b.sundayWorked - used, contra }

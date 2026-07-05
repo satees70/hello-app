@@ -197,7 +197,7 @@ export default function CrossCheckPage() {
                     {!r.matched ? <span className="text-rose-600 text-xs">not in app</span>
                       : r.ok ? <span className="text-green-700 text-xs">✓ match</span>
                         : <span className="text-amber-700 text-xs">⚠ {r.diffs.join(', ')} differ</span>}
-                    {r.half > 0 && <span className="ml-2 text-xs text-indigo-600" title="Half-day(s) with no leave type set — assign it on the Attendance page (e.g. as Unpaid) to close the gap">· ½ unassigned {fmt(r.half)}</span>}
+                    {r.half > 0 && <span className="ml-2 text-xs text-indigo-600" title="Includes unassigned half-day(s), counted as unpaid by default. If it's really AL/MC, set it on the Attendance page.">· incl ½ {fmt(r.half)}</span>}
                   </td>
                 </tr>
               ))}

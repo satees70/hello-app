@@ -63,7 +63,7 @@ const COLS: { key: string; label: string; num?: boolean; title?: string; csv: (r
   { key: 'leaveBreak', label: 'Leave breakdown', csv: r => r.leaveBreak },
   { key: 'sundayWorked', label: 'Sun wk', num: true, title: 'Sundays worked', csv: r => days(r.sundayWorked) },
   { key: 'contra', label: 'Contra', title: 'On: a Sunday worked cancels an unpaid-leave day. Untick to keep the Sunday paid at rate.', csv: r => (r.noContra ? 'no' : 'yes') },
-  { key: 'netUL', label: 'Net UL', num: true, title: 'Unpaid leave after Sunday contra', csv: r => days(r.netUL) },
+  { key: 'netUL', label: 'Net UL', num: true, title: 'Unpaid leave (incl. unassigned half-days) after Sunday contra', csv: r => days(r.netUL) },
   { key: 'sundayPaid', label: 'Sun @rate', num: true, title: 'Sundays to pay at Sunday rate (after contra)', csv: r => days(r.sundayPaid) },
   { key: 'workedMin', label: 'Worked h', num: true, csv: r => hrs(r.workedMin) },
   { key: 'otMin', label: 'OT h', num: true, csv: r => hrs(r.otMin) },
