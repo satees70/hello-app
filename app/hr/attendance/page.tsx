@@ -154,7 +154,8 @@ export default function AttendancePage() {
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Failed') } else await load()
   }
 
-  // Set a driver's trip type for a day (optimistic — no full reload).
+  // Set a driver's trip type for a day. Reload after saving so the OT-under-trip
+  // rule recomputes — for a driver, switching a day to OS1/OS2 drops that day's OT.
   async function saveTrip(code: string, date: string, tripType: string) {
     setBlocks(bs => bs.map(b => b.code === code
       ? { ...b, days: b.days.map(d => d.dateKey === date ? { ...d, trip: tripType || null } : d) } : b))
@@ -162,7 +163,7 @@ export default function AttendancePage() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ employee_code: code, work_date: date, trip_type: tripType }),
     })
-    if (!res.ok) { const j = await res.json(); setError(j.error || 'Trip save failed') }
+    if (!res.ok) { const j = await res.json(); setError(j.error || 'Trip save failed') } else await load()
   }
 
   // Set the leave type on an absent OR half-worked day (optimistic — no reload).
