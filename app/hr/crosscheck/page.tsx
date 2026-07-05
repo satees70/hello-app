@@ -88,7 +88,10 @@ export default function CrossCheckPage() {
     const app = { AL: lb['AL'] || 0, UL: b ? sundayContra(b).netUL : 0, MC: lb['MC'] || 0 }
     const payv = { AL: p.AL, UL: p.UL, MC: p.MC }
     const diffs = COMPARE.filter(c => !near(app[c.label as 'AL' | 'UL' | 'MC'], payv[c.label as 'AL' | 'UL' | 'MC']))
-    return { p, b, code: b?.code ?? '', app, payv, matched: !!b, ok: !!b && diffs.length === 0, diffs: diffs.map(d => d.label) }
+    // Half-days the app detected but whose ½-leave type isn't set (in the "Half"
+    // bucket) — often the exact 0.5 that makes a UL differ; flag them to categorise.
+    const half = lb['Half'] || 0
+    return { p, b, code: b?.code ?? '', app, payv, half, matched: !!b, ok: !!b && diffs.length === 0, diffs: diffs.map(d => d.label) }
   }), [pay, appByName])
 
   // App people (with attendance this month) who aren't in the payroll file at all.
@@ -103,7 +106,8 @@ export default function CrossCheckPage() {
   // plus the "in app, not in payroll" list.
   function printTable() {
     const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
-    const stat = (r: typeof shown[number]) => !r.matched ? 'NOT IN APP' : r.ok ? 'match' : `DIFFER: ${r.diffs.join(', ')}`
+    const stat = (r: typeof shown[number]) => (!r.matched ? 'NOT IN APP' : r.ok ? 'match' : `DIFFER: ${r.diffs.join(', ')}`)
+      + (r.half > 0 ? ` · ½ unassigned ${fmt(r.half)}` : '')
     const trs = shown.map(r => `<tr>
       <td>${esc(r.p.name)}${r.code ? ` (${esc(r.code)})` : ''}</td>
       <td class="n">${r.matched ? fmt(r.app.AL) : '—'} / ${fmt(r.payv.AL)}</td>
@@ -193,6 +197,7 @@ export default function CrossCheckPage() {
                     {!r.matched ? <span className="text-rose-600 text-xs">not in app</span>
                       : r.ok ? <span className="text-green-700 text-xs">✓ match</span>
                         : <span className="text-amber-700 text-xs">⚠ {r.diffs.join(', ')} differ</span>}
+                    {r.half > 0 && <span className="ml-2 text-xs text-indigo-600" title="Half-day(s) with no leave type set — assign it on the Attendance page (e.g. as Unpaid) to close the gap">· ½ unassigned {fmt(r.half)}</span>}
                   </td>
                 </tr>
               ))}
