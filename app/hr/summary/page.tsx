@@ -172,12 +172,15 @@ export default function SummaryPage() {
   async function exportPayroll() {
     const [y, m, d] = to.split('-')
     const eom = `${Number(d)}/${Number(m)}/${y}`   // e.g. 30/6/2026
+    // ZKLink stores the L-series without a dash (L00096); SQL Payroll wants the
+    // dash (L-00096). Insert it for a leading "L" + 5 digits; leave others as-is.
+    const payCode = (c: string) => c.replace(/^L(\d{5})$/, 'L-$1')
     const header = ['No', 'Code', 'Pay Code', 'Quantity', 'Name', 'Start Date', 'End Date', 'Description', 'Rate']
     // OT hours and Sunday counts as NUMBERS (2dp) so they import as numeric cells.
     const otRows = rows.filter(r => r.totalOtMin > 0)
-      .map(r => [r.code, 'HW15', Number((r.totalOtMin / 60).toFixed(2)), r.name, eom, eom, 'OT HOURLY', 1.5])
+      .map(r => [payCode(r.code), 'HW15', Number((r.totalOtMin / 60).toFixed(2)), r.name, eom, eom, 'OT HOURLY', 1.5])
     const sunRows = rows.filter(r => r.sundayPaid > 0)
-      .map(r => [r.code, 'S', Number(r.sundayPaid.toFixed(2)), r.name, eom, eom, 'SUNDAY', 1.5])
+      .map(r => [payCode(r.code), 'S', Number(r.sundayPaid.toFixed(2)), r.name, eom, eom, 'SUNDAY', 1.5])
     const aoa: (string | number)[][] = [header, ...[...otRows, ...sunRows].map((row, i) => [i + 1, ...row])]
     const XLSX = await import('xlsx')
     const ws = XLSX.utils.aoa_to_sheet(aoa)
