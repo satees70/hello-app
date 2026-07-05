@@ -192,13 +192,17 @@ export default function AttendancePage() {
   }
 
   // Per-day flags: exclude that day's OT (exclude_ot) and/or force it to a half
-  // day (force_half). A full reload keeps totals + half-day counting correct.
+  // day (force_half). Flip the day's flag OPTIMISTICALLY so the tick responds
+  // instantly (the reload for correct totals takes a few seconds), then reload.
   async function saveDayFlag(code: string, date: string, patch: { exclude_ot?: boolean; force_half?: boolean }) {
+    setBlocks(bs => bs.map(b => b.code === code ? { ...b, days: b.days.map(d => d.dateKey === date
+      ? { ...d, otExcludedDay: patch.exclude_ot ?? d.otExcludedDay, forceHalf: patch.force_half ?? d.forceHalf } : d) } : b))
     const res = await apiFetch('/api/attendance/day-flag', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ employee_code: code, work_date: date, ...patch }),
     })
-    if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') } else await load()
+    if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') }
+    await load()
   }
 
   // Ignore (or restore) one punch time on a day — drops a stray tap from pairing.
