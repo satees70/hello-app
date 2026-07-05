@@ -37,6 +37,7 @@ export default function CrossCheckPage() {
   const [pay, setPay] = useState<PayRow[]>([])
   const [fileName, setFileName] = useState('')
   const [onlyDiff, setOnlyDiff] = useState(true)
+  const [hideNotInApp, setHideNotInApp] = useState(true)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -98,7 +99,9 @@ export default function CrossCheckPage() {
   const payNames = useMemo(() => new Set(pay.map(p => norm(p.name))), [pay])
   const appOnly = useMemo(() => blocks.filter(b => b.leaveDays > 0 && !payNames.has(norm(b.name))), [blocks, payNames])
 
-  const shown = onlyDiff ? rows.filter(r => !r.ok) : rows
+  const shown = rows.filter(r => (!onlyDiff || !r.ok) && (!hideNotInApp || r.matched))
+  const diffInApp = rows.filter(r => r.matched && !r.ok).length
+  const notInApp = rows.filter(r => !r.matched).length
   const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1))
   const fmtDate = (k: string) => { const [y, m, d] = k.split('-'); return `${d}/${m}/${y}` }
 
@@ -159,6 +162,12 @@ export default function CrossCheckPage() {
           </label>
         )}
         {pay.length > 0 && (
+          <label className={`flex items-center gap-1.5 text-sm cursor-pointer rounded-md border px-3 py-1.5 ${hideNotInApp ? 'border-amber-400 bg-amber-50 text-amber-800' : 'border-gray-300'}`}>
+            <input type="checkbox" checked={hideNotInApp} onChange={e => setHideNotInApp(e.target.checked)} />
+            Hide &ldquo;not in app&rdquo;{notInApp > 0 ? ` (${notInApp})` : ''}
+          </label>
+        )}
+        {pay.length > 0 && (
           <button onClick={printTable} className="rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">Print</button>
         )}
       </div>
@@ -166,7 +175,7 @@ export default function CrossCheckPage() {
       {error && <div className="mb-4 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{error}</div>}
       <p className="text-sm text-gray-500 mb-3">
         {loading ? 'Loading app data…' : pay.length === 0 ? 'Upload the payroll file to compare.'
-          : `${fileName} · ${pay.length} people in file · ${rows.filter(r => !r.ok).length} to check · ${fmtDate(from)} – ${fmtDate(to)}`}
+          : `${fileName} · ${pay.length} in file · ${diffInApp} in-app differences · ${notInApp} not in app · showing ${shown.length}`}
       </p>
 
       {pay.length > 0 && (
