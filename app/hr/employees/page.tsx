@@ -29,6 +29,8 @@ export default function EmployeesSetupPage() {
   const [msg, setMsg] = useState<string | null>(null)
   const [pulling, setPulling] = useState(false)
   const [reportMonth, setReportMonth] = useState(() => new Date().toISOString().slice(0, 7))
+  const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: '', dir: 1 })
+  const toggleSort = (key: string) => setSort(s => s.key === key ? { key, dir: (s.dir === 1 ? -1 : 1) } : { key, dir: 1 })
   const [newProf, setNewProf] = useState({ name: '', normal_hours: '7.5', lunch_rule: 'punch', lunch_minutes: '60', attendance_mode: 'pair' })
   const [week, setWeek] = useState<WeekEdit>(defaultWeek())
   const [holidays, setHolidays] = useState<Holiday[]>([])
@@ -198,7 +200,7 @@ export default function EmployeesSetupPage() {
   const named = rows.filter(r => r.name).length
   const withProfile = rows.filter(r => r.shift_profile_id).length
   const depts = [...new Set(rows.map(r => r.department).filter(Boolean))].sort() as string[]
-  const visibleRows = rows.filter(r => {
+  const filteredRows = rows.filter(r => {
     if (filterActive === 'active' && !r.active) return false
     if (filterActive === 'inactive' && r.active) return false
     if (filterDept && r.department !== filterDept) return false
@@ -207,6 +209,28 @@ export default function EmployeesSetupPage() {
     if (search.trim()) { const s = search.toLowerCase(); if (!`${r.name} ${r.employee_code} ${r.department}`.toLowerCase().includes(s)) return false }
     return true
   })
+  // Sort value per column key (string/number/date). Empty sorts last.
+  const profName = (id: string | null) => profiles.find(p => p.id === id)?.name || ''
+  const sortVal = (r: Row, key: string): string | number => {
+    switch (key) {
+      case 'code': return r.employee_code
+      case 'name': return (r.name || '').toLowerCase()
+      case 'department': return (r.department || '~').toLowerCase()
+      case 'profile': return profName(r.shift_profile_id).toLowerCase() || '~'
+      case 'production': return r.is_production ? 0 : 1
+      case 'driver': return r.is_driver ? 0 : 1
+      case 'delivery': return (r.delivery_name || '~').toLowerCase()
+      case 'joined': return r.join_date || '9999'
+      case 'left': return r.resign_date || '9999'
+      case 'seen': return r.lastSeen || '0'
+      case 'active': return r.active ? 0 : 1
+      default: return ''
+    }
+  }
+  const visibleRows = sort.key
+    ? [...filteredRows].sort((a, b) => { const av = sortVal(a, sort.key), bv = sortVal(b, sort.key); return (av < bv ? -1 : av > bv ? 1 : 0) * sort.dir })
+    : filteredRows
+  const arrow = (key: string) => (sort.key === key ? (sort.dir === 1 ? ' ▲' : ' ▼') : '')
 
   return (
     <main className="max-w-5xl mx-auto p-4 sm:p-6">
@@ -380,17 +404,17 @@ export default function EmployeesSetupPage() {
           <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[64rem]">
             <thead className="text-left text-gray-500">
-              <tr className="border-b border-gray-100">
-                <th className="px-3 py-2 font-medium">Code</th>
-                <th className="px-3 py-2 font-medium">Name</th>
-                <th className="px-3 py-2 font-medium">Department</th>
-                <th className="px-3 py-2 font-medium">Shift profile</th>
-                <th className="px-3 py-2 font-medium" title="Ticked people appear in the Production module (e.g. Grinding “Grind by”)">Production</th>
-                <th className="px-3 py-2 font-medium">Driver</th>
-                <th className="px-3 py-2 font-medium">Delivery link</th>
-                <th className="px-3 py-2 font-medium" title="Joined date (days before are 'Not employed') / Left date (days after are 'Not employed')">Joined / Left</th>
-                <th className="px-3 py-2 font-medium">Last seen</th>
-                <th className="px-3 py-2 font-medium">Active</th>
+              <tr className="border-b border-gray-100 [&>th]:cursor-pointer [&>th]:select-none [&>th:hover]:text-gray-800">
+                <th className="px-3 py-2 font-medium" onClick={() => toggleSort('code')}>Code{arrow('code')}</th>
+                <th className="px-3 py-2 font-medium" onClick={() => toggleSort('name')}>Name{arrow('name')}</th>
+                <th className="px-3 py-2 font-medium" onClick={() => toggleSort('department')}>Department{arrow('department')}</th>
+                <th className="px-3 py-2 font-medium" onClick={() => toggleSort('profile')}>Shift profile{arrow('profile')}</th>
+                <th className="px-3 py-2 font-medium" title="Ticked people appear in the Production module (e.g. Grinding “Grind by”)" onClick={() => toggleSort('production')}>Production{arrow('production')}</th>
+                <th className="px-3 py-2 font-medium" onClick={() => toggleSort('driver')}>Driver{arrow('driver')}</th>
+                <th className="px-3 py-2 font-medium" onClick={() => toggleSort('delivery')}>Delivery link{arrow('delivery')}</th>
+                <th className="px-3 py-2 font-medium" title="Joined date (days before are 'Not employed') / Left date (days after are 'Not employed')" onClick={() => toggleSort('joined')}>Joined{arrow('joined')} / <span onClick={e => { e.stopPropagation(); toggleSort('left') }}>Left{arrow('left')}</span></th>
+                <th className="px-3 py-2 font-medium" onClick={() => toggleSort('seen')}>Last seen{arrow('seen')}</th>
+                <th className="px-3 py-2 font-medium" onClick={() => toggleSort('active')}>Active{arrow('active')}</th>
               </tr>
             </thead>
             <tbody>
