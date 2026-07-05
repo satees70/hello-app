@@ -205,6 +205,27 @@ export default function AttendancePage() {
     await load()
   }
 
+  // Month-level "total ignore" toggles (same as the Monthly summary). count OT off
+  // skips all of this person's OT for the month; deduct off keeps late/early out of
+  // Total OT. Reload after count-OT so the header OT total updates.
+  async function saveCountOt(code: string, count: boolean) {
+    setBlocks(bs => bs.map(b => b.code === code ? { ...b, otMonthOff: !count } : b))
+    const res = await apiFetch('/api/attendance/ot-month', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employee_code: code, month: from.slice(0, 7), off: !count }),
+    })
+    if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') }
+    await load()
+  }
+  async function saveDeduct(code: string, deduct: boolean) {
+    setBlocks(bs => bs.map(b => b.code === code ? { ...b, noDeductLate: !deduct } : b))
+    const res = await apiFetch('/api/attendance/deduct-override', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employee_code: code, month: from.slice(0, 7), no_deduct: !deduct }),
+    })
+    if (!res.ok) { const j = await res.json(); setError(j.error || 'Save failed') }
+  }
+
   // Ignore (or restore) one punch time on a day — drops a stray tap from pairing.
   async function toggleIgnorePunch(code: string, date: string, hm: string, ignore: boolean) {
     const res = await apiFetch('/api/attendance/ignore-punch', {
@@ -368,6 +389,12 @@ export default function AttendancePage() {
                 })()}
                 <span className="ml-3">Worked {fmtMinutes(b.totalWorked)}</span>
                 <span className="ml-3 font-medium text-gray-800">OT {fmtMinutes(b.totalOt)}</span>
+                <label className="ml-2 inline-flex items-center gap-1 text-xs text-gray-600 cursor-pointer align-middle" title="Off = ignore ALL of this person's OT for the whole month">
+                  <input type="checkbox" checked={!b.otMonthOff} onChange={e => saveCountOt(b.code, e.target.checked)} /> count OT
+                </label>
+                <label className="ml-2 inline-flex items-center gap-1 text-xs text-gray-600 cursor-pointer align-middle" title="Off = don't deduct this person's late/early from Total OT for the whole month">
+                  <input type="checkbox" checked={!b.noDeductLate} onChange={e => saveDeduct(b.code, e.target.checked)} /> deduct late/early
+                </label>
                 {b.totalLate > 0 && <span className="ml-3 text-rose-600">Late {fmtMinutes(b.totalLate)}</span>}
                 {b.totalEarlyOut > 0 && <span className="ml-3 text-rose-600">Early-out {fmtMinutes(b.totalEarlyOut)}</span>}
                 {b.totalRestDays > 0 && <span className="ml-3 text-purple-700">Rest {b.totalRestDays}d</span>}
@@ -424,6 +451,8 @@ export default function AttendancePage() {
                       {kind === 'worked' && !result.needsReview && result.otMinutes > 0 ? (
                         otInTrip ? (
                           <span className="text-gray-400 line-through" title={`Driver on ${trip} — OT paid under the trip, not counted here`}>{fmtMinutes(result.otMinutes)}</span>
+                        ) : b.otMonthOff ? (
+                          <span className="text-gray-400 line-through" title="Count OT is off for this person this month">{fmtMinutes(result.otMinutes)}</span>
                         ) : (
                           <div>
                             <span className={otExcludedDay ? 'text-gray-400 line-through' : 'font-medium'}>{fmtMinutes(result.otMinutes)}</span>
