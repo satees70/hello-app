@@ -28,6 +28,7 @@ export default function EmployeesSetupPage() {
   const [error, setError] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [pulling, setPulling] = useState(false)
+  const [reportMonth, setReportMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [newProf, setNewProf] = useState({ name: '', normal_hours: '7.5', lunch_rule: 'punch', lunch_minutes: '60', attendance_mode: 'pair' })
   const [week, setWeek] = useState<WeekEdit>(defaultWeek())
   const [holidays, setHolidays] = useState<Holiday[]>([])
@@ -163,6 +164,37 @@ export default function EmployeesSetupPage() {
     else { setMsg(`Active updated: ${j.active} active, ${j.inactive} inactive (based on last ${j.windowDays} days).`); await load() }
   }
 
+  // Print a joiners & leavers report for the chosen month from the Joined / Left
+  // dates (join_date / resign_date).
+  function printJoinersLeavers() {
+    const esc = (s: string) => (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
+    const dmy = (d: string) => { const [y, m, day] = d.split('-'); return `${day}/${m}/${y}` }
+    const inMonth = (d: string | null) => !!d && d.slice(0, 7) === reportMonth
+    const joined = rows.filter(r => inMonth(r.join_date)).sort((a, b) => (a.join_date || '').localeCompare(b.join_date || ''))
+    const left = rows.filter(r => inMonth(r.resign_date)).sort((a, b) => (a.resign_date || '').localeCompare(b.resign_date || ''))
+    const tbl = (title: string, list: Row[], dateOf: (r: Row) => string, col: string) => `<h2>${title} (${list.length})</h2>` + (list.length
+      ? `<table><thead><tr><th class="n">#</th><th>Code</th><th>Name</th><th>Department</th><th>${col}</th></tr></thead><tbody>${list.map((r, i) =>
+          `<tr><td class="n">${i + 1}</td><td>${esc(r.employee_code)}</td><td>${esc(r.name || '')}</td><td>${esc(r.department || '')}</td><td>${dmy(dateOf(r))}</td></tr>`).join('')}</tbody></table>`
+      : `<p class="none">None</p>`)
+    const [yy, mm] = reportMonth.split('-')
+    const monthName = new Date(Number(yy), Number(mm) - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+    const css = `* { font-family: -apple-system, Segoe UI, Arial, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      @page { size: A4; margin: 12mm; } body { margin: 0; color: #111; }
+      h1 { font-size: 16px; margin: 0 0 8px; } h2 { font-size: 13px; margin: 14px 0 4px; }
+      table { width: 100%; border-collapse: collapse; font-size: 11px; }
+      th, td { border: 1px solid #bbb; padding: 3px 6px; text-align: left; } th { background: #eee; }
+      td.n, th.n { text-align: center; width: 28px; } .none { color: #777; font-size: 11px; }`
+    const win = window.open('', '_blank')
+    if (!win) { setError('Please allow pop-ups to print.'); return }
+    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Joiners & leavers</title><style>${css}</style></head><body>
+      <h1>Joiners &amp; leavers — ${monthName}</h1>
+      ${tbl('Joined', joined, r => r.join_date!, 'Joined')}
+      ${tbl('Left / resigned', left, r => r.resign_date!, 'Left')}
+    </body></html>`)
+    win.document.close(); win.focus()
+    setTimeout(() => win.print(), 350)
+  }
+
   const named = rows.filter(r => r.name).length
   const withProfile = rows.filter(r => r.shift_profile_id).length
   const depts = [...new Set(rows.map(r => r.department).filter(Boolean))].sort() as string[]
@@ -295,7 +327,13 @@ export default function EmployeesSetupPage() {
       <section className="rounded-lg border border-gray-200 overflow-hidden">
         <header className="flex flex-wrap items-center justify-between gap-2 bg-gray-50 px-4 py-2 border-b border-gray-200">
           <span className="text-sm text-gray-600">{rows.length} people · {named} named · {withProfile} with a shift · {rows.filter(r => r.active).length} active · {rows.filter(r => r.is_production).length} production</span>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <input type="month" lang="en-GB" value={reportMonth} onChange={e => setReportMonth(e.target.value)}
+              title="Month for the joiners & leavers report" className="rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
+            <button onClick={printJoinersLeavers}
+              className="rounded-md border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-100">
+              Joiners / leavers
+            </button>
             <button onClick={setActiveFromAttendance}
               className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50">
               Set active from attendance
