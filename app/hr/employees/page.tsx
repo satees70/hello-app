@@ -43,7 +43,7 @@ export default function EmployeesSetupPage() {
     setLoading(true); setError(null)
     const [{ data: profs }, { data: emps }, codes, { data: hols }, { data: drv }] = await Promise.all([
       supabase.from('shift_profiles').select('id, name, normal_hours, lunch_rule, lunch_minutes, week_schedule, attendance_mode').order('name'),
-      supabase.from('employees').select('employee_code, name, shift_profile_id, is_driver, is_production, active, department, delivery_name, crew_role'),
+      supabase.from('employees').select('employee_code, name, shift_profile_id, is_driver, is_production, active, department, delivery_name, crew_role, join_date, resign_date'),
       fetchAll<{ employee_code: string; punch_time: string }>('attendance_punches', 'employee_code, punch_time'),
       supabase.from('public_holidays').select('holiday_date, name').order('holiday_date'),
       // Delivery link comes from the unified crew pool (kind 'crew' + legacy 'driver'/'kelindan'), not just 'driver'.
