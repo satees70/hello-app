@@ -48,6 +48,7 @@ export default function AttendancePage() {
   const [from, setFrom] = useState(() => prevMonthRange().from)
   const [to, setTo] = useState(() => prevMonthRange().to)
   const [onlyReview, setOnlyReview] = useState(false)
+  const [onlyLeave, setOnlyLeave] = useState(false)
   const [search, setSearch] = useState('')
   const [location, setLocation] = useState('')   // '' = all locations/departments
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -292,11 +293,15 @@ export default function AttendancePage() {
   const fmtDate = (k: string) => { const [y, m, d] = k.split('-'); return `${d}/${m}/${y}` }
   const grandOt = blocks.reduce((s, b) => s + b.totalOt, 0)
   const totalToReview = blocks.reduce((s, b) => s + b.days.filter(dayNeedsAttn).length, 0)
+  // A leave-relevant day: absent, a worked half-day, or an outstation day marked
+  // as leave. Used by the "Only leave / ½ days" filter to jump straight to them.
+  const dayIsLeave = (d: DayRow) => d.kind === 'absent' || (d.kind === 'worked' && d.result.halfDay) || (d.kind === 'outstation' && !!d.leaveType)
   // Location list = the distinct departments present, for the filter dropdown.
   const locations = [...new Set(blocks.map(b => b.department).filter(Boolean) as string[])].sort()
   const q = search.trim().toLowerCase()
   const shown = blocks.filter(b =>
     (!onlyReview || b.days.some(dayNeedsAttn)) &&
+    (!onlyLeave || b.days.some(dayIsLeave)) &&
     (!location || b.department === location) &&
     (!q || b.name.toLowerCase().includes(q) || b.code.toLowerCase().includes(q))
   )
@@ -333,6 +338,10 @@ export default function AttendancePage() {
         <label className={`flex items-center gap-1.5 text-sm cursor-pointer rounded-md border px-3 py-1.5 ${onlyReview ? 'border-amber-400 bg-amber-50 text-amber-800' : 'border-gray-300'}`}>
           <input type="checkbox" checked={onlyReview} onChange={e => setOnlyReview(e.target.checked)} />
           Only needs review{totalToReview > 0 ? ` (${totalToReview})` : ''}
+        </label>
+        <label className={`flex items-center gap-1.5 text-sm cursor-pointer rounded-md border px-3 py-1.5 ${onlyLeave ? 'border-amber-400 bg-amber-50 text-amber-800' : 'border-gray-300'}`}>
+          <input type="checkbox" checked={onlyLeave} onChange={e => setOnlyLeave(e.target.checked)} />
+          Only leave / ½ days
         </label>
         <label className="text-sm">Find person
           <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="name or code"
@@ -422,8 +431,8 @@ export default function AttendancePage() {
                 </tr>
               </thead>
               <tbody>
-                {(onlyReview ? b.days.filter(dayNeedsAttn) : b.days).map(({ dateKey, result, trip, manualTime, outstationId, kind, leaveType, lateExcused, otInTrip, otExcludedDay, forceHalf, punchTimes, ignoredTimes }) => (
-                  <tr key={dateKey} className={`border-b border-gray-50 align-top ${result.needsReview ? 'bg-amber-50' : kind === 'absent' ? 'bg-rose-50' : kind === 'off' || kind === 'holiday' || kind === 'notEmployed' ? 'text-gray-400' : ''}`}>
+                {(onlyReview ? b.days.filter(dayNeedsAttn) : onlyLeave ? b.days.filter(dayIsLeave) : b.days).map(({ dateKey, result, trip, manualTime, outstationId, kind, leaveType, lateExcused, otInTrip, otExcludedDay, forceHalf, punchTimes, ignoredTimes }) => (
+                  <tr key={dateKey} className={`border-b border-gray-50 align-top ${result.needsReview ? 'bg-amber-50' : kind === 'absent' ? 'bg-rose-50' : (kind === 'worked' && result.halfDay) ? 'bg-amber-100' : kind === 'off' || kind === 'holiday' || kind === 'notEmployed' ? 'text-gray-400' : ''}`}>
                     <td className="px-4 py-2 whitespace-nowrap">
                       {fmtDate(dateKey)} <span className={`ml-1 ${weekdayOf(dateKey) === 0 ? 'text-rose-500' : 'text-gray-400'}`}>{DOW_SHORT[weekdayOf(dateKey)]}</span>
                     </td>
