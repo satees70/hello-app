@@ -207,12 +207,18 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
       const trip = overrideByKey.get(`${code}|${dateKey}`) ?? autoTrip
       const leaveType = leaveByKey.get(`${code}|${dateKey}`) ?? null
 
-      // Outstation day → present, no OT, no review (punches still shown).
+      // Outstation day → present, no OT, no review (punches still shown). But it
+      // can be marked as LEAVE (e.g. absent the daytime, only departed at night):
+      // then it counts as leave, not an outstation work day.
       if (osDates.has(dateKey)) {
         punchCount += activeTimes.length
-        totalOutstation++
-        if (scheduledWorking && !isHol) workDays++
-        dayRows.push({ dateKey, result: outstationResult(activeTimes), trip, manualTime: null, outstationId: osDates.get(dateKey)!, kind: 'outstation', leaveType: null, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false, punchTimes, ignoredTimes })
+        if (leaveType) {
+          if (scheduledWorking && !isHol) { const w = leaveWeight(leaveType); leaveDays += w; workDays += 1 - w }
+        } else {
+          totalOutstation++
+          if (scheduledWorking && !isHol) workDays++
+        }
+        dayRows.push({ dateKey, result: outstationResult(activeTimes), trip, manualTime: null, outstationId: osDates.get(dateKey)!, kind: 'outstation', leaveType, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false, punchTimes, ignoredTimes })
         continue
       }
       // Resolve any human review + hand-entered times. Each HH:mm in manual_time
@@ -299,7 +305,7 @@ export function leaveBreakdown(b: EmpBlock): Record<string, number> {
   const lc: Record<string, number> = {}
   const add = (k: string, n: number) => { lc[k] = (lc[k] || 0) + n }
   for (const d of b.days) {
-    if (d.kind === 'absent' && d.leaveType) add(d.leaveType, leaveWeight(d.leaveType))
+    if ((d.kind === 'absent' || d.kind === 'outstation') && d.leaveType) add(d.leaveType, leaveWeight(d.leaveType))
     else if (d.kind === 'worked' && d.result.halfDay) add(d.leaveType || 'Half', 0.5)
   }
   return lc

@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { apiFetch } from '@/lib/api'
 import { klTime, fmtMinutes } from '@/lib/attendance'
 import {
-  loadReport, prevMonthRange, leaveWeight, dayNeedsAttn, weekdayOf, addDay, DOW_SHORT,
+  loadReport, prevMonthRange, dayNeedsAttn, weekdayOf, addDay, DOW_SHORT,
   LEAVE_TYPES, leaveBreakdown, tripBreakdown, type EmpBlock, type DayRow,
 } from '@/lib/attendanceReport'
 
@@ -16,7 +16,7 @@ function dayStatusText(d: DayRow): string {
   if (d.kind === 'off') return 'Rest day'
   if (d.kind === 'holiday') return 'Public holiday'
   if (d.kind === 'absent') return 'Absent' + (d.leaveType ? ` (${d.leaveType})` : '')
-  if (d.kind === 'outstation') return 'Outstation'
+  if (d.kind === 'outstation') return d.leaveType ? `Leave (${d.leaveType})` : 'Outstation'
   const r = d.result
   if (r.needsReview) return 'Needs review'
   if (r.halfDay) return 'Half day' + (d.leaveType ? ` (${d.leaveType})` : '')
@@ -166,33 +166,17 @@ export default function AttendancePage() {
     if (!res.ok) { const j = await res.json(); setError(j.error || 'Trip save failed') } else await load()
   }
 
-  // Set the leave type on an absent OR half-worked day (optimistic — no reload).
-  // On an absent day the leave weight also shifts work↔leave; on a half-worked day
-  // the split is already 0.5/0.5, so only the type label changes.
+  // Set the leave type on an absent, outstation, or half-worked day. Optimistically
+  // show the new label, then reload so the work/leave day counts are recomputed
+  // correctly (each kind shifts the totals differently).
   async function saveLeave(code: string, date: string, leaveType: string) {
-    setBlocks(bs => bs.map(b => {
-      if (b.code !== code) return b
-      const old = b.days.find(d => d.dateKey === date)
-      if (!old) return b
-      if (old.kind === 'absent') {
-        const oldW = leaveWeight(old.leaveType), newW = leaveWeight(leaveType || null)
-        return {
-          ...b,
-          days: b.days.map(d => d.dateKey === date ? { ...d, leaveType: leaveType || null } : d),
-          leaveDays: b.leaveDays - oldW + newW,
-          workDays: b.workDays - (1 - oldW) + (1 - newW),
-        }
-      }
-      if (old.kind === 'worked' && old.result.halfDay) {
-        return { ...b, days: b.days.map(d => d.dateKey === date ? { ...d, leaveType: leaveType || null } : d) }
-      }
-      return b
-    }))
+    setBlocks(bs => bs.map(b => b.code === code
+      ? { ...b, days: b.days.map(d => d.dateKey === date ? { ...d, leaveType: leaveType || null } : d) } : b))
     const res = await apiFetch('/api/attendance/leave', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ employee_code: code, work_date: date, leave_type: leaveType }),
     })
-    if (!res.ok) { const j = await res.json(); setError(j.error || 'Leave save failed') }
+    if (!res.ok) { const j = await res.json(); setError(j.error || 'Leave save failed') } else await load()
   }
 
   // Excuse (or un-excuse) one day's late/early so it isn't deducted from Total OT
@@ -502,7 +486,13 @@ export default function AttendancePage() {
                         </div>
                       ) : result.outstation ? (
                         <span className="inline-flex items-center gap-2">
-                          <span className="rounded bg-teal-100 px-2 py-0.5 text-xs text-teal-800">outstation</span>
+                          <span className={`rounded px-2 py-0.5 text-xs ${leaveType ? 'bg-rose-100 text-rose-800' : 'bg-teal-100 text-teal-800'}`}>{leaveType ? 'leave' : 'outstation'}</span>
+                          <select value={leaveType ?? ''} onChange={e => saveLeave(b.code, dateKey, e.target.value)}
+                            title="Mark the daytime as leave (e.g. absent by day, departed at night)"
+                            className={`rounded border px-1 py-0.5 text-xs ${leaveType ? 'border-rose-300 bg-rose-50 text-rose-800' : 'border-gray-200 text-gray-400'}`}>
+                            <option value="">leave type…</option>
+                            {LEAVE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                          </select>
                           {outstationId && <button onClick={() => removeOutstation(outstationId)} className="text-xs text-gray-400 underline">remove</button>}
                         </span>
                       ) : result.reviewed ? (
