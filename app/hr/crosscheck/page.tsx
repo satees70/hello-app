@@ -140,6 +140,40 @@ export default function CrossCheckPage() {
     setTimeout(() => win.print(), 350)
   }
 
+  // Print just the "not in app" list — payroll people with no attendance in the
+  // app (new joiners, resigned, or unsynced). Shows their payroll leave + attended
+  // so new-vs-resigned is easy to spot (e.g. UL 30 / Attended 0 = away all month).
+  function printNotInApp() {
+    const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
+    const list = rows.filter(r => !r.matched)
+    const trs = list.map((r, i) => `<tr>
+      <td class="n">${i + 1}</td>
+      <td>${esc(r.p.name)}</td>
+      <td class="n">${fmt(r.payv.AL)}</td>
+      <td class="n">${fmt(r.payv.UL)}</td>
+      <td class="n">${fmt(r.payv.MC)}</td>
+      <td class="n">${r.p.RL || 0}</td>
+      <td class="n">${r.p.SL || 0}</td>
+      <td class="n">${r.p.attended ?? ''}</td></tr>`).join('')
+    const css = `* { font-family: -apple-system, Segoe UI, Arial, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      @page { size: A4; margin: 12mm; }
+      body { margin: 0; color: #111; }
+      h1 { font-size: 15px; margin: 0 0 2px; }
+      .meta { font-size: 11px; color: #444; margin-bottom: 8px; }
+      table { width: 100%; border-collapse: collapse; font-size: 11px; }
+      th, td { border: 1px solid #bbb; padding: 3px 6px; text-align: left; }
+      th { background: #eee; } td.n, th.n { text-align: center; white-space: nowrap; }`
+    const win = window.open('', '_blank')
+    if (!win) { setError('Please allow pop-ups to print.'); return }
+    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Not in app</title><style>${css}</style></head><body>
+      <h1>In payroll, not in the app — ${fmtDate(from)} – ${fmtDate(to)}</h1>
+      <div class="meta">${esc(fileName)} · ${list.length} people · new joiners / resigned / no punches this month</div>
+      <table><thead><tr><th class="n">#</th><th>Name</th><th class="n">AL</th><th class="n">UL</th><th class="n">MC</th><th class="n">RL</th><th class="n">SL</th><th class="n">Attended</th></tr></thead><tbody>${trs}</tbody></table>
+    </body></html>`)
+    win.document.close(); win.focus()
+    setTimeout(() => win.print(), 350)
+  }
+
   return (
     <main className="max-w-full mx-auto p-4 sm:p-6">
       <h1 className="text-2xl font-semibold">Cross-check payroll</h1>
@@ -169,6 +203,9 @@ export default function CrossCheckPage() {
         )}
         {pay.length > 0 && (
           <button onClick={printTable} className="rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">Print</button>
+        )}
+        {pay.length > 0 && notInApp > 0 && (
+          <button onClick={printNotInApp} className="rounded-md border border-indigo-300 bg-indigo-50 px-4 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-100">Not-in-app list ({notInApp})</button>
         )}
       </div>
 
