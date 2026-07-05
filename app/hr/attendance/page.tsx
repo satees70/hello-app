@@ -219,7 +219,7 @@ export default function AttendancePage() {
 
   // Ignore (or restore) one punch time on a day — drops a stray tap from pairing.
   async function toggleIgnorePunch(code: string, date: string, hm: string, ignore: boolean) {
-    const res = await fetch('/api/attendance/ignore-punch', {
+    const res = await apiFetch('/api/attendance/ignore-punch', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ employee_code: code, work_date: date, punch_hm: hm, ignore }),
     })

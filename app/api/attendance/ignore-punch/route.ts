@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { requirePerm } from '@/lib/apiAuth'
 
 // Ignore (or restore) one stray punch on a day — e.g. a fingerprint-enrolment tap
 // that shouldn't count. A row = that 'HH:mm' is dropped from the day's pairing.
@@ -11,6 +12,9 @@ const admin = createClient(
 )
 
 export async function POST(request: Request) {
+  const auth = await requirePerm(request, 'hr', 'edit')
+  if (auth instanceof NextResponse) return auth
+
   const { employee_code, work_date, punch_hm, ignore } = await request.json()
   const hm = (punch_hm ?? '').toString().trim()
   if (!employee_code || !work_date || !/^\d{2}:\d{2}$/.test(hm)) {
