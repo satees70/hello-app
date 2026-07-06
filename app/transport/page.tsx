@@ -42,7 +42,7 @@ export default function TransportPage() {
   async function load() {
     const [{ data: f }, { data: res }, { data: o }, { data: lr }] = await Promise.all([
       supabase.from('factories').select('code, name').order('code'),
-      supabase.from('delivery_resources').select('id, kind, name, parked_at, lorry_type').eq('active', true).order('name'),
+      supabase.from('delivery_resources').select('id, kind, name, parked_at, lorry_type').eq('active', true).eq('approved', true).order('name'),
       supabase.from('dispatch_orders')
         .select('id, do_number, factory_code, created_at, created_by_name, vehicle, lorry_requested_at, driver_name, driver_requested_at, dispatch_order_lines(item_code, description, quantity), material_returns(item_code, description, quantity)')
         .gte('created_at', TRANSPORT_SINCE).order('created_at', { ascending: false }).limit(100),
