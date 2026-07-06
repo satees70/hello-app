@@ -37,6 +37,22 @@ const STATUS_STYLE: Record<string, string> = {
 // Statuses that mean the line is finished — excluded from the pending list.
 const DONE = new Set(['Delivered to warehouse', 'Production completed'])
 
+const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
+// Stylesheet for the printable Pending Summary.
+const PRINT_CSS = `
+  * { font-family: -apple-system, Segoe UI, Arial, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  @page { size: A4; margin: 12mm; }
+  body { margin: 0; color: #111; }
+  h1 { font-size: 16px; margin: 0; }
+  .meta { font-size: 11px; color: #555; margin: 2px 0 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  th, td { border: 1px solid #bbb; padding: 3px 6px; text-align: left; vertical-align: top; }
+  th { background: #eee; }
+  td.n { text-align: right; white-space: nowrap; }
+  tr.grp td { background: #f3f4f6; font-weight: 600; }
+  .sub { color: #666; font-size: 10px; }
+`
+
 export default function PendingSummaryPage() {
   const { profile, loading, error: profileError } = useProfile()
   useRequireView(profile, 'sales')
@@ -143,6 +159,24 @@ export default function PendingSummaryPage() {
     return [...m.values()].sort((a, b) => a.code.localeCompare(b.code))
   }
 
+  // Open a clean, fully-expanded printout of the currently-filtered summary.
+  function printSummary() {
+    const when = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Kuala_Lumpur' })
+    const rowsHtml = facs.map(fc => {
+      const items = combineByItem(visible.filter(l => factoryName(l.factory_code) === fc))
+      const body = items.map(it => `<tr><td>${esc(it.code)}${it.grinding ? ' 🌀' : ''}${isMultiFac.has(it.code) ? ' ⚠ 2+ factories' : ''}<div class="sub">${esc(it.desc || '')}</div></td><td>${esc(it.sos.join(', '))}</td><td class="n">${Number(it.qty.toFixed(3))}</td><td>${[...it.statuses].map(s => esc(String(s))).join(', ')}</td></tr>`).join('')
+      return `<tr class="grp"><td colspan="4">🏭 ${esc(fc)} · ${items.length} item(s)</td></tr>${body}`
+    }).join('')
+    const filters = [tomorrowOnly ? 'Tomorrow only' : '', search ? `Search: “${search}”` : ''].filter(Boolean).join(' · ')
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Pending Summary</title><style>${PRINT_CSS}</style></head><body>`
+      + `<h1>Pending Summary</h1><div class="meta">${esc(when)} · ${visible.length} pending line(s)${filters ? ' · ' + esc(filters) : ''}</div>`
+      + `<table><thead><tr><th>Item</th><th>Orders (SO)</th><th>Qty</th><th>Status</th></tr></thead><tbody>${rowsHtml || '<tr><td colspan="4">Nothing pending.</td></tr>'}</tbody></table>`
+      + `</body></html>`
+    const w = window.open('', '_blank')
+    if (!w) { alert('Please allow pop-ups to print.'); return }
+    w.document.write(html); w.document.close(); w.focus(); w.print()
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
@@ -172,6 +206,7 @@ export default function PendingSummaryPage() {
           <div className="w-52"><span className="text-xs text-gray-500">Status</span><MultiFilter values={[...new Set(pending.map(lineStatus))].sort()} selected={statF} onChange={setStatF} /></div>
           <button onClick={() => setTomorrowOnly(v => !v)} className={`text-xs px-3 py-1.5 rounded-full font-medium border self-end ${tomorrowOnly ? 'bg-yellow-300 border-yellow-400 text-yellow-900' : 'bg-white border-gray-300 text-gray-600 hover:bg-yellow-50'}`}>🚚 Tomorrow{tomorrowCount ? ` (${tomorrowCount})` : ''}</button>
           <span className="text-gray-400 text-xs self-end">{visible.length} pending line(s)</span>
+          <button onClick={printSummary} className="text-xs px-3 py-1.5 rounded-lg font-medium border bg-white border-gray-300 text-gray-700 hover:bg-gray-50 self-end ml-auto">🖨 Print</button>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[36rem]">
