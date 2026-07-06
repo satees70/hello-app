@@ -64,7 +64,8 @@ Other rules:
 Call the record_sales_order_lines tool with one entry per numbered line item, in the order they appear.`
 
 export async function POST(request: Request) {
-  const auth = await requirePerm(request, 'sales', 'edit')
+  // Match the Sales Orders page: a user who can edit sales at any one factory uploads too.
+  const auth = await requirePerm(request, 'sales', 'edit', { anyLocation: true })
   if (auth instanceof NextResponse) return auth
 
   const { importId, filePath } = await request.json()
