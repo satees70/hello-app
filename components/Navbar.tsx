@@ -64,9 +64,17 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     if (isHO) q = q.or(`user_id.eq.${me},user_id.is.null`)
     else q = q.or(`user_id.eq.${me},and(user_id.is.null,factory_code.in.(${myFacs.join(',')}))`)
     const { data } = await q
-    setNotifs(((data as Notif[]) || []).filter(n => n.author_id !== me))   // don't show me my own messages
+    // Hide notifications this user has individually cleared (ticked off).
+    const { data: dism } = await supabase.from('notification_dismissals').select('notification_id').eq('user_id', me)
+    const dismissed = new Set((dism || []).map(d => d.notification_id as string))
+    setNotifs(((data as Notif[]) || []).filter(n => n.author_id !== me && !dismissed.has(n.id)))   // don't show my own / cleared
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHO, me, myFacs.join(',')])
+  // Clear one notification for me only (others still see it).
+  async function dismissNotif(id: string) {
+    setNotifs(ns => ns.filter(n => n.id !== id))
+    await supabase.rpc('dismiss_notification', { p_id: id })
+  }
   useEffect(() => { loadNotifs(); const t = setInterval(loadNotifs, 30000); return () => clearInterval(t) }, [loadNotifs, pathname])
   const unseenCount = notifSeenAt ? notifs.filter(n => n.created_at > notifSeenAt).length : notifs.length
   function openNotifs() { setNotifOpen(o => !o) }   // opening no longer marks all read — use the button
@@ -333,16 +341,17 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
                     const unseen = !notifSeenAt || n.created_at > notifSeenAt
                     const go = () => { setNotifOpen(false); if (n.link) router.push(n.link) }
                     return (
-                      <button key={n.id} onClick={go} className={`block w-full text-left px-4 py-2 border-b last:border-0 hover:bg-gray-50 ${unseen ? 'bg-blue-50/60' : ''}`}>
-                        <div className="flex items-start gap-2">
+                      <div key={n.id} className={`flex items-start border-b last:border-0 hover:bg-gray-50 ${unseen ? 'bg-blue-50/60' : ''}`}>
+                        <button onClick={go} className="flex items-start gap-2 text-left min-w-0 flex-1 px-4 py-2">
                           {unseen && <span className="mt-1 w-2 h-2 rounded-full bg-blue-500 shrink-0" />}
                           <div className="min-w-0">
                             <div className="text-sm font-medium truncate">{n.title}</div>
                             {n.body && <div className="text-xs text-gray-500">{n.body}</div>}
                             <div className="text-[10px] text-gray-400 mt-0.5">{isHO ? `${n.factory_code} · ` : ''}{new Date(n.created_at).toLocaleString()}</div>
                           </div>
-                        </div>
-                      </button>
+                        </button>
+                        <button onClick={() => dismissNotif(n.id)} title="Clear this notification" className="shrink-0 self-stretch px-3 text-gray-300 hover:text-green-600 hover:bg-green-50" aria-label="Clear">✓</button>
+                      </div>
                     )
                   })}
                 </div>
