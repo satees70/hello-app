@@ -65,7 +65,8 @@ async function markError(doId: string) {
 }
 
 export async function POST(request: Request) {
-  const auth = await requirePerm(request, 'goods_received', 'edit')
+  // Match the Goods Received page: warehouse staff and per-factory editors upload too.
+  const auth = await requirePerm(request, 'goods_received', 'edit', { allowWarehouse: true, anyLocation: true })
   if (auth instanceof NextResponse) return auth
 
   const { doId, filePath } = await request.json()

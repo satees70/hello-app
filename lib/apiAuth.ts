@@ -28,6 +28,7 @@ export interface CallerProfile {
   permissions: Permissions | null
   readonly_factories: string[] | null
   location_perms: LocationPerms | null
+  warehouse_user: boolean | null
 }
 export interface Caller {
   userId: string
@@ -50,7 +51,7 @@ export async function getCaller(request: Request): Promise<Caller | null> {
   if (error || !user) return null
   const { data: profile } = await admin
     .from('profiles')
-    .select('id, role, permissions, readonly_factories, location_perms')
+    .select('id, role, permissions, readonly_factories, location_perms, warehouse_user')
     .eq('id', user.id)
     .single()
   if (!profile) return null
@@ -59,14 +60,29 @@ export async function getCaller(request: Request): Promise<Caller | null> {
 
 // Gate a route on a module/action permission (admins always pass — see can()).
 // Returns the Caller when allowed, or a NextResponse (401/403) to return as-is.
+//
+// opts mirror the extra ways the UI grants access, for routes that fire before a
+// specific factory is known (e.g. uploading a document):
+//   allowWarehouse — warehouse staff (warehouse_user) receive for every factory,
+//                    so they pass regardless of the section grid (Goods Received).
+//   anyLocation    — a user granted `edit` at ANY single factory (via per-location
+//                    overrides) passes, even if their default grid is view-only.
 export async function requirePerm(
   request: Request,
   module: ModuleKey,
   action: Action,
+  opts?: { allowWarehouse?: boolean; anyLocation?: boolean },
 ): Promise<Caller | NextResponse> {
   const caller = await getCaller(request)
   if (!caller) return unauth()
-  if (!can(caller.profile, module, action)) return forbidden()
+  const p = caller.profile
+  let ok = can(p, module, action)
+  if (!ok && opts?.allowWarehouse && p.warehouse_user) ok = true
+  if (!ok && opts?.anyLocation && action === 'edit') {
+    const lp = p.location_perms || {}
+    ok = Object.keys(lp).some(fc => !!lp[fc]?.[module]?.edit)
+  }
+  if (!ok) return forbidden()
   return caller
 }
 
