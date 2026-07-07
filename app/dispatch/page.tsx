@@ -116,6 +116,12 @@ export default function DispatchPage() {
   const [editNewReason, setEditNewReason] = useState('')
   const [editWhy, setEditWhy] = useState('')
   const [editPending, setEditPending] = useState<Set<string>>(new Set())
+  // Cart-line edit — BEFORE the DO is created (nothing committed yet, so no approval).
+  // fgEdits overrides a finished-goods line's fields, keyed by batch id.
+  const [fgEdits, setFgEdits] = useState<Record<string, { item_code: string; description: string; quantity: number; batch_no: string; exp_date: string }>>({})
+  const [ecart, setEcart] = useState<{ kind: 'fg'; batchId: string } | { kind: 'ret'; index: number } | null>(null)
+  const [ecItem, setEcItem] = useState(''); const [ecDesc, setEcDesc] = useState(''); const [ecQty, setEcQty] = useState('')
+  const [ecBatch, setEcBatch] = useState(''); const [ecExp, setEcExp] = useState(''); const [ecReason, setEcReason] = useState('')
   // Finished-goods line edit (delivery-note correction, HO approval)
   type FgLine = { id: string; item_code: string; description: string | null; quantity: number; batch_no: string | null; exp_date: string | null }
   const [fgEdit, setFgEdit] = useState<{ line: FgLine; doNumber: string | null; dispatchId: string; factory: string } | null>(null)
@@ -365,17 +371,25 @@ export default function DispatchPage() {
     if (count === 0) return
     if (!confirm(`Create a delivery order for ${factoryName(fac)} with ${count} item(s) and send to the warehouse?`)) return
     setBusy(true); setError(''); setSuccess('')
+    // Per-batch edits made in the cart (item / description / qty / batch / expiry).
+    const overrides: Record<string, unknown> = {}
+    for (const id of batchIds) {
+      const ed = fgEdits[id]
+      if (ed) overrides[id] = { item_code: ed.item_code, description: ed.description, quantity: ed.quantity, batch_no: ed.batch_no || null, exp_date: ed.exp_date || null }
+    }
     const { data, error: e } = await supabase.rpc('create_delivery_order', {
       p_batch_ids: batchIds,
       p_returns: facReturns.map(r => r.manual
         ? { manual: true, item_code: r.itemCode, description: r.description, batch_no: r.batchNo, exp_date: r.expDate || null, qty: r.qty, reason: r.reason, factory_code: r.factory }
         : { lot_id: r.lotId, qty: r.qty, reason: r.reason }),
       p_vehicle: (vehicleByFac[fac] || '').trim() || null,
+      p_batch_overrides: Object.keys(overrides).length ? overrides : null,
     })
     if (e) { setError(e.message); setBusy(false); return }
     setSuccess(`Delivery order ${data} created — ${count} item(s) sent to warehouse.`)
     // Clear only this factory's items; keep the rest of the cart for its own DO.
     setPicked(p => { const n = new Set(p); batchIds.forEach(id => n.delete(id)); return n })
+    setFgEdits(m => { const n = { ...m }; batchIds.forEach(id => delete n[id]); return n })
     setReturnCart(c => c.filter(r => r.factory !== fac))
     setVehicleByFac(v => { const n = { ...v }; delete n[fac]; return n })
     setBusy(false); load()
@@ -458,6 +472,35 @@ export default function DispatchPage() {
     setBusy(false); setFgEdit(null)
     setSuccess(isHO ? 'Delivery line updated.' : 'Edit request sent to Head Office for approval.')
     load()
+  }
+  // Effective (possibly edited) values for a finished-goods cart line.
+  function fgLine(b: Batch) {
+    return fgEdits[b.id] || { item_code: b.item_code, description: b.description || '', quantity: Number(b.produced_qty || 0), batch_no: b.batch_no || '', exp_date: b.exp_date || '' }
+  }
+  function openEditCart(sel: { kind: 'fg'; batchId: string } | { kind: 'ret'; index: number }) {
+    if (sel.kind === 'fg') {
+      const b = batches.find(x => x.id === sel.batchId); if (!b) return
+      const v = fgLine(b)
+      setEcItem(v.item_code); setEcDesc(v.description); setEcQty(String(v.quantity)); setEcBatch(v.batch_no); setEcExp(v.exp_date); setEcReason('')
+    } else {
+      const r = returnCart[sel.index]; if (!r) return
+      setEcItem(r.itemCode); setEcDesc(r.description); setEcQty(String(r.qty)); setEcBatch(r.batchNo || ''); setEcExp(r.expDate || ''); setEcReason(r.reason || '')
+    }
+    setError(''); setEcart(sel)
+  }
+  function saveEditCart() {
+    if (!ecart) return
+    const qn = Number(ecQty)
+    if (!(qn > 0)) { setError('Enter a quantity greater than zero.'); return }
+    if (ecart.kind === 'fg') {
+      if (!ecItem.trim()) { setError('Item code is required.'); return }
+      const sel = ecart
+      setFgEdits(m => ({ ...m, [sel.batchId]: { item_code: ecItem.trim(), description: ecDesc.trim(), quantity: qn, batch_no: ecBatch.trim(), exp_date: ecExp } }))
+    } else {
+      const idx = ecart.index
+      setReturnCart(c => c.map((r, i) => i === idx ? { ...r, qty: qn, reason: ecReason.trim() } : r))
+    }
+    setError(''); setEcart(null)
   }
   // Request an edit to a past return (qty/reason). HO approval applies the stock change.
   async function submitRetEdit() {
@@ -760,21 +803,23 @@ export default function DispatchPage() {
                     </div>
                   </div>
                   <div className="text-sm divide-y">
-                    {facBatches.map(b => (
+                    {facBatches.map(b => { const v = fgLine(b); const edited = !!fgEdits[b.id]; return (
                       <div key={b.id} className="flex items-center gap-2 py-1.5">
                         <span title="Finished goods">📦</span>
-                        <span className="font-mono">{b.item_code}</span>
-                        <span className="text-gray-400 flex-1 truncate">{b.description}{b.batch_no ? ` · ${b.batch_no}` : ''}</span>
-                        <span className="font-medium whitespace-nowrap">× {b.produced_qty}</span>
+                        <span className="font-mono">{v.item_code}</span>
+                        <span className="text-gray-400 flex-1 truncate">{v.description}{v.batch_no ? ` · ${v.batch_no}` : ''}{edited && <span className="text-teal-600"> · edited</span>}</span>
+                        <span className="font-medium whitespace-nowrap">× {v.quantity}</span>
+                        <button onClick={() => openEditCart({ kind: 'fg', batchId: b.id })} className="text-blue-600 text-xs hover:underline">edit</button>
                         <button onClick={() => toggle(b.id)} className="text-red-500 text-xs hover:underline">remove</button>
                       </div>
-                    ))}
+                    ) })}
                     {facReturns.map(({ r, i }) => (
                       <div key={i} className="flex items-center gap-2 py-1.5">
                         <span title="Raw-material return" className="text-orange-600">↩</span>
                         <span className="font-mono">{r.itemCode}</span>
                         <span className="text-gray-400 flex-1 truncate">{r.description} · batch {r.batchNo || '—'}{r.reason ? ` · ${r.reason}` : ''}</span>
                         <span className="font-medium whitespace-nowrap">× {r.qty} {r.unit}</span>
+                        <button onClick={() => openEditCart({ kind: 'ret', index: i })} className="text-blue-600 text-xs hover:underline">edit</button>
                         <button onClick={() => setReturnCart(c => c.filter((_, j) => j !== i))} className="text-red-500 text-xs hover:underline">remove</button>
                       </div>
                     ))}
@@ -888,6 +933,41 @@ export default function DispatchPage() {
             <div className="flex gap-2 mt-5">
               <button onClick={submitRetEdit} disabled={busy} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{busy ? 'Saving…' : isHO ? 'Apply' : 'Send for approval'}</button>
               <button onClick={() => setEditRet(null)} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit a cart line before the DO is created (no approval — nothing committed yet) */}
+      {ecart && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setEcart(null)}>
+          <div className="bg-white rounded-xl shadow-xl border w-full max-w-md my-8 p-6" onClick={e => e.stopPropagation()}>
+            <h2 className="font-semibold text-lg mb-1">Edit {ecart.kind === 'fg' ? 'finished-goods line' : 'return'}</h2>
+            <p className="text-gray-500 text-sm mb-4">{ecart.kind === 'fg'
+              ? 'Change what appears on this delivery-order line. Applies when you create the DO — nothing is committed yet.'
+              : 'Adjust the quantity or reason before the delivery order is created.'}</p>
+            <div className="space-y-3">
+              <div><label className="block text-sm font-medium mb-1">Item code</label>
+                <input value={ecItem} onChange={e => setEcItem(e.target.value)} disabled={ecart.kind === 'ret'} className="w-full border rounded-lg px-3 py-2 font-mono disabled:bg-gray-100 disabled:text-gray-500" /></div>
+              <div><label className="block text-sm font-medium mb-1">Description</label>
+                <input value={ecDesc} onChange={e => setEcDesc(e.target.value)} disabled={ecart.kind === 'ret'} className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100 disabled:text-gray-500" /></div>
+              <div><label className="block text-sm font-medium mb-1">Quantity</label>
+                <input type="number" step="any" min="0" value={ecQty} onChange={e => setEcQty(e.target.value)} className="w-full border rounded-lg px-3 py-2" /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="block text-sm font-medium mb-1">Batch <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input value={ecBatch} onChange={e => setEcBatch(e.target.value)} disabled={ecart.kind === 'ret'} placeholder="Batch no." className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100 disabled:text-gray-500" /></div>
+                <div><label className="block text-sm font-medium mb-1">Expiry <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input type="date" value={ecExp} onChange={e => setEcExp(e.target.value)} disabled={ecart.kind === 'ret'} className="w-full border rounded-lg px-3 py-2 disabled:bg-gray-100 disabled:text-gray-500" /></div>
+              </div>
+              {ecart.kind === 'ret' && <>
+                <div><label className="block text-sm font-medium mb-1">Reason <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input value={ecReason} onChange={e => setEcReason(e.target.value)} className="w-full border rounded-lg px-3 py-2" /></div>
+                <p className="text-xs text-gray-400">To change the item or batch of a return, remove it and add it again from stock.</p>
+              </>}
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={saveEditCart} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 font-medium">Save</button>
+              <button onClick={() => setEcart(null)} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
             </div>
           </div>
         </div>
