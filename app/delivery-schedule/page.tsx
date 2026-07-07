@@ -93,7 +93,7 @@ export default function DeliverySchedulePage() {
   const [dateFilter, setDateFilter] = useState('all')
   const [showScheduled, setShowScheduled] = useState(false)   // upload list: also show orders already scheduled
   // Drivers & kelindan share one "crew" pool — a person can go as either, and a lorry can carry several kelindan.
-  const [resources, setResources] = useState<Record<'lorry' | 'crew', { id: string; name: string; phone: string | null }[]>>({ lorry: [], crew: [] })
+  const [resources, setResources] = useState<Record<'lorry' | 'crew', { id: string; name: string; phone: string | null; approved: boolean }[]>>({ lorry: [], crew: [] })
   const [showManage, setShowManage] = useState(false)
   const [newRes, setNewRes] = useState<Record<'lorry' | 'crew', string>>({ lorry: '', crew: '' })
   const [newPhone, setNewPhone] = useState<Record<'lorry' | 'crew', string>>({ lorry: '', crew: '' })
@@ -105,11 +105,14 @@ export default function DeliverySchedulePage() {
   const [success, setSuccess] = useState('')
 
   useEffect(() => { if (profile) { load(); loadUploads(); loadResources() } }, [profile])
+  // Head Office (and admins) manage the master lists directly; factory users' new
+  // lorries/crew are held pending until HO approves them.
+  const isHO = profile?.factory_code === 'HEAD_OFFICE' || profile?.role === 'admin'
   // Master lists of lorries / drivers / kelindan (the future driver app reads from here too).
   async function loadResources() {
-    const { data } = await supabase.from('delivery_resources').select('id, kind, name, phone').eq('active', true).order('name')
-    const g: Record<'lorry' | 'crew', { id: string; name: string; phone: string | null }[]> = { lorry: [], crew: [] }
-    ;(data || []).forEach((r: { id: string; kind: string; name: string; phone: string | null }) => { (r.kind === 'lorry' ? g.lorry : g.crew).push({ id: r.id, name: r.name, phone: r.phone }) })
+    const { data } = await supabase.from('delivery_resources').select('id, kind, name, phone, approved').eq('active', true).order('name')
+    const g: Record<'lorry' | 'crew', { id: string; name: string; phone: string | null; approved: boolean }[]> = { lorry: [], crew: [] }
+    ;(data || []).forEach((r: { id: string; kind: string; name: string; phone: string | null; approved: boolean }) => { (r.kind === 'lorry' ? g.lorry : g.crew).push({ id: r.id, name: r.name, phone: r.phone, approved: r.approved !== false }) })
     g.crew.sort((a, b) => a.name.localeCompare(b.name))
     setResources(g)
     // A crew member is "linked" if a driver employee's Delivery link points at their name.
@@ -128,14 +131,20 @@ export default function DeliverySchedulePage() {
     const { error: e } = await supabase.from('delivery_resources').insert({ kind: kind === 'lorry' ? 'lorry' : 'crew', name: n, phone: (phone || '').trim() || null })
     if (e) { setAddMsg(p => ({ ...p, [kind]: { text: `Couldn’t add “${n}”: ${e.message}`, err: true } })); return }
     setNewRes(p => ({ ...p, [kind]: '' })); setNewPhone(p => ({ ...p, [kind]: '' })); loadResources()
-    // Added — if a new crew name isn't linked to an employee yet, remind to settle it later.
+    // Factory users' additions wait for Head Office; HO/admin additions are live at once.
+    const base = isHO ? `“${n}” added.` : `“${n}” sent for Head Office approval.`
     setAddMsg(p => ({ ...p, [kind]: kind === 'crew' && !isLinked(n)
-      ? { text: `“${n}” added — not linked to an employee yet. Set their Delivery link on HR › Employees when you can.`, err: false }
-      : { text: `“${n}” added.`, err: false } }))
+      ? { text: `${base} (Not linked to an employee yet — set their Delivery link on HR › Employees when you can.)`, err: false }
+      : { text: base, err: false } }))
   }
   async function removeResource(id: string) {
     await supabase.from('delivery_resources').delete().eq('id', id)
     loadResources()
+  }
+  // Head Office approves a pending lorry/crew entry so it can be assigned.
+  async function approveResource(id: string) {
+    const { error } = await supabase.rpc('approve_delivery_resource', { p_id: id })
+    if (!error) loadResources()
   }
   async function load() {
     const { data: s } = await supabase.from('delivery_schedule').select('id, so_number, customer_name, route, delivery_date, created_by_name, data, invoiced').order('route', { ascending: true, nullsFirst: false }).order('delivery_date', { ascending: true, nullsFirst: false })
@@ -593,9 +602,13 @@ export default function DeliverySchedulePage() {
                           <span className="min-w-0">
                             <span className={unlinked ? 'text-red-700' : ''}>{r.name}</span>
                             {r.phone && <span className="text-gray-400 text-xs ml-1">· {r.phone}</span>}
+                            {!r.approved && <span className="ml-1.5 inline-flex items-center rounded bg-amber-100 text-amber-800 text-[10px] px-1.5 py-0.5" title="Waiting for Head Office approval before it can be assigned">⏳ pending</span>}
                             {unlinked && <span className="ml-1.5 inline-flex items-center rounded bg-red-100 text-red-700 text-[10px] px-1.5 py-0.5" title="No employee has this name set as their Delivery link">⚠ not linked</span>}
                           </span>
-                          <button onClick={() => removeResource(r.id)} className="text-red-500 hover:text-red-700 text-xs shrink-0">Remove</button>
+                          <span className="flex items-center gap-2 shrink-0">
+                            {!r.approved && isHO && <button onClick={() => approveResource(r.id)} className="text-green-600 hover:text-green-800 text-xs font-medium">Approve</button>}
+                            <button onClick={() => removeResource(r.id)} className="text-red-500 hover:text-red-700 text-xs">{!r.approved ? 'Reject' : 'Remove'}</button>
+                          </span>
                         </li>
                         )
                       })}
@@ -658,8 +671,9 @@ export default function DeliverySchedulePage() {
               const tripKey = g.route && g.date ? `${g.route}|${g.date}` : ''
               const trip = tripKey ? trips[tripKey] : undefined
               // Show all lorries / crew — a driver can run more than one trip a day (2nd trip), so nothing is hidden.
-              const availLorries = resources.lorry
-              const availCrew = resources.crew
+              // Only approved lorries/crew can be assigned; pending ones are hidden here.
+              const availLorries = resources.lorry.filter(r => r.approved)
+              const availCrew = resources.crew.filter(r => r.approved)
               const kelList = (trip?.kelindan || '').split(',').map(s => s.trim()).filter(Boolean)
               return (
               <div key={k} className="border rounded-xl bg-white shadow-sm overflow-hidden">

@@ -59,7 +59,7 @@ export default function DriverTodayPage() {
   const driverName = drivers.find(d => d.id === driverId)?.name || ''
 
   useEffect(() => {
-    supabase.from('delivery_resources').select('id, name, phone').eq('kind', 'driver').eq('active', true).order('name')
+    supabase.from('delivery_resources').select('id, name, phone').eq('kind', 'driver').eq('active', true).eq('approved', true).order('name')
       .then(({ data }) => {
         const list = (data as Driver[]) || []
         setDrivers(list)
