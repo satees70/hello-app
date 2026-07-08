@@ -54,7 +54,9 @@ function Donut({ segments }: { segments: { value: number; color: string }[] }) {
 
 export default function HrDashboardPage() {
   const [rows, setRows] = useState<Row[]>([])
-  const [trend, setTrend] = useState<{ day: string; present: number }[]>([])
+  const [trendRaw, setTrendRaw] = useState<{ day: string; codes: string[] }[]>([])
+  const [locFilter, setLocFilter] = useState('')   // '' = all locations
+  const [sortBy, setSortBy] = useState<'latest' | 'name'>('latest')
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -128,13 +130,13 @@ export default function HrDashboardPage() {
       setRows(out)
 
       // Weekly trend: distinct employees with any punch each day.
-      const days: { day: string; present: number }[] = []
+      const days: { day: string; codes: string[] }[] = []
       for (let d = weekStart; d <= today; d = addDay(d)) {
-        const present = new Set<string>()
-        for (const [code, m] of byEmpDay) if ((m.get(d)?.length ?? 0) > 0) present.add(code)
-        days.push({ day: DOW_SHORT[weekdayOf(d)], present: present.size })
+        const present: string[] = []
+        for (const [code, m] of byEmpDay) if ((m.get(d)?.length ?? 0) > 0) present.push(code)
+        days.push({ day: DOW_SHORT[weekdayOf(d)], codes: present })
       }
-      setTrend(days)
+      setTrendRaw(days)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally { setLoading(false) }
@@ -151,15 +153,19 @@ export default function HrDashboardPage() {
     finally { setSyncing(false) }
   }
 
-  const workingNow = rows.filter(r => r.status === 'working').length
-  const lateCount = rows.filter(r => (r.status === 'working' || r.status === 'present') && r.late).length
-  const absentCount = rows.filter(r => r.status === 'absent').length
-  const leaveCount = rows.filter(r => r.status === 'leave').length
-  const presentTotal = rows.filter(r => r.status === 'working' || r.status === 'present').length
+  // Location (department) filter — restricts every number & list to one location.
+  const locations = [...new Set(rows.map(r => r.department))].sort()
+  const visibleRows = locFilter ? rows.filter(r => r.department === locFilter) : rows
+
+  const workingNow = visibleRows.filter(r => r.status === 'working').length
+  const lateCount = visibleRows.filter(r => (r.status === 'working' || r.status === 'present') && r.late).length
+  const absentCount = visibleRows.filter(r => r.status === 'absent').length
+  const leaveCount = visibleRows.filter(r => r.status === 'leave').length
+  const presentTotal = visibleRows.filter(r => r.status === 'working' || r.status === 'present').length
   const onTime = presentTotal - lateCount
   // Per-location (department) attendance today.
   const byDept = new Map<string, { present: number; expected: number }>()
-  for (const r of rows) {
+  for (const r of visibleRows) {
     if (r.status === 'off' || r.status === 'holiday' || r.status === 'unknown') continue
     const d = byDept.get(r.department) ?? { present: 0, expected: 0 }
     d.expected++
@@ -167,24 +173,42 @@ export default function HrDashboardPage() {
     byDept.set(r.department, d)
   }
   const depts = [...byDept.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  // Weekly present trend, restricted to the chosen location if any.
+  const deptOf = new Map(rows.map(r => [r.code, r.department]))
+  const trend = trendRaw.map(t => ({ day: t.day, present: locFilter ? t.codes.filter(c => deptOf.get(c) === locFilter).length : t.codes.length }))
   const trendMax = Math.max(1, ...trend.map(t => t.present))
   // Tap a KPI card to filter the live list to that group (tap again to clear).
   const filterLabel = filter === 'working' ? 'working now' : filter === 'late' ? 'late' : filter === 'absent' ? 'absent' : filter === 'leave' ? 'on leave' : ''
-  const onLeaveRows = rows.filter(r => r.status === 'leave')
-  const shownRows = !filter ? rows : rows.filter(r =>
+  const onLeaveRows = visibleRows.filter(r => r.status === 'leave')
+  const absentRows = visibleRows.filter(r => r.status === 'absent')
+  const shownRows = !filter ? visibleRows : visibleRows.filter(r =>
     filter === 'late' ? ((r.status === 'working' || r.status === 'present') && r.late)
     : filter === 'working' ? r.status === 'working'
     : filter === 'absent' ? r.status === 'absent'
     : r.status === 'leave')
+  // Live-list order: by latest clock-in (late arrivals on top), or by name.
+  const liveRows = [...shownRows].sort((a, b) => {
+    if (sortBy === 'name') return a.name.localeCompare(b.name)
+    if (a.inTime && b.inTime) return b.inTime.localeCompare(a.inTime)   // 'HH:mm' → later first
+    if (a.inTime) return -1
+    if (b.inTime) return 1
+    return a.name.localeCompare(b.name)
+  })
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
         <h1 className="text-2xl font-bold">Attendance Dashboard</h1>
-        <button onClick={syncNow} disabled={syncing} className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50">{syncing ? 'Syncing…' : '↻ Sync from clock'}</button>
+        <div className="flex items-center gap-2">
+          <select value={locFilter} onChange={e => setLocFilter(e.target.value)} className="text-sm border rounded-lg px-2 py-2 bg-white max-w-[12rem]">
+            <option value="">All locations</option>
+            {locations.map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+          <button onClick={syncNow} disabled={syncing} className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap">{syncing ? 'Syncing…' : '↻ Sync from clock'}</button>
+        </div>
       </div>
       <p className="text-gray-500 text-sm mb-5">
-        Today, {klDateKey(new Date())} · {rows.length} active staff
+        Today, {klDateKey(new Date())} · {visibleRows.length} staff{locFilter ? ` in ${locFilter}` : ' active'}
         {lastSync && <> · as of last sync {new Date(lastSync).toLocaleString()}</>}
       </p>
 
@@ -248,37 +272,59 @@ export default function HrDashboardPage() {
             </div>
           </div>
 
-          {/* On leave today */}
-          <div className="bg-white rounded-xl border shadow-sm mb-4">
-            <div className="px-4 py-2 border-b font-semibold text-sm">🌴 On leave today <span className="text-gray-400 font-normal">· {onLeaveRows.length}</span></div>
-            {onLeaveRows.length === 0 ? (
-              <p className="px-4 py-4 text-gray-400 text-sm">No one on leave today.</p>
-            ) : (
-              <ul className="divide-y max-h-72 overflow-auto">
-                {onLeaveRows.map(r => (
-                  <li key={r.code} className="flex items-center gap-2 px-4 py-2 text-sm">
-                    <span className="font-medium">{r.name}</span>
-                    <span className="text-gray-400 text-xs">{r.code}</span>
-                    <span className="ml-auto inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">{r.leaveType || 'Leave'}</span>
-                    <span className="text-gray-500 text-xs w-28 sm:w-40 truncate text-right">{r.department}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
+          {/* On leave + Absent lists */}
+          <div className="grid md:grid-cols-2 gap-4 mb-4">
+            <div className="bg-white rounded-xl border shadow-sm">
+              <div className="px-4 py-2 border-b font-semibold text-sm">🌴 On leave today <span className="text-gray-400 font-normal">· {onLeaveRows.length}</span></div>
+              {onLeaveRows.length === 0 ? (
+                <p className="px-4 py-4 text-gray-400 text-sm">No one on leave today.</p>
+              ) : (
+                <ul className="divide-y max-h-72 overflow-auto">
+                  {onLeaveRows.map(r => (
+                    <li key={r.code} className="flex items-center gap-2 px-4 py-2 text-sm">
+                      <span className="font-medium">{r.name}</span>
+                      <span className="text-gray-400 text-xs">{r.code}</span>
+                      <span className="ml-auto inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">{r.leaveType || 'Leave'}</span>
+                      <span className="text-gray-500 text-xs w-24 truncate text-right">{r.department}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="bg-white rounded-xl border shadow-sm">
+              <div className="px-4 py-2 border-b font-semibold text-sm">🚫 Absent today <span className="text-gray-400 font-normal">· {absentRows.length}</span></div>
+              {absentRows.length === 0 ? (
+                <p className="px-4 py-4 text-gray-400 text-sm">No absentees 🎉</p>
+              ) : (
+                <ul className="divide-y max-h-72 overflow-auto">
+                  {absentRows.map(r => (
+                    <li key={r.code} className="flex items-center gap-2 px-4 py-2 text-sm">
+                      <span className="font-medium">{r.name}</span>
+                      <span className="text-gray-400 text-xs">{r.code}</span>
+                      <span className="ml-auto text-gray-500 text-xs w-28 truncate text-right">{r.department}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
 
           {/* Live list */}
           <div className="bg-white rounded-xl border shadow-sm">
             <div className="px-4 py-2 border-b font-semibold text-sm flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span>Live attendance <span className="text-gray-400 font-normal">· {presentTotal} in / {rows.length} staff</span></span>
+              <span>Live attendance <span className="text-gray-400 font-normal">· {presentTotal} in / {visibleRows.length} staff</span></span>
               {filter && <span className="font-normal text-xs text-blue-600">· showing {filterLabel} ({shownRows.length}) <button onClick={() => setFilter(null)} className="underline ml-1">show all</button></span>}
+              <select value={sortBy} onChange={e => setSortBy(e.target.value as 'latest' | 'name')} className="ml-auto text-xs font-normal border rounded px-1.5 py-1 bg-white">
+                <option value="latest">Latest clock-in first</option>
+                <option value="name">Name (A–Z)</option>
+              </select>
             </div>
             <div className="overflow-auto max-h-[28rem]">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b sticky top-0"><tr>{['Staff', 'Status', filter === 'leave' ? 'Leave' : 'In', 'Location'].map(h => <th key={h} className="text-left px-4 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
                 <tbody>
-                  {shownRows.length === 0 && <tr><td colSpan={4} className="text-center py-6 text-gray-400">{filter ? `No one ${filterLabel}.` : 'No staff.'}</td></tr>}
-                  {shownRows.map(r => (
+                  {liveRows.length === 0 && <tr><td colSpan={4} className="text-center py-6 text-gray-400">{filter ? `No one ${filterLabel}.` : 'No staff.'}</td></tr>}
+                  {liveRows.map(r => (
                     <tr key={r.code} className="border-b last:border-0 hover:bg-gray-50">
                       <td className="px-4 py-2"><span className="font-medium">{r.name}</span> <span className="text-gray-400 text-xs">{r.code}</span></td>
                       <td className="px-4 py-2 whitespace-nowrap">
