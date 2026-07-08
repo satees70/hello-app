@@ -1,0 +1,274 @@
+'use client'
+import { useCallback, useEffect, useState } from 'react'
+import { supabase, fetchAll } from '@/lib/supabase'
+import { apiFetch } from '@/lib/api'
+import { computeDay, klDateKey, klTime, type ShiftProfileLite } from '@/lib/attendance'
+import { weekdayOf, addDay, DOW_SHORT } from '@/lib/attendanceReport'
+
+// Live-ish HR attendance dashboard — "who is working / late / absent / on leave"
+// today, computed from the ZKLink punches already synced into attendance_punches.
+// Numbers use the same computeDay() the Attendance & OT page uses, so they agree.
+
+interface Prof extends ShiftProfileLite { id: string }
+interface Emp { employee_code: string; name: string | null; shift_profile_id: string | null; department: string | null }
+type Status = 'working' | 'present' | 'absent' | 'leave' | 'off' | 'holiday' | 'unknown'
+interface Row { code: string; name: string; department: string; status: Status; late: boolean; inTime: string | null }
+
+const STATUS_LABEL: Record<Status, string> = {
+  working: 'Working', present: 'Done', absent: 'Absent', leave: 'On leave', off: 'Rest day', holiday: 'Holiday', unknown: '—',
+}
+const STATUS_STYLE: Record<Status, string> = {
+  working: 'bg-green-100 text-green-700', present: 'bg-teal-100 text-teal-700', absent: 'bg-red-100 text-red-700',
+  leave: 'bg-blue-100 text-blue-700', off: 'bg-gray-100 text-gray-500', holiday: 'bg-purple-100 text-purple-700', unknown: 'bg-gray-100 text-gray-400',
+}
+
+function Kpi({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div className="bg-white rounded-xl border shadow-sm p-4">
+      <div className="text-xs text-gray-500">{label}</div>
+      <div className={`text-3xl font-bold ${color}`}>{value}</div>
+    </div>
+  )
+}
+
+function Donut({ segments }: { segments: { value: number; color: string }[] }) {
+  const total = segments.reduce((s, x) => s + x.value, 0) || 1
+  const R = 54, C = 2 * Math.PI * R
+  let offset = 0
+  return (
+    <svg viewBox="0 0 140 140" className="w-36 h-36 shrink-0">
+      <g transform="translate(70,70) rotate(-90)">
+        <circle r={R} fill="none" stroke="#eef0f2" strokeWidth="18" />
+        {segments.filter(s => s.value > 0).map((s, i) => {
+          const len = (s.value / total) * C
+          const el = <circle key={i} r={R} fill="none" stroke={s.color} strokeWidth="18" strokeDasharray={`${len} ${C - len}`} strokeDashoffset={-offset} strokeLinecap="butt" />
+          offset += len
+          return el
+        })}
+      </g>
+      <text x="70" y="68" textAnchor="middle" className="fill-gray-800" fontSize="26" fontWeight="700">{total}</text>
+      <text x="70" y="86" textAnchor="middle" className="fill-gray-400" fontSize="10">expected today</text>
+    </svg>
+  )
+}
+
+export default function HrDashboardPage() {
+  const [rows, setRows] = useState<Row[]>([])
+  const [trend, setTrend] = useState<{ day: string; present: number }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [syncing, setSyncing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [lastSync, setLastSync] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null)
+    try {
+      const today = klDateKey(new Date())
+      // 7-day window start (6 days before today).
+      let weekStart = today
+      for (let i = 0; i < 6; i++) weekStart = subDay(weekStart)
+      const weekFromUtc = `${weekStart}T00:00:00+08:00`
+      const todayToUtc = `${today}T23:59:59+08:00`
+
+      const [emps, profs, punches, { data: leaves }, { data: hols }, { data: state }] = await Promise.all([
+        supabase.from('employees').select('employee_code, name, shift_profile_id, department').eq('active', true),
+        supabase.from('shift_profiles').select('id, normal_hours, lunch_rule, lunch_minutes, shift_start, shift_end, week_schedule, attendance_mode'),
+        fetchAll<{ employee_code: string; punch_time: string; department_name: string | null }>(
+          'attendance_punches', 'employee_code, punch_time, department_name',
+          q => q.gte('punch_time', weekFromUtc).lte('punch_time', todayToUtc).order('punch_time')),
+        supabase.from('leave_days').select('employee_code, leave_type').eq('work_date', today),
+        supabase.from('public_holidays').select('holiday_date').eq('holiday_date', today),
+        supabase.from('sync_state').select('last_synced_at').eq('key', 'zklink').maybeSingle(),
+      ])
+      setLastSync(state?.last_synced_at ?? null)
+
+      const empList = (emps.data as Emp[]) || []
+      const profById = new Map<string, Prof>(((profs.data as Prof[]) || []).map(p => [p.id, p]))
+      const leaveByEmp = new Map<string, string>((leaves || []).map(l => [l.employee_code, l.leave_type]))
+      const isHoliday = (hols || []).length > 0
+
+      // Punches → per employee, per KL day.
+      const byEmpDay = new Map<string, Map<string, Date[]>>()
+      for (const p of punches || []) {
+        const d = new Date(p.punch_time); const key = klDateKey(d)
+        if (!byEmpDay.has(p.employee_code)) byEmpDay.set(p.employee_code, new Map())
+        const m = byEmpDay.get(p.employee_code)!
+        if (!m.has(key)) m.set(key, [])
+        m.get(key)!.push(d)
+      }
+
+      const wd = weekdayOf(today)
+      const out: Row[] = []
+      for (const e of empList) {
+        const prof = e.shift_profile_id ? profById.get(e.shift_profile_id) ?? null : null
+        const ws = prof?.week_schedule ?? null
+        const win = ws ? ws[String(wd)] : null
+        const scheduled = ws ? !!(win && win.start && win.end) : null   // null = no profile
+        const times = byEmpDay.get(e.employee_code)?.get(today) ?? []
+        const leaveType = leaveByEmp.get(e.employee_code)
+
+        let status: Status = 'unknown'; let late = false; let inTime: string | null = null
+        if (leaveType) status = 'leave'
+        else if (isHoliday && !times.length) status = 'holiday'
+        else if (scheduled === false && !times.length) status = 'off'
+        else if (times.length > 0) {
+          const res = computeDay(times, prof, null, { weekday: wd, isHoliday })
+          inTime = klTime([...times].sort((a, b) => a.getTime() - b.getTime())[0])
+          late = res.lateMinutes > 0
+          status = res.pairing.needsReview ? 'working' : 'present'   // odd punches = still clocked in
+        } else if (scheduled) status = 'absent'
+        else status = 'unknown'
+
+        out.push({ code: e.employee_code, name: e.name || e.employee_code, department: e.department || '—', status, late, inTime })
+      }
+      // Live list: working first, then late, then the rest; by name.
+      const rank: Record<Status, number> = { working: 0, present: 2, absent: 3, leave: 4, holiday: 5, off: 6, unknown: 7 }
+      out.sort((a, b) => (a.late === b.late ? 0 : a.late ? -1 : 1) + (rank[a.status] - rank[b.status]) * 10 || a.name.localeCompare(b.name))
+      setRows(out)
+
+      // Weekly trend: distinct employees with any punch each day.
+      const days: { day: string; present: number }[] = []
+      for (let d = weekStart; d <= today; d = addDay(d)) {
+        const present = new Set<string>()
+        for (const [code, m] of byEmpDay) if ((m.get(d)?.length ?? 0) > 0) present.add(code)
+        days.push({ day: DOW_SHORT[weekdayOf(d)], present: present.size })
+      }
+      setTrend(days)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally { setLoading(false) }
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  async function syncNow() {
+    setSyncing(true); setError(null)
+    try {
+      const res = await apiFetch('/api/attendance/sync')
+      if (!res.ok) { const j = await res.json(); setError(j.error || 'Sync failed') }
+      await load()
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    finally { setSyncing(false) }
+  }
+
+  const workingNow = rows.filter(r => r.status === 'working').length
+  const lateCount = rows.filter(r => (r.status === 'working' || r.status === 'present') && r.late).length
+  const absentCount = rows.filter(r => r.status === 'absent').length
+  const leaveCount = rows.filter(r => r.status === 'leave').length
+  const presentTotal = rows.filter(r => r.status === 'working' || r.status === 'present').length
+  const onTime = presentTotal - lateCount
+  // Per-location (department) attendance today.
+  const byDept = new Map<string, { present: number; expected: number }>()
+  for (const r of rows) {
+    if (r.status === 'off' || r.status === 'holiday' || r.status === 'unknown') continue
+    const d = byDept.get(r.department) ?? { present: 0, expected: 0 }
+    d.expected++
+    if (r.status === 'working' || r.status === 'present') d.present++
+    byDept.set(r.department, d)
+  }
+  const depts = [...byDept.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  const trendMax = Math.max(1, ...trend.map(t => t.present))
+
+  return (
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
+        <h1 className="text-2xl font-bold">Attendance Dashboard</h1>
+        <button onClick={syncNow} disabled={syncing} className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50">{syncing ? 'Syncing…' : '↻ Sync from clock'}</button>
+      </div>
+      <p className="text-gray-500 text-sm mb-5">
+        Today, {klDateKey(new Date())} · {rows.length} active staff
+        {lastSync && <> · as of last sync {new Date(lastSync).toLocaleString()}</>}
+      </p>
+
+      {error && <div className="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2">{error}</div>}
+      {loading ? <div className="text-gray-400 py-16 text-center">Loading…</div> : (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+            <Kpi label="Working now" value={workingNow} color="text-green-600" />
+            <Kpi label="Late today" value={lateCount} color="text-amber-600" />
+            <Kpi label="Absent" value={absentCount} color="text-red-600" />
+            <Kpi label="On leave" value={leaveCount} color="text-blue-600" />
+          </div>
+
+          <div className="grid lg:grid-cols-3 gap-4 mb-4">
+            {/* Summary donut */}
+            <div className="bg-white rounded-xl border shadow-sm p-4">
+              <div className="font-semibold text-sm mb-3">Today at a glance</div>
+              <div className="flex items-center gap-4">
+                <Donut segments={[
+                  { value: onTime, color: '#16a34a' },
+                  { value: lateCount, color: '#d97706' },
+                  { value: absentCount, color: '#dc2626' },
+                  { value: leaveCount, color: '#2563eb' },
+                ]} />
+                <ul className="text-sm space-y-1.5">
+                  <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-sm bg-green-600 inline-block" /> On time <b className="ml-auto">{onTime}</b></li>
+                  <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-sm bg-amber-600 inline-block" /> Late <b className="ml-auto">{lateCount}</b></li>
+                  <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-sm bg-red-600 inline-block" /> Absent <b className="ml-auto">{absentCount}</b></li>
+                  <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-sm bg-blue-600 inline-block" /> On leave <b className="ml-auto">{leaveCount}</b></li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Weekly trend */}
+            <div className="bg-white rounded-xl border shadow-sm p-4">
+              <div className="font-semibold text-sm mb-3">Present this week</div>
+              <div className="flex items-end justify-between gap-2 h-36">
+                {trend.map((t, i) => (
+                  <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1">
+                    <span className="text-[11px] text-gray-500">{t.present}</span>
+                    <div className="w-full rounded-t bg-blue-500" style={{ height: `${(t.present / trendMax) * 100}%`, minHeight: t.present ? 4 : 0 }} />
+                    <span className="text-[11px] text-gray-400">{t.day}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Location overview */}
+            <div className="bg-white rounded-xl border shadow-sm p-4">
+              <div className="font-semibold text-sm mb-3">By location</div>
+              {depts.length === 0 ? <p className="text-gray-400 text-sm">No data.</p> : (
+                <ul className="space-y-2 text-sm max-h-36 overflow-auto">
+                  {depts.map(([d, v]) => { const pct = v.expected ? Math.round((v.present / v.expected) * 100) : 0; return (
+                    <li key={d}>
+                      <div className="flex justify-between text-xs mb-0.5"><span className="truncate">{d}</span><span className="text-gray-500">{v.present}/{v.expected} · {pct}%</span></div>
+                      <div className="h-2 rounded bg-gray-100"><div className="h-2 rounded bg-green-500" style={{ width: `${pct}%` }} /></div>
+                    </li>
+                  ) })}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          {/* Live list */}
+          <div className="bg-white rounded-xl border shadow-sm">
+            <div className="px-4 py-2 border-b font-semibold text-sm">Live attendance <span className="text-gray-400 font-normal">· {presentTotal} in / {rows.length} staff</span></div>
+            <div className="overflow-auto max-h-[28rem]">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b sticky top-0"><tr>{['Staff', 'Status', 'In', 'Location'].map(h => <th key={h} className="text-left px-4 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
+                <tbody>
+                  {rows.map(r => (
+                    <tr key={r.code} className="border-b last:border-0 hover:bg-gray-50">
+                      <td className="px-4 py-2"><span className="font-medium">{r.name}</span> <span className="text-gray-400 text-xs">{r.code}</span></td>
+                      <td className="px-4 py-2 whitespace-nowrap">
+                        <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[r.status]}`}>{STATUS_LABEL[r.status]}</span>
+                        {r.late && (r.status === 'working' || r.status === 'present') && <span className="ml-1 inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">Late</span>}
+                      </td>
+                      <td className={`px-4 py-2 whitespace-nowrap ${r.late ? 'text-amber-600 font-medium' : 'text-gray-600'}`}>{r.inTime || '—'}</td>
+                      <td className="px-4 py-2 text-gray-500">{r.department}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// One day earlier than a 'yyyy-MM-dd' date string (UTC-stable).
+function subDay(dk: string): string {
+  const [y, m, d] = dk.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10)
+}
