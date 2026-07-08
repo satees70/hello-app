@@ -56,6 +56,7 @@ export default function HrDashboardPage() {
   const [rows, setRows] = useState<Row[]>([])
   const [trendRaw, setTrendRaw] = useState<{ day: string; codes: string[] }[]>([])
   const [locFilter, setLocFilter] = useState('')   // '' = all locations
+  const [sortBy, setSortBy] = useState<'latest' | 'name'>('latest')
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -185,6 +186,14 @@ export default function HrDashboardPage() {
     : filter === 'working' ? r.status === 'working'
     : filter === 'absent' ? r.status === 'absent'
     : r.status === 'leave')
+  // Live-list order: by latest clock-in (late arrivals on top), or by name.
+  const liveRows = [...shownRows].sort((a, b) => {
+    if (sortBy === 'name') return a.name.localeCompare(b.name)
+    if (a.inTime && b.inTime) return b.inTime.localeCompare(a.inTime)   // 'HH:mm' → later first
+    if (a.inTime) return -1
+    if (b.inTime) return 1
+    return a.name.localeCompare(b.name)
+  })
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
@@ -303,15 +312,19 @@ export default function HrDashboardPage() {
           {/* Live list */}
           <div className="bg-white rounded-xl border shadow-sm">
             <div className="px-4 py-2 border-b font-semibold text-sm flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span>Live attendance <span className="text-gray-400 font-normal">· {presentTotal} in / {rows.length} staff</span></span>
+              <span>Live attendance <span className="text-gray-400 font-normal">· {presentTotal} in / {visibleRows.length} staff</span></span>
               {filter && <span className="font-normal text-xs text-blue-600">· showing {filterLabel} ({shownRows.length}) <button onClick={() => setFilter(null)} className="underline ml-1">show all</button></span>}
+              <select value={sortBy} onChange={e => setSortBy(e.target.value as 'latest' | 'name')} className="ml-auto text-xs font-normal border rounded px-1.5 py-1 bg-white">
+                <option value="latest">Latest clock-in first</option>
+                <option value="name">Name (A–Z)</option>
+              </select>
             </div>
             <div className="overflow-auto max-h-[28rem]">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b sticky top-0"><tr>{['Staff', 'Status', filter === 'leave' ? 'Leave' : 'In', 'Location'].map(h => <th key={h} className="text-left px-4 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
                 <tbody>
-                  {shownRows.length === 0 && <tr><td colSpan={4} className="text-center py-6 text-gray-400">{filter ? `No one ${filterLabel}.` : 'No staff.'}</td></tr>}
-                  {shownRows.map(r => (
+                  {liveRows.length === 0 && <tr><td colSpan={4} className="text-center py-6 text-gray-400">{filter ? `No one ${filterLabel}.` : 'No staff.'}</td></tr>}
+                  {liveRows.map(r => (
                     <tr key={r.code} className="border-b last:border-0 hover:bg-gray-50">
                       <td className="px-4 py-2"><span className="font-medium">{r.name}</span> <span className="text-gray-400 text-xs">{r.code}</span></td>
                       <td className="px-4 py-2 whitespace-nowrap">
