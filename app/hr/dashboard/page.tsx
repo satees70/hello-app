@@ -170,6 +170,7 @@ export default function HrDashboardPage() {
   const trendMax = Math.max(1, ...trend.map(t => t.present))
   // Tap a KPI card to filter the live list to that group (tap again to clear).
   const filterLabel = filter === 'working' ? 'working now' : filter === 'late' ? 'late' : filter === 'absent' ? 'absent' : filter === 'leave' ? 'on leave' : ''
+  const onLeaveRows = rows.filter(r => r.status === 'leave')
   const shownRows = !filter ? rows : rows.filter(r =>
     filter === 'late' ? ((r.status === 'working' || r.status === 'present') && r.late)
     : filter === 'working' ? r.status === 'working'
@@ -245,6 +246,25 @@ export default function HrDashboardPage() {
                 </ul>
               )}
             </div>
+          </div>
+
+          {/* On leave today */}
+          <div className="bg-white rounded-xl border shadow-sm mb-4">
+            <div className="px-4 py-2 border-b font-semibold text-sm">🌴 On leave today <span className="text-gray-400 font-normal">· {onLeaveRows.length}</span></div>
+            {onLeaveRows.length === 0 ? (
+              <p className="px-4 py-4 text-gray-400 text-sm">No one on leave today.</p>
+            ) : (
+              <ul className="divide-y max-h-72 overflow-auto">
+                {onLeaveRows.map(r => (
+                  <li key={r.code} className="flex items-center gap-2 px-4 py-2 text-sm">
+                    <span className="font-medium">{r.name}</span>
+                    <span className="text-gray-400 text-xs">{r.code}</span>
+                    <span className="ml-auto inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">{r.leaveType || 'Leave'}</span>
+                    <span className="text-gray-500 text-xs w-28 sm:w-40 truncate text-right">{r.department}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           {/* Live list */}
