@@ -12,7 +12,7 @@ import { weekdayOf, addDay, DOW_SHORT } from '@/lib/attendanceReport'
 interface Prof extends ShiftProfileLite { id: string }
 interface Emp { employee_code: string; name: string | null; shift_profile_id: string | null; department: string | null }
 type Status = 'working' | 'present' | 'absent' | 'leave' | 'off' | 'holiday' | 'unknown'
-interface Row { code: string; name: string; department: string; status: Status; late: boolean; inTime: string | null }
+interface Row { code: string; name: string; department: string; status: Status; late: boolean; inTime: string | null; leaveType: string | null }
 
 const STATUS_LABEL: Record<Status, string> = {
   working: 'Working', present: 'Done', absent: 'Absent', leave: 'On leave', off: 'Rest day', holiday: 'Holiday', unknown: '—',
@@ -22,12 +22,12 @@ const STATUS_STYLE: Record<Status, string> = {
   leave: 'bg-blue-100 text-blue-700', off: 'bg-gray-100 text-gray-500', holiday: 'bg-purple-100 text-purple-700', unknown: 'bg-gray-100 text-gray-400',
 }
 
-function Kpi({ label, value, color }: { label: string; value: number; color: string }) {
+function Kpi({ label, value, color, active, onClick }: { label: string; value: number; color: string; active?: boolean; onClick?: () => void }) {
   return (
-    <div className="bg-white rounded-xl border shadow-sm p-4">
+    <button type="button" onClick={onClick} className={`text-left bg-white rounded-xl border shadow-sm p-4 w-full transition ${onClick ? 'cursor-pointer hover:border-gray-400' : ''} ${active ? 'ring-2 ring-blue-500 border-blue-400' : ''}`}>
       <div className="text-xs text-gray-500">{label}</div>
       <div className={`text-3xl font-bold ${color}`}>{value}</div>
-    </div>
+    </button>
   )
 }
 
@@ -59,6 +59,7 @@ export default function HrDashboardPage() {
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastSync, setLastSync] = useState<string | null>(null)
+  const [filter, setFilter] = useState<'working' | 'late' | 'absent' | 'leave' | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -119,7 +120,7 @@ export default function HrDashboardPage() {
         } else if (scheduled) status = 'absent'
         else status = 'unknown'
 
-        out.push({ code: e.employee_code, name: e.name || e.employee_code, department: e.department || '—', status, late, inTime })
+        out.push({ code: e.employee_code, name: e.name || e.employee_code, department: e.department || '—', status, late, inTime, leaveType: leaveType ?? null })
       }
       // Live list: working first, then late, then the rest; by name.
       const rank: Record<Status, number> = { working: 0, present: 2, absent: 3, leave: 4, holiday: 5, off: 6, unknown: 7 }
@@ -167,6 +168,14 @@ export default function HrDashboardPage() {
   }
   const depts = [...byDept.entries()].sort((a, b) => a[0].localeCompare(b[0]))
   const trendMax = Math.max(1, ...trend.map(t => t.present))
+  // Tap a KPI card to filter the live list to that group (tap again to clear).
+  const filterLabel = filter === 'working' ? 'working now' : filter === 'late' ? 'late' : filter === 'absent' ? 'absent' : filter === 'leave' ? 'on leave' : ''
+  const onLeaveRows = rows.filter(r => r.status === 'leave')
+  const shownRows = !filter ? rows : rows.filter(r =>
+    filter === 'late' ? ((r.status === 'working' || r.status === 'present') && r.late)
+    : filter === 'working' ? r.status === 'working'
+    : filter === 'absent' ? r.status === 'absent'
+    : r.status === 'leave')
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
@@ -183,10 +192,10 @@ export default function HrDashboardPage() {
       {loading ? <div className="text-gray-400 py-16 text-center">Loading…</div> : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-            <Kpi label="Working now" value={workingNow} color="text-green-600" />
-            <Kpi label="Late today" value={lateCount} color="text-amber-600" />
-            <Kpi label="Absent" value={absentCount} color="text-red-600" />
-            <Kpi label="On leave" value={leaveCount} color="text-blue-600" />
+            <Kpi label="Working now" value={workingNow} color="text-green-600" active={filter === 'working'} onClick={() => setFilter(f => f === 'working' ? null : 'working')} />
+            <Kpi label="Late today" value={lateCount} color="text-amber-600" active={filter === 'late'} onClick={() => setFilter(f => f === 'late' ? null : 'late')} />
+            <Kpi label="Absent" value={absentCount} color="text-red-600" active={filter === 'absent'} onClick={() => setFilter(f => f === 'absent' ? null : 'absent')} />
+            <Kpi label="On leave" value={leaveCount} color="text-blue-600" active={filter === 'leave'} onClick={() => setFilter(f => f === 'leave' ? null : 'leave')} />
           </div>
 
           <div className="grid lg:grid-cols-3 gap-4 mb-4">
@@ -239,21 +248,44 @@ export default function HrDashboardPage() {
             </div>
           </div>
 
+          {/* On leave today */}
+          <div className="bg-white rounded-xl border shadow-sm mb-4">
+            <div className="px-4 py-2 border-b font-semibold text-sm">🌴 On leave today <span className="text-gray-400 font-normal">· {onLeaveRows.length}</span></div>
+            {onLeaveRows.length === 0 ? (
+              <p className="px-4 py-4 text-gray-400 text-sm">No one on leave today.</p>
+            ) : (
+              <ul className="divide-y max-h-72 overflow-auto">
+                {onLeaveRows.map(r => (
+                  <li key={r.code} className="flex items-center gap-2 px-4 py-2 text-sm">
+                    <span className="font-medium">{r.name}</span>
+                    <span className="text-gray-400 text-xs">{r.code}</span>
+                    <span className="ml-auto inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">{r.leaveType || 'Leave'}</span>
+                    <span className="text-gray-500 text-xs w-28 sm:w-40 truncate text-right">{r.department}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
           {/* Live list */}
           <div className="bg-white rounded-xl border shadow-sm">
-            <div className="px-4 py-2 border-b font-semibold text-sm">Live attendance <span className="text-gray-400 font-normal">· {presentTotal} in / {rows.length} staff</span></div>
+            <div className="px-4 py-2 border-b font-semibold text-sm flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span>Live attendance <span className="text-gray-400 font-normal">· {presentTotal} in / {rows.length} staff</span></span>
+              {filter && <span className="font-normal text-xs text-blue-600">· showing {filterLabel} ({shownRows.length}) <button onClick={() => setFilter(null)} className="underline ml-1">show all</button></span>}
+            </div>
             <div className="overflow-auto max-h-[28rem]">
               <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b sticky top-0"><tr>{['Staff', 'Status', 'In', 'Location'].map(h => <th key={h} className="text-left px-4 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
+                <thead className="bg-gray-50 border-b sticky top-0"><tr>{['Staff', 'Status', filter === 'leave' ? 'Leave' : 'In', 'Location'].map(h => <th key={h} className="text-left px-4 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
                 <tbody>
-                  {rows.map(r => (
+                  {shownRows.length === 0 && <tr><td colSpan={4} className="text-center py-6 text-gray-400">{filter ? `No one ${filterLabel}.` : 'No staff.'}</td></tr>}
+                  {shownRows.map(r => (
                     <tr key={r.code} className="border-b last:border-0 hover:bg-gray-50">
                       <td className="px-4 py-2"><span className="font-medium">{r.name}</span> <span className="text-gray-400 text-xs">{r.code}</span></td>
                       <td className="px-4 py-2 whitespace-nowrap">
                         <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[r.status]}`}>{STATUS_LABEL[r.status]}</span>
                         {r.late && (r.status === 'working' || r.status === 'present') && <span className="ml-1 inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">Late</span>}
                       </td>
-                      <td className={`px-4 py-2 whitespace-nowrap ${r.late ? 'text-amber-600 font-medium' : 'text-gray-600'}`}>{r.inTime || '—'}</td>
+                      <td className={`px-4 py-2 whitespace-nowrap ${r.late ? 'text-amber-600 font-medium' : 'text-gray-600'}`}>{r.status === 'leave' ? (r.leaveType || 'Leave') : (r.inTime || '—')}</td>
                       <td className="px-4 py-2 text-gray-500">{r.department}</td>
                     </tr>
                   ))}
