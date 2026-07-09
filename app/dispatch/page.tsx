@@ -440,8 +440,10 @@ export default function DispatchPage() {
     ]
     autoTable(doc, {
       startY: 53, head: [['#', 'SO', 'Code', 'Item name', 'Qty', 'Batch', 'Exp']], body,
-      styles: { fontSize: 8, cellPadding: 1.4 }, headStyles: { fillColor: [30, 58, 138] },
-      columnStyles: { 0: { cellWidth: 7 }, 4: { halign: 'right' } }, margin: { left: 10, right: 10 },
+      styles: { fontSize: 8, cellPadding: 1.4, valign: 'middle' }, headStyles: { fillColor: [30, 58, 138] },
+      // SO column: fixed width + smaller font so a long list of orders wraps neatly
+      // instead of sprawling across the row.
+      columnStyles: { 0: { cellWidth: 7 }, 1: { cellWidth: 38, fontSize: 6.5 }, 4: { halign: 'right', cellWidth: 12 }, 5: { cellWidth: 20 }, 6: { cellWidth: 20 } }, margin: { left: 10, right: 10 },
     })
     const endY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || 40
     doc.setFontSize(8)
