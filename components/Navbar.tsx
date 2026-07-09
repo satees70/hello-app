@@ -259,6 +259,10 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
         { href: '/admin/location-map', label: 'Location Map' },
       ] : []),
     ] },
+    { header: 'Import', items: [
+      { href: '/import', label: 'Shipments', module: 'import' as ModuleKey },
+      { href: '/import/suppliers', label: 'Suppliers', module: 'import' as ModuleKey },
+    ] },
     { header: 'Setup', items: [
       { href: '/admin/packing-lines', label: 'Packing Lines', module: 'packing_lines' as ModuleKey },
       { href: '/admin/grinding-machines', label: 'Grinding Machines', module: 'grinding' as ModuleKey },
