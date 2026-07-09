@@ -277,6 +277,20 @@ export default function DispatchPage() {
   function openLink(lineId: string, isReturn: boolean, itemCode: string, description: string | null, factory: string, qty: number) {
     setLinkModal({ lineId, isReturn, itemCode, description, factory, qty }); setAlloc({}); setError(''); setSuccess('')
   }
+  // Spread the delivered quantity across the pending orders by how much each needs,
+  // in order, until the delivery is used up.
+  function autoAssign() {
+    if (!linkModal) return
+    const cands = pendingDetailForItem(linkModal.itemCode, linkModal.factory)
+    let left = linkModal.qty
+    const next: Record<string, string> = {}
+    for (const c of cands) {
+      if (left <= 1e-6) break
+      const give = Math.min(c.remaining, left)
+      if (give > 0) { next[c.so] = String(Number(give.toFixed(3))); left -= give }
+    }
+    setAlloc(next)
+  }
   async function submitLink() {
     if (!linkModal) return
     const entries = Object.entries(alloc).map(([so, v]) => ({ so, qty: Number(v) })).filter(x => x.qty > 0)
@@ -1010,16 +1024,21 @@ export default function DispatchPage() {
             <div className="bg-white rounded-xl shadow-xl border w-full max-w-lg my-8 p-6" onClick={e => e.stopPropagation()}>
               <h2 className="font-semibold text-lg mb-1">Link to order(s)</h2>
               <p className="text-gray-500 text-sm mb-1"><span className="font-mono">{linkModal.itemCode}</span>{linkModal.description ? ` — ${linkModal.description}` : ''} · delivered <strong>{linkModal.qty}</strong></p>
-              <p className="text-gray-400 text-xs mb-3">Give each order the quantity to fulfil from this delivery. Each order it&apos;s allocated to is marked delivered and cleared.</p>
+              <p className="text-gray-400 text-xs mb-2">Give each order the quantity to fulfil from this delivery. Each order it&apos;s allocated to is marked delivered and cleared.</p>
+              <div className="flex items-center justify-between mb-2">
+                <button onClick={autoAssign} disabled={cands.length === 0} className="text-xs bg-gray-800 text-white px-3 py-1.5 rounded-lg hover:bg-gray-900 disabled:opacity-50">✨ Auto-fill by need</button>
+                {allocated > 0 && <button onClick={() => setAlloc({})} className="text-xs text-gray-500 hover:underline">Clear</button>}
+              </div>
               <div className="border rounded-lg divide-y max-h-72 overflow-auto mb-2">
                 {cands.length === 0 && <p className="text-gray-400 text-sm text-center py-6">No pending orders for this item.</p>}
                 {cands.map(c => (
                   <div key={c.so} className="flex items-center gap-3 px-3 py-2">
                     <div className="flex-1 min-w-0">
                       <div className="font-mono font-medium text-sm">{c.so}</div>
-                      <div className="text-gray-500 text-xs truncate">{c.customer || '—'} · need {c.remaining}</div>
+                      <div className="text-gray-500 text-xs truncate">{c.customer || '—'}</div>
                     </div>
-                    <input type="number" step="any" min="0" max={c.remaining} value={alloc[c.so] || ''} onChange={e => setAlloc(p => ({ ...p, [c.so]: e.target.value }))} placeholder="0" className="w-24 border rounded-lg px-2 py-1.5 text-sm text-right" />
+                    <div className="text-right shrink-0 whitespace-nowrap"><span className="block text-[10px] text-gray-400 leading-none">need</span><span className="text-sm font-semibold text-gray-700">{c.remaining}</span></div>
+                    <input type="number" step="any" min="0" max={c.remaining} value={alloc[c.so] || ''} onChange={e => setAlloc(p => ({ ...p, [c.so]: e.target.value }))} placeholder="0" className="w-20 border rounded-lg px-2 py-1.5 text-sm text-right" />
                   </div>
                 ))}
               </div>
