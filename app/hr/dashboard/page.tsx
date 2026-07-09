@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { apiFetch } from '@/lib/api'
 import { computeDay, klDateKey, klTime, type ShiftProfileLite } from '@/lib/attendance'
-import { weekdayOf, addDay, DOW_SHORT } from '@/lib/attendanceReport'
+import { weekdayOf, addDay, DOW_SHORT, LEAVE_TYPES } from '@/lib/attendanceReport'
 
 // Live-ish HR attendance dashboard — "who is working / late / absent / on leave"
 // today, computed from the ZKLink punches already synced into attendance_punches.
@@ -57,6 +57,21 @@ export default function HrDashboardPage() {
   const [trendRaw, setTrendRaw] = useState<{ day: string; codes: string[] }[]>([])
   const [locFilter, setLocFilter] = useState('')   // '' = all locations
   const [sortBy, setSortBy] = useState<'latest' | 'name'>('latest')
+  const [saving, setSaving] = useState(false)
+  const today = klDateKey(new Date())
+
+  // Record (or clear) a person's leave for today — straight from the dashboard.
+  async function setLeave(code: string, type: string) {
+    setSaving(true); setError(null)
+    try {
+      const res = await apiFetch('/api/attendance/leave', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ employee_code: code, work_date: today, leave_type: type }),
+      })
+      if (!res.ok) { const j = await res.json().catch(() => ({})); setError(j.error || 'Could not save leave.'); return }
+      await load()
+    } finally { setSaving(false) }
+  }
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -179,8 +194,8 @@ export default function HrDashboardPage() {
   const trendMax = Math.max(1, ...trend.map(t => t.present))
   // Tap a KPI card to filter the live list to that group (tap again to clear).
   const filterLabel = filter === 'working' ? 'working now' : filter === 'late' ? 'late' : filter === 'absent' ? 'absent' : filter === 'leave' ? 'on leave' : ''
-  const onLeaveRows = visibleRows.filter(r => r.status === 'leave')
-  const absentRows = visibleRows.filter(r => r.status === 'absent')
+  const onLeaveRows = visibleRows.filter(r => r.status === 'leave').sort((a, b) => a.name.localeCompare(b.name))
+  const absentRows = visibleRows.filter(r => r.status === 'absent').sort((a, b) => a.name.localeCompare(b.name))
   const shownRows = !filter ? visibleRows : visibleRows.filter(r =>
     filter === 'late' ? ((r.status === 'working' || r.status === 'present') && r.late)
     : filter === 'working' ? r.status === 'working'
@@ -284,8 +299,12 @@ export default function HrDashboardPage() {
                     <li key={r.code} className="flex items-center gap-2 px-4 py-2 text-sm">
                       <span className="font-medium">{r.name}</span>
                       <span className="text-gray-400 text-xs">{r.code}</span>
-                      <span className="ml-auto inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">{r.leaveType || 'Leave'}</span>
-                      <span className="text-gray-500 text-xs w-24 truncate text-right">{r.department}</span>
+                      <select value={r.leaveType || ''} disabled={saving} onChange={e => setLeave(r.code, e.target.value)} className="ml-auto text-xs border rounded px-1.5 py-1 bg-blue-50 text-blue-700 font-medium">
+                        {r.leaveType && !LEAVE_TYPES.includes(r.leaveType) && <option value={r.leaveType}>{r.leaveType}</option>}
+                        {LEAVE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                        <option value="">✕ remove</option>
+                      </select>
+                      <span className="text-gray-500 text-xs w-20 truncate text-right">{r.department}</span>
                     </li>
                   ))}
                 </ul>
@@ -301,7 +320,11 @@ export default function HrDashboardPage() {
                     <li key={r.code} className="flex items-center gap-2 px-4 py-2 text-sm">
                       <span className="font-medium">{r.name}</span>
                       <span className="text-gray-400 text-xs">{r.code}</span>
-                      <span className="ml-auto text-gray-500 text-xs w-28 truncate text-right">{r.department}</span>
+                      <select value="" disabled={saving} onChange={e => e.target.value && setLeave(r.code, e.target.value)} className="ml-auto text-xs border rounded px-1.5 py-1 bg-white text-gray-600">
+                        <option value="">Mark leave…</option>
+                        {LEAVE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                      <span className="text-gray-500 text-xs w-20 truncate text-right">{r.department}</span>
                     </li>
                   ))}
                 </ul>
