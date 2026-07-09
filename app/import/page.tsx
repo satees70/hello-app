@@ -1,7 +1,8 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase, fetchAll } from '@/lib/supabase'
+import { apiFetch } from '@/lib/api'
 import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
 import {
@@ -29,6 +30,9 @@ export default function ImportShipmentsPage() {
   const [nNotes, setNNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  // Start-from-a-document upload
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [docBusy, setDocBusy] = useState('')
 
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
@@ -72,6 +76,43 @@ export default function ImportShipmentsPage() {
     router.push(`/import/${data.id}`)
   }
 
+  // Start a shipment straight from a PDF: create a blank draft, upload the file,
+  // read it with Claude, then open the shipment with the review panel ready.
+  // Unknown supplier is auto-created when you Apply the review.
+  async function startFromDocument(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !profile) return
+    if (file.type !== 'application/pdf') { setError('Please choose a PDF file.'); return }
+    setError(''); setDocBusy('Creating shipment…')
+    // 1) blank draft (reference filled in from the document on Apply)
+    const { data: ship, error: e1 } = await supabase.from('import_shipments').insert({
+      reference: '', status: 'Ordered', created_by: profile.id, created_by_name: profile.full_name || null,
+    }).select('id').single()
+    if (e1 || !ship) { setDocBusy(''); setError(e1?.message || 'Could not create shipment.'); return }
+    // 2) upload the PDF
+    setDocBusy('Uploading…')
+    const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const path = `${ship.id}/${Date.now()}-${safe}`
+    const { error: e2 } = await supabase.storage.from('import-docs').upload(path, file)
+    if (e2) { setDocBusy(''); setError(`Upload failed: ${e2.message}`); return }
+    // 3) record + read
+    const { data: doc, error: e3 } = await supabase.from('import_documents').insert({
+      shipment_id: ship.id, file_name: file.name, file_path: path, status: 'Processing',
+      uploaded_by: profile.id, uploaded_by_name: profile.full_name || null,
+    }).select('id').single()
+    if (e3 || !doc) { setDocBusy(''); setError(`Saving failed: ${e3?.message}`); return }
+    setDocBusy('Reading the document with Claude…')
+    try {
+      await apiFetch('/api/extract-import-document', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId: doc.id, filePath: path }),
+      })
+    } catch { /* fall through — the detail page can re-read if needed */ }
+    // 4) open the shipment with this document's review panel open
+    router.push(`/import/${ship.id}?review=${doc.id}`)
+  }
+
   if (loading && !profileError) return <div className="p-8 text-sm text-gray-500">Loading…</div>
   if (profileError) return <div className="p-8 text-sm text-red-600">{profileError}</div>
   if (!profile) return null
@@ -92,9 +133,18 @@ export default function ImportShipmentsPage() {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
           <h1 className="text-2xl font-bold">Import shipments</h1>
-          {canEdit && <button onClick={() => { setShowNew(true); setError('') }} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 text-sm font-medium">+ New shipment</button>}
+          {canEdit && (
+            <div className="flex items-center gap-2">
+              <label className={`text-sm font-medium px-4 py-2 rounded-lg border cursor-pointer ${docBusy ? 'bg-gray-100 text-gray-400 border-gray-200' : 'border-blue-600 text-blue-600 hover:bg-blue-50'}`}>
+                {docBusy || '⬆ Start from a document'}
+                <input ref={fileRef} type="file" accept="application/pdf" onChange={startFromDocument} disabled={!!docBusy} className="hidden" />
+              </label>
+              <button onClick={() => { setShowNew(true); setError('') }} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 text-sm font-medium">+ New shipment</button>
+            </div>
+          )}
         </div>
-        <p className="text-gray-500 text-sm mb-5">Track goods coming in from overseas suppliers — from order through to received.</p>
+        <p className="text-gray-500 text-sm mb-5">Track goods coming in from overseas suppliers — from order through to received. No supplier yet? Upload a PDF and it will be created for you.</p>
+        {error && !showNew && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
 
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-3 mb-4 text-sm">
@@ -123,7 +173,7 @@ export default function ImportShipmentsPage() {
                 const running = agg && (agg.dem > 0 || agg.det > 0)
                 return (
                   <tr key={s.id} className="border-b last:border-0 hover:bg-blue-50/40 cursor-pointer" onClick={() => router.push(`/import/${s.id}`)}>
-                    <td className="px-4 py-2 font-medium whitespace-nowrap">{s.reference}</td>
+                    <td className="px-4 py-2 font-medium whitespace-nowrap">{s.reference || <span className="text-gray-400 italic">(from document…)</span>}</td>
                     <td className="px-4 py-2 text-gray-700">{supplierName[s.supplier_id || ''] || <span className="text-gray-400">—</span>}</td>
                     <td className="px-4 py-2"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[s.status] || 'bg-gray-100 text-gray-700'}`}>{s.status}</span></td>
                     <td className="px-4 py-2 whitespace-nowrap">{fmtDate(s.order_date)}</td>

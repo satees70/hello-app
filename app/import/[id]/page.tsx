@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
@@ -17,6 +17,7 @@ type MasterItem = { code: string; description: string; unit: string; id?: string
 export default function ShipmentDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
+  const reviewParam = useSearchParams().get('review') || undefined
   const { profile, loading, error: profileError } = useProfile()
   const canEdit = can(profile, 'import', 'edit')
   const canDelete = can(profile, 'import', 'delete')
@@ -93,7 +94,7 @@ export default function ShipmentDetailPage() {
           reload={load} reloadCharges={reloadCharges} />
 
         <Documents shipment={shipment} documents={documents} suppliers={suppliers} master={master}
-          profileId={profile.id} profileName={profile.full_name} canEdit={canEdit} reload={load} />
+          profileId={profile.id} profileName={profile.full_name} canEdit={canEdit} reload={load} autoReview={reviewParam} />
       </div>
     </div>
   )
@@ -469,13 +470,13 @@ const DOC_STATUS_STYLE: Record<string, string> = {
   Review: 'bg-amber-100 text-amber-700', Applied: 'bg-green-100 text-green-700', Error: 'bg-red-100 text-red-700',
 }
 
-function Documents({ shipment, documents, suppliers, master, profileId, profileName, canEdit, reload }: {
+function Documents({ shipment, documents, suppliers, master, profileId, profileName, canEdit, reload, autoReview }: {
   shipment: ImportShipment; documents: ImportDocument[]; suppliers: ImportSupplier[]; master: MasterItem[]
-  profileId: string; profileName: string; canEdit: boolean; reload: () => void
+  profileId: string; profileName: string; canEdit: boolean; reload: () => void; autoReview?: string
 }) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
-  const [reviewing, setReviewing] = useState<string | null>(null)
+  const [reviewing, setReviewing] = useState<string | null>(autoReview || null)
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
