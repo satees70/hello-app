@@ -42,7 +42,10 @@ const STATUS_STYLES: Record<string, string> = {
   Error: 'bg-red-100 text-red-700',
 }
 const ACTIVE = ['Open', 'Partially Received']
-const PACK = 'BAG|CTN|CARTON'
+// Pack units on an item code's size suffix (e.g. 30KG/BAG). Accept the plural
+// forms too (BAGS/CTNS/CARTONS) so a code like S852-SP-30KG/BAGS still resolves
+// to its base material instead of showing as an unknown item.
+const PACK = 'BAGS?|CTNS?|CARTONS?'
 
 // Transport stage of a Goods-Received document (warehouse → factory).
 type GrStage = 'none' | 'lorry' | 'loaded' | 'driver' | 'sent' | 'received'
