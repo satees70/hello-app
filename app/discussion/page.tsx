@@ -24,7 +24,7 @@ export default function DiscussionPage() {
   const [selMembers, setSelMembers] = useState<string[]>([])   // member ids of the selected group (for tag restriction)
   const [err, setErr] = useState('')
 
-  useEffect(() => { const p = new URLSearchParams(window.location.search); setFilterSo(p.get('so') || ''); setFilterTopic(p.get('topic') || '') }, [])
+  useEffect(() => { const p = new URLSearchParams(window.location.search); const t = p.get('topic') || ''; setFilterSo(p.get('so') || ''); setFilterTopic(t); if (/^do[-\s/]/i.test(t)) setSel('goods_received') }, [])
   useEffect(() => {
     if (!profile) return
     fetchAll<{ so_number: string | null; customer_name: string | null }>('sales_order_lines', 'so_number, customer_name').then(rows => {
@@ -91,9 +91,10 @@ export default function DiscussionPage() {
   if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
   if (!profile) return null
 
-  const selGroup = groups.find(g => g.id === sel) || null
-  const channel = selGroup ? `group:${selGroup.id}` : 'warehouse'
-  const title = selGroup ? `🔒 ${selGroup.name}` : 'Warehouse discussion'
+  const isSpecial = sel === 'warehouse' || sel === 'goods_received'
+  const selGroup = isSpecial ? null : (groups.find(g => g.id === sel) || null)
+  const channel = selGroup ? `group:${selGroup.id}` : (sel === 'goods_received' ? 'goods_received' : 'warehouse')
+  const title = selGroup ? `🔒 ${selGroup.name}` : (sel === 'goods_received' ? 'Goods Received issues' : 'Warehouse discussion')
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -105,6 +106,7 @@ export default function DiscussionPage() {
         {/* Channel selector */}
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <button onClick={() => setSel('warehouse')} className={`px-3 py-1.5 rounded-lg text-sm border ${sel === 'warehouse' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white hover:bg-gray-50'}`}>🏢 Warehouse</button>
+          <button onClick={() => setSel('goods_received')} className={`px-3 py-1.5 rounded-lg text-sm border ${sel === 'goods_received' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white hover:bg-gray-50'}`}>📦 Goods Received</button>
           {groups.map(g => (
             <button key={g.id} onClick={() => setSel(g.id)} className={`px-3 py-1.5 rounded-lg text-sm border ${sel === g.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white hover:bg-gray-50'}`}>🔒 {g.name}</button>
           ))}

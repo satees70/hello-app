@@ -616,7 +616,31 @@ export default function IncomingPage() {
       body: `DO ${linesFor.do_number || '—'}: ${l.description || l.item_code} — DO ${doQty}, received ${actual} ${l.unit || ''} (${diff > 0 ? '+' : ''}${diff})${reason ? ' · ' + reason : ''}.`,
       link: '/incoming',
     })
+    // Also log it as a tracked thread in the Goods Received discussion so it can
+    // be checked off / discussed (no @mention here — the notification above is the ping).
+    const doTopic = linesFor.do_number || linesFor.file_name || linesFor.id
+    await supabase.from('discussions').insert({
+      channel: 'goods_received', author_id: profile?.id, author_name: profile?.full_name || null, topic: doTopic,
+      body: `${diff > 0 ? '⬆ Over' : '⬇ Short'}: ${l.description || l.item_code} — DO ${doQty}, received ${actual} ${l.unit || ''} (${diff > 0 ? '+' : ''}${diff})${reason ? ' · ' + reason : ''}.`,
+    })
     setSuccess(`Received ${actual} ${l.unit || ''} and flagged ${diff > 0 ? 'over' : 'short'} by ${Math.abs(diff)} to Head Office.`)
+  }
+
+  // Raise a free-form issue on this DO — posts a thread into the Goods Received
+  // discussion tab and pings the DO's location so the warehouse checks & updates it.
+  async function raiseIssue() {
+    if (!linesFor) return
+    const doTopic = linesFor.do_number || linesFor.file_name || linesFor.id
+    const msg = window.prompt(`Describe the issue with DO ${doTopic} — the warehouse will see this and can reply / mark it done:`)
+    if (msg == null) return
+    const text = msg.trim(); if (!text) return
+    const fac = linesFor.factory_code
+    const { error: err } = await supabase.from('discussions').insert({
+      channel: 'goods_received', author_id: profile?.id, author_name: profile?.full_name || null, topic: doTopic, body: text,
+      mention_factories: fac && fac !== 'HEAD_OFFICE' ? [fac] : [],
+    })
+    if (err) { setError('Could not raise the issue: ' + err.message); return }
+    setSuccess('Issue raised — it is now in the Goods Received discussion for the warehouse to check.')
   }
 
   // Receive every line that's ready (QC-ticked + photo + receivable) and not yet received
@@ -730,7 +754,11 @@ export default function IncomingPage() {
           <div className="bg-white rounded-xl shadow-sm border p-5 mb-10">
             <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
               <h2 className="font-semibold text-lg">{linesFor.do_number || linesFor.file_name} <span className="text-gray-400 font-normal text-sm">· {isHO ? factoryName(linesFor.factory_code) : linesFor.factory_code} · {linesFor.do_date || '—'}</span></h2>
-              <button onClick={() => setLinesFor(null)} className="text-gray-400 hover:text-gray-600 text-sm">Close</button>
+              <div className="flex items-center gap-3">
+                <button onClick={raiseIssue} className="text-amber-700 bg-amber-50 border border-amber-300 hover:bg-amber-100 rounded-lg px-3 py-1 text-xs font-medium">🚩 Raise issue</button>
+                <a href={`/discussion?topic=${encodeURIComponent(linesFor.do_number || linesFor.file_name || linesFor.id)}`} className="text-blue-600 hover:underline text-xs">💬 Discussion</a>
+                <button onClick={() => setLinesFor(null)} className="text-gray-400 hover:text-gray-600 text-sm">Close</button>
+              </div>
             </div>
             {(linesFor.pick_run_no || linesFor.so_number) && (() => {
               const linked = !!linesFor.pick_run_no && requests.some(r => r.pick_run_no === linesFor.pick_run_no)
