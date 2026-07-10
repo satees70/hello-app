@@ -701,33 +701,29 @@ function DocumentReview({ doc, extracted, shipment, suppliers, master, profileId
         </div>
       )}
 
-      {/* Items */}
+      {/* Items — built from divs (NOT a table) so the item-search dropdown can
+          float over the rows below instead of being trapped in a table cell. */}
       {rows.length > 0 && (
         <div className="mb-3">
           <div className="text-xs font-medium text-gray-600 mb-1">Items (English → your item master)</div>
-          {/* No overflow-x-auto here: it would clip the item-search dropdown. */}
           <div className="border rounded-lg bg-white">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b"><tr>{['Add', 'On document', 'Matched item', 'Qty', 'Declared wt', ''].map(h => <th key={h} className="text-left px-3 py-1.5 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
-              <tbody>
-                {rows.map((r, i) => (
-                  <tr key={i} className="border-b last:border-0">
-                    <td className="px-3 py-1.5"><input type="checkbox" className={chk} checked={r.include} onChange={e => setRow(i, { include: e.target.checked })} /></td>
-                    <td className="px-3 py-1.5 text-gray-600">{r.description_en}</td>
-                    <td className="px-3 py-1.5 min-w-[15rem]">
-                      <div className="flex items-center gap-2">
-                        {confBadge(r.confidence)}
-                        <div className="flex-1"><ItemPicker items={master} value={r.code ? `${r.code} — ${codeToItem[r.code]?.description || ''}` : ''} onPick={it => setRow(i, { code: it.code, include: true })} placeholder="Pick item…" /></div>
-                      </div>
-                    </td>
-                    <td className="px-3 py-1.5"><input type="number" step="any" value={r.quantity} onChange={e => setRow(i, { quantity: Number(e.target.value) })} className="border rounded px-2 py-1 text-sm w-24 text-right" /></td>
-                    <td className="px-3 py-1.5"><input type="number" step="any" value={r.declared_weight ?? ''} onChange={e => setRow(i, { declared_weight: e.target.value === '' ? null : Number(e.target.value) })} className="border rounded px-2 py-1 text-sm w-24 text-right" /></td>
-                    <td className="px-3 py-1.5 text-xs text-gray-400">{r.include && !r.code ? 'pick a code' : ''}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="hidden sm:grid grid-cols-[1.75rem_minmax(6rem,1fr)_minmax(9rem,1.6fr)_4.5rem_6rem] gap-2 items-center px-3 py-1.5 bg-gray-50 border-b text-xs font-medium text-gray-600">
+              <span>Add</span><span>On document</span><span>Matched item</span><span className="text-right">Qty</span><span className="text-right">Declared wt</span>
+            </div>
+            {rows.map((r, i) => (
+              <div key={i} className="grid grid-cols-[1.75rem_minmax(6rem,1fr)_minmax(9rem,1.6fr)_4.5rem_6rem] gap-2 items-center px-3 py-2 border-b last:border-0">
+                <input type="checkbox" className={chk} checked={r.include} onChange={e => setRow(i, { include: e.target.checked })} />
+                <span className="text-gray-600 truncate" title={r.description_en}>{r.description_en}</span>
+                <div className="flex items-center gap-2 min-w-0">
+                  {confBadge(r.confidence)}
+                  <div className="flex-1 min-w-0"><ItemPicker items={master} value={r.code ? `${r.code} — ${codeToItem[r.code]?.description || ''}` : ''} onPick={it => setRow(i, { code: it.code, include: true })} placeholder="Pick item…" /></div>
+                </div>
+                <input type="number" step="any" value={r.quantity} onChange={e => setRow(i, { quantity: Number(e.target.value) })} className="border rounded px-2 py-1 text-sm w-full text-right" />
+                <input type="number" step="any" value={r.declared_weight ?? ''} onChange={e => setRow(i, { declared_weight: e.target.value === '' ? null : Number(e.target.value) })} className="border rounded px-2 py-1 text-sm w-full text-right" />
+              </div>
+            ))}
           </div>
+          {rows.some(r => r.include && !r.code) && <p className="text-xs text-amber-600 mt-1">Rows without a matched code are skipped — pick a code to include them.</p>}
         </div>
       )}
 
