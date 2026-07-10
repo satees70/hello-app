@@ -440,10 +440,19 @@ export default function DispatchPage() {
     ]
     autoTable(doc, {
       startY: 53, head: [['#', 'SO', 'Code', 'Item name', 'Qty', 'Batch', 'Exp']], body,
-      styles: { fontSize: 8, cellPadding: 1.4, valign: 'middle' }, headStyles: { fillColor: [30, 58, 138] },
-      // SO column: fixed width + smaller font so a long list of orders wraps neatly
-      // instead of sprawling across the row.
-      columnStyles: { 0: { cellWidth: 7 }, 1: { cellWidth: 38, fontSize: 6.5 }, 4: { halign: 'right', cellWidth: 12 }, 5: { cellWidth: 20 }, 6: { cellWidth: 20 } }, margin: { left: 10, right: 10 },
+      styles: { fontSize: 7.5, cellPadding: 1.2, valign: 'middle', overflow: 'linebreak' }, headStyles: { fillColor: [30, 58, 138] },
+      // Fixed widths for every column except Item name, which takes whatever's
+      // left so it never gets squeezed to one-letter-per-line on the narrow A5
+      // page. SO + Code use a smaller font so long values wrap tidily.
+      columnStyles: {
+        0: { cellWidth: 6 },                          // #
+        1: { cellWidth: 16, fontSize: 6.5 },          // SO (wraps a list neatly)
+        2: { cellWidth: 27, fontSize: 6.5 },          // Code
+        3: { cellWidth: 'auto' },                     // Item name — gets the rest
+        4: { halign: 'right', cellWidth: 10 },        // Qty
+        5: { cellWidth: 15 },                         // Batch
+        6: { cellWidth: 15 },                         // Exp
+      }, margin: { left: 10, right: 10 },
     })
     const endY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || 40
     doc.setFontSize(8)
