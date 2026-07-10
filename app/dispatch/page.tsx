@@ -427,11 +427,11 @@ export default function DispatchPage() {
     load()
   }
 
-  // Print a delivery order on half-A4 (A5): item code, name, qty, batch, exp — finished goods + returns.
+  // Print a delivery order on A4: item code, name, qty, batch, exp — finished goods + returns.
   async function printDO(o: DOrder) {
     const { default: jsPDF } = await import('jspdf')
     const { default: autoTable } = await import('jspdf-autotable')
-    const doc = new jsPDF({ format: 'a5' })
+    const doc = new jsPDF({ format: 'a4' })
     const W = doc.internal.pageSize.getWidth()
     // ── Company letterhead ──
     doc.setFontSize(13); doc.setFont('helvetica', 'bold')
@@ -458,18 +458,18 @@ export default function DispatchPage() {
     ]
     autoTable(doc, {
       startY: 53, head: [['#', 'SO', 'Code', 'Item name', 'Qty', 'Batch', 'Exp']], body,
-      styles: { fontSize: 7.5, cellPadding: 1.2, valign: 'middle', overflow: 'linebreak' }, headStyles: { fillColor: [30, 58, 138] },
-      // Fixed widths for every column except Item name, which takes whatever's
-      // left so it never gets squeezed to one-letter-per-line on the narrow A5
-      // page. SO + Code use a smaller font so long values wrap tidily.
+      styles: { fontSize: 8.5, cellPadding: 2, valign: 'middle', overflow: 'ellipsize' }, headStyles: { fillColor: [30, 58, 138] },
+      // A4 is wide, so every item stays on ONE line — no wrapping. Columns are
+      // sized to fit codes/names; anything unusually long is trimmed with … rather
+      // than wrapped onto a second line.
       columnStyles: {
-        0: { cellWidth: 6 },                          // #
-        1: { cellWidth: 16, fontSize: 6.5 },          // SO (wraps a list neatly)
-        2: { cellWidth: 27, fontSize: 6.5 },          // Code
-        3: { cellWidth: 'auto' },                     // Item name — gets the rest
-        4: { halign: 'right', cellWidth: 10 },        // Qty
-        5: { cellWidth: 15 },                         // Batch
-        6: { cellWidth: 15 },                         // Exp
+        0: { cellWidth: 10 },                         // #
+        1: { cellWidth: 22 },                         // SO
+        2: { cellWidth: 36 },                         // Code
+        3: { cellWidth: 61 },                         // Item name
+        4: { halign: 'right', cellWidth: 15 },        // Qty
+        5: { cellWidth: 22 },                         // Batch
+        6: { cellWidth: 16 },                         // Exp
       }, margin: { left: 10, right: 10 },
     })
     const endY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || 40
