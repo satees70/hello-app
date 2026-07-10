@@ -409,6 +409,24 @@ export default function DispatchPage() {
     setBusy(false); load()
   }
 
+  // Clear old / wrong finished-goods batches off "ready to send" (HO/admin).
+  // For batches already delivered outside the system, or wrong/test batches that
+  // will never ship. Hides them (status → Bypassed); no stock change, kept in history.
+  const canClear = isHO || profile?.role === 'admin'
+  async function clearBatches() {
+    const ids = batches.filter(b => picked.has(b.id)).map(b => b.id)
+    if (!ids.length) return
+    if (!confirm(`Clear ${ids.length} finished-goods item(s) from "ready to send"?\n\nUse this for old batches already delivered outside the system, or wrong / test batches that will never ship. They are hidden from this list (kept in history) — no stock changes and nobody is notified of a delivery.`)) return
+    const reason = (window.prompt('Reason (why are these being cleared?) — optional:') || '').trim()
+    setBusy(true); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('clear_fg_batches', { p_ids: ids, p_reason: reason || null })
+    setBusy(false)
+    if (e) { setError(/clear_fg_batches|function/i.test(e.message) ? 'Clearing needs a database update — run db/2026-07-clear-fg-batch.sql in the Supabase SQL editor.' : e.message); return }
+    setPicked(p => { const n = new Set(p); ids.forEach(id => n.delete(id)); return n })
+    setSuccess(`Cleared ${ids.length} item(s) from the list.`)
+    load()
+  }
+
   // Print a delivery order on half-A4 (A5): item code, name, qty, batch, exp — finished goods + returns.
   async function printDO(o: DOrder) {
     const { default: jsPDF } = await import('jspdf')
@@ -648,6 +666,12 @@ export default function DispatchPage() {
 
         {/* ---- Finished goods to deliver ---- */}
         <h2 className="text-lg font-semibold mb-2">Finished goods ready to send</h2>
+        {canClear && batches.some(b => picked.has(b.id)) && (
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <button onClick={clearBatches} disabled={busy} className="text-red-700 border border-red-300 bg-red-50 hover:bg-red-100 rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50">🗑 Clear {batches.filter(b => picked.has(b.id)).length} selected from list</button>
+            <span className="text-gray-400 text-xs">For old / already-sent / wrong batches — hides them, no stock change.</span>
+          </div>
+        )}
 
         {/* mobile cards */}
         <div className="md:hidden space-y-2 mb-8">
