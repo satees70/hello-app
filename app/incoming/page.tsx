@@ -514,14 +514,30 @@ export default function IncomingPage() {
   )
   // Per-line Receive button (partial receiving): enabled once QC-ticked + photo + receivable
   const receiveBtn = (l: DoLine) => {
-    if (l.received_at) return <span className="text-green-600 text-xs font-medium whitespace-nowrap">✓ Received</span>
     const c = lineCalc(l)
+    if (l.received_at) {
+      // Flag a short/over receipt: actual received count vs what the DO said.
+      const recvCount = c.factor ? Number(l.received_qty || 0) / c.factor : null
+      const doQty = Number(l.quantity)
+      const disc = recvCount != null && Math.abs(recvCount - doQty) > 0.001
+      return (
+        <span className="text-xs font-medium whitespace-nowrap">
+          <span className="text-green-600">✓ Received{disc ? ` ${Number(recvCount!.toFixed(3))}` : ''}</span>
+          {disc && <span className={`ml-1 ${recvCount! > doQty ? 'text-indigo-600' : 'text-amber-600'}`}>({recvCount! > doQty ? 'over' : 'short'} {Number(Math.abs(recvCount! - doQty).toFixed(3))})</span>}
+        </span>
+      )
+    }
     const ready = l.qc_checked && (!photoReq || !!l.photo_path) && c.known && c.factor !== null
     return (
-      <button onClick={() => receiveLine(l)} disabled={!ready || busyLine === l.id}
-        className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-medium disabled:opacity-40 whitespace-nowrap">
-        {busyLine === l.id ? '…' : 'Receive'}
-      </button>
+      <span className="flex items-center gap-2 whitespace-nowrap">
+        <button onClick={() => receiveLine(l)} disabled={!ready || busyLine === l.id}
+          className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-medium disabled:opacity-40">
+          {busyLine === l.id ? '…' : 'Receive'}
+        </button>
+        <button onClick={() => reportShortOver(l)} disabled={!ready || busyLine === l.id}
+          title="Received a different quantity than the DO? Enter the actual amount — it goes into stock and Head Office is flagged."
+          className="text-xs text-amber-700 hover:underline disabled:opacity-40">Short/over</button>
+      </span>
     )
   }
 
@@ -538,14 +554,15 @@ export default function IncomingPage() {
   }
 
   // Receive ONE line into stock (partial receiving). Requires QC tick + photo.
-  async function receiveLine(l: DoLine, silent = false) {
-    if (!canEditFac(linesFor?.factory_code)) { setError("You have view-only access at this factory."); return }
-    if (!linesFor || l.received_at) return
+  async function receiveLine(l: DoLine, silent = false, overrideCount?: number): Promise<boolean> {
+    if (!canEditFac(linesFor?.factory_code)) { setError("You have view-only access at this factory."); return false }
+    if (!linesFor || l.received_at) return false
     const c = lineCalc(l)
-    if (!c.known || c.factor === null) { setError(`${l.item_code}: cannot be received (unknown item or pack size).`); return }
-    if (!l.qc_checked || (photoReq && !l.photo_path)) { setError(`${l.item_code}: tick QC${photoReq ? ' and add a photo' : ''} first.`); return }
+    if (!c.known || c.factor === null) { setError(`${l.item_code}: cannot be received (unknown item or pack size).`); return false }
+    if (!l.qc_checked || (photoReq && !l.photo_path)) { setError(`${l.item_code}: tick QC${photoReq ? ' and add a photo' : ''} first.`); return false }
     if (!silent) { setBusyLine(l.id); setError(''); setSuccess('') }
-    const qty = Number(l.quantity) * c.factor
+    // Receive the DO's quantity, unless production entered a different actual count.
+    const qty = (overrideCount != null ? overrideCount : Number(l.quantity)) * c.factor
     const ml = matchLines(l.item_code)
     let err
     if (ml.length > 0) {
@@ -554,7 +571,7 @@ export default function IncomingPage() {
       const item = resolveItem(l.item_code)!
       ;({ error: err } = await supabase.rpc('receive_stock_direct', { p_item_code: item.code, p_factory: linesFor.factory_code, p_qty: qty, p_batch_no: l.batch_no || null, p_exp_date: null, p_do_number: linesFor.do_number || null }))
     }
-    if (err) { setError(`${l.item_code}: ${err.message}`); setBusyLine(''); return }
+    if (err) { setError(`${l.item_code}: ${err.message}`); setBusyLine(''); return false }
     // Record which stock lot this line booked (for an exact reversal if it's deleted later)
     const resolved = resolveItem(l.item_code)
     let lotId: string | null = null
@@ -565,7 +582,7 @@ export default function IncomingPage() {
       lotId = lot?.id || null
     }
     const { error: markErr } = await supabase.from('delivery_order_lines').update({ received_at: new Date().toISOString(), stock_lot_id: lotId, received_qty: qty }).eq('id', l.id)
-    if (markErr) { setError(`${l.item_code}: stock was added but the line could not be marked received — ${markErr.message}. Ask Head Office to run the database update.`); setBusyLine(''); return }
+    if (markErr) { setError(`${l.item_code}: stock was added but the line could not be marked received — ${markErr.message}. Ask Head Office to run the database update.`); setBusyLine(''); return false }
     if (!silent) {
       const { data } = await supabase.from('delivery_order_lines').select('*').eq('do_id', linesFor.id).order('item_code')
       const fresh = (data as DoLine[]) || []
@@ -573,6 +590,33 @@ export default function IncomingPage() {
       await refreshDoStatus(fresh)
       setSuccess(`Received ${l.item_code}.`)
     }
+    return true
+  }
+
+  // Production received a different quantity than the DO says: book the ACTUAL
+  // amount into stock and raise an issue to Head Office (short / over).
+  async function reportShortOver(l: DoLine) {
+    if (!linesFor) return
+    if (!canEditFac(linesFor.factory_code)) { setError("You have view-only access at this factory."); return }
+    const c = lineCalc(l)
+    if (!c.known || c.factor === null) { setError(`${l.item_code}: sort out the item / pack size first.`); return }
+    if (!l.qc_checked || (photoReq && !l.photo_path)) { setError(`${l.item_code}: tick QC${photoReq ? ' and add a photo' : ''} first.`); return }
+    const doQty = Number(l.quantity)
+    const v = window.prompt(`How many ${l.unit || 'unit'}(s) did you ACTUALLY receive?\nThe DO says ${doQty}.`, String(doQty))
+    if (v == null) return
+    const actual = Number(v)
+    if (Number.isNaN(actual) || actual < 0) { setError('Enter a valid quantity.'); return }
+    const reason = (window.prompt('Note for Head Office (why short / over?) — optional:') || '').trim()
+    const ok = await receiveLine(l, false, actual)
+    if (!ok || actual === doQty) return
+    const diff = Number((actual - doQty).toFixed(3))
+    await supabase.from('notifications').insert({
+      factory_code: linesFor.factory_code, type: 'grn',
+      title: `${diff > 0 ? '⬆ Over' : '⬇ Short'} receipt: ${l.item_code}`,
+      body: `DO ${linesFor.do_number || '—'}: ${l.description || l.item_code} — DO ${doQty}, received ${actual} ${l.unit || ''} (${diff > 0 ? '+' : ''}${diff})${reason ? ' · ' + reason : ''}.`,
+      link: '/incoming',
+    })
+    setSuccess(`Received ${actual} ${l.unit || ''} and flagged ${diff > 0 ? 'over' : 'short'} by ${Math.abs(diff)} to Head Office.`)
   }
 
   // Receive every line that's ready (QC-ticked + photo + receivable) and not yet received
