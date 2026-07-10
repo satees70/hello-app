@@ -1,14 +1,15 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
 import ItemPicker from '@/components/ItemPicker'
+import { apiFetch } from '@/lib/api'
 import {
-  IMPORT_STATUSES, STATUS_STYLE, fmtDate, n3,
+  IMPORT_STATUSES, STATUS_STYLE, DOC_TYPE_LABEL, fmtDate, n3,
   type ImportShipment, type ImportSupplier, type ImportBL, type ImportContainer,
-  type ImportItem, type ContainerCharge,
+  type ImportItem, type ContainerCharge, type ImportDocument, type Extracted, type ExtractedItem,
 } from '@/lib/import'
 
 type MasterItem = { code: string; description: string; unit: string; id?: string }
@@ -16,6 +17,7 @@ type MasterItem = { code: string; description: string; unit: string; id?: string
 export default function ShipmentDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
+  const reviewParam = useSearchParams().get('review') || undefined
   const { profile, loading, error: profileError } = useProfile()
   const canEdit = can(profile, 'import', 'edit')
   const canDelete = can(profile, 'import', 'delete')
@@ -27,6 +29,7 @@ export default function ShipmentDetailPage() {
   const [items, setItems] = useState<ImportItem[]>([])
   const [charges, setCharges] = useState<ContainerCharge[]>([])
   const [master, setMaster] = useState<MasterItem[]>([])
+  const [documents, setDocuments] = useState<ImportDocument[]>([])
   const [notFound, setNotFound] = useState(false)
 
   useEffect(() => { if (profile && id) load() }, [profile, id])
@@ -34,15 +37,16 @@ export default function ShipmentDetailPage() {
     const { data: ship } = await supabase.from('import_shipments').select('*').eq('id', id).maybeSingle()
     if (!ship) { setNotFound(true); return }
     setShipment(ship as ImportShipment)
-    const [sup, bl, con, it, chg, mst] = await Promise.all([
+    const [sup, bl, con, it, chg, mst, docs] = await Promise.all([
       fetchAll<ImportSupplier>('import_suppliers', '*', 'name'),
       fetchAll<ImportBL>('import_bills_of_lading', '*', q => q.eq('shipment_id', id).order('created_at')),
       fetchAll<ImportContainer>('import_containers', '*', q => q.eq('shipment_id', id).order('created_at')),
       fetchAll<ImportItem>('import_shipment_items', '*', q => q.eq('shipment_id', id).order('created_at')),
       fetchAll<ContainerCharge>('import_container_charges', '*', q => q.eq('shipment_id', id)),
       fetchAll<MasterItem>('items', 'id, code, description, unit', 'code'),
+      fetchAll<ImportDocument>('import_documents', '*', q => q.eq('shipment_id', id).order('created_at', { ascending: false })),
     ])
-    setSuppliers(sup); setBls(bl); setContainers(con); setItems(it); setCharges(chg); setMaster(mst)
+    setSuppliers(sup); setBls(bl); setContainers(con); setItems(it); setCharges(chg); setMaster(mst); setDocuments(docs)
   }
   // Reload just the container-charge view (after a container date/free-day edit).
   async function reloadCharges() {
@@ -88,6 +92,9 @@ export default function ShipmentDetailPage() {
 
         <Containers shipmentId={shipment.id} containers={containers} bls={bls} charges={chargeOf} canEdit={canEdit}
           reload={load} reloadCharges={reloadCharges} />
+
+        <Documents shipment={shipment} documents={documents} suppliers={suppliers} master={master}
+          profileId={profile.id} profileName={profile.full_name} canEdit={canEdit} reload={load} autoReview={reviewParam} />
       </div>
     </div>
   )
@@ -450,6 +457,283 @@ function ContainerCard({ c, bls, charge, canEdit, reload, reloadCharges }: {
           <button onClick={remove} className="ml-auto text-red-500 hover:underline text-xs">Remove</button>
         </div>
       )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Documents — upload a PDF (sales order / invoice / BL), read it with Claude,
+// review what it found, and apply it to the shipment. Fully optional.
+// ---------------------------------------------------------------------------
+const DOC_STATUS_STYLE: Record<string, string> = {
+  Uploaded: 'bg-gray-100 text-gray-600', Processing: 'bg-blue-100 text-blue-700',
+  Review: 'bg-amber-100 text-amber-700', Applied: 'bg-green-100 text-green-700', Error: 'bg-red-100 text-red-700',
+}
+
+function Documents({ shipment, documents, suppliers, master, profileId, profileName, canEdit, reload, autoReview }: {
+  shipment: ImportShipment; documents: ImportDocument[]; suppliers: ImportSupplier[]; master: MasterItem[]
+  profileId: string; profileName: string; canEdit: boolean; reload: () => void; autoReview?: string
+}) {
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [reviewing, setReviewing] = useState<string | null>(autoReview || null)
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (file.type !== 'application/pdf') { setMsg('Please choose a PDF.'); return }
+    setBusy(true); setMsg('Uploading…')
+    const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const path = `${shipment.id}/${Date.now()}-${safe}`
+    const { error: upErr } = await supabase.storage.from('import-docs').upload(path, file)
+    if (upErr) { setBusy(false); setMsg(`Upload failed: ${upErr.message}`); return }
+    const { data: doc, error: insErr } = await supabase.from('import_documents').insert({
+      shipment_id: shipment.id, file_name: file.name, file_path: path, status: 'Processing',
+      uploaded_by: profileId, uploaded_by_name: profileName || null,
+    }).select('id').single()
+    if (insErr || !doc) { setBusy(false); setMsg(`Saving failed: ${insErr?.message}`); return }
+    setMsg('Reading the document with Claude…')
+    try {
+      const res = await apiFetch('/api/extract-import-document', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId: doc.id, filePath: path }),
+      })
+      const result = await res.json()
+      setBusy(false)
+      if (!res.ok) { setMsg(`Reading failed: ${result.error || 'Unknown error'}`); reload(); return }
+      setMsg('Read successfully — review below.'); setReviewing(doc.id); reload()
+    } catch {
+      setBusy(false); setMsg('Could not reach the reading service.'); reload()
+    }
+  }
+
+  async function reExtract(doc: ImportDocument) {
+    setMsg(`Re-reading "${doc.file_name}"…`)
+    await supabase.from('import_documents').update({ status: 'Processing' }).eq('id', doc.id)
+    reload()
+    try {
+      const res = await apiFetch('/api/extract-import-document', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId: doc.id, filePath: doc.file_path }),
+      })
+      const result = await res.json()
+      if (!res.ok) setMsg(`Reading failed: ${result.error || 'Unknown error'}`)
+      else { setMsg('Read successfully — review below.'); setReviewing(doc.id) }
+    } catch { setMsg('Could not reach the reading service.') }
+    reload()
+  }
+
+  async function view(doc: ImportDocument) {
+    const { data } = await supabase.storage.from('import-docs').createSignedUrl(doc.file_path, 120)
+    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+  }
+  async function remove(doc: ImportDocument) {
+    if (!confirm(`Delete "${doc.file_name}"? (The shipment data it created stays.)`)) return
+    await supabase.storage.from('import-docs').remove([doc.file_path])
+    await supabase.from('import_documents').delete().eq('id', doc.id)
+    reload()
+  }
+
+  return (
+    <section className="bg-white rounded-xl shadow-sm border p-5 mb-5">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+        <h2 className="font-semibold">Documents <span className="text-gray-400 font-normal text-sm">({documents.length})</span></h2>
+        {canEdit && (
+          <label className={`text-sm font-medium px-4 py-2 rounded-lg cursor-pointer ${busy ? 'bg-gray-200 text-gray-400' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+            {busy ? 'Working…' : '⬆ Upload & auto-fill'}
+            <input type="file" accept="application/pdf" onChange={onFile} disabled={busy} className="hidden" />
+          </label>
+        )}
+      </div>
+      <p className="text-xs text-gray-400 mb-3">Upload a supplier sales order, invoice, or Bill of Lading (PDF). Claude reads it and suggests the supplier, reference, containers and items for you to review — English documents are matched to your Malay item master automatically. Optional; you can always enter things by hand.</p>
+      {msg && <p className="text-sm mb-3 text-gray-600">{msg}</p>}
+
+      {documents.length === 0 && <p className="text-gray-400 text-sm">No documents uploaded.</p>}
+      <div className="space-y-2">
+        {documents.map(doc => (
+          <div key={doc.id} className="border rounded-lg">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${DOC_STATUS_STYLE[doc.status] || 'bg-gray-100'}`}>{doc.status}</span>
+              <span className="text-sm font-medium">{doc.file_name || 'document.pdf'}</span>
+              <span className="text-xs text-gray-400">{DOC_TYPE_LABEL[doc.doc_type] || 'Document'}{doc.uploaded_by_name ? ` · ${doc.uploaded_by_name}` : ''} · {new Date(doc.created_at).toLocaleDateString()}</span>
+              <div className="ml-auto flex items-center gap-3 text-xs">
+                <button onClick={() => view(doc)} className="text-blue-600 hover:underline">View</button>
+                {canEdit && doc.status === 'Review' && <button onClick={() => setReviewing(reviewing === doc.id ? null : doc.id)} className="text-amber-700 font-medium hover:underline">{reviewing === doc.id ? 'Hide' : 'Review & apply'}</button>}
+                {canEdit && (doc.status === 'Error' || doc.status === 'Processing') && <button onClick={() => reExtract(doc)} className="text-blue-600 hover:underline">Re-read</button>}
+                {canEdit && <button onClick={() => remove(doc)} className="text-red-500 hover:underline">Delete</button>}
+              </div>
+            </div>
+            {doc.status === 'Error' && doc.error_message && <p className="px-3 pb-2 text-xs text-red-500">{doc.error_message}</p>}
+            {canEdit && reviewing === doc.id && doc.status === 'Review' && doc.extracted && (
+              <DocumentReview doc={doc} extracted={doc.extracted} shipment={shipment} suppliers={suppliers} master={master}
+                profileId={profileId} onDone={() => { setReviewing(null); reload() }} />
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// Only pass through a real ISO date (yyyy-mm-dd); anything else → null (the model
+// is asked for ISO, but a date column would reject a stray format).
+const isoOrNull = (s?: string) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s.trim()) ? s.trim() : null)
+
+function DocumentReview({ doc, extracted, shipment, suppliers, master, profileId, onDone }: {
+  doc: ImportDocument; extracted: Extracted; shipment: ImportShipment; suppliers: ImportSupplier[]
+  master: MasterItem[]; profileId: string; onDone: () => void
+}) {
+  // Supplier: matched to an existing one, or a new name to create.
+  const matched = useMemo(() => {
+    const byMatch = extracted.supplier_match && suppliers.find(s => s.name.toLowerCase() === extracted.supplier_match!.toLowerCase())
+    const byName = extracted.supplier_name && suppliers.find(s => s.name.toLowerCase() === extracted.supplier_name!.toLowerCase())
+    return byMatch || byName || null
+  }, [extracted, suppliers])
+  const [applySupplier, setApplySupplier] = useState(!!(matched || extracted.supplier_name) && !shipment.supplier_id)
+  const [applyReference, setApplyReference] = useState(!!extracted.reference && !shipment.reference)
+  const [applyBL, setApplyBL] = useState(!!(extracted.bl && (extracted.bl.bl_number || extracted.bl.shipping_line)))
+  const [conSel, setConSel] = useState<boolean[]>((extracted.containers || []).map(() => true))
+  // Item rows: pre-filled with the model's cross-language match; user confirms/fixes.
+  const [rows, setRows] = useState(() => (extracted.items || []).map((it: ExtractedItem) => ({
+    code: it.matched_item_code && master.some(m => m.code === it.matched_item_code) ? it.matched_item_code : '',
+    description_en: it.description_en, quantity: it.quantity ?? 0, declared_weight: it.declared_weight ?? null as number | null,
+    confidence: it.match_confidence,
+    include: !!(it.matched_item_code && master.some(m => m.code === it.matched_item_code)),
+  })))
+  const [applying, setApplying] = useState(false)
+  const [err, setErr] = useState('')
+
+  const codeToItem = useMemo(() => { const m: Record<string, MasterItem> = {}; master.forEach(i => { m[i.code] = i }); return m }, [master])
+  const setRow = (i: number, patch: Partial<typeof rows[number]>) => setRows(rs => rs.map((r, j) => j === i ? { ...r, ...patch } : r))
+
+  async function apply() {
+    setApplying(true); setErr('')
+    try {
+      // 1) Supplier
+      if (applySupplier) {
+        let supplierId = matched?.id
+        if (!supplierId && extracted.supplier_name) {
+          const { data, error } = await supabase.from('import_suppliers')
+            .insert({ name: extracted.supplier_name, created_by: profileId }).select('id').single()
+          if (error && !error.message.includes('import_suppliers_name_key')) throw new Error(error.message)
+          if (data) supplierId = data.id
+          else { const { data: ex } = await supabase.from('import_suppliers').select('id').ilike('name', extracted.supplier_name).maybeSingle(); supplierId = ex?.id }
+        }
+        if (supplierId) await supabase.from('import_shipments').update({ supplier_id: supplierId }).eq('id', shipment.id)
+      }
+      // 2) Reference
+      if (applyReference && extracted.reference) {
+        await supabase.from('import_shipments').update({ reference: extracted.reference }).eq('id', shipment.id)
+      }
+      // 3) Bill of Lading
+      let newBlId: string | null = null
+      if (applyBL && extracted.bl) {
+        const b = extracted.bl
+        const { data } = await supabase.from('import_bills_of_lading').insert({
+          shipment_id: shipment.id, bl_number: b.bl_number || null, shipping_line: b.shipping_line || null,
+          vessel: b.vessel || null, port_of_loading: b.port_of_loading || null, port_of_discharge: b.port_of_discharge || null,
+          shipped_date: isoOrNull(b.shipped_date), eta: isoOrNull(b.eta), arrival_date: isoOrNull(b.arrival_date),
+        }).select('id').single()
+        newBlId = data?.id ?? null
+      }
+      // 4) Containers
+      const cons = (extracted.containers || []).filter((_, i) => conSel[i])
+      if (cons.length) {
+        await supabase.from('import_containers').insert(cons.map(c => ({
+          shipment_id: shipment.id, bl_id: newBlId, container_no: c.container_no || null, container_type: c.container_type || null,
+        })))
+      }
+      // 5) Items (only rows the user kept AND matched to a real master code)
+      const itemRows = rows.filter(r => r.include && r.code && codeToItem[r.code])
+      if (itemRows.length) {
+        await supabase.from('import_shipment_items').insert(itemRows.map(r => {
+          const m = codeToItem[r.code]
+          return { shipment_id: shipment.id, item_id: m.id || null, item_code: m.code, description: m.description, unit: m.unit, quantity: Number(r.quantity) || 0, declared_weight: r.declared_weight }
+        }))
+      }
+      // 6) Mark applied
+      await supabase.from('import_documents').update({ status: 'Applied', bl_id: newBlId }).eq('id', doc.id)
+      onDone()
+    } catch (e) {
+      setApplying(false); setErr(e instanceof Error ? e.message : 'Could not apply.')
+    }
+  }
+
+  const confBadge = (c: string) => c === 'high' ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">match</span>
+    : c === 'low' ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">check</span>
+    : <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">pick</span>
+  const chk = 'h-4 w-4'
+
+  return (
+    <div className="border-t bg-amber-50/40 px-4 py-4 text-sm">
+      {err && <p className="text-red-500 mb-2">{err}</p>}
+      <p className="text-xs text-gray-500 mb-3">Detected: <b>{DOC_TYPE_LABEL[extracted.doc_type] || 'Document'}</b>. Tick what to apply, fix any item matches, then Apply. Unmatched items are skipped until you pick a code.</p>
+
+      {/* Supplier + reference */}
+      <div className="flex flex-wrap gap-x-6 gap-y-2 mb-3">
+        {(matched || extracted.supplier_name) && (
+          <label className="inline-flex items-center gap-2"><input type="checkbox" className={chk} checked={applySupplier} onChange={e => setApplySupplier(e.target.checked)} />
+            Supplier: <b>{matched ? matched.name : extracted.supplier_name}</b> {matched ? <span className="text-xs text-green-600">(existing)</span> : <span className="text-xs text-blue-600">(will be added)</span>}</label>
+        )}
+        {extracted.reference && (
+          <label className="inline-flex items-center gap-2"><input type="checkbox" className={chk} checked={applyReference} onChange={e => setApplyReference(e.target.checked)} />
+            Reference: <b>{extracted.reference}</b></label>
+        )}
+      </div>
+
+      {/* BL */}
+      {extracted.bl && (extracted.bl.bl_number || extracted.bl.shipping_line || extracted.bl.vessel) && (
+        <label className="inline-flex items-start gap-2 mb-3"><input type="checkbox" className={`${chk} mt-0.5`} checked={applyBL} onChange={e => setApplyBL(e.target.checked)} />
+          <span>Add Bill of Lading: <b>{extracted.bl.bl_number || '(no number)'}</b> <span className="text-xs text-gray-500">{[extracted.bl.shipping_line, extracted.bl.vessel, extracted.bl.arrival_date].filter(Boolean).join(' · ')}</span></span></label>
+      )}
+
+      {/* Containers */}
+      {(extracted.containers || []).length > 0 && (
+        <div className="mb-3">
+          <div className="text-xs font-medium text-gray-600 mb-1">Containers</div>
+          <div className="flex flex-wrap gap-3">
+            {(extracted.containers || []).map((c, i) => (
+              <label key={i} className="inline-flex items-center gap-2"><input type="checkbox" className={chk} checked={conSel[i]} onChange={e => setConSel(s => s.map((v, j) => j === i ? e.target.checked : v))} />
+                <span className="font-mono">{c.container_no}</span>{c.container_type && <span className="text-xs text-gray-400">{c.container_type}</span>}</label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Items */}
+      {rows.length > 0 && (
+        <div className="mb-3">
+          <div className="text-xs font-medium text-gray-600 mb-1">Items (English → your item master)</div>
+          <div className="overflow-x-auto border rounded-lg bg-white">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b"><tr>{['Add', 'On document', 'Matched item', 'Qty', 'Declared wt', ''].map(h => <th key={h} className="text-left px-3 py-1.5 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={i} className="border-b last:border-0">
+                    <td className="px-3 py-1.5"><input type="checkbox" className={chk} checked={r.include} onChange={e => setRow(i, { include: e.target.checked })} /></td>
+                    <td className="px-3 py-1.5 text-gray-600">{r.description_en}</td>
+                    <td className="px-3 py-1.5 min-w-[15rem]">
+                      <div className="flex items-center gap-2">
+                        {confBadge(r.confidence)}
+                        <div className="flex-1"><ItemPicker items={master} value={r.code ? `${r.code} — ${codeToItem[r.code]?.description || ''}` : ''} onPick={it => setRow(i, { code: it.code, include: true })} placeholder="Pick item…" /></div>
+                      </div>
+                    </td>
+                    <td className="px-3 py-1.5"><input type="number" step="any" value={r.quantity} onChange={e => setRow(i, { quantity: Number(e.target.value) })} className="border rounded px-2 py-1 text-sm w-24 text-right" /></td>
+                    <td className="px-3 py-1.5"><input type="number" step="any" value={r.declared_weight ?? ''} onChange={e => setRow(i, { declared_weight: e.target.value === '' ? null : Number(e.target.value) })} className="border rounded px-2 py-1 text-sm w-24 text-right" /></td>
+                    <td className="px-3 py-1.5 text-xs text-gray-400">{r.include && !r.code ? 'pick a code' : ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button onClick={apply} disabled={applying} className="bg-green-600 text-white px-5 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium">{applying ? 'Applying…' : 'Apply to shipment'}</button>
+        <button onClick={onDone} className="text-gray-500 hover:underline text-sm">Close</button>
+      </div>
     </div>
   )
 }

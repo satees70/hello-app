@@ -53,6 +53,33 @@ export interface ContainerCharge {
   demurrage_days: number; detention_days: number
 }
 
+// --- Documents + auto-detect (extract-import-document) ----------------------
+export type DocType = 'sales_order' | 'invoice' | 'bill_of_lading' | 'packing_list' | 'other'
+export const DOC_TYPE_LABEL: Record<string, string> = {
+  sales_order: 'Sales order', invoice: 'Invoice', bill_of_lading: 'Bill of Lading',
+  packing_list: 'Packing list', other: 'Document',
+}
+export interface ExtractedBL {
+  bl_number?: string; shipping_line?: string; vessel?: string
+  port_of_loading?: string; port_of_discharge?: string
+  shipped_date?: string; eta?: string; arrival_date?: string
+}
+export interface ExtractedContainer { container_no: string; container_type?: string }
+export interface ExtractedItem {
+  description_en: string; matched_item_code?: string
+  match_confidence: 'high' | 'low' | 'none'; quantity?: number; declared_weight?: number
+}
+export interface Extracted {
+  doc_type: DocType; supplier_name?: string; supplier_match?: string; reference?: string
+  bl?: ExtractedBL; containers?: ExtractedContainer[]; items?: ExtractedItem[]
+}
+export interface ImportDocument {
+  id: string; shipment_id: string; bl_id: string | null; doc_type: DocType
+  file_name: string | null; file_path: string; status: string
+  extracted: Extracted | null; error_message: string | null
+  uploaded_by_name: string | null; created_at: string
+}
+
 // dd/mm/yyyy for display (matches the rest of the portal); em-dash when blank.
 export const fmtDate = (d: string | null | undefined) => d ? d.split('-').reverse().join('/') : '—'
 // Trim a numeric to at most 3 decimals for display.
