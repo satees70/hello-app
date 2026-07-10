@@ -705,7 +705,8 @@ function DocumentReview({ doc, extracted, shipment, suppliers, master, profileId
       {rows.length > 0 && (
         <div className="mb-3">
           <div className="text-xs font-medium text-gray-600 mb-1">Items (English → your item master)</div>
-          <div className="overflow-x-auto border rounded-lg bg-white">
+          {/* No overflow-x-auto here: it would clip the item-search dropdown. */}
+          <div className="border rounded-lg bg-white">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b"><tr>{['Add', 'On document', 'Matched item', 'Qty', 'Declared wt', ''].map(h => <th key={h} className="text-left px-3 py-1.5 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
               <tbody>
