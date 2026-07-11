@@ -22,6 +22,18 @@ const STATUS_STYLE: Record<Status, string> = {
   leave: 'bg-blue-100 text-blue-700', off: 'bg-gray-100 text-gray-500', holiday: 'bg-purple-100 text-purple-700', unknown: 'bg-gray-100 text-gray-400',
 }
 
+// Plain-English guess of which punch is missing, from the punch times alone.
+// A lone morning punch = they clocked in but not out; a lone afternoon punch =
+// they never clocked in. More than one = a punch in the middle is missing.
+function missingHint(times: string[]): string {
+  if (times.length === 0) return 'no punches'
+  if (times.length === 1) {
+    const h = parseInt(times[0].slice(0, 2), 10)
+    return h < 13 ? 'clock-OUT missing' : 'clock-IN missing'
+  }
+  return 'a middle punch missing'
+}
+
 function Kpi({ label, value, color, active, onClick }: { label: string; value: number; color: string; active?: boolean; onClick?: () => void }) {
   return (
     <button type="button" onClick={onClick} className={`text-left bg-white rounded-xl border shadow-sm p-4 w-full transition ${onClick ? 'cursor-pointer hover:border-gray-400' : ''} ${active ? 'ring-2 ring-blue-500 border-blue-400' : ''}`}>
@@ -79,7 +91,7 @@ export default function HrDashboardPage() {
   const [lastSync, setLastSync] = useState<string | null>(null)
   const [filter, setFilter] = useState<'working' | 'late' | 'absent' | 'leave' | null>(null)
   const [viewDate, setViewDate] = useState<string>(() => klDateKey(new Date()))   // yyyy-MM-dd being viewed
-  const [punchIssues, setPunchIssues] = useState<{ code: string; name: string; date: string; reason: string }[]>([])
+  const [punchIssues, setPunchIssues] = useState<{ code: string; name: string; date: string; reason: string; times: string[] }[]>([])
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -172,9 +184,9 @@ export default function HrDashboardPage() {
       let from = viewDate
       for (let i = 0; i < 30; i++) from = subDay(from)
       const { blocks } = await loadReport(from, viewDate)
-      const issues: { code: string; name: string; date: string; reason: string }[] = []
+      const issues: { code: string; name: string; date: string; reason: string; times: string[] }[] = []
       for (const b of blocks) for (const d of b.days) {
-        if (d.result.needsReview) issues.push({ code: b.code, name: b.name || b.code, date: d.dateKey, reason: d.result.reviewReason || 'Missing a clock-out' })
+        if (d.result.needsReview) issues.push({ code: b.code, name: b.name || b.code, date: d.dateKey, reason: d.result.reviewReason || 'Missing a clock-out', times: d.punchTimes })
       }
       issues.sort((a, b2) => b2.date.localeCompare(a.date) || a.name.localeCompare(b2.name))
       setPunchIssues(issues)
@@ -385,11 +397,16 @@ export default function HrDashboardPage() {
             ) : (
               <ul className="divide-y max-h-72 overflow-auto">
                 {visibleIssues.map(i => (
-                  <li key={`${i.code}|${i.date}`} className="flex items-center gap-2 px-4 py-2 text-sm">
+                  <li key={`${i.code}|${i.date}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2 text-sm">
                     <span className="text-gray-500 text-xs w-14 shrink-0">{fmtDay(i.date)}</span>
                     <span className="font-medium">{i.name}</span>
                     <span className="text-gray-400 text-xs">{i.code}</span>
-                    <span className="ml-auto text-amber-700 text-xs text-right">{i.reason}</span>
+                    <span className="ml-auto flex flex-wrap items-center gap-1 justify-end">
+                      {i.times.length > 0
+                        ? i.times.map((t, k) => <span key={k} className="font-mono text-xs bg-gray-100 text-gray-700 rounded px-1.5 py-0.5">{t}</span>)
+                        : <span className="text-gray-400 text-xs">no punches</span>}
+                      <span className="text-amber-700 text-xs font-medium ml-1">→ {missingHint(i.times)}</span>
+                    </span>
                   </li>
                 ))}
               </ul>
