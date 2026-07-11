@@ -29,12 +29,12 @@ export const dayNeedsAttn = (d: DayRow) => d.result.needsReview || (d.kind === '
 
 export interface EmpBlock {
   code: string; name: string; department: string | null; profile: ShiftProfile | null; deliveryName: string | null
-  days: DayRow[]; punches: number; totalWorked: number; totalOt: number; totalLate: number; totalEarlyOut: number
+  days: DayRow[]; punches: number; totalWorked: number; totalOt: number; totalLate: number; totalEarlyOut: number; totalOverLunch: number
   totalRestDays: number; totalHolidayDays: number; totalPresentDays: number; totalOutstation: number
   workDays: number; leaveDays: number; needsReview: number
   // Late/early deduction control (HR Monthly Summary). `excusedLate/Early` are the
   // minutes on per-day-excused days; `noDeductLate` = the whole month is exempted.
-  excusedLate: number; excusedEarly: number; noDeductLate: boolean
+  excusedLate: number; excusedEarly: number; excusedOverLunch: number; noDeductLate: boolean
   // `otMonthOff` = the "Count OT" tick is off for the whole month (all OT skipped).
   otMonthOff: boolean
   // Sunday↔UL contra: `sundayWorked` = day-units worked on Sundays; `noContra` =
@@ -59,7 +59,9 @@ export function sundayContra(b: EmpBlock): { ul: number; used: number; netUL: nu
 // and the per-person monthly override. Total OT = OT − deductedLate − deductedEarly.
 export function deductedLate(b: EmpBlock): number { return b.noDeductLate ? 0 : Math.max(0, b.totalLate - b.excusedLate) }
 export function deductedEarly(b: EmpBlock): number { return b.noDeductLate ? 0 : Math.max(0, b.totalEarlyOut - b.excusedEarly) }
-export function totalOtMinutes(b: EmpBlock): number { return b.totalOt - deductedLate(b) - deductedEarly(b) }
+// Punched-lunch time beyond the standard lunch — deducted from OT (not work hours).
+export function deductedOverLunch(b: EmpBlock): number { return b.noDeductLate ? 0 : Math.max(0, b.totalOverLunch - b.excusedOverLunch) }
+export function totalOtMinutes(b: EmpBlock): number { return Math.max(0, b.totalOt - deductedLate(b) - deductedEarly(b) - deductedOverLunch(b)) }
 
 // Add one day to a 'yyyy-MM-dd' date string (UTC-stable).
 export function addDay(dk: string): string {
@@ -203,6 +205,7 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
     const dayRows: DayRow[] = []
     let punchCount = 0, totalWorked = 0, totalOt = 0, totalLate = 0, totalEarlyOut = 0, totalRestDays = 0, totalHolidayDays = 0, totalPresentDays = 0, totalOutstation = 0, needsReview = 0
     let workDays = 0, leaveDays = 0, excusedLate = 0, excusedEarly = 0, sundayWorked = 0
+    let totalOverLunch = 0, excusedOverLunch = 0
     const ws = prof?.week_schedule ?? null
     // Walk every calendar day in the range, so absent (leave) days show as rows too.
     for (const dateKey of rangeDates) {
@@ -271,8 +274,9 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
         totalOt += otCounted ? result.otMinutes : 0
         totalLate += result.lateMinutes
         totalEarlyOut += result.earlyOutMinutes
+        totalOverLunch += result.overLunchMinutes
         const lateExcused = excusedSet.has(`${code}|${dateKey}`)
-        if (lateExcused) { excusedLate += result.lateMinutes; excusedEarly += result.earlyOutMinutes }
+        if (lateExcused) { excusedLate += result.lateMinutes; excusedEarly += result.earlyOutMinutes; excusedOverLunch += result.overLunchMinutes }
         if (result.dayType === 'rest') totalRestDays += result.dayUnits
         if (result.dayType === 'rest' && weekdayOf(dateKey) === 0) sundayWorked += result.dayUnits
         if (result.dayType === 'holiday') totalHolidayDays += result.dayUnits
@@ -309,8 +313,8 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
     }
     out.push({
       code, name: emp?.name || code, department: deptByCode.get(code) ?? null,
-      profile: prof, deliveryName, days: dayRows, punches: punchCount, totalWorked, totalOt, totalLate, totalEarlyOut, totalRestDays, totalHolidayDays, totalPresentDays, totalOutstation, workDays, leaveDays, needsReview,
-      excusedLate, excusedEarly, noDeductLate: noDeductSet.has(code), otMonthOff,
+      profile: prof, deliveryName, days: dayRows, punches: punchCount, totalWorked, totalOt, totalLate, totalEarlyOut, totalOverLunch, totalRestDays, totalHolidayDays, totalPresentDays, totalOutstation, workDays, leaveDays, needsReview,
+      excusedLate, excusedEarly, excusedOverLunch, noDeductLate: noDeductSet.has(code), otMonthOff,
       sundayWorked, noContra: noContraSet.has(code),
     })
   }

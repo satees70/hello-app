@@ -246,7 +246,8 @@ export default function AttendancePage() {
       const worked = d.kind === 'worked' && !d.result.needsReview ? fmtMinutes(d.result.workedMinutes) : ''
       const ot = d.kind === 'worked' && !d.result.needsReview && d.result.otMinutes > 0 ? fmtMinutes(d.result.otMinutes) : ''
       const le = [d.result.lateMinutes > 0 ? `late ${fmtMinutes(d.result.lateMinutes)}` : '',
-      d.result.earlyOutMinutes > 0 ? `early ${fmtMinutes(d.result.earlyOutMinutes)}` : ''].filter(Boolean).join(', ')
+      d.result.earlyOutMinutes > 0 ? `early ${fmtMinutes(d.result.earlyOutMinutes)}` : '',
+      d.result.overLunchMinutes > 0 ? `lunch +${fmtMinutes(d.result.overLunchMinutes)}` : ''].filter(Boolean).join(', ')
       return `<tr>
         <td class="${wend ? 'wend' : ''}">${fmtDate(d.dateKey)} ${DOW_SHORT[weekdayOf(d.dateKey)]}</td>
         <td>${sessions}</td>
@@ -264,7 +265,7 @@ export default function AttendancePage() {
         <b>Work ${b.workDays}d</b> ·
         Leave ${b.leaveDays}d${leaveBreak ? ` (${leaveBreak})` : ''} ·
         Worked ${fmtMinutes(b.totalWorked)} · <b>OT ${fmtMinutes(b.totalOt)}</b> ·
-        Late ${fmtMinutes(b.totalLate)} · Early-out ${fmtMinutes(b.totalEarlyOut)} ·
+        Late ${fmtMinutes(b.totalLate)} · Early-out ${fmtMinutes(b.totalEarlyOut)}${b.totalOverLunch > 0 ? ` · Over-lunch ${fmtMinutes(b.totalOverLunch)}` : ''} ·
         Rest ${b.totalRestDays}d · PH ${b.totalHolidayDays}d ·
         Present ${b.totalPresentDays}d · Outstation ${b.totalOutstation}d
       </div>
@@ -406,6 +407,7 @@ export default function AttendancePage() {
                 </label>
                 {b.totalLate > 0 && <span className="ml-3 text-rose-600">Late {fmtMinutes(b.totalLate)}</span>}
                 {b.totalEarlyOut > 0 && <span className="ml-3 text-rose-600">Early-out {fmtMinutes(b.totalEarlyOut)}</span>}
+                {b.totalOverLunch > 0 && <span className="ml-3 text-rose-600" title="Lunch taken beyond the standard — deducted from OT, not from work hours">Over-lunch {fmtMinutes(b.totalOverLunch)}</span>}
                 {b.totalRestDays > 0 && <span className="ml-3 text-purple-700">Rest {b.totalRestDays}d</span>}
                 {b.totalHolidayDays > 0 && <span className="ml-3 text-purple-700">PH {b.totalHolidayDays}d</span>}
                 {b.totalPresentDays > 0 && <span className="ml-3 font-medium text-gray-800">Present {b.totalPresentDays}d</span>}
@@ -489,8 +491,9 @@ export default function AttendancePage() {
                         {result.lateMinutes > 0 && <span>late {fmtMinutes(result.lateMinutes)}</span>}
                         {result.lateMinutes > 0 && result.earlyOutMinutes > 0 && <span> · </span>}
                         {result.earlyOutMinutes > 0 && <span>early {fmtMinutes(result.earlyOutMinutes)}</span>}
+                        {result.overLunchMinutes > 0 && <span>{(result.lateMinutes > 0 || result.earlyOutMinutes > 0) ? ' · ' : ''}lunch +{fmtMinutes(result.overLunchMinutes)}</span>}
                       </span>
-                      {kind === 'worked' && (result.lateMinutes > 0 || result.earlyOutMinutes > 0) && (
+                      {kind === 'worked' && (result.lateMinutes > 0 || result.earlyOutMinutes > 0 || result.overLunchMinutes > 0) && (
                         <label className="mt-1 flex items-center gap-1 text-gray-500 cursor-pointer" title="Tick if there's a valid reason — this day's late/early won't be deducted from Total OT">
                           <input type="checkbox" checked={lateExcused} onChange={e => saveExcuse(b.code, dateKey, e.target.checked)} />
                           excuse

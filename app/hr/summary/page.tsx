@@ -39,6 +39,7 @@ function rowFor(b: EmpBlock) {
     otMin: b.totalOt,
     lateMin: b.totalLate,
     earlyMin: b.totalEarlyOut,
+    overLunchMin: b.totalOverLunch,
     excusedLateMin: b.excusedLate,
     excusedEarlyMin: b.excusedEarly,
     noDeductLate: b.noDeductLate,
@@ -70,6 +71,7 @@ const COLS: { key: string; label: string; num?: boolean; title?: string; csv: (r
   { key: 'countOt', label: 'Count OT', csv: r => (r.otMonthOff ? 'no' : 'yes') },
   { key: 'lateMin', label: 'Late h', num: true, csv: r => hrs(r.lateMin) },
   { key: 'earlyMin', label: 'Early-out h', num: true, csv: r => hrs(r.earlyMin) },
+  { key: 'overLunchMin', label: 'Over-lunch h', num: true, title: 'Lunch beyond the standard — deducted from OT, not from work hours', csv: r => hrs(r.overLunchMin) },
   { key: 'totalOtMin', label: 'Total OT h', num: true, csv: r => hrs(r.totalOtMin) },
   { key: 'deduct', label: 'Deduct late/early', csv: r => (r.noDeductLate ? 'no' : 'yes') },
   { key: 'phDays', label: 'PH d', num: true, title: 'Days actually worked on a public holiday', csv: r => days(r.phDays) },
@@ -143,10 +145,10 @@ export default function SummaryPage() {
       workDays: a.workDays + r.workDays, leaveDays: a.leaveDays + r.leaveDays,
       sundayWorked: a.sundayWorked + r.sundayWorked, netUL: a.netUL + r.netUL, sundayPaid: a.sundayPaid + r.sundayPaid,
       workedMin: a.workedMin + r.workedMin, otMin: a.otMin + r.otMin,
-      lateMin: a.lateMin + r.lateMin, earlyMin: a.earlyMin + r.earlyMin,
+      lateMin: a.lateMin + r.lateMin, earlyMin: a.earlyMin + r.earlyMin, overLunchMin: a.overLunchMin + r.overLunchMin,
       totalOtMin: a.totalOtMin + r.totalOtMin, phDays: a.phDays + r.phDays,
       restDays: a.restDays + r.restDays, outstationDays: a.outstationDays + r.outstationDays,
-    }), { workDays: 0, leaveDays: 0, sundayWorked: 0, netUL: 0, sundayPaid: 0, workedMin: 0, otMin: 0, lateMin: 0, earlyMin: 0, totalOtMin: 0, phDays: 0, restDays: 0, outstationDays: 0 })
+    }), { workDays: 0, leaveDays: 0, sundayWorked: 0, netUL: 0, sundayPaid: 0, workedMin: 0, otMin: 0, lateMin: 0, earlyMin: 0, overLunchMin: 0, totalOtMin: 0, phDays: 0, restDays: 0, outstationDays: 0 })
     return t
   }, [rows])
 
@@ -309,6 +311,10 @@ export default function SummaryPage() {
                       ? <div className="text-xs text-gray-400">not deducted</div>
                       : r.excusedEarlyMin > 0 && <div className="text-xs text-gray-400">exc {hrs(r.excusedEarlyMin)}</div>}
                   </td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap text-rose-600">
+                    {hb(r.overLunchMin)}
+                    {r.noDeductLate && r.overLunchMin > 0 && <div className="text-xs text-gray-400">not deducted</div>}
+                  </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap font-medium text-gray-900">{hb(r.totalOtMin)}</td>
                   <td className="px-3 py-2 text-center">
                     <input type="checkbox" checked={!r.noDeductLate} onChange={e => saveDeduct(r.code, e.target.checked)}
@@ -336,6 +342,7 @@ export default function SummaryPage() {
                 <td className="px-3 py-2"></td>
                 <td className="px-3 py-2 text-right">{hb(totals.lateMin)}</td>
                 <td className="px-3 py-2 text-right">{hb(totals.earlyMin)}</td>
+                <td className="px-3 py-2 text-right">{hb(totals.overLunchMin)}</td>
                 <td className="px-3 py-2 text-right">{hb(totals.totalOtMin)}</td>
                 <td className="px-3 py-2"></td>
                 <td className="px-3 py-2 text-right">{db(totals.phDays)}</td>
