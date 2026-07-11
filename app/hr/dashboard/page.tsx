@@ -78,11 +78,13 @@ export default function HrDashboardPage() {
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
   const [lastSync, setLastSync] = useState<string | null>(null)
   const [filter, setFilter] = useState<'working' | 'late' | 'absent' | 'leave' | null>(null)
+  const [viewDate, setViewDate] = useState<string>(() => klDateKey(new Date()))   // yyyy-MM-dd being viewed
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const today = klDateKey(new Date())
+      const today = viewDate
+      const isToday = today === klDateKey(new Date())
       // 7-day window start (6 days before today).
       let weekStart = today
       for (let i = 0; i < 6; i++) weekStart = subDay(weekStart)
@@ -134,7 +136,9 @@ export default function HrDashboardPage() {
           const res = computeDay(times, prof, null, { weekday: wd, isHoliday })
           inTime = klTime([...times].sort((a, b) => a.getTime() - b.getTime())[0])
           late = res.lateMinutes > 0
-          status = res.pairing.needsReview ? 'working' : 'present'   // odd punches = still clocked in
+          // Odd punches = still clocked in → "working" only makes sense for today;
+          // on a past day everyone with punches was simply "present".
+          status = (res.pairing.needsReview && isToday) ? 'working' : 'present'
         } else if (scheduled) status = 'absent'
         else status = 'unknown'
 
@@ -156,7 +160,7 @@ export default function HrDashboardPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally { setLoading(false) }
-  }, [])
+  }, [viewDate])
   useEffect(() => { load() }, [load])
 
   async function syncNow() {
@@ -178,6 +182,8 @@ export default function HrDashboardPage() {
     finally { setSyncing(false) }
   }
 
+  const todayKey = klDateKey(new Date())
+  const isToday = viewDate === todayKey
   // Location (department) filter — restricts every number & list to one location.
   const locations = [...new Set(rows.map(r => r.department))].sort()
   const visibleRows = locFilter ? rows.filter(r => r.department === locFilter) : rows
@@ -203,12 +209,12 @@ export default function HrDashboardPage() {
   const trend = trendRaw.map(t => ({ day: t.day, present: locFilter ? t.codes.filter(c => deptOf.get(c) === locFilter).length : t.codes.length }))
   const trendMax = Math.max(1, ...trend.map(t => t.present))
   // Tap a KPI card to filter the live list to that group (tap again to clear).
-  const filterLabel = filter === 'working' ? 'working now' : filter === 'late' ? 'late' : filter === 'absent' ? 'absent' : filter === 'leave' ? 'on leave' : ''
+  const filterLabel = filter === 'working' ? (isToday ? 'working now' : 'present') : filter === 'late' ? 'late' : filter === 'absent' ? 'absent' : filter === 'leave' ? 'on leave' : ''
   const onLeaveRows = visibleRows.filter(r => r.status === 'leave').sort((a, b) => a.name.localeCompare(b.name))
   const absentRows = visibleRows.filter(r => r.status === 'absent').sort((a, b) => a.name.localeCompare(b.name))
   const shownRows = !filter ? visibleRows : visibleRows.filter(r =>
     filter === 'late' ? ((r.status === 'working' || r.status === 'present') && r.late)
-    : filter === 'working' ? r.status === 'working'
+    : filter === 'working' ? (r.status === 'working' || (!isToday && r.status === 'present'))
     : filter === 'absent' ? r.status === 'absent'
     : r.status === 'leave')
   // Live-list order: by latest clock-in (late arrivals on top), or by name.
@@ -225,6 +231,10 @@ export default function HrDashboardPage() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
         <h1 className="text-2xl font-bold">Attendance Dashboard</h1>
         <div className="flex items-center gap-2">
+          <input type="date" value={viewDate} max={todayKey}
+            onChange={e => { setViewDate(e.target.value || todayKey); setFilter(null) }}
+            className="text-sm border rounded-lg px-2 py-2 bg-white" title="Pick a day to view its summary" />
+          {!isToday && <button onClick={() => { setViewDate(todayKey); setFilter(null) }} className="text-sm border rounded-lg px-3 py-2 bg-white hover:bg-gray-50 whitespace-nowrap">Today</button>}
           <select value={locFilter} onChange={e => setLocFilter(e.target.value)} className="text-sm border rounded-lg px-2 py-2 bg-white max-w-[12rem]">
             <option value="">All locations</option>
             {locations.map(l => <option key={l} value={l}>{l}</option>)}
@@ -233,7 +243,7 @@ export default function HrDashboardPage() {
         </div>
       </div>
       <p className="text-gray-500 text-sm mb-5">
-        Today, {klDateKey(new Date())} · {visibleRows.length} staff{locFilter ? ` in ${locFilter}` : ' active'}
+        {isToday ? 'Today' : 'Viewing'}, {viewDate} · {visibleRows.length} staff{locFilter ? ` in ${locFilter}` : ' active'}
         {lastSync && <> · as of last sync {new Date(lastSync).toLocaleString()}</>}
       </p>
 
@@ -242,7 +252,7 @@ export default function HrDashboardPage() {
       {loading ? <div className="text-gray-400 py-16 text-center">Loading…</div> : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-            <Kpi label="Working now" value={workingNow} color="text-green-600" active={filter === 'working'} onClick={() => setFilter(f => f === 'working' ? null : 'working')} />
+            <Kpi label={isToday ? 'Working now' : 'Present'} value={isToday ? workingNow : presentTotal} color="text-green-600" active={filter === 'working'} onClick={() => setFilter(f => f === 'working' ? null : 'working')} />
             <Kpi label="Late today" value={lateCount} color="text-amber-600" active={filter === 'late'} onClick={() => setFilter(f => f === 'late' ? null : 'late')} />
             <Kpi label="Absent" value={absentCount} color="text-red-600" active={filter === 'absent'} onClick={() => setFilter(f => f === 'absent' ? null : 'absent')} />
             <Kpi label="On leave" value={leaveCount} color="text-blue-600" active={filter === 'leave'} onClick={() => setFilter(f => f === 'leave' ? null : 'leave')} />
@@ -251,7 +261,7 @@ export default function HrDashboardPage() {
           <div className="grid lg:grid-cols-3 gap-4 mb-4">
             {/* Summary donut */}
             <div className="bg-white rounded-xl border shadow-sm p-4">
-              <div className="font-semibold text-sm mb-3">Today at a glance</div>
+              <div className="font-semibold text-sm mb-3">{isToday ? 'Today at a glance' : 'At a glance'}</div>
               <div className="flex items-center gap-4">
                 <Donut segments={[
                   { value: onTime, color: '#16a34a' },
