@@ -121,6 +121,7 @@ export default function SalesOrdersPage() {
   const [docSummary, setDocSummary] = useState<Record<string, { pending: number; dup: number; locations: string[]; confirmed: string[]; locStats: Record<string, { total: number; done: number }> }>>({})
   const [docDelPending, setDocDelPending] = useState<Set<string>>(new Set())
   const [lineStatuses, setLineStatuses] = useState<Record<string, string>>({}) // sales line id -> production lifecycle status
+  const [onBoard, setOnBoard] = useState<Set<string>>(new Set())               // sales line ids that already have a production batch
 
   // Trace each confirmed line to its production batch and report where it is.
   async function loadLineStatuses(ls: SalesLine[]) {
@@ -134,10 +135,13 @@ export default function SalesOrdersPage() {
     const mrStatus: Record<string, string> = {}
     if (mrIds.length) { const { data: mrs } = await supabase.from('material_requests').select('id, status').in('id', mrIds); (mrs || []).forEach(m => { mrStatus[m.id] = m.status }) }
     const map: Record<string, string> = {}
-    rows.forEach(r => { const b = r.production_batches; if (b) map[`${b.factory_code}|${b.item_code}|${r.so_number}`] = lineStatusOf(b, mrStatus) })
+    const boardKeys = new Set<string>()
+    rows.forEach(r => { const b = r.production_batches; if (b) { const k = `${b.factory_code}|${b.item_code}|${r.so_number}`; map[k] = lineStatusOf(b, mrStatus); boardKeys.add(k) } })
     const out: Record<string, string> = {}
-    ls.forEach(l => { out[l.id] = map[`${l.factory_code}|${l.item_code}|${l.so_number}`] || 'Pending Material Request' })
+    const board = new Set<string>()
+    ls.forEach(l => { const k = `${l.factory_code}|${l.item_code}|${l.so_number}`; out[l.id] = map[k] || 'Pending Material Request'; if (boardKeys.has(k)) board.add(l.id) })
     setLineStatuses(out)
+    setOnBoard(board)
   }
   const LINE_STATUS_STYLE: Record<string, string> = {
     'Pending Material Request': 'bg-gray-100 text-gray-600', 'Material Received Partial': 'bg-amber-100 text-amber-700',
@@ -701,6 +705,21 @@ export default function SalesOrdersPage() {
     loadSummary()
   }
 
+  // Confirmed lines with no production batch yet — e.g. items added to the SO
+  // AFTER its factory was confirmed, which the one-shot confirm never picked up.
+  const missingForFactory = (f: string) => lines.filter(l => (l.factory_code || '') === f && !onBoard.has(l.id))
+
+  // Additive repair: create Order-Board batches for those missing confirmed lines.
+  // Never duplicates (the RPC only creates for lines that have no batch).
+  async function pushToBoard() {
+    if (!linesFor) return
+    setError(''); setSuccess('')
+    const { data, error: e } = await supabase.rpc('sync_confirmed_to_production', { p_import_id: linesFor.id })
+    if (e) { setError(/sync_confirmed_to_production|function|schema cache/i.test(e.message) ? 'This needs a database update — run db/2026-07-sync-order-board.sql in the Supabase SQL editor.' : e.message); return }
+    setSuccess(`Pushed ${data ?? 0} new item(s) to the Order Board.`)
+    loadLineStatuses(lines)
+  }
+
   async function handleDownload(path: string) {
     const { data, error: signError } = await supabase.storage.from('sales-orders').createSignedUrl(path, 60)
     if (signError || !data) { setError('Could not open file.'); return }
@@ -1168,19 +1187,29 @@ export default function SalesOrdersPage() {
                         <div className="text-sm">
                           <span className="font-medium">{factoryName(f)}</span>
                           {confirmed
-                            ? <span className="ml-2 text-green-600">✓ Confirmed{confirmedByName(f) ? ` by ${confirmedByName(f)}` : ''}</span>
+                            ? <>
+                                <span className="ml-2 text-green-600">✓ Confirmed{confirmedByName(f) ? ` by ${confirmedByName(f)}` : ''}</span>
+                                {missingForFactory(f).length > 0 && <span className="ml-2 text-amber-600">· ⚠ {missingForFactory(f).length} item(s) added after confirm — not on the Order Board yet</span>}
+                              </>
                             : pend > 0
                               ? <span className="ml-2 text-amber-600">⏳ {pend} pending change(s) — resolve first</span>
                               : dup > 0
                                 ? <span className="ml-2 text-amber-600">⚠ {dup} duplicate line(s) — resolve first</span>
                                 : <span className="ml-2 text-green-600">Ready to confirm</span>}
                         </div>
-                        {!confirmed && (can(profile, 'sales', 'edit', f)
-                          ? <button onClick={() => confirmFactory(f)} disabled={!ready || confirmingFactory === f}
-                              className="bg-green-600 text-white px-5 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium whitespace-nowrap">
-                              {confirmingFactory === f ? 'Confirming…' : `Confirm ${f} lines`}
-                            </button>
-                          : <span className="text-gray-400 text-sm">view only</span>)}
+                        {!confirmed
+                          ? (can(profile, 'sales', 'edit', f)
+                            ? <button onClick={() => confirmFactory(f)} disabled={!ready || confirmingFactory === f}
+                                className="bg-green-600 text-white px-5 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium whitespace-nowrap">
+                                {confirmingFactory === f ? 'Confirming…' : `Confirm ${f} lines`}
+                              </button>
+                            : <span className="text-gray-400 text-sm">view only</span>)
+                          : (missingForFactory(f).length > 0 && can(profile, 'sales', 'edit', f)
+                            ? <button onClick={pushToBoard}
+                                className="bg-amber-600 text-white px-5 py-2 rounded-lg hover:bg-amber-700 text-sm font-medium whitespace-nowrap">
+                                ↻ Push {missingForFactory(f).length} to Order Board
+                              </button>
+                            : null)}
                       </div>
                     )
                   })}
