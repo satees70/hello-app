@@ -409,11 +409,29 @@ export default function DispatchPage() {
     setBusy(false); load()
   }
 
-  // Print a delivery order on half-A4 (A5): item code, name, qty, batch, exp — finished goods + returns.
+  // Clear old / wrong finished-goods batches off "ready to send" (HO/admin).
+  // For batches already delivered outside the system, or wrong/test batches that
+  // will never ship. Hides them (status → Bypassed); no stock change, kept in history.
+  const canClear = isHO || profile?.role === 'admin'
+  async function clearBatches() {
+    const ids = batches.filter(b => picked.has(b.id)).map(b => b.id)
+    if (!ids.length) return
+    if (!confirm(`Clear ${ids.length} finished-goods item(s) from "ready to send"?\n\nUse this for old batches already delivered outside the system, or wrong / test batches that will never ship. They are hidden from this list (kept in history) — no stock changes and nobody is notified of a delivery.`)) return
+    const reason = (window.prompt('Reason (why are these being cleared?) — optional:') || '').trim()
+    setBusy(true); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('clear_fg_batches', { p_ids: ids, p_reason: reason || null })
+    setBusy(false)
+    if (e) { setError(/clear_fg_batches|function/i.test(e.message) ? 'Clearing needs a database update — run db/2026-07-clear-fg-batch.sql in the Supabase SQL editor.' : e.message); return }
+    setPicked(p => { const n = new Set(p); ids.forEach(id => n.delete(id)); return n })
+    setSuccess(`Cleared ${ids.length} item(s) from the list.`)
+    load()
+  }
+
+  // Print a delivery order on A4: item code, name, qty, batch, exp — finished goods + returns.
   async function printDO(o: DOrder) {
     const { default: jsPDF } = await import('jspdf')
     const { default: autoTable } = await import('jspdf-autotable')
-    const doc = new jsPDF({ format: 'a5' })
+    const doc = new jsPDF({ format: 'a4' })
     const W = doc.internal.pageSize.getWidth()
     // ── Company letterhead ──
     doc.setFontSize(13); doc.setFont('helvetica', 'bold')
@@ -440,18 +458,18 @@ export default function DispatchPage() {
     ]
     autoTable(doc, {
       startY: 53, head: [['#', 'SO', 'Code', 'Item name', 'Qty', 'Batch', 'Exp']], body,
-      styles: { fontSize: 7.5, cellPadding: 1.2, valign: 'middle', overflow: 'linebreak' }, headStyles: { fillColor: [30, 58, 138] },
-      // Fixed widths for every column except Item name, which takes whatever's
-      // left so it never gets squeezed to one-letter-per-line on the narrow A5
-      // page. SO + Code use a smaller font so long values wrap tidily.
+      styles: { fontSize: 8.5, cellPadding: 2, valign: 'middle', overflow: 'ellipsize' }, headStyles: { fillColor: [30, 58, 138] },
+      // A4 is wide, so every item stays on ONE line — no wrapping. Columns are
+      // sized to fit codes/names; anything unusually long is trimmed with … rather
+      // than wrapped onto a second line.
       columnStyles: {
-        0: { cellWidth: 6 },                          // #
-        1: { cellWidth: 16, fontSize: 6.5 },          // SO (wraps a list neatly)
-        2: { cellWidth: 27, fontSize: 6.5 },          // Code
-        3: { cellWidth: 'auto' },                     // Item name — gets the rest
-        4: { halign: 'right', cellWidth: 10 },        // Qty
-        5: { cellWidth: 15 },                         // Batch
-        6: { cellWidth: 15 },                         // Exp
+        0: { cellWidth: 10 },                         // #
+        1: { cellWidth: 22 },                         // SO
+        2: { cellWidth: 36 },                         // Code
+        3: { cellWidth: 61 },                         // Item name
+        4: { halign: 'right', cellWidth: 15 },        // Qty
+        5: { cellWidth: 22 },                         // Batch
+        6: { cellWidth: 16 },                         // Exp
       }, margin: { left: 10, right: 10 },
     })
     const endY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || 40
@@ -648,6 +666,12 @@ export default function DispatchPage() {
 
         {/* ---- Finished goods to deliver ---- */}
         <h2 className="text-lg font-semibold mb-2">Finished goods ready to send</h2>
+        {canClear && batches.some(b => picked.has(b.id)) && (
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <button onClick={clearBatches} disabled={busy} className="text-red-700 border border-red-300 bg-red-50 hover:bg-red-100 rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50">🗑 Clear {batches.filter(b => picked.has(b.id)).length} selected from list</button>
+            <span className="text-gray-400 text-xs">For old / already-sent / wrong batches — hides them, no stock change.</span>
+          </div>
+        )}
 
         {/* mobile cards */}
         <div className="md:hidden space-y-2 mb-8">
