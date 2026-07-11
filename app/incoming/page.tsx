@@ -151,7 +151,13 @@ export default function IncomingPage() {
     if (!editReq || !linesFor) return
     if (await hasPendingChange(editReq.id)) { setError('An amendment for this line is already waiting for Head Office — wait for it to be approved or rejected first.'); return }
     const orig: Record<string, string> = { item_code: editReq.item_code || '', description: editReq.description || '', quantity: String(editReq.quantity ?? ''), unit: editReq.unit || '', batch_no: editReq.batch_no || '' }
-    if (editForm.item_code && !itemByCode(editForm.item_code) && !itemByCode(baseCode(editForm.item_code))) { setError('Pick a valid item code from the Items master.'); return }
+    // Only validate the item code against the master when the user actually CHANGES
+    // it. The line's original code came from the Delivery Order and was already
+    // accepted/received, so editing another field (e.g. batch no) must not be blocked
+    // just because that code (a pack variant like S104-25KG/BAG) isn't literally in
+    // the master.
+    const codeChanged = (editForm.item_code || '') !== (editReq.item_code || '')
+    if (codeChanged && editForm.item_code && !itemByCode(editForm.item_code) && !itemByCode(baseCode(editForm.item_code))) { setError('Pick a valid item code from the Items master.'); return }
     const changed = EDIT_FIELDS.filter(f => (editForm[f.key] || '') !== orig[f.key])
     if (changed.length === 0) { setError('Nothing changed.'); return }
     const reason = window.prompt('Reason for these changes (sent to Head Office):')
@@ -979,7 +985,7 @@ export default function IncomingPage() {
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setEditReq(null)}>
           <div className="bg-white rounded-xl shadow-xl border w-full max-w-lg my-8 p-6" onClick={e => e.stopPropagation()}>
             <h2 className="font-semibold text-lg mb-1">Request changes to a line</h2>
-            <p className="text-gray-500 text-sm mb-4">Goes to Head Office for approval.{editReq.received_at ? ' This line is already received — item/qty/unit/batch changes need it deleted & received again.' : ''}</p>
+            <p className="text-gray-500 text-sm mb-4">Goes to Head Office for approval.{editReq.received_at ? ' This line is already received — the batch number can be corrected here; item / qty / unit changes still need it deleted & received again.' : ''}</p>
             <div className="space-y-3">
               {EDIT_FIELDS.map(f => (
                 <div key={f.key}>
@@ -988,7 +994,14 @@ export default function IncomingPage() {
                     <>
                       <ItemCombo items={itemsMaster} value={editForm.item_code || ''}
                         onPick={(code, description) => setEditForm({ ...editForm, item_code: code, description })} />
-                      {editForm.item_code && !itemByCode(editForm.item_code) ? (itemByCode(baseCode(editForm.item_code)) ? <span className="text-xs text-gray-400">→ {baseCode(editForm.item_code)} (in stock as the base material)</span> : <span className="text-xs text-amber-600">This code isn’t in the Items master — type a code or name and pick it from the list.</span>) : null}
+                      {editForm.item_code && !itemByCode(editForm.item_code)
+                        ? (itemByCode(baseCode(editForm.item_code))
+                            ? <span className="text-xs text-gray-400">→ {baseCode(editForm.item_code)} (in stock as the base material)</span>
+                            : (editReq && (editForm.item_code || '') === (editReq.item_code || '')
+                                // Unchanged original DO code — it was already accepted, so this is fine.
+                                ? <span className="text-xs text-gray-400">Original code from the Delivery Order — you can edit the other fields (e.g. batch no).</span>
+                                : <span className="text-xs text-amber-600">This code isn’t in the Items master — type a code or name and pick it from the list.</span>))
+                        : null}
                     </>
                   ) : f.key === 'description' ? (
                     <input value={editForm.description || ''} disabled className="w-full border rounded-lg px-3 py-2 bg-gray-100 text-gray-500" title="Follows the item code" />
