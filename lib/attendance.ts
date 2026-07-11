@@ -118,6 +118,7 @@ export interface DayResult {
   otMinutes: number
   lateMinutes: number           // clocked in after shift start
   earlyOutMinutes: number       // clocked out before shift end
+  overLunchMinutes: number      // punched-lunch break beyond the standard lunch (deducted from OT, NOT from work hours)
   needsReview: boolean
   reviewReason: string | null
   reviewed: boolean             // a human review was applied
@@ -146,31 +147,31 @@ function klMinutesOfDay(d: Date): number {
 }
 const overlap = (a: number, b: number, c: number, d: number) => Math.max(0, Math.min(b, d) - Math.max(a, c))
 
-function result(regular: number, ot: number, late: number, earlyOut: number, pairing: DayPairing, reviewed: boolean): DayResult {
+function result(regular: number, ot: number, late: number, earlyOut: number, pairing: DayPairing, reviewed: boolean, overLunch = 0): DayResult {
   const r = Math.max(0, Math.round(regular)), o = Math.max(0, Math.round(ot))
-  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: false, outstation: false, workedMinutes: r + o, regularMinutes: r, otMinutes: o, lateMinutes: Math.max(0, Math.round(late)), earlyOutMinutes: Math.max(0, Math.round(earlyOut)), needsReview: false, reviewReason: null, reviewed, halfDay: false }
+  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: false, outstation: false, workedMinutes: r + o, regularMinutes: r, otMinutes: o, lateMinutes: Math.max(0, Math.round(late)), earlyOutMinutes: Math.max(0, Math.round(earlyOut)), overLunchMinutes: Math.max(0, Math.round(overLunch)), needsReview: false, reviewReason: null, reviewed, halfDay: false }
 }
 function flag(pairing: DayPairing, reason: string): DayResult {
-  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: false, outstation: false, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: true, reviewReason: reason, reviewed: false, halfDay: false }
+  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: false, outstation: false, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, overLunchMinutes: 0, needsReview: true, reviewReason: reason, reviewed: false, halfDay: false }
 }
 // Rest-day / public-holiday work, counted in days: full shift → 1, >half → 1,
 // half or less → ½. (SQL Payroll applies the day-rate from the bucket.)
 function dayCount(dayType: 'rest' | 'holiday', worked: number, fullNormalMin: number, pairing: DayPairing): DayResult {
   const units = worked <= 0 ? 0 : (worked > fullNormalMin / 2 ? 1 : 0.5)
-  return { pairing, dayType, dayUnits: units, presentDay: false, outstation: false, workedMinutes: Math.round(worked), regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false, halfDay: false }
+  return { pairing, dayType, dayUnits: units, presentDay: false, outstation: false, workedMinutes: Math.round(worked), regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, overLunchMinutes: 0, needsReview: false, reviewReason: null, reviewed: false, halfDay: false }
 }
 // Salesman single-punch mode: any punch that day = present (no hours/OT/review).
 function presentResult(pairing: DayPairing): DayResult {
-  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: true, outstation: false, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false, halfDay: false }
+  return { pairing, dayType: 'normal', dayUnits: 0, presentDay: true, outstation: false, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, overLunchMinutes: 0, needsReview: false, reviewReason: null, reviewed: false, halfDay: false }
 }
 // A day inside a multi-day outstation trip: present, no OT, no review; the
 // punches (departure / return) are still shown but don't flag.
 export function outstationResult(times: Date[]): DayResult {
-  return { pairing: pairDay(times), dayType: 'normal', dayUnits: 0, presentDay: false, outstation: true, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false, halfDay: false }
+  return { pairing: pairDay(times), dayType: 'normal', dayUnits: 0, presentDay: false, outstation: true, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, overLunchMinutes: 0, needsReview: false, reviewReason: null, reviewed: false, halfDay: false }
 }
 // A day with no attendance (off / holiday / absent) — all zero.
 export function emptyDay(): DayResult {
-  return { pairing: pairDay([]), dayType: 'normal', dayUnits: 0, presentDay: false, outstation: false, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, needsReview: false, reviewReason: null, reviewed: false, halfDay: false }
+  return { pairing: pairDay([]), dayType: 'normal', dayUnits: 0, presentDay: false, outstation: false, workedMinutes: 0, regularMinutes: 0, otMinutes: 0, lateMinutes: 0, earlyOutMinutes: 0, overLunchMinutes: 0, needsReview: false, reviewReason: null, reviewed: false, halfDay: false }
 }
 
 export function computeDay(times: Date[], profile: ShiftProfileLite | null, review: ReviewLite | null, ctx?: DayContext): DayResult {
@@ -260,6 +261,19 @@ export function computeDay(times: Date[], profile: ShiftProfileLite | null, revi
   const lateMinutes = Math.max(0, firstIn - shiftStart!)
   const earlyOutMinutes = lastOut != null ? Math.max(0, shiftEnd! - lastOut) : 0
 
+  // Over-lunch: on a PUNCHED-lunch shift, the break time inside the shift window
+  // beyond the standard lunch. Per the payroll rule it is NOT deducted from work
+  // hours (credit it back so only a standard lunch is excluded); instead it is
+  // deducted from OT via the late/early column. Auto-deduct shifts (no lunch punch)
+  // can't measure a real lunch, so they're unaffected.
+  let overLunch = 0
+  if (lunchRule !== 'auto_deduct' && pairing.sessions.length >= 2 && lastOut != null) {
+    const presenceInWindow = overlap(firstIn, lastOut, shiftStart!, shiftEnd!)
+    const breaksInWindow = Math.max(0, presenceInWindow - normalRaw)   // lunch/breaks inside the shift
+    overLunch = Math.max(0, breaksInWindow - lunchMin)
+  }
+  const normalAdj = normal + overLunch   // don't let the extra lunch reduce work hours
+
   // Half day: worked only about half of THIS DAY'S scheduled hours — e.g. a
   // 08:30–17:00 shift where they were present 08:30–13:00 (morning) only. Judged
   // against the day's own window (not the global 7.5h), so a day that is scheduled
@@ -268,8 +282,8 @@ export function computeDay(times: Date[], profile: ShiftProfileLite | null, revi
   const dayWindowMin = shiftEnd! - shiftStart!
   // A short scheduled day has no lunch break; a full-length one does.
   const dayExpectedWork = dayWindowMin <= normalMin ? dayWindowMin : Math.max(0, dayWindowMin - lunchMin)
-  const halfDay = normal > 0 && normal >= dayExpectedWork * 0.3 && normal <= dayExpectedWork * 0.7
-  const r = result(normal, ot, halfDay ? 0 : lateMinutes, halfDay ? 0 : earlyOutMinutes, pairing, !!review)
+  const halfDay = normalAdj > 0 && normalAdj >= dayExpectedWork * 0.3 && normalAdj <= dayExpectedWork * 0.7
+  const r = result(normalAdj, ot, halfDay ? 0 : lateMinutes, halfDay ? 0 : earlyOutMinutes, pairing, !!review, halfDay ? 0 : overLunch)
   r.halfDay = halfDay
   return r
 }
