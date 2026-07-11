@@ -5,16 +5,18 @@ import type { NextRequest } from 'next/server'
 // Opens the right app at the ROOT of each subdomain:
 //   hr.srrieaswari.com/     → /hr/attendance
 //   driver.srrieaswari.com/ → /driver/today
+//   import.srrieaswari.com/ → /import
 // Only the root path is rewritten (see config.matcher); every other path
-// (/hr/*, /driver/*, /login, /api, production.srrieaswari.com) is untouched.
+// (/hr/*, /driver/*, /import/*, /login, /api, production.srrieaswari.com) is untouched.
 export function proxy(request: NextRequest) {
   const host = request.headers.get('host') || ''
   const { pathname } = request.nextUrl
   const isHr = host.startsWith('hr.')
   const isDriver = host.startsWith('driver.')
-  if (!isHr && !isDriver) return NextResponse.next()
+  const isImport = host.startsWith('import.')
+  if (!isHr && !isDriver && !isImport) return NextResponse.next()
 
-  const appHome = isHr ? '/hr/attendance' : '/driver/today'
+  const appHome = isHr ? '/hr/attendance' : isDriver ? '/driver/today' : '/import'
 
   // Root → serve the app (clean URL via rewrite).
   if (pathname === '/') {
