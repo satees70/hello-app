@@ -13,6 +13,7 @@ const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;
 // One short status label for a day on the printed card.
 function dayStatusText(d: DayRow): string {
   if (d.kind === 'notEmployed') return 'Not employed'
+  if (d.kind === 'future') return 'Upcoming'
   if (d.kind === 'off') return 'Rest day'
   if (d.kind === 'holiday') return 'Public holiday'
   if (d.kind === 'absent') return 'Absent' + (d.leaveType ? ` (${d.leaveType})` : '')
@@ -434,7 +435,7 @@ export default function AttendancePage() {
               </thead>
               <tbody>
                 {(onlyReview ? b.days.filter(dayNeedsAttn) : onlyLeave ? b.days.filter(dayIsLeave) : b.days).map(({ dateKey, result, trip, manualTime, outstationId, kind, leaveType, lateExcused, otInTrip, otExcludedDay, forceHalf, punchTimes, ignoredTimes }) => (
-                  <tr key={dateKey} className={`border-b border-gray-50 align-top ${result.needsReview ? 'bg-amber-50' : kind === 'absent' ? 'bg-rose-50' : (kind === 'worked' && result.halfDay) ? 'bg-amber-100' : kind === 'off' || kind === 'holiday' || kind === 'notEmployed' ? 'text-gray-400' : ''}`}>
+                  <tr key={dateKey} className={`border-b border-gray-50 align-top ${result.needsReview ? 'bg-amber-50' : kind === 'absent' ? 'bg-rose-50' : (kind === 'worked' && result.halfDay) ? 'bg-amber-100' : kind === 'off' || kind === 'holiday' || kind === 'notEmployed' || kind === 'future' ? 'text-gray-400' : ''}`}>
                     <td className="px-4 py-2 whitespace-nowrap">
                       {fmtDate(dateKey)} <span className={`ml-1 ${weekdayOf(dateKey) === 0 ? 'text-rose-500' : 'text-gray-400'}`}>{DOW_SHORT[weekdayOf(dateKey)]}</span>
                     </td>
@@ -503,6 +504,8 @@ export default function AttendancePage() {
                     <td className="px-4 py-2">
                       {kind === 'notEmployed' ? (
                         <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-500">Not employed</span>
+                      ) : kind === 'future' ? (
+                        <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-400">Upcoming</span>
                       ) : kind === 'off' ? (
                         <span className="rounded bg-purple-100 px-2 py-0.5 text-xs text-purple-800">Rest day</span>
                       ) : kind === 'holiday' ? (
