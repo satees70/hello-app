@@ -75,6 +75,7 @@ export default function HrDashboardPage() {
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [syncMsg, setSyncMsg] = useState<string | null>(null)
   const [lastSync, setLastSync] = useState<string | null>(null)
   const [filter, setFilter] = useState<'working' | 'late' | 'absent' | 'leave' | null>(null)
 
@@ -159,12 +160,21 @@ export default function HrDashboardPage() {
   useEffect(() => { load() }, [load])
 
   async function syncNow() {
-    setSyncing(true); setError(null)
+    setSyncing(true); setError(null); setSyncMsg(null)
     try {
       const res = await apiFetch('/api/attendance/sync')
-      if (!res.ok) { const j = await res.json(); setError(j.error || 'Sync failed') }
+      const text = await res.text()
+      let j: { error?: string; pulled?: number; inserted?: number; range?: { from?: string; to?: string } } = {}
+      try { j = JSON.parse(text) } catch { /* non-JSON response (e.g. an HTML error page) */ }
+      if (!res.ok) {
+        setError(`Sync failed (HTTP ${res.status}): ${j.error || text.slice(0, 300) || 'no details returned'}`)
+      } else {
+        // Show what actually came back so a "nothing happened" sync is diagnosable:
+        // pulled 0 = the clock isn't uploading punches; pulled >0 = it's working.
+        setSyncMsg(`Sync OK — pulled ${j.pulled ?? '?'} punch(es) from the clock, added ${j.inserted ?? '?'} new, for ${j.range?.from ?? '?'} → ${j.range?.to ?? '?'}.`)
+      }
       await load()
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    } catch (e) { setError('Could not reach the sync service: ' + (e instanceof Error ? e.message : String(e))) }
     finally { setSyncing(false) }
   }
 
@@ -227,7 +237,8 @@ export default function HrDashboardPage() {
         {lastSync && <> · as of last sync {new Date(lastSync).toLocaleString()}</>}
       </p>
 
-      {error && <div className="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2">{error}</div>}
+      {error && <div className="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 whitespace-pre-wrap break-words">{error}</div>}
+      {syncMsg && <div className="mb-4 rounded-lg bg-green-50 border border-green-200 text-green-700 text-sm px-3 py-2 break-words">{syncMsg}</div>}
       {loading ? <div className="text-gray-400 py-16 text-center">Loading…</div> : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
