@@ -13,7 +13,7 @@ export interface Employee { employee_code: string; name: string | null; shift_pr
 export interface Punch { employee_code: string; punch_time: string; department_name: string | null }
 export interface Review extends ReviewLite { employee_code: string; work_date: string; manual_time: string | null }
 
-export type DayKind = 'worked' | 'outstation' | 'holiday' | 'off' | 'absent' | 'notEmployed'
+export type DayKind = 'worked' | 'outstation' | 'holiday' | 'off' | 'absent' | 'notEmployed' | 'future'
 export interface DayRow { dateKey: string; result: DayResult; trip: string | null; manualTime: string | null; outstationId: string | null; kind: DayKind; leaveType: string | null; lateExcused: boolean; otInTrip: boolean; otExcludedDay: boolean; forceHalf: boolean; punchTimes: string[]; ignoredTimes: string[] }
 
 // Trip categories whose overtime a DRIVER earns under the trip, not as OT here.
@@ -92,6 +92,7 @@ export interface ReportData { blocks: EmpBlock[]; tripOptions: string[]; punchCo
 export async function loadReport(from: string, to: string): Promise<ReportData> {
   const fromUtc = `${from}T00:00:00+08:00`
   const toUtc = `${to}T23:59:59+08:00`
+  const todayKL = klDateKey(new Date())   // future days (> today) haven't happened → never absent/review
 
   // Punches can be thousands — page past Supabase's 1000-row limit with fetchAll.
   const [punches, { data: emps }, { data: profs }, { data: reviews }] = await Promise.all([
@@ -303,6 +304,12 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
       // actually worked on a rest day / Sunday, counted in the worked branch).
       if (!scheduledWorking) {
         dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'off', leaveType: null, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false, punchTimes, ignoredTimes })
+        continue
+      }
+      // A scheduled work day in the FUTURE hasn't happened yet — never absent and
+      // never "needs review" (don't count it as work/leave either).
+      if (dateKey > todayKL) {
+        dayRows.push({ dateKey, result: emptyDay(), trip: null, manualTime: null, outstationId: null, kind: 'future', leaveType: null, lateExcused: false, otInTrip: false, otExcludedDay: false, forceHalf: false, punchTimes, ignoredTimes })
         continue
       }
       // Scheduled work day with no attendance → absent / leave (half-day = 0.5).
