@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { apiFetch } from '@/lib/api'
 import { computeDay, klDateKey, klTime, type ShiftProfileLite } from '@/lib/attendance'
-import { weekdayOf, addDay, DOW_SHORT, LEAVE_TYPES } from '@/lib/attendanceReport'
+import { weekdayOf, addDay, DOW_SHORT, LEAVE_TYPES, loadReport } from '@/lib/attendanceReport'
 
 // Live-ish HR attendance dashboard — "who is working / late / absent / on leave"
 // today, computed from the ZKLink punches already synced into attendance_punches.
@@ -79,6 +79,7 @@ export default function HrDashboardPage() {
   const [lastSync, setLastSync] = useState<string | null>(null)
   const [filter, setFilter] = useState<'working' | 'late' | 'absent' | 'leave' | null>(null)
   const [viewDate, setViewDate] = useState<string>(() => klDateKey(new Date()))   // yyyy-MM-dd being viewed
+  const [punchIssues, setPunchIssues] = useState<{ code: string; name: string; date: string; reason: string }[]>([])
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -163,6 +164,24 @@ export default function HrDashboardPage() {
   }, [viewDate])
   useEffect(() => { load() }, [load])
 
+  // Outstanding punch issues (a missing clock-out / odd punches) over the last ~30
+  // days up to the viewed day — the SAME "needs review" days the Attendance & OT
+  // page shows (loadReport already excludes ones that were reviewed/resolved).
+  const loadIssues = useCallback(async () => {
+    try {
+      let from = viewDate
+      for (let i = 0; i < 30; i++) from = subDay(from)
+      const { blocks } = await loadReport(from, viewDate)
+      const issues: { code: string; name: string; date: string; reason: string }[] = []
+      for (const b of blocks) for (const d of b.days) {
+        if (d.result.needsReview) issues.push({ code: b.code, name: b.name || b.code, date: d.dateKey, reason: d.result.reviewReason || 'Missing a clock-out' })
+      }
+      issues.sort((a, b2) => b2.date.localeCompare(a.date) || a.name.localeCompare(b2.name))
+      setPunchIssues(issues)
+    } catch { /* don't let the issues panel break the rest of the dashboard */ }
+  }, [viewDate])
+  useEffect(() => { loadIssues() }, [loadIssues])
+
   async function syncNow() {
     setSyncing(true); setError(null); setSyncMsg(null)
     try {
@@ -206,6 +225,8 @@ export default function HrDashboardPage() {
   const depts = [...byDept.entries()].sort((a, b) => a[0].localeCompare(b[0]))
   // Weekly present trend, restricted to the chosen location if any.
   const deptOf = new Map(rows.map(r => [r.code, r.department]))
+  const visibleIssues = locFilter ? punchIssues.filter(i => (deptOf.get(i.code) || '') === locFilter) : punchIssues
+  const fmtDay = (dk: string) => new Date(`${dk}T00:00:00+08:00`).toLocaleDateString([], { day: '2-digit', month: 'short' })
   const trend = trendRaw.map(t => ({ day: t.day, present: locFilter ? t.codes.filter(c => deptOf.get(c) === locFilter).length : t.codes.length }))
   const trendMax = Math.max(1, ...trend.map(t => t.present))
   // Tap a KPI card to filter the live list to that group (tap again to clear).
@@ -351,6 +372,28 @@ export default function HrDashboardPage() {
                 </ul>
               )}
             </div>
+          </div>
+
+          {/* Punch issues to review (missing clock-out / odd punches) */}
+          <div className="bg-white rounded-xl border shadow-sm mb-4">
+            <div className="px-4 py-2 border-b font-semibold text-sm flex flex-wrap items-center gap-x-2">
+              <span>⚠ Punch issues to review <span className="text-gray-400 font-normal">· {visibleIssues.length}{locFilter ? ` in ${locFilter}` : ''} · last 30 days</span></span>
+              <a href="/hr/attendance" className="ml-auto text-xs font-normal text-blue-600 hover:underline">Fix in Attendance &amp; OT →</a>
+            </div>
+            {visibleIssues.length === 0 ? (
+              <p className="px-4 py-4 text-gray-400 text-sm">No punch issues 🎉 — every clock-in has a matching clock-out.</p>
+            ) : (
+              <ul className="divide-y max-h-72 overflow-auto">
+                {visibleIssues.map(i => (
+                  <li key={`${i.code}|${i.date}`} className="flex items-center gap-2 px-4 py-2 text-sm">
+                    <span className="text-gray-500 text-xs w-14 shrink-0">{fmtDay(i.date)}</span>
+                    <span className="font-medium">{i.name}</span>
+                    <span className="text-gray-400 text-xs">{i.code}</span>
+                    <span className="ml-auto text-amber-700 text-xs text-right">{i.reason}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           {/* Live list */}
