@@ -985,7 +985,7 @@ export default function IncomingPage() {
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setEditReq(null)}>
           <div className="bg-white rounded-xl shadow-xl border w-full max-w-lg my-8 p-6" onClick={e => e.stopPropagation()}>
             <h2 className="font-semibold text-lg mb-1">Request changes to a line</h2>
-            <p className="text-gray-500 text-sm mb-4">Goes to Head Office for approval.{editReq.received_at ? ' This line is already received — item/qty/unit/batch changes need it deleted & received again.' : ''}</p>
+            <p className="text-gray-500 text-sm mb-4">Goes to Head Office for approval.{editReq.received_at ? ' This line is already received — the batch number can be corrected here; item / qty / unit changes still need it deleted & received again.' : ''}</p>
             <div className="space-y-3">
               {EDIT_FIELDS.map(f => (
                 <div key={f.key}>
