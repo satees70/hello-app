@@ -9,10 +9,10 @@ interface Loc {
   id: string
   warehouse_code: string
   category: string
-  location_type: string   // 'SL' = pick face, 'XS' = excess / reserve
+  location_type: string   // 'SL' = pick face, 'XS' = excess/reserve, 'PICK' etc. from the path
   code: string            // e.g. 'A105'
-  aisle: string | null    // leading letters, e.g. 'A' / 'AA'
-  sql_location: string | null  // exact SQL Account path, e.g. '8BT/Stock/SL/A105'
+  aisle: string | null    // leading letters, e.g. 'A' / 'AA' / 'ZG'
+  sql_location: string | null  // exact SQL Account path, e.g. '8BT/Stock/SL/A105' or '8BT/PICK/ZG203'
   label: string | null
   pick_sequence: number | null
   active: boolean
@@ -21,16 +21,20 @@ interface Loc {
 
 const WAREHOUSE = '8BT'
 const CATEGORY = 'Stock'
-const TYPES = ['SL', 'XS']
 
 const EMPTY = { code: '', location_type: 'SL', label: '', pick_sequence: '', active: true }
 
-// Leading letters of a code become the aisle used for grouping/sorting (A105 → A, AA01 → AA).
+// Leading letters of a code become the aisle used for grouping/sorting (A105 → A, ZG203 → ZG).
 const deriveAisle = (code: string) => (code.match(/^[A-Za-z]+/)?.[0] || '').toUpperCase()
-// The exact string SQL Accounting uses for this location.
+// For a NEW manually-added location, build the standard 8BT/Stock/<type>/<code> path.
 const buildPath = (type: string, code: string) => `${WAREHOUSE}/${CATEGORY}/${type}/${code}`
 
 const TYPE_LABEL: Record<string, string> = { SL: 'Pick (SL)', XS: 'Excess (XS)' }
+const typeLabel = (t: string) => TYPE_LABEL[t] || t
+const typeChip = (t: string) =>
+  t === 'SL' ? 'bg-emerald-100 text-emerald-700'
+  : t === 'XS' ? 'bg-amber-100 text-amber-700'
+  : 'bg-sky-100 text-sky-700'
 
 export default function WmsLocationsPage() {
   const { profile, loading } = useProfile()
@@ -64,6 +68,7 @@ export default function WmsLocationsPage() {
   }
 
   const aisles = useMemo(() => Array.from(new Set(rows.map(r => r.aisle || '').filter(Boolean))).sort(), [rows])
+  const types = useMemo(() => Array.from(new Set(['SL', 'XS', ...rows.map(r => r.location_type)])).filter(Boolean), [rows])
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase()
@@ -75,12 +80,11 @@ export default function WmsLocationsPage() {
       .sort((a, b) => (a.aisle || '').localeCompare(b.aisle || '') || a.code.localeCompare(b.code))
   }, [rows, q, typeFilter, aisleFilter, activeFilter])
 
-  const counts = useMemo(() => ({
-    total: rows.length,
-    sl: rows.filter(r => r.location_type === 'SL').length,
-    xs: rows.filter(r => r.location_type === 'XS').length,
-    inactive: rows.filter(r => !r.active).length,
-  }), [rows])
+  const counts = useMemo(() => {
+    const sl = rows.filter(r => r.location_type === 'SL').length
+    const xs = rows.filter(r => r.location_type === 'XS').length
+    return { total: rows.length, sl, xs, other: rows.length - sl - xs, inactive: rows.filter(r => !r.active).length }
+  }, [rows])
 
   function openCreate() { setEditing(null); setForm(EMPTY); setErr(''); setShowForm(true) }
   function openEdit(r: Loc) {
@@ -92,25 +96,32 @@ export default function WmsLocationsPage() {
   async function saveOne(e: React.FormEvent) {
     e.preventDefault()
     if (!canEdit) return
-    const code = form.code.trim().toUpperCase()
-    if (!code) { setErr('Location code is required.'); return }
     setBusy(true); setErr('')
-    const payload = {
-      warehouse_code: WAREHOUSE,
-      category: CATEGORY,
-      location_type: form.location_type,
-      code,
-      aisle: deriveAisle(code),
-      sql_location: buildPath(form.location_type, code),
-      label: form.label.trim() || null,
-      pick_sequence: form.pick_sequence ? Number(form.pick_sequence) : null,
-      active: form.active,
+    if (editing) {
+      // Never rewrite the SQL Account identity (code / sql_location) on edit — just the
+      // classification and housekeeping fields.
+      const res = await supabase.from('wms_locations').update({
+        location_type: form.location_type.trim().toUpperCase() || 'SL',
+        label: form.label.trim() || null,
+        pick_sequence: form.pick_sequence ? Number(form.pick_sequence) : null,
+        active: form.active,
+      }).eq('id', editing.id)
+      setBusy(false)
+      if (res.error) { setErr(res.error.message); return }
+    } else {
+      const code = form.code.trim().toUpperCase()
+      if (!code) { setErr('Location code is required.'); setBusy(false); return }
+      const type = form.location_type.trim().toUpperCase() || 'SL'
+      const res = await supabase.from('wms_locations').insert({
+        warehouse_code: WAREHOUSE, category: CATEGORY, location_type: type, code,
+        aisle: deriveAisle(code), sql_location: buildPath(type, code),
+        label: form.label.trim() || null,
+        pick_sequence: form.pick_sequence ? Number(form.pick_sequence) : null,
+        active: form.active,
+      })
+      setBusy(false)
+      if (res.error) { setErr(res.error.message); return }
     }
-    const res = editing
-      ? await supabase.from('wms_locations').update(payload).eq('id', editing.id)
-      : await supabase.from('wms_locations').insert(payload)
-    setBusy(false)
-    if (res.error) { setErr(res.error.message); return }
     setShowForm(false); load()
   }
 
@@ -133,20 +144,20 @@ export default function WmsLocationsPage() {
   const existingPaths = useMemo(() => new Set(rows.map(r => r.sql_location)), [rows])
   const importPreview = useMemo(() => {
     const seen = new Set<string>()
-    let sl = 0, xs = 0, dupInFile = 0, already = 0
+    const byType: Record<string, number> = {}
+    let dupInFile = 0, already = 0
     for (const p of parsed) {
       if (seen.has(p.sql_location)) { dupInFile++; continue }
       seen.add(p.sql_location)
-      if (p.location_type === 'SL') sl++; else if (p.location_type === 'XS') xs++
+      byType[p.location_type] = (byType[p.location_type] || 0) + 1
       if (existingPaths.has(p.sql_location)) already++
     }
-    return { rows: seen.size, sl, xs, dupInFile, already, isNew: seen.size - already }
+    return { rows: seen.size, byType, dupInFile, already, isNew: seen.size - already }
   }, [parsed, existingPaths])
 
   async function runImport() {
     if (!canEdit) return
     setBusy(true); setErr('')
-    // de-dupe within the paste by sql_location (keep first)
     const seen = new Set<string>()
     const toUpsert = parsed.filter(p => { if (seen.has(p.sql_location)) return false; seen.add(p.sql_location); return true })
     for (let i = 0; i < toUpsert.length; i += 500) {
@@ -186,7 +197,7 @@ export default function WmsLocationsPage() {
           <Stat label="Total locations" value={counts.total} />
           <Stat label="Pick (SL)" value={counts.sl} accent="text-emerald-700" />
           <Stat label="Excess (XS)" value={counts.xs} accent="text-amber-600" />
-          <Stat label="Inactive" value={counts.inactive} accent="text-gray-400" />
+          <Stat label="Other types" value={counts.other} accent="text-sky-600" />
         </div>
 
         {/* filters */}
@@ -195,8 +206,7 @@ export default function WmsLocationsPage() {
             className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[180px]" />
           <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
             <option value="">All types</option>
-            <option value="SL">Pick (SL)</option>
-            <option value="XS">Excess (XS)</option>
+            {types.map(t => <option key={t} value={t}>{typeLabel(t)}</option>)}
           </select>
           <select value={aisleFilter} onChange={e => setAisleFilter(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
             <option value="">All aisles</option>
@@ -217,14 +227,13 @@ export default function WmsLocationsPage() {
               <div>
                 <label className="block text-sm font-medium mb-1">Location code</label>
                 <input value={form.code} onChange={e => setForm({ ...form, code: e.target.value.toUpperCase() })}
-                  className="w-full border rounded-lg px-3 py-2 font-mono" placeholder="A105" required />
+                  className="w-full border rounded-lg px-3 py-2 font-mono disabled:bg-gray-100 disabled:text-gray-500" placeholder="A105" required disabled={!!editing} />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Type</label>
-                <select value={form.location_type} onChange={e => setForm({ ...form, location_type: e.target.value })}
-                  className="w-full border rounded-lg px-3 py-2">
-                  {TYPES.map(t => <option key={t} value={t}>{TYPE_LABEL[t] || t}</option>)}
-                </select>
+                <input list="wms-types" value={form.location_type} onChange={e => setForm({ ...form, location_type: e.target.value.toUpperCase() })}
+                  className="w-full border rounded-lg px-3 py-2 font-mono" placeholder="SL" />
+                <datalist id="wms-types">{types.map(t => <option key={t} value={t} />)}</datalist>
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Label <span className="text-gray-400 font-normal">(optional)</span></label>
@@ -240,7 +249,9 @@ export default function WmsLocationsPage() {
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} /> Active
             </label>
-            <p className="text-xs text-gray-500">SQL Account path: <span className="font-mono">{buildPath(form.location_type, form.code || '…')}</span></p>
+            {editing
+              ? <p className="text-xs text-gray-500">SQL Account path: <span className="font-mono">{editing.sql_location}</span> <span className="text-gray-400">(fixed — comes from SQL Account)</span></p>
+              : <p className="text-xs text-gray-500">SQL Account path: <span className="font-mono">{buildPath(form.location_type || 'SL', form.code || '…')}</span></p>}
             {err && <p className="text-red-600 text-sm bg-red-50 p-2 rounded">{err}</p>}
             <div className="flex gap-3">
               <button type="submit" disabled={busy}
@@ -272,8 +283,8 @@ export default function WmsLocationsPage() {
                 <tr key={r.id} className={`border-b last:border-0 hover:bg-gray-50 ${r.active ? '' : 'opacity-50'}`}>
                   <td className="px-4 py-2.5 font-mono font-medium">{r.code}</td>
                   <td className="px-4 py-2.5">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${r.location_type === 'SL' ? 'bg-emerald-100 text-emerald-700' : r.location_type === 'XS' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
-                      {TYPE_LABEL[r.location_type] || r.location_type}
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${typeChip(r.location_type)}`}>
+                      {typeLabel(r.location_type)}
                     </span>
                   </td>
                   <td className="px-4 py-2.5">{r.aisle}</td>
@@ -304,15 +315,17 @@ export default function WmsLocationsPage() {
             <h2 className="font-semibold text-lg mb-1">Import locations from SQL Account</h2>
             <p className="text-sm text-gray-500 mb-3">
               In SQL Account, select the <b>Location</b> + <b>Description</b> columns and copy. Paste them below —
-              the type (SL / XS), aisle and path are read automatically from the description. Pasting the same
-              location again just updates it (no duplicates).
+              the exact path, type (SL / XS / PICK …) and aisle are read from each description. Header rows and
+              blank locations are ignored. Pasting the same location again just updates it (no duplicates).
             </p>
             <textarea value={pasteText} onChange={e => setPasteText(e.target.value)} rows={10}
-              placeholder={'A105\t8BT/Stock/SL/A105\nA420\t8BT/Stock/XS/A420'}
+              placeholder={'A105\t8BT/Stock/SL/A105\nA420\t8BT/Stock/XS/A420\nZG203\t8BT/PICK/ZG203'}
               className="w-full border rounded-lg px-3 py-2 font-mono text-xs" />
             {parsed.length > 0 && (
               <div className="mt-3 text-sm bg-gray-50 border rounded-lg p-3">
-                <p><b>{importPreview.rows}</b> locations read — <span className="text-emerald-700">{importPreview.sl} pick (SL)</span>, <span className="text-amber-600">{importPreview.xs} excess (XS)</span>.</p>
+                <p><b>{importPreview.rows}</b> locations read — {Object.entries(importPreview.byType).map(([t, n], i) =>
+                  <span key={t}>{i > 0 ? ', ' : ''}<span className={t === 'SL' ? 'text-emerald-700' : t === 'XS' ? 'text-amber-600' : 'text-sky-600'}>{n} {typeLabel(t)}</span></span>
+                )}.</p>
                 <p className="text-gray-500 text-xs mt-1">
                   {importPreview.isNew} new · {importPreview.already} already exist (will update)
                   {importPreview.dupInFile > 0 && ` · ${importPreview.dupInFile} duplicate line(s) in the paste (skipped)`}
@@ -343,9 +356,11 @@ function Stat({ label, value, accent }: { label: string; value: number; accent?:
   )
 }
 
-// Parse pasted SQL Account rows. Each line may be "Code<TAB>Description" or just the
-// Description path. We read warehouse/category/type/code from the "8BT/Stock/SL/A105"
-// path when present; otherwise fall back to the bare code (defaults to SL).
+// Parse pasted SQL Account rows. Only lines whose description is a real location PATH
+// (contains '/') are imported — header rows, "DEFAULT LOCATION" and summary lines are
+// skipped. The EXACT path is kept as sql_location (the SQL Account identity); the type
+// is the segment just before the code, so both 8BT/Stock/SL/A105 (→ SL) and
+// 8BT/PICK/ZG203 (→ PICK) are handled correctly.
 type Parsed = { warehouse_code: string; category: string; location_type: string; code: string; aisle: string; sql_location: string }
 function parsePaste(text: string): Parsed[] {
   const out: Parsed[] = []
@@ -354,17 +369,15 @@ function parsePaste(text: string): Parsed[] {
     if (!line) continue
     const tokens = line.split(/\t|\s{2,}|,/).map(t => t.trim()).filter(Boolean)
     const pathTok = tokens.find(t => t.includes('/'))
-    let warehouse = WAREHOUSE, category = CATEGORY, type = 'SL', code = ''
-    if (pathTok) {
-      const parts = pathTok.split('/').map(p => p.trim()).filter(Boolean)
-      if (parts.length >= 4) { warehouse = parts[0]; category = parts[1]; type = parts[2].toUpperCase(); code = parts[parts.length - 1] }
-      else if (parts.length >= 1) { code = parts[parts.length - 1] }
-    } else {
-      code = tokens[0] || ''
-    }
-    code = code.toUpperCase()
+    if (!pathTok) continue   // no path → header / DEFAULT LOCATION / summary line
+    const parts = pathTok.split('/').map(p => p.trim()).filter(Boolean)
+    if (parts.length < 2) continue
+    const code = parts[parts.length - 1].toUpperCase()
     if (!code) continue
-    out.push({ warehouse_code: warehouse, category, location_type: type, code, aisle: deriveAisle(code), sql_location: `${warehouse}/${category}/${type}/${code}` })
+    const type = (parts[parts.length - 2] || 'SL').toUpperCase()
+    const warehouse = parts[0] || WAREHOUSE
+    const category = parts.length >= 4 ? parts.slice(1, parts.length - 2).join('/') : CATEGORY
+    out.push({ warehouse_code: warehouse, category, location_type: type, code, aisle: deriveAisle(code), sql_location: pathTok })
   }
   return out
 }
