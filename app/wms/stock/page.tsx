@@ -96,39 +96,29 @@ export default function WmsStockPage() {
     if (!itemCode) { setErr('Pick an item.'); return }
     if (!loc) { setErr(`Location "${locCode}" is not in the Location Map.`); return }
     const qty = Number(form.quantity)
-    if (!isFinite(qty)) { setErr('Enter a valid quantity.'); return }
+    if (!isFinite(qty) || qty < 0) { setErr('Enter a valid quantity (0 or more).'); return }
     setBusy(true); setErr('')
-    const it = itemByCode.get(itemCode)
-    const item_id = await itemIdFor(itemCode)   // link to Items master by code (null if unknown)
-    const payload = {
-      warehouse_code: WAREHOUSE,
-      item_id,
-      item_code: itemCode,
-      description: form.description.trim() || it?.description || null,
-      location_id: loc.id,
-      location_code: loc.code,
-      batch_no: form.batch.trim(),
-      exp_date: form.exp_date || null,
-      quantity: qty,
-      uom: form.uom.trim() || it?.unit || null,
-    }
-    const res = editing
-      ? await supabase.from('wms_stock').update(payload).eq('id', editing.id)
-      : await supabase.from('wms_stock').upsert(payload, { onConflict: 'warehouse_code,item_code,location_id,batch_no' })
+    // Set the exact on-hand via the logged RPC (records an 'adjust' move for the change).
+    const { error } = await supabase.rpc('wms_adjust_stock', {
+      p_item_code: editing ? editing.item_code : itemCode,
+      p_location_id: editing ? editing.location_id : loc.id,
+      p_batch: editing ? editing.batch_no : form.batch.trim(),
+      p_exp_date: form.exp_date || null,
+      p_new_qty: qty,
+      p_reference: 'manual',
+    })
     setBusy(false)
-    if (res.error) { setErr(res.error.message); return }
+    if (error) { setErr(error.message); return }
     setShowForm(false); load()
-  }
-
-  async function itemIdFor(code: string): Promise<string | null> {
-    const { data } = await supabase.from('items').select('id').eq('code', code).maybeSingle()
-    return data?.id ?? null
   }
 
   async function remove(r: Stock) {
     if (!canEdit) return
     if (!confirm(`Remove ${fmtQty(r.quantity)} of ${r.item_code} from ${r.location_code}?`)) return
-    const { error } = await supabase.from('wms_stock').delete().eq('id', r.id)
+    const { error } = await supabase.rpc('wms_adjust_stock', {
+      p_item_code: r.item_code, p_location_id: r.location_id, p_batch: r.batch_no,
+      p_exp_date: r.exp_date || null, p_new_qty: 0, p_reference: 'manual removal',
+    })
     if (error) { alert(error.message); return }
     load()
   }

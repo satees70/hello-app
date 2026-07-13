@@ -10,6 +10,8 @@ import { useProfile } from '@/hooks/useProfile'
 const LINKS = [
   { href: '/wms/locations', label: 'Location Map' },
   { href: '/wms/stock', label: 'Stock' },
+  { href: '/wms/putaway', label: 'Putaway' },
+  { href: '/wms/movements', label: 'Movements' },
 ]
 
 export default function WmsNavbar() {
