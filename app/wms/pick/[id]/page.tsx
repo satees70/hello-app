@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
+import ScanGate from '@/components/ScanGate'
+import { matchBin, matchItem } from '@/lib/qr'
 
 interface Order { id: string; order_no: string | null; customer_name: string | null; status: string; delivery_date: string | null }
 interface Line { id: string; line_no: number | null; item_id: string | null; item_code: string; description: string | null; quantity: number; qty_picked: number; uom: string | null; source_hint: string | null; remarks: string | null }
@@ -32,6 +34,7 @@ export default function WmsPickPage() {
   const [qtyInput, setQtyInput] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState('')
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
+  const [scanFor, setScanFor] = useState<{ line: Line; stock: Stock; qty: number } | null>(null)
 
   const load = useCallback(async () => {
     const { data: o } = await supabase.from('wms_orders').select('id, order_no, customer_name, status, delivery_date').eq('id', id).single()
@@ -136,17 +139,9 @@ export default function WmsPickPage() {
     load()
   }
 
-  // Convenience: auto-fill the whole order earliest-expiry-first.
-  async function pickAllAuto() {
-    setErr(''); setMsg('')
-    for (const l of lines) {
-      const rem = remainingOf(l)
-      if (rem <= 0) continue
-      setBusy(l.id)
-      const { error } = await supabase.rpc('wms_pick_line', { p_line_id: l.id, p_qty: rem, p_reference: order?.order_no ?? null })
-      if (error) { setBusy(''); setErr(error.message); return }
-    }
-    setBusy(''); setMsg('Picked everything possible, earliest-expiry first.'); load()
+  function startPick(l: Line, s: Stock, qty: number) {
+    if (!canEdit || !(qty > 0)) return
+    setErr(''); setScanFor({ line: l, stock: s, qty })
   }
 
   const totals = useMemo(() => ({
@@ -173,16 +168,7 @@ export default function WmsPickPage() {
         {msg && <p className="text-emerald-700 text-sm bg-emerald-50 border border-emerald-200 p-3 rounded-lg mb-4">✓ {msg}</p>}
 
         <div className="flex flex-wrap gap-2 mb-5">
-          <button onClick={downloadPickList}
-            className="border px-4 py-2 rounded-lg hover:bg-gray-50 text-sm font-medium">
-            ⬇ Print pick list (PDF)
-          </button>
-          {canEdit && totals.remaining > 0 && (
-            <button onClick={pickAllAuto} disabled={!!busy}
-              className="border border-emerald-600 text-emerald-700 px-4 py-2 rounded-lg hover:bg-emerald-50 disabled:opacity-50 text-sm font-medium">
-              Auto-pick everything (earliest expiry)
-            </button>
-          )}
+          <button onClick={downloadPickList} className="border px-4 py-2 rounded-lg hover:bg-gray-50 text-sm font-medium">⬇ Print pick list (PDF)</button>
         </div>
 
         <div className="space-y-3">
@@ -233,10 +219,10 @@ export default function WmsPickPage() {
                             <input value={input} onChange={e => setQtyInput(q => ({ ...q, [l.id]: e.target.value.replace(/[^0-9.]/g, '') }))}
                               className="w-24 border rounded-lg px-3 py-2 text-sm text-right tabular-nums" inputMode="decimal" />
                           </div>
-                          <button onClick={() => chosenStock && pickFromBin(l, chosenStock, Number(input))}
+                          <button onClick={() => chosenStock && startPick(l, chosenStock, Number(input))}
                             disabled={busy === l.id || !chosenStock || !(Number(input) > 0)}
                             className="bg-emerald-700 text-white px-4 py-2 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium whitespace-nowrap">
-                            {busy === l.id ? 'Picking…' : 'Pick'}
+                            {busy === l.id ? 'Picking…' : '📷 Scan & pick'}
                           </button>
                         </div>
                       )}
@@ -249,6 +235,18 @@ export default function WmsPickPage() {
           {lines.length === 0 && <div className="bg-white rounded-xl border p-8 text-center text-gray-400 text-sm">This order has no lines.</div>}
         </div>
       </div>
+
+      {scanFor && (
+        <ScanGate
+          title={`Pick ${scanFor.line.item_code} from ${scanFor.stock.location_code}`}
+          steps={[
+            { label: 'bin', expectText: scanFor.stock.location_code, match: raw => matchBin(raw, scanFor.stock.location_code) },
+            { label: 'item / batch', expectText: `${scanFor.line.item_code}${scanFor.stock.batch_no ? ' · ' + scanFor.stock.batch_no : ''}`, match: raw => matchItem(raw, scanFor.line.item_code, scanFor.stock.batch_no) },
+          ]}
+          onComplete={() => { const s = scanFor; setScanFor(null); if (s) pickFromBin(s.line, s.stock, s.qty) }}
+          onCancel={() => setScanFor(null)}
+        />
+      )}
     </div>
   )
 }

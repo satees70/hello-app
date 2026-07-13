@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
+import { encodeItem } from '@/lib/qr'
+import { LABEL_SIZES, downloadLabels } from '@/lib/wmsLabel'
 
 interface PO { id: string; po_number: string | null; supplier_name: string | null; status: string; expected_date: string | null }
 interface Line { id: string; line_no: number | null; item_id: string | null; item_code: string; description: string | null; quantity: number; qty_received: number; uom: string | null }
@@ -42,6 +44,14 @@ export default function WmsReceivePage() {
   const [grnId, setGrnId] = useState<string | null>(null)
   const [busy, setBusy] = useState('')
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
+  const [labelSize, setLabelSize] = useState('55x35')
+
+  async function printLabel(l: Line) {
+    const d = draftOf(l)
+    const subs = [d.batch ? `Batch ${d.batch}` : 'No batch']
+    if (d.exp) subs.push(`Exp ${new Date(d.exp + 'T00:00:00').toLocaleDateString('en-GB')}`)
+    await downloadLabels([{ qrText: encodeItem(l.item_code, d.batch, d.exp), title: l.item_code, subs }], labelSize, `BatchLabel_${l.item_code.replace(/[^a-zA-Z0-9]/g, '-')}.pdf`)
+  }
 
   const load = useCallback(async () => {
     const { data: o } = await supabase.from('wms_purchase_orders').select('id, po_number, supplier_name, status, expected_date').eq('id', id).single()
@@ -104,6 +114,9 @@ export default function WmsReceivePage() {
         {!canEdit && <p className="text-sm bg-amber-50 text-amber-700 border border-amber-200 rounded-lg p-3 mb-4">You have view-only warehouse access, so you can’t receive goods.</p>}
         {err && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg mb-4">{err}</p>}
         {msg && <p className="text-emerald-700 text-sm bg-emerald-50 border border-emerald-200 p-3 rounded-lg mb-4">✓ {msg}</p>}
+        {canEdit && <div className="text-xs text-gray-500 mb-4 flex items-center gap-2">Batch label size:
+          <select value={labelSize} onChange={e => setLabelSize(e.target.value)} className="border rounded-lg px-2 py-1 text-xs">{Object.entries(LABEL_SIZES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select>
+        </div>}
 
         <div className="space-y-3">
           {lines.map(l => {
@@ -141,7 +154,10 @@ export default function WmsReceivePage() {
                       <button onClick={() => receive(l)} disabled={busy === l.id || !(Number(d.qty) > 0) || !d.photo} className="w-full bg-emerald-700 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium">{busy === l.id ? '…' : 'Receive'}</button>
                     </div>
                     {d.qc === 'fail' && <div className="col-span-2 sm:col-span-6"><input value={d.note} onChange={e => setDraft(l.id, { note: e.target.value })} placeholder="QC fail reason…" className="w-full border rounded-lg px-2 py-1.5 text-sm" /></div>}
-                    {d.preview && <div className="col-span-2 sm:col-span-6"><img src={d.preview} alt="" className="h-16 rounded border" /></div>}
+                    <div className="col-span-2 sm:col-span-6 flex items-center gap-3">
+                      {d.preview && <img src={d.preview} alt="" className="h-14 rounded border" />}
+                      <button type="button" onClick={() => printLabel(l)} className="text-xs text-emerald-700 hover:underline">🏷 Print batch label</button>
+                    </div>
                   </div>
                 )}
               </div>

@@ -4,6 +4,8 @@ import { supabase, fetchAll } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
 import ItemPicker from '@/components/ItemPicker'
+import ScanGate from '@/components/ScanGate'
+import { matchBin, matchItem } from '@/lib/qr'
 
 interface Item { code: string; description: string; unit: string }
 interface Loc { id: string; code: string; location_type: string; active: boolean; pick_sequence: number | null }
@@ -31,6 +33,7 @@ export default function WmsPutawayPage() {
   const [binEdits, setBinEdits] = useState<Record<string, string>>({})   // pending row -> chosen bin
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState(''); const [ok, setOk] = useState('')
+  const [scanFor, setScanFor] = useState<{ row: Stock; bin: string } | null>(null)
 
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
@@ -68,10 +71,15 @@ export default function WmsPutawayPage() {
   const suggestion = form.itemCode ? suggestBin(form.itemCode) : null
   const binValue = binTouched ? form.bin : (suggestion?.code || form.bin)
 
-  async function putAwayPending(row: Stock) {
-    if (!canEdit || !goodsIn) return
+  function startPutaway(row: Stock) {
     const toCode = (binEdits[row.id] ?? suggestBin(row.item_code)?.code ?? '').toUpperCase()
-    const to = locByCode.get(toCode)
+    if (!locByCode.get(toCode)) { setErr(`Choose a valid bin for ${row.item_code}.`); return }
+    setErr(''); setScanFor({ row, bin: toCode })
+  }
+
+  async function putAwayPending(row: Stock, toCode: string) {
+    if (!canEdit || !goodsIn) return
+    const to = locByCode.get(toCode.toUpperCase())
     if (!to) { setErr(`Choose a valid bin for ${row.item_code}.`); return }
     setBusy(row.id); setErr(''); setOk('')
     const { error } = await supabase.rpc('wms_transfer', {
@@ -134,8 +142,8 @@ export default function WmsPutawayPage() {
                       {canEdit && <>
                         <input list="wms-bins" value={bin} onChange={e => setBinEdits(b => ({ ...b, [row.id]: e.target.value.toUpperCase() }))}
                           className="w-28 border rounded-lg px-2 py-1.5 text-sm font-mono" placeholder="bin" />
-                        <button onClick={() => putAwayPending(row)} disabled={busy === row.id}
-                          className="bg-emerald-700 text-white px-4 py-1.5 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium">{busy === row.id ? '…' : 'Put away'}</button>
+                        <button onClick={() => startPutaway(row)} disabled={busy === row.id}
+                          className="bg-emerald-700 text-white px-4 py-1.5 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium">{busy === row.id ? '…' : '📷 Scan & put away'}</button>
                         {sug && !binEdits[row.id] && <span className="text-[11px] text-emerald-700 basis-full sm:basis-auto">→ {sug.code} ({sug.why})</span>}
                       </>}
                     </div>
@@ -186,6 +194,18 @@ export default function WmsPutawayPage() {
           </table>
         </div>
       </div>
+
+      {scanFor && (
+        <ScanGate
+          title={`Put ${scanFor.row.item_code} into ${scanFor.bin}`}
+          steps={[
+            { label: 'bin', expectText: scanFor.bin, match: raw => matchBin(raw, scanFor.bin) },
+            { label: 'item / batch', expectText: `${scanFor.row.item_code}${scanFor.row.batch_no ? ' · ' + scanFor.row.batch_no : ''}`, match: raw => matchItem(raw, scanFor.row.item_code, scanFor.row.batch_no) },
+          ]}
+          onComplete={() => { const s = scanFor; setScanFor(null); if (s) putAwayPending(s.row, s.bin) }}
+          onCancel={() => setScanFor(null)}
+        />
+      )}
     </div>
   )
 }
