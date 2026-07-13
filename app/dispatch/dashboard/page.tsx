@@ -11,8 +11,9 @@ interface Line { received_at: string | null }
 interface DO {
   id: string; do_number: string | null; factory_code: string; created_at: string
   departed_at: string | null; received_at: string | null; warehouse_grn: string | null; vehicle: string | null
-  dispatch_order_lines: Line[]
+  dispatch_order_lines: Line[]; material_returns: Line[]
 }
+const allItems = (o: DO): Line[] => [...(o.dispatch_order_lines || []), ...(o.material_returns || [])]
 type Stage = 'awaiting' | 'out' | 'received'
 const stageOf = (o: DO): Stage => o.received_at ? 'received' : o.departed_at ? 'out' : 'awaiting'
 const STAGE_LABEL: Record<Stage, string> = { awaiting: 'Awaiting lorry out', out: 'Out for delivery', received: 'Received' }
@@ -43,7 +44,7 @@ export default function DispatchDashboardPage() {
     const [{ data: f }, { data, error: e }] = await Promise.all([
       supabase.from('factories').select('code, name'),
       supabase.from('dispatch_orders')
-        .select('id, do_number, factory_code, created_at, departed_at, received_at, warehouse_grn, vehicle, dispatch_order_lines(received_at)')
+        .select('id, do_number, factory_code, created_at, departed_at, received_at, warehouse_grn, vehicle, dispatch_order_lines(received_at), material_returns(received_at)')
         .order('created_at', { ascending: false }).limit(300),
     ])
     setFacs(Object.fromEntries(((f as { code: string; name: string }[]) || []).map(x => [x.code, x.name])))
@@ -73,7 +74,7 @@ export default function DispatchDashboardPage() {
   if (pErr) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{pErr}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
   if (!profile) return null
 
-  const lineProg = (o: DO) => { const ls = o.dispatch_order_lines || []; return `${ls.filter(l => l.received_at).length}/${ls.length}` }
+  const lineProg = (o: DO) => { const ls = allItems(o); return `${ls.filter(l => l.received_at).length}/${ls.length}` }
 
   return (
     <div className="min-h-screen bg-gray-50">
