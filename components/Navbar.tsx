@@ -271,6 +271,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/wms/locations', label: 'Location Map', module: 'warehouse' as ModuleKey },
       { href: '/wms/stock', label: 'Stock', module: 'warehouse' as ModuleKey },
       { href: '/wms/putaway', label: 'Putaway', module: 'warehouse' as ModuleKey },
+      { href: '/wms/orders', label: 'Orders to Pick', module: 'warehouse' as ModuleKey },
       { href: '/wms/movements', label: 'Movements', module: 'warehouse' as ModuleKey },
     ] },
     { header: 'Setup', items: [
@@ -292,6 +293,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/wms/locations', label: 'Location Map (WMS)', module: 'warehouse' as ModuleKey },
       { href: '/wms/stock', label: 'Stock (WMS)', module: 'warehouse' as ModuleKey },
       { href: '/wms/putaway', label: 'Putaway (WMS)', module: 'warehouse' as ModuleKey },
+      { href: '/wms/orders', label: 'Orders to Pick (WMS)', module: 'warehouse' as ModuleKey },
       { href: '/discussion', label: 'Discussion' },
     ] },
   ]

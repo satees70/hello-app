@@ -11,6 +11,7 @@ const LINKS = [
   { href: '/wms/locations', label: 'Location Map' },
   { href: '/wms/stock', label: 'Stock' },
   { href: '/wms/putaway', label: 'Putaway' },
+  { href: '/wms/orders', label: 'Orders to Pick' },
   { href: '/wms/movements', label: 'Movements' },
 ]
 
