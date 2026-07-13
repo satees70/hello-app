@@ -267,6 +267,9 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/import', label: 'Shipments', module: 'import' as ModuleKey },
       { href: '/import/suppliers', label: 'Suppliers', module: 'import' as ModuleKey },
     ] },
+    { header: 'Warehouse (WMS)', items: [
+      { href: '/wms/locations', label: 'Location Map', module: 'warehouse' as ModuleKey },
+    ] },
     { header: 'Setup', items: [
       { href: '/admin/packing-lines', label: 'Packing Lines', module: 'packing_lines' as ModuleKey },
       { href: '/admin/grinding-machines', label: 'Grinding Machines', module: 'grinding' as ModuleKey },
@@ -283,6 +286,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/incoming', label: 'Goods Received', module: 'goods_received' as ModuleKey },
       { href: '/sales-orders', label: 'Sales Orders', module: 'sales' as ModuleKey },
       { href: '/dispatch/dashboard', label: 'Delivery Status', module: 'dispatch' as ModuleKey },
+      { href: '/wms/locations', label: 'Location Map (WMS)', module: 'warehouse' as ModuleKey },
       { href: '/discussion', label: 'Discussion' },
     ] },
   ]
