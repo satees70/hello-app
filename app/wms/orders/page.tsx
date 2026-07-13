@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { apiFetch } from '@/lib/api'
 import { useProfile } from '@/hooks/useProfile'
@@ -145,6 +146,8 @@ export default function WmsOrdersPage() {
                   <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">{fmtTime(o.created_at)}</td>
                   <td className="px-4 py-2.5 whitespace-nowrap">
                     <div className="flex gap-3 text-xs">
+                      {['Review', 'Released', 'Picking', 'Picked'].includes(o.status) &&
+                        <Link href={`/wms/pick/${o.id}`} className="text-emerald-700 font-medium hover:underline">Pick →</Link>}
                       <button onClick={() => viewLines(o)} className="text-emerald-700 hover:underline">View lines</button>
                       {o.file_path && <button onClick={() => viewPdf(o)} className="text-gray-500 hover:underline">PDF</button>}
                       {canEdit && <button onClick={() => reRead(o)} className="text-gray-500 hover:underline">Re-read</button>}
