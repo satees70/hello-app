@@ -17,6 +17,8 @@ interface Toast { id: number; title: string; message: string }
 export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const router = useRouter()
   const pathname = usePathname()
+  const [onWarehouse, setOnWarehouse] = useState(false)   // warehouse.srrieaswari.com → focused warehouse menu
+  useEffect(() => { if (typeof window !== 'undefined') setOnWarehouse(window.location.host.startsWith('warehouse.')) }, [])
   const isHO = factoryCode === 'HEAD_OFFICE'
   const isAdmin = role === 'admin'
   const [pendingCount, setPendingCount] = useState(0)
@@ -273,15 +275,26 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       ...(isHO ? [{ href: '/admin/allowed-networks', label: 'Allowed Networks' }] : []),
     ] },
   ]
+  // On the warehouse subdomain, show only the documents the warehouse works with.
+  const warehouseGroups = [
+    { header: 'Warehouse', items: [
+      { href: '/warehouse', label: 'Warehouse Receiving', module: 'goods_received' as ModuleKey },
+      { href: '/material-requests', label: 'Pick Runs', module: 'material_requests' as ModuleKey },
+      { href: '/incoming', label: 'Goods Received', module: 'goods_received' as ModuleKey },
+      { href: '/sales-orders', label: 'Sales Orders', module: 'sales' as ModuleKey },
+      { href: '/dispatch/dashboard', label: 'Delivery Status', module: 'dispatch' as ModuleKey },
+      { href: '/discussion', label: 'Discussion' },
+    ] },
+  ]
   // Hide links the user has no View permission for (admins/HO/unconfigured see all).
-  const menuGroups = allGroups
+  const menuGroups = (onWarehouse ? warehouseGroups : allGroups)
     .map(g => ({ ...g, items: g.items.filter(it => !it.module || can(profileLike, it.module, 'view')) }))
     .filter(g => g.items.length > 0)
   return (
     <>
       <nav className="bg-blue-700 text-white px-4 sm:px-6 flex items-center justify-between gap-3 relative z-50">
         <div className="flex items-stretch gap-0.5 min-w-0">
-          <span className="font-bold text-lg shrink-0 self-center mr-3">EASWARI</span>
+          <span className="font-bold text-lg shrink-0 self-center mr-3">EASWARI{onWarehouse && <span className="font-normal text-blue-200"> Warehouse</span>}</span>
           <div className="hidden md:flex items-stretch flex-wrap gap-0.5 min-w-0">
           {menuGroups.map((g, gi) => {
             // Top-level group with no header → render its items as direct bar links
