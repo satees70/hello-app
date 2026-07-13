@@ -96,9 +96,6 @@ export default function DispatchPage() {
   const [returnCart, setReturnCart] = useState<CartReturn[]>([])
   const [vehicleByFac, setVehicleByFac] = useState<Record<string, string>>({})   // vehicle no. keyed by factory, set before creating each DO
   const [lorries, setLorries] = useState<string[]>([])   // APPROVED lorry plates only (no free-typed plates allowed)
-  const [receiveFor, setReceiveFor] = useState<DOrder | null>(null)   // DO being received at the warehouse
-  const [grnInput, setGrnInput] = useState('')
-  const [receiptPhoto, setReceiptPhoto] = useState<File | null>(null)
   const [recentQ, setRecentQ] = useState('')   // search Recent delivery orders by DO no. / item / location
   const [lorryReqs, setLorryReqs] = useState<{ id: string; factory_code: string; kind: string; lorry_type: string; note: string | null; destination: string | null; status: string; fulfilled_lorry: string | null; requested_by_name: string | null; requested_at: string }[]>([])
   const [lrFactory, setLrFactory] = useState('')     // which factory to request a lorry for
@@ -403,39 +400,9 @@ export default function DispatchPage() {
     setLorryReqs(prev => prev.filter(r => r.id !== id))
   }
 
-  // ---- Warehouse receipt of a delivered DO: photo + their system's GRN number ----
+  // Warehouse receives each item (with a photo) on the Warehouse page; here we only
+  // show the rolled-up received status and link across to it.
   const canReceive = !!profile && (!!profile.warehouse_user || isHO || profile.role === 'admin')
-  function openReceive(o: DOrder) { setReceiveFor(o); setGrnInput(o.warehouse_grn || ''); setReceiptPhoto(null); setError(''); setSuccess('') }
-  async function submitReceive() {
-    if (!receiveFor) return
-    setBusy(true); setError(''); setSuccess('')
-    try {
-      let photo_path = receiveFor.receipt_photo_path || null
-      if (receiptPhoto) {
-        const path = `do-receipts/${receiveFor.id}/${Date.now()}.jpg`
-        const { error: upErr } = await supabase.storage.from('delivery-photos').upload(path, receiptPhoto, { upsert: true, contentType: receiptPhoto.type || 'image/jpeg' })
-        if (upErr) throw upErr
-        photo_path = path
-      }
-      const { error: e } = await supabase.rpc('confirm_do_received', { p_do_id: receiveFor.id, p_grn: grnInput.trim() || null, p_photo_path: photo_path })
-      if (e) throw e
-      const no = receiveFor.do_number
-      setReceiveFor(null); setSuccess(`Delivery order ${no} marked received.`); load()
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      setError(/confirm_do_received|function|column|received_at/i.test(msg) ? 'Receiving needs a database update — run db/2026-07-do-warehouse-receipt.sql in the Supabase SQL editor.' : msg)
-    } finally { setBusy(false) }
-  }
-  async function undoReceive(o: DOrder) {
-    if (!confirm(`Undo the warehouse receipt for ${o.do_number}?`)) return
-    const { error: e } = await supabase.rpc('unreceive_do', { p_do_id: o.id })
-    if (e) { setError(e.message); return }
-    setSuccess('Receipt undone.'); load()
-  }
-  async function viewReceiptPhoto(path: string) {
-    const { data } = await supabase.storage.from('delivery-photos').createSignedUrl(path, 120)
-    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
-  }
 
   async function createDO(fac: string) {
     const batchIds = batches.filter(b => picked.has(b.id) && b.factory_code === fac).map(b => b.id)
@@ -967,18 +934,13 @@ export default function DispatchPage() {
                     {o.departed_at
                       ? <div className="mt-1 text-green-600 text-xs">✅ Out {fmt(o.departed_at)}{canFac(o.factory_code) && !o.received_at && <button onClick={() => markLorryOut(o, false)} className="ml-1 text-gray-400 hover:underline">undo</button>}</div>
                       : canFac(o.factory_code) && <button onClick={() => markLorryOut(o, true)} disabled={busy} className="mt-1 bg-teal-600 text-white px-2 py-1 rounded text-xs hover:bg-teal-700 disabled:opacity-50">🚚 Lorry out</button>}
-                    {/* Warehouse receipt: after the lorry is out */}
+                    {/* Warehouse receives per item on the Warehouse page */}
                     {o.departed_at && (o.received_at
                       ? <div className="mt-1 text-xs text-green-700">
                           📦 Received {fmt(o.received_at)}{o.received_by_name ? ` · ${o.received_by_name}` : ''}
                           {o.warehouse_grn && <span className="block text-gray-600">GRN: <span className="font-mono">{o.warehouse_grn}</span></span>}
-                          <span className="block">
-                            {o.receipt_photo_path && <button onClick={() => viewReceiptPhoto(o.receipt_photo_path!)} className="text-blue-600 hover:underline">📷 photo</button>}
-                            {canReceive && <button onClick={() => openReceive(o)} className="ml-2 text-gray-400 hover:underline">edit</button>}
-                            {canReceive && <button onClick={() => undoReceive(o)} className="ml-2 text-gray-400 hover:underline">undo</button>}
-                          </span>
                         </div>
-                      : canReceive && <button onClick={() => openReceive(o)} className="mt-1 bg-blue-600 text-white px-2 py-1 rounded text-xs hover:bg-blue-700">📷 Receive</button>)}
+                      : canReceive && <a href="/warehouse" className="mt-1 inline-block text-blue-600 hover:underline text-xs">📷 Receive per item →</a>)}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-600">{o.created_by_name || '—'}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-400">{fmt(o.created_at)}</td>
@@ -1030,31 +992,6 @@ export default function DispatchPage() {
       </div>
 
       {/* Edit-a-return modal (HO approval) */}
-      {receiveFor && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setReceiveFor(null)}>
-          <div className="bg-white rounded-xl shadow-xl border w-full max-w-md my-8 p-6" onClick={e => e.stopPropagation()}>
-            <h2 className="font-semibold text-lg mb-1">📦 Receive at warehouse</h2>
-            <p className="text-gray-500 text-sm mb-4">{receiveFor.do_number} · {factoryName(receiveFor.factory_code)}. Attach a photo and enter your GRN number to cross-reference — both optional.</p>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium mb-1">Photo (proof of delivery)</label>
-                <input type="file" accept="image/*" capture="environment" onChange={e => setReceiptPhoto(e.target.files?.[0] || null)} className="block w-full text-sm" />
-                {receiptPhoto && <span className="text-xs text-gray-500">Selected: {receiptPhoto.name}</span>}
-                {!receiptPhoto && receiveFor.receipt_photo_path && <button onClick={() => viewReceiptPhoto(receiveFor.receipt_photo_path!)} className="text-blue-600 hover:underline text-xs">📷 current photo</button>}
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Your GRN number <span className="text-gray-400 font-normal">(from your system)</span></label>
-                <input value={grnInput} onChange={e => setGrnInput(e.target.value)} placeholder="e.g. GRN-00123" className="w-full border rounded-lg px-3 py-2 text-sm" />
-              </div>
-            </div>
-            <div className="flex items-center gap-2 mt-5">
-              <button onClick={submitReceive} disabled={busy} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{busy ? 'Saving…' : (receiveFor.received_at ? 'Save' : 'Mark received')}</button>
-              <button onClick={() => setReceiveFor(null)} className="text-gray-600 px-3 py-2 text-sm">Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {editRet && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setEditRet(null)}>
           <div className="bg-white rounded-xl shadow-xl border w-full max-w-md my-8 p-6" onClick={e => e.stopPropagation()}>
