@@ -34,6 +34,22 @@ create table if not exists public.wms_locations (
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now()
 );
+-- Ensure every column exists even if an older/empty wms_locations table was created
+-- before this version (create table if not exists would skip it otherwise).
+alter table public.wms_locations add column if not exists warehouse_code text not null default '8BT';
+alter table public.wms_locations add column if not exists category      text not null default 'Stock';
+alter table public.wms_locations add column if not exists location_type text not null default 'SL';
+alter table public.wms_locations add column if not exists code          text;
+alter table public.wms_locations add column if not exists aisle         text;
+alter table public.wms_locations add column if not exists sql_location  text;
+alter table public.wms_locations add column if not exists label         text;
+alter table public.wms_locations add column if not exists pick_sequence int;
+alter table public.wms_locations add column if not exists active        boolean not null default true;
+alter table public.wms_locations add column if not exists notes         text;
+alter table public.wms_locations add column if not exists created_by    uuid;
+alter table public.wms_locations add column if not exists created_at    timestamptz not null default now();
+alter table public.wms_locations add column if not exists updated_at    timestamptz not null default now();
+
 -- The SQL Account path is the true unique identity of a location (the future join key
 -- for orders-in / results-out with SQL Accounting). A bin code is unique per warehouse.
 create unique index if not exists wms_locations_sqlpath_uniq on public.wms_locations(sql_location);
@@ -52,3 +68,7 @@ drop policy if exists wms_loc_write on public.wms_locations;
 create policy wms_loc_write on public.wms_locations for all
   using (has_perm('warehouse','edit'))
   with check (has_perm('warehouse','edit'));
+
+-- Refresh the PostgREST schema cache so the API sees all columns immediately
+-- (prevents "Could not find the 'aisle' column ... in the schema cache" on import).
+notify pgrst, 'reload schema';
