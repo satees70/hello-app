@@ -51,7 +51,7 @@ export default function WmsPickPage() {
 
   // Available stock for an item, best-first: SL bins, then earliest expiry, then walking order.
   const availFor = useCallback((itemCode: string) => {
-    return stock.filter(s => s.item_code === itemCode && s.quantity > 0).slice().sort((a, b) => {
+    return stock.filter(s => s.item_code === itemCode && s.quantity > 0 && locMeta.get(s.location_id)?.location_type !== 'STAGE').slice().sort((a, b) => {
       const la = locMeta.get(a.location_id), lb = locMeta.get(b.location_id)
       const slA = la?.location_type === 'SL' ? 0 : 1, slB = lb?.location_type === 'SL' ? 0 : 1
       if (slA !== slB) return slA - slB

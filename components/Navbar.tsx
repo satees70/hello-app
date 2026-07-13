@@ -270,6 +270,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     { header: 'Warehouse (WMS)', items: [
       { href: '/wms/locations', label: 'Location Map', module: 'warehouse' as ModuleKey },
       { href: '/wms/stock', label: 'Stock', module: 'warehouse' as ModuleKey },
+      { href: '/wms/purchase-orders', label: 'Purchase Orders', module: 'warehouse' as ModuleKey },
       { href: '/wms/putaway', label: 'Putaway', module: 'warehouse' as ModuleKey },
       { href: '/wms/transfers', label: 'Transfers', module: 'warehouse' as ModuleKey },
       { href: '/wms/orders', label: 'Orders to Pick', module: 'warehouse' as ModuleKey },
