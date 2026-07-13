@@ -24,8 +24,9 @@ const CATEGORY = 'Stock'
 
 const EMPTY = { code: '', location_type: 'SL', label: '', pick_sequence: '', active: true }
 
-// Leading letters of a code become the aisle used for grouping/sorting (A105 → A, ZG203 → ZG).
-const deriveAisle = (code: string) => (code.match(/^[A-Za-z]+/)?.[0] || '').toUpperCase()
+// The code minus its trailing number is the aisle used for grouping/sorting
+// (A105 → A, ZG203 → ZG, 0BA01 → 0BA). Falls back to the whole code if it's all digits.
+const deriveAisle = (code: string) => { const a = code.replace(/\d+$/, ''); return (a || code).toUpperCase() }
 // For a NEW manually-added location, build the standard 8BT/Stock/<type>/<code> path.
 const buildPath = (type: string, code: string) => `${WAREHOUSE}/${CATEGORY}/${type}/${code}`
 
