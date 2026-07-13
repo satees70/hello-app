@@ -94,6 +94,7 @@ export default function DispatchPage() {
   const [reason, setReason] = useState('')
   const [returnCart, setReturnCart] = useState<CartReturn[]>([])
   const [vehicleByFac, setVehicleByFac] = useState<Record<string, string>>({})   // vehicle no. keyed by factory, set before creating each DO
+  const [lorries, setLorries] = useState<string[]>([])   // APPROVED lorry plates only (no free-typed plates allowed)
   const [recentQ, setRecentQ] = useState('')   // search Recent delivery orders by DO no. / item / location
   const [lorryReqs, setLorryReqs] = useState<{ id: string; factory_code: string; kind: string; lorry_type: string; note: string | null; destination: string | null; status: string; fulfilled_lorry: string | null; requested_by_name: string | null; requested_at: string }[]>([])
   const [lrFactory, setLrFactory] = useState('')     // which factory to request a lorry for
@@ -162,6 +163,10 @@ export default function DispatchPage() {
       .select('id, factory_code, kind, lorry_type, note, destination, status, fulfilled_lorry, requested_by_name, requested_at').in('status', ['open', 'fulfilled'])
       .order('requested_at', { ascending: false })
     setLorryReqs(lr || [])
+    // Approved lorries only — the DO vehicle must be picked from this list (no free-typed plates).
+    const { data: dr } = await supabase.from('delivery_resources')
+      .select('name').eq('kind', 'lorry').eq('active', true).eq('approved', true).order('name')
+    setLorries([...new Set((dr || []).map(r => r.name).filter(Boolean))] as string[])
     // SO number(s) per dispatched batch, so each delivery line can show its order.
     const batchIds = [...new Set(((o as DOrder[]) || []).flatMap(d => (d.dispatch_order_lines || []).map(l => l.batch_id).filter(Boolean)))] as string[]
     const sob: Record<string, string> = {}
@@ -330,6 +335,22 @@ export default function DispatchPage() {
     }
     setSuccess(`Direct delivery created — ${dos.join(', ')}.`)
     setDirectCart([]); setBusy(false); load()
+  }
+
+  // Add a lorry to the approved list. Head Office / admin additions are approved at
+  // once (usable immediately); a factory user's addition waits for HO approval, so a
+  // brand-new plate can't be used on a DO until it's approved.
+  async function addLorry() {
+    const v = window.prompt('New lorry plate number:')
+    if (v == null) return
+    const plate = v.trim().toUpperCase()
+    if (!plate) return
+    setError(''); setSuccess('')
+    const { error: e } = await supabase.from('delivery_resources').insert({ kind: 'lorry', name: plate })
+    if (e) { setError(/delivery_resources|approved|column/i.test(e.message) ? 'Adding a lorry needs a database update — run db/2026-07-lorry-crew-approval.sql in Supabase.' : e.message); return }
+    const auto = isHO || profile?.role === 'admin'
+    setSuccess(auto ? `Lorry ${plate} added and approved.` : `Lorry ${plate} submitted — waiting for Head Office approval before it can be used.`)
+    load()
   }
 
   // Create ONE delivery order for a single factory's items (finished goods + returns).
@@ -845,9 +866,14 @@ export default function DispatchPage() {
                     <h3 className="font-semibold">🏭 {factoryName(fac)} <span className="text-gray-400 font-normal text-sm">· {count} item(s)</span></h3>
                     <div className="flex items-center gap-2">
                       <label className="text-sm text-gray-600">🚚 Vehicle
-                        <input value={vehicleByFac[fac] || ''} onChange={e => setVehicleByFac(v => ({ ...v, [fac]: e.target.value }))}
-                          placeholder="Lorry / plate no." className="ml-2 border rounded-lg px-2 py-1.5 text-sm w-40" />
+                        <select value={vehicleByFac[fac] || ''} onChange={e => setVehicleByFac(v => ({ ...v, [fac]: e.target.value }))}
+                          className="ml-2 border rounded-lg px-2 py-1.5 text-sm w-44 bg-white" title="Only approved lorries can be used">
+                          <option value="">Choose lorry…</option>
+                          {lorries.map(l => <option key={l} value={l}>{l}</option>)}
+                          {vehicleByFac[fac] && !lorries.includes(vehicleByFac[fac]) && <option value={vehicleByFac[fac]}>{vehicleByFac[fac]} (not approved)</option>}
+                        </select>
                       </label>
+                      <button onClick={addLorry} type="button" title="Add a lorry (Head Office approves it)" className="text-teal-700 border border-teal-300 rounded-lg px-2 py-1.5 text-sm hover:bg-teal-50">＋ Lorry</button>
                       <button onClick={() => createDO(fac)} disabled={busy} className="bg-teal-600 text-white px-4 py-2 rounded-lg hover:bg-teal-700 disabled:opacity-50 text-sm font-medium">{busy ? 'Creating…' : 'Create delivery order'}</button>
                     </div>
                   </div>
