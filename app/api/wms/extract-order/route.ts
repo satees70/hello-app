@@ -18,41 +18,51 @@ const MODEL = 'claude-sonnet-4-6'
 
 const EXTRACTION_TOOL: Anthropic.Tool = {
   name: 'record_warehouse_order',
-  description: 'Record the header and every line item of a customer order the warehouse must pick.',
+  description: 'Record the header and every line item of an SQL Account picking list the warehouse must pick.',
   input_schema: {
     type: 'object',
     properties: {
-      order_no: { type: 'string', description: 'The order / document number (e.g. SO-40496, PO number). Empty string if none.' },
-      customer_name: { type: 'string', description: 'The customer the goods are being sent to (the buyer). Empty string if unclear.' },
-      order_date: { type: 'string', description: 'The order date exactly as printed (e.g. 13/06/26). Empty string if none.' },
+      order_no: { type: 'string', description: 'The SO / order number at the top (e.g. SO-41596). Empty string if none.' },
+      customer_name: { type: 'string', description: 'The customer / outlet the goods go to, e.g. "TF VALUE MART SDN.BHD. (SRI DAMANSARA)". NOT our own company "SRRI EASWARI MILLS". Empty string if unclear.' },
+      order_date: { type: 'string', description: 'The "SO Date" exactly as printed (e.g. 13/7/2026). Empty string if none.' },
+      delivery_date: { type: 'string', description: 'The "Delivery Date" exactly as printed (e.g. 15/7/2026). Empty string if none.' },
       lines: {
         type: 'array',
-        description: 'One entry per ordered product line.',
+        description: 'One entry per numbered product line.',
         items: {
           type: 'object',
           properties: {
-            item_code: { type: 'string', description: 'The product / item code as printed.' },
-            description: { type: 'string', description: 'The item description.' },
-            quantity: { type: 'number', description: 'The quantity ordered for this line.' },
-            uom: { type: 'string', description: 'The unit of measure if shown (e.g. UNIT, CTN, BAG, KG). Empty string if none.' },
+            item_code: { type: 'string', description: 'The Item Code, e.g. D225-10KG/BAG, E3694-10UN/BAG.' },
+            description: { type: 'string', description: 'The item description, e.g. "KACANG HITAM 10KG".' },
+            quantity: { type: 'number', description: 'The Qty number, e.g. 1.00, 3.00.' },
+            uom: { type: 'string', description: 'The unit next to the quantity, e.g. BAG, CTN, UNIT. Empty string if none.' },
+            source_location: { type: 'string', description: 'The "Picked Location" shown for this line, e.g. SUPPLIER, G202, F113, AVINA101. Empty string if none.' },
+            remarks: { type: 'string', description: 'The Remarks text for this line — usually a batch number (e.g. 260630) or an expiry note (e.g. EXP08022027). Empty string if none.' },
           },
-          required: ['item_code', 'description', 'quantity', 'uom'],
+          required: ['item_code', 'description', 'quantity', 'uom', 'source_location', 'remarks'],
         },
       },
     },
-    required: ['order_no', 'customer_name', 'order_date', 'lines'],
+    required: ['order_no', 'customer_name', 'order_date', 'delivery_date', 'lines'],
   },
 }
 
-const PROMPT = `This PDF is a CUSTOMER ORDER that our warehouse must pick and ship (a sales order / purchase order sent to us).
+const PROMPT = `This PDF is an SQL Account "PICKING LIST" for a sales order our warehouse must pick and ship.
 
-Extract:
-- the order number (Doc No / SO / PO number),
-- the customer (the buyer we are shipping to — NOT our own company "SRRI EASWARI MILLS", which is the seller),
-- the order date as printed,
-- and every ordered product line: item code, description, quantity, and unit of measure if shown.
+Header to capture:
+- order_no: the SO number at the top (e.g. SO-41596).
+- customer_name: the customer / outlet (e.g. "TF VALUE MART SDN.BHD. (SRI DAMANSARA)"). NOT our own company "SRRI EASWARI MILLS" (the seller).
+- order_date: the "SO Date".
+- delivery_date: the "Delivery Date".
 
-Ignore totals, tax lines, terms & conditions, and any summary blocks — only the real ordered product rows. Call record_warehouse_order once with the header and one entry per product line, in the order they appear.`
+For each NUMBERED product line (1, 2, 3, …) capture:
+- item_code (the Item Code column, e.g. D225-10KG/BAG),
+- description (e.g. KACANG HITAM 10KG),
+- quantity (the Qty number) and uom (the unit beside it: BAG / CTN / UNIT),
+- source_location (the "Picked Location" for that row: SUPPLIER, a bin like G202/F113, or a factory like AVINA101),
+- remarks (the Remarks for that row — a batch number like 260630 or an expiry like EXP08022027).
+
+Ignore the "Total" row, the header/sign-off fields (Pick By, Truck No, Driver, Pending…, Print Date, etc.) and any URL. Call record_warehouse_order once with the header and one entry per numbered line, in order.`
 
 export async function POST(request: Request) {
   // Only warehouse editors create orders (matches the /wms/orders upload gate).
@@ -88,7 +98,7 @@ export async function POST(request: Request) {
       await markError(orderId, 'No data extracted')
       return NextResponse.json({ error: 'No data could be read from the document.' }, { status: 400 })
     }
-    const out = toolUse.input as { order_no?: string; customer_name?: string; order_date?: string; lines?: OrderLine[] }
+    const out = toolUse.input as { order_no?: string; customer_name?: string; order_date?: string; delivery_date?: string; lines?: OrderLine[] }
     const lines = out.lines || []
 
     // Resolve each item code to the Items master (unknown codes stay unlinked, flagged in the UI).
@@ -109,6 +119,8 @@ export async function POST(request: Request) {
         description: l.description || null,
         quantity: Number(l.quantity) || 0,
         uom: l.uom || null,
+        source_hint: l.source_location || null,
+        remarks: l.remarks || null,
       }))
       const { error: insErr } = await supabaseAdmin.from('wms_order_lines').insert(rows)
       if (insErr) {
@@ -121,6 +133,7 @@ export async function POST(request: Request) {
       order_no: out.order_no?.trim() || null,
       customer_name: out.customer_name?.trim() || null,
       order_date: out.order_date?.trim() || null,
+      delivery_date: out.delivery_date?.trim() || null,
       status: 'Review',
       error_message: null,
     }).eq('id', orderId)
@@ -137,4 +150,4 @@ async function markError(orderId: string, msg?: string) {
   await supabaseAdmin.from('wms_orders').update({ status: 'Error', error_message: msg ?? null }).eq('id', orderId)
 }
 
-interface OrderLine { item_code: string; description: string; quantity: number; uom: string }
+interface OrderLine { item_code: string; description: string; quantity: number; uom: string; source_location: string; remarks: string }

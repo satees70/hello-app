@@ -7,12 +7,12 @@ import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
 
 interface Order {
-  id: string; order_no: string | null; customer_name: string | null; order_date: string | null
+  id: string; order_no: string | null; customer_name: string | null; order_date: string | null; delivery_date: string | null
   file_name: string | null; file_path: string | null; status: string; source: string
   error_message: string | null; uploaded_by_name: string | null; created_at: string
   wms_order_lines?: { count: number }[]
 }
-interface Line { id: string; line_no: number | null; item_id: string | null; item_code: string; description: string | null; quantity: number; uom: string | null }
+interface Line { id: string; line_no: number | null; item_id: string | null; item_code: string; description: string | null; quantity: number; uom: string | null; source_hint: string | null; remarks: string | null }
 
 const clean = (n: number) => Number(n.toPrecision(12))
 const fmtQty = (n: number) => clean(n).toLocaleString(undefined, { maximumFractionDigits: 4 })
@@ -130,17 +130,18 @@ export default function WmsOrdersPage() {
         <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
-              <tr>{['File', 'Order No', 'Customer', 'Lines', 'Status', 'Uploaded', 'Actions'].map(h => (
+              <tr>{['File', 'Order No', 'Customer', 'Delivery', 'Lines', 'Status', 'Uploaded', 'Actions'].map(h => (
                 <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>
               ))}</tr>
             </thead>
             <tbody>
-              {orders.length === 0 && <tr><td colSpan={7} className="text-center py-10 text-gray-400">No orders yet — upload a PDF to start.</td></tr>}
+              {orders.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-gray-400">No orders yet — upload a PDF to start.</td></tr>}
               {orders.map(o => (
                 <tr key={o.id} className="border-b last:border-0 hover:bg-gray-50">
                   <td className="px-4 py-2.5 max-w-[200px] truncate" title={o.file_name || ''}>{o.file_name}</td>
                   <td className="px-4 py-2.5 font-mono">{o.order_no || <span className="text-gray-300">—</span>}</td>
                   <td className="px-4 py-2.5">{o.customer_name || <span className="text-gray-300">—</span>}</td>
+                  <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">{o.delivery_date || <span className="text-gray-300">—</span>}</td>
                   <td className="px-4 py-2.5 tabular-nums">{o.wms_order_lines?.[0]?.count ?? 0}</td>
                   <td className="px-4 py-2.5"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CHIP[o.status] || 'bg-gray-100'}`}>{o.status}</span></td>
                   <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">{fmtTime(o.created_at)}</td>
@@ -168,20 +169,23 @@ export default function WmsOrdersPage() {
               <h2 className="font-semibold text-lg">{linesFor.order_no || linesFor.file_name} <span className="text-gray-400 font-normal text-sm">· {linesFor.customer_name || 'customer ?'}</span></h2>
               <button onClick={() => setLinesFor(null)} className="text-gray-400 hover:text-gray-600">✕</button>
             </div>
+            {(linesFor.order_date || linesFor.delivery_date) && <p className="text-xs text-gray-500 mb-3">SO date {linesFor.order_date || '—'} · Delivery {linesFor.delivery_date || '—'}</p>}
             {linesFor.error_message && <p className="text-red-600 text-sm bg-red-50 p-2 rounded mb-3">{linesFor.error_message}</p>}
             {unmatched > 0 && <p className="text-amber-600 text-xs bg-amber-50 border border-amber-200 rounded p-2 mb-3">⚠ {unmatched} line(s) have an item code not found in the Items master — check the codes before picking.</p>}
             <div className="overflow-x-auto border rounded-lg">
               <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b"><tr>{['#', 'Item', 'Description', 'Qty', 'Unit'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600">{h}</th>)}</tr></thead>
+                <thead className="bg-gray-50 border-b"><tr>{['#', 'Item', 'Description', 'Qty', 'Unit', 'SQL loc', 'Remarks'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600">{h}</th>)}</tr></thead>
                 <tbody>
-                  {lines.length === 0 && <tr><td colSpan={5} className="text-center py-6 text-gray-400">No lines read.</td></tr>}
+                  {lines.length === 0 && <tr><td colSpan={7} className="text-center py-6 text-gray-400">No lines read.</td></tr>}
                   {lines.map(l => (
                     <tr key={l.id} className="border-b last:border-0">
                       <td className="px-3 py-2 text-gray-400">{l.line_no}</td>
                       <td className="px-3 py-2 font-mono font-medium">{l.item_code}{!l.item_id && <span className="ml-1 text-amber-600" title="Not in Items master">⚠</span>}</td>
-                      <td className="px-3 py-2 text-gray-600 max-w-[240px] truncate">{l.description}</td>
+                      <td className="px-3 py-2 text-gray-600 max-w-[220px] truncate">{l.description}</td>
                       <td className="px-3 py-2 font-medium tabular-nums">{fmtQty(l.quantity)}</td>
                       <td className="px-3 py-2 text-gray-500">{l.uom}</td>
+                      <td className="px-3 py-2 text-gray-500 text-xs font-mono">{l.source_hint || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-2 text-gray-500 text-xs">{l.remarks || <span className="text-gray-300">—</span>}</td>
                     </tr>
                   ))}
                 </tbody>

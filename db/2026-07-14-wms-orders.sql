@@ -71,4 +71,11 @@ drop policy if exists wms_order_lines_write on public.wms_order_lines;
 create policy wms_order_lines_read  on public.wms_order_lines for select using (has_perm('warehouse', 'view'));
 create policy wms_order_lines_write on public.wms_order_lines for all using (has_perm('warehouse', 'edit')) with check (has_perm('warehouse', 'edit'));
 
+-- 5) Extra fields captured from the SQL Account "PICKING LIST" layout.
+--    delivery_date on the header; per-line the SQL Account "Picked Location" hint
+--    (SUPPLIER / a factory / a bin) and the Remarks (batch or expiry note).
+alter table public.wms_orders      add column if not exists delivery_date text;
+alter table public.wms_order_lines add column if not exists source_hint text;
+alter table public.wms_order_lines add column if not exists remarks     text;
+
 notify pgrst, 'reload schema';
