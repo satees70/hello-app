@@ -6,15 +6,14 @@ import { supabase, fetchAll } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
 
-interface Order { id: string; order_no: string | null; customer_name: string | null; status: string }
-interface Line { id: string; line_no: number | null; item_id: string | null; item_code: string; description: string | null; quantity: number; qty_picked: number; uom: string | null }
+interface Order { id: string; order_no: string | null; customer_name: string | null; status: string; delivery_date: string | null }
+interface Line { id: string; line_no: number | null; item_id: string | null; item_code: string; description: string | null; quantity: number; qty_picked: number; uom: string | null; source_hint: string | null; remarks: string | null }
 interface Stock { id: string; item_code: string; location_id: string; location_code: string; batch_no: string; exp_date: string | null; quantity: number }
 interface Loc { id: string; location_type: string; pick_sequence: number | null }
 
 const clean = (n: number) => Number(n.toPrecision(12))
 const fmtQty = (n: number) => clean(n).toLocaleString(undefined, { maximumFractionDigits: 4 })
 const fmtDate = (d: string | null) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB') : ''
-
 const STATUS_CHIP: Record<string, string> = {
   Review: 'bg-amber-100 text-amber-700', Released: 'bg-emerald-100 text-emerald-700',
   Picking: 'bg-blue-100 text-blue-700', Picked: 'bg-emerald-100 text-emerald-700',
@@ -29,12 +28,13 @@ export default function WmsPickPage() {
   const [lines, setLines] = useState<Line[]>([])
   const [stock, setStock] = useState<Stock[]>([])
   const [locMeta, setLocMeta] = useState<Map<string, Loc>>(new Map())
+  const [chosen, setChosen] = useState<Record<string, string>>({})   // lineId -> stock.id
   const [qtyInput, setQtyInput] = useState<Record<string, string>>({})
-  const [busy, setBusy] = useState<string>('')
+  const [busy, setBusy] = useState('')
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
 
   const load = useCallback(async () => {
-    const { data: o } = await supabase.from('wms_orders').select('id, order_no, customer_name, status').eq('id', id).single()
+    const { data: o } = await supabase.from('wms_orders').select('id, order_no, customer_name, status, delivery_date').eq('id', id).single()
     const { data: ls } = await supabase.from('wms_order_lines').select('*').eq('order_id', id).order('line_no')
     const lineList = (ls as Line[]) || []
     const codes = [...new Set(lineList.map(l => l.item_code))]
@@ -44,14 +44,14 @@ export default function WmsPickPage() {
     const locs = await fetchAll<Loc>('wms_locations', 'id, location_type, pick_sequence')
     setOrder((o as Order) || null); setLines(lineList); setStock(st || [])
     setLocMeta(new Map(locs.map(l => [l.id, l])))
+    setChosen({}); setQtyInput({})
   }, [id])
 
   useEffect(() => { if (profile) load() }, [profile, load])
 
-  // FEFO allocation preview for a line: SL bins first, earliest expiry, walking order.
-  const allocate = useCallback((itemCode: string, need: number) => {
-    const rows = stock.filter(s => s.item_code === itemCode && s.quantity > 0).slice()
-    rows.sort((a, b) => {
+  // Available stock for an item, best-first: SL bins, then earliest expiry, then walking order.
+  const availFor = useCallback((itemCode: string) => {
+    return stock.filter(s => s.item_code === itemCode && s.quantity > 0).slice().sort((a, b) => {
       const la = locMeta.get(a.location_id), lb = locMeta.get(b.location_id)
       const slA = la?.location_type === 'SL' ? 0 : 1, slB = lb?.location_type === 'SL' ? 0 : 1
       if (slA !== slB) return slA - slB
@@ -59,35 +59,36 @@ export default function WmsPickPage() {
       if (ea !== eb) return ea < eb ? -1 : 1
       return (la?.pick_sequence ?? 999999) - (lb?.pick_sequence ?? 999999) || a.location_code.localeCompare(b.location_code)
     })
-    const allocs: { bin: string; batch: string; exp: string | null; qty: number }[] = []
-    let left = need
-    for (const r of rows) {
-      if (left <= 0) break
-      const take = Math.min(r.quantity, left)
-      allocs.push({ bin: r.location_code, batch: r.batch_no, exp: r.exp_date, qty: take })
-      left = clean(left - take)
-    }
-    return { allocs, shortfall: Math.max(clean(left), 0) }
   }, [stock, locMeta])
 
   const remainingOf = (l: Line) => clean(l.quantity - l.qty_picked)
 
-  async function pick(l: Line, qty: number) {
+  async function pickFromBin(l: Line, s: Stock, qty: number) {
     if (!canEdit || qty <= 0) return
     setBusy(l.id); setErr(''); setMsg('')
-    const { data, error } = await supabase.rpc('wms_pick_line', { p_line_id: l.id, p_qty: qty, p_reference: order?.order_no ?? null })
+    const { data, error } = await supabase.rpc('wms_pick_from_bin', {
+      p_line_id: l.id, p_location_id: s.location_id, p_batch: s.batch_no, p_qty: qty, p_reference: order?.order_no ?? null,
+    })
     setBusy('')
     if (error) { setErr(error.message); return }
-    const res = data as { picked: number; shortfall: number }
-    setMsg(res.shortfall > 0
-      ? `Picked ${fmtQty(res.picked)} of ${l.item_code} — short by ${fmtQty(res.shortfall)} (not enough stock).`
-      : `Picked ${fmtQty(res.picked)} of ${l.item_code}.`)
-    setQtyInput(q => ({ ...q, [l.id]: '' }))
+    const res = data as { picked: number; requested: number }
+    setMsg(res.picked < res.requested
+      ? `Picked ${fmtQty(res.picked)} of ${l.item_code} from ${s.location_code} (bin only had that much).`
+      : `Picked ${fmtQty(res.picked)} of ${l.item_code} from ${s.location_code}.`)
     load()
   }
 
-  async function pickAll() {
-    for (const l of lines) { const rem = remainingOf(l); if (rem > 0) await pick(l, rem) }
+  // Convenience: auto-fill the whole order earliest-expiry-first.
+  async function pickAllAuto() {
+    setErr(''); setMsg('')
+    for (const l of lines) {
+      const rem = remainingOf(l)
+      if (rem <= 0) continue
+      setBusy(l.id)
+      const { error } = await supabase.rpc('wms_pick_line', { p_line_id: l.id, p_qty: rem, p_reference: order?.order_no ?? null })
+      if (error) { setBusy(''); setErr(error.message); return }
+    }
+    setBusy(''); setMsg('Picked everything possible, earliest-expiry first.'); load()
   }
 
   const totals = useMemo(() => ({
@@ -107,16 +108,16 @@ export default function WmsPickPage() {
           <h1 className="text-2xl font-bold">Pick {order.order_no || '(no number)'}</h1>
           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CHIP[order.status] || 'bg-gray-100 text-gray-600'}`}>{order.status}</span>
         </div>
-        <p className="text-gray-500 text-sm mb-6">{order.customer_name || 'Customer ?'} · {totals.done}/{totals.lines} lines picked · {fmtQty(totals.remaining)} still to pick</p>
+        <p className="text-gray-500 text-sm mb-6">{order.customer_name || 'Customer ?'}{order.delivery_date ? ` · deliver ${order.delivery_date}` : ''} · {totals.done}/{totals.lines} lines done · {fmtQty(totals.remaining)} still to pick</p>
 
         {!canEdit && <p className="text-sm bg-amber-50 text-amber-700 border border-amber-200 rounded-lg p-3 mb-4">You have view-only warehouse access, so you can’t book picks.</p>}
         {err && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg mb-4">{err}</p>}
         {msg && <p className="text-emerald-700 text-sm bg-emerald-50 border border-emerald-200 p-3 rounded-lg mb-4">✓ {msg}</p>}
 
         {canEdit && totals.remaining > 0 && (
-          <button onClick={pickAll} disabled={!!busy}
-            className="mb-5 bg-emerald-700 text-white px-5 py-2 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium">
-            Pick everything remaining
+          <button onClick={pickAllAuto} disabled={!!busy}
+            className="mb-5 border border-emerald-600 text-emerald-700 px-4 py-2 rounded-lg hover:bg-emerald-50 disabled:opacity-50 text-sm font-medium">
+            Auto-pick everything (earliest expiry)
           </button>
         )}
 
@@ -124,47 +125,58 @@ export default function WmsPickPage() {
           {lines.map(l => {
             const rem = remainingOf(l)
             const done = rem <= 0
-            const sug = allocate(l.item_code, rem)
-            const input = qtyInput[l.id] ?? (rem > 0 ? String(rem) : '')
+            const avail = availFor(l.item_code)
+            const totalAvail = clean(avail.reduce((s, a) => s + a.quantity, 0))
+            const chosenId = chosen[l.id] ?? avail[0]?.id ?? ''
+            const chosenStock = avail.find(a => a.id === chosenId) || avail[0]
+            const defQty = chosenStock ? Math.min(rem, chosenStock.quantity) : rem
+            const input = qtyInput[l.id] ?? (rem > 0 ? String(clean(defQty)) : '')
             return (
               <div key={l.id} className={`bg-white rounded-xl border shadow-sm p-4 ${done ? 'opacity-70' : ''}`}>
-                <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <div className="font-mono font-semibold">{l.item_code}{!l.item_id && <span className="ml-1 text-amber-600" title="Not in Items master">⚠</span>}</div>
-                    <div className="text-sm text-gray-500 max-w-[420px]">{l.description}</div>
+                    <div className="text-sm text-gray-500 max-w-[440px]">{l.description}</div>
                     <div className="text-xs text-gray-500 mt-1 tabular-nums">
                       Ordered <b>{fmtQty(l.quantity)}</b>{l.uom ? ' ' + l.uom : ''} · Picked <b className="text-emerald-700">{fmtQty(l.qty_picked)}</b> · Remaining <b className={rem > 0 ? 'text-amber-600' : 'text-gray-400'}>{fmtQty(rem)}</b>
                     </div>
-                  </div>
-                  {done
-                    ? <span className="text-emerald-700 text-sm font-medium">✓ Picked</span>
-                    : canEdit && (
-                      <div className="flex items-center gap-2">
-                        <input value={input} onChange={e => setQtyInput(q => ({ ...q, [l.id]: e.target.value.replace(/[^0-9.]/g, '') }))}
-                          className="w-24 border rounded-lg px-3 py-1.5 text-sm text-right tabular-nums" inputMode="decimal" />
-                        <button onClick={() => pick(l, Number(input))} disabled={busy === l.id || !(Number(input) > 0)}
-                          className="bg-emerald-700 text-white px-4 py-1.5 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium whitespace-nowrap">
-                          {busy === l.id ? 'Picking…' : 'Pick'}
-                        </button>
-                      </div>
+                    {(l.source_hint || l.remarks) && (
+                      <div className="text-[11px] text-gray-400 mt-0.5">From SQL Account: {l.source_hint || '—'}{l.remarks ? ` · note “${l.remarks}”` : ''}</div>
                     )}
+                  </div>
+                  {done && <span className="text-emerald-700 text-sm font-medium">✓ Picked</span>}
                 </div>
-                {!done && (
+
+                {!done && canEdit && (
                   <div className="mt-3 border-t pt-3">
-                    <div className="text-xs text-gray-500 mb-1.5">Pick from (earliest expiry first):</div>
-                    {sug.allocs.length === 0
+                    {avail.length === 0
                       ? <div className="text-xs text-red-600">No stock in the warehouse for this item.</div>
-                      : <div className="flex flex-wrap gap-2">
-                          {sug.allocs.map((a, i) => (
-                            <span key={i} className="inline-flex items-center gap-1.5 bg-gray-50 border rounded-lg px-2.5 py-1 text-xs">
-                              <span className="font-mono font-medium">{a.bin}</span>
-                              {a.batch && <span className="text-gray-400">b:{a.batch}</span>}
-                              {a.exp && <span className="text-gray-400">exp {fmtDate(a.exp)}</span>}
-                              <span className="font-medium tabular-nums">×{fmtQty(a.qty)}</span>
-                            </span>
-                          ))}
-                        </div>}
-                    {sug.shortfall > 0 && <div className="text-xs text-amber-600 mt-1.5">⚠ Only {fmtQty(rem - sug.shortfall)} available — short by {fmtQty(sug.shortfall)}.</div>}
+                      : (
+                        <div className="flex flex-wrap items-end gap-2">
+                          <div className="flex-1 min-w-[240px]">
+                            <label className="block text-xs text-gray-500 mb-1">Pick from bin / batch <span className="text-gray-400">(earliest expiry first)</span></label>
+                            <select value={chosenId} onChange={e => { setChosen(c => ({ ...c, [l.id]: e.target.value })); setQtyInput(q => { const nq = { ...q }; delete nq[l.id]; return nq }) }}
+                              className="w-full border rounded-lg px-3 py-2 text-sm">
+                              {avail.map((a, i) => (
+                                <option key={a.id} value={a.id}>
+                                  {a.location_code}{a.batch_no ? ` · b:${a.batch_no}` : ' · no batch'}{a.exp_date ? ` · exp ${fmtDate(a.exp_date)}` : ''} — {fmtQty(a.quantity)} on hand{i === 0 ? '  (suggested)' : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Qty</label>
+                            <input value={input} onChange={e => setQtyInput(q => ({ ...q, [l.id]: e.target.value.replace(/[^0-9.]/g, '') }))}
+                              className="w-24 border rounded-lg px-3 py-2 text-sm text-right tabular-nums" inputMode="decimal" />
+                          </div>
+                          <button onClick={() => chosenStock && pickFromBin(l, chosenStock, Number(input))}
+                            disabled={busy === l.id || !chosenStock || !(Number(input) > 0)}
+                            className="bg-emerald-700 text-white px-4 py-2 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium whitespace-nowrap">
+                            {busy === l.id ? 'Picking…' : 'Pick'}
+                          </button>
+                        </div>
+                      )}
+                    {avail.length > 0 && totalAvail < rem && <div className="text-xs text-amber-600 mt-1.5">⚠ Only {fmtQty(totalAvail)} in the warehouse across all bins — short by {fmtQty(rem - totalAvail)}.</div>}
                   </div>
                 )}
               </div>
