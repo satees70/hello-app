@@ -8,6 +8,7 @@ import { useProfile } from '@/hooks/useProfile'
 // area, distinct from the blue portal / Warehouse Receiving. More links get added here
 // as WMS modules land (stock, putaway, picking); for now Module 1 is the Location Map.
 const LINKS = [
+  { href: '/wms', label: 'Home' },
   { href: '/wms/locations', label: 'Location Map' },
   { href: '/wms/stock', label: 'Stock' },
   { href: '/wms/purchase-orders', label: 'Purchase Orders' },
@@ -23,7 +24,7 @@ export default function WmsNavbar() {
   return (
     <nav className="bg-emerald-700 text-white">
       <div className="max-w-6xl mx-auto px-4 flex flex-wrap items-center gap-1 min-h-14 py-1">
-        <span className="font-bold text-lg mr-4">EASWARI <span className="font-normal text-emerald-200">WMS</span></span>
+        <Link href="/wms" className="font-bold text-lg mr-4">EASWARI <span className="font-normal text-emerald-200">WMS</span></Link>
         {LINKS.map(l => {
           const active = pathname === l.href
           return (
