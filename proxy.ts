@@ -3,20 +3,23 @@ import type { NextRequest } from 'next/server'
 
 // Subdomain landing pages (Next.js "proxy" = the renamed middleware).
 // Opens the right app at the ROOT of each subdomain:
-//   hr.srrieaswari.com/     → /hr/attendance
-//   driver.srrieaswari.com/ → /driver/today
-//   import.srrieaswari.com/ → /import
+//   hr.srrieaswari.com/        → /hr/attendance
+//   driver.srrieaswari.com/    → /driver/today
+//   import.srrieaswari.com/    → /import
+//   warehouse.srrieaswari.com/ → /warehouse
 // Only the root path is rewritten (see config.matcher); every other path
-// (/hr/*, /driver/*, /import/*, /login, /api, production.srrieaswari.com) is untouched.
+// (/hr/*, /driver/*, /import/*, /warehouse, /login, /api, production.srrieaswari.com)
+// is untouched. The warehouse-only menu is applied in the Navbar by host.
 export function proxy(request: NextRequest) {
   const host = request.headers.get('host') || ''
   const { pathname } = request.nextUrl
   const isHr = host.startsWith('hr.')
   const isDriver = host.startsWith('driver.')
   const isImport = host.startsWith('import.')
-  if (!isHr && !isDriver && !isImport) return NextResponse.next()
+  const isWarehouse = host.startsWith('warehouse.')
+  if (!isHr && !isDriver && !isImport && !isWarehouse) return NextResponse.next()
 
-  const appHome = isHr ? '/hr/attendance' : isDriver ? '/driver/today' : '/import'
+  const appHome = isHr ? '/hr/attendance' : isDriver ? '/driver/today' : isImport ? '/import' : '/warehouse'
 
   // Root → serve the app (clean URL via rewrite).
   if (pathname === '/') {
