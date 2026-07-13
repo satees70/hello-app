@@ -63,6 +63,64 @@ export default function WmsPickPage() {
 
   const remainingOf = (l: Line) => clean(l.quantity - l.qty_picked)
 
+  // FEFO allocation (which bins/batches to pull) for the printed pick list.
+  const allocate = useCallback((itemCode: string, need: number) => {
+    const rows = availFor(itemCode)
+    const allocs: { bin: string; batch: string; exp: string | null; qty: number }[] = []
+    let left = need
+    for (const r of rows) {
+      if (left <= 0) break
+      const take = Math.min(r.quantity, left)
+      allocs.push({ bin: r.location_code, batch: r.batch_no, exp: r.exp_date, qty: take })
+      left = clean(left - take)
+    }
+    return { allocs, shortfall: Math.max(clean(left), 0) }
+  }, [availFor])
+
+  async function downloadPickList() {
+    const { default: jsPDF } = await import('jspdf')
+    const { default: autoTable } = await import('jspdf-autotable')
+    const doc = new jsPDF({ orientation: 'landscape' })
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold')
+    doc.text('SRRI EASWARI MILLS SDN BHD', 14, 15)
+    doc.setFontSize(11); doc.setFont('helvetica', 'normal')
+    doc.text('WAREHOUSE PICKING LIST', 14, 22)
+    doc.setFontSize(10)
+    doc.text(`Order: ${order?.order_no || '-'}`, 14, 30)
+    doc.text(`Customer: ${order?.customer_name || '-'}`, 14, 36)
+    if (order?.delivery_date) doc.text(`Delivery: ${order.delivery_date}`, 150, 30)
+    doc.text(`Printed: ${new Date().toLocaleString('en-GB')}`, 150, 36)
+    const body: string[][] = []
+    let n = 1
+    for (const l of lines) {
+      const rem = remainingOf(l)
+      if (rem <= 0) continue
+      const { allocs, shortfall } = allocate(l.item_code, rem)
+      if (allocs.length === 0) {
+        body.push([String(n++), l.item_code, l.description || '', l.uom || '', '— no stock —', '', '', fmtQty(rem), '☐'])
+      } else {
+        allocs.forEach((a, i) => body.push([
+          i === 0 ? String(n) : '', i === 0 ? l.item_code : '', i === 0 ? (l.description || '') : '', i === 0 ? (l.uom || '') : '',
+          a.bin, a.batch || '', a.exp ? fmtDate(a.exp) : '', fmtQty(a.qty), '☐',
+        ]))
+        if (shortfall > 0) body.push(['', '', `(short by ${fmtQty(shortfall)} — not enough stock)`, '', '', '', '', '', ''])
+        n++
+      }
+    }
+    autoTable(doc, {
+      startY: 42,
+      head: [['#', 'Item Code', 'Description', 'Unit', 'Bin', 'Batch', 'Exp', 'Qty', '✓']],
+      body,
+      styles: { fontSize: 8, cellPadding: 1.5 },
+      headStyles: { fillColor: [4, 120, 87] },
+      columnStyles: { 7: { halign: 'right' }, 8: { halign: 'center' } },
+    })
+    const endY = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY) + 14
+    doc.text('Picked by: ______________  Date: ________', 14, endY)
+    doc.text('Checked by: _____________  Date: ________', 150, endY)
+    doc.save(`PickList_${(order?.order_no || 'order').replace(/[\/\s]/g, '-')}.pdf`)
+  }
+
   async function pickFromBin(l: Line, s: Stock, qty: number) {
     if (!canEdit || qty <= 0) return
     setBusy(l.id); setErr(''); setMsg('')
@@ -114,12 +172,18 @@ export default function WmsPickPage() {
         {err && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg mb-4">{err}</p>}
         {msg && <p className="text-emerald-700 text-sm bg-emerald-50 border border-emerald-200 p-3 rounded-lg mb-4">✓ {msg}</p>}
 
-        {canEdit && totals.remaining > 0 && (
-          <button onClick={pickAllAuto} disabled={!!busy}
-            className="mb-5 border border-emerald-600 text-emerald-700 px-4 py-2 rounded-lg hover:bg-emerald-50 disabled:opacity-50 text-sm font-medium">
-            Auto-pick everything (earliest expiry)
+        <div className="flex flex-wrap gap-2 mb-5">
+          <button onClick={downloadPickList}
+            className="border px-4 py-2 rounded-lg hover:bg-gray-50 text-sm font-medium">
+            ⬇ Print pick list (PDF)
           </button>
-        )}
+          {canEdit && totals.remaining > 0 && (
+            <button onClick={pickAllAuto} disabled={!!busy}
+              className="border border-emerald-600 text-emerald-700 px-4 py-2 rounded-lg hover:bg-emerald-50 disabled:opacity-50 text-sm font-medium">
+              Auto-pick everything (earliest expiry)
+            </button>
+          )}
+        </div>
 
         <div className="space-y-3">
           {lines.map(l => {
