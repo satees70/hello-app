@@ -230,6 +230,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/repacking', label: 'Repacking', module: 'sales' },
       { href: '/delivery-schedule', label: 'Delivery Schedule' },
       { href: '/dispatch', label: 'Delivery Orders', module: 'dispatch' as ModuleKey },
+      { href: '/dispatch/dashboard', label: 'Delivery Status', module: 'dispatch' as ModuleKey },
       { href: '/transport', label: 'Lorry Internal Transfer', module: 'dispatch' as ModuleKey },
       { href: '/supplier', label: 'Supplier (to order)', module: 'sales' },
     ] },

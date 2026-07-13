@@ -53,6 +53,15 @@ begin
   select count(*) into v_pending from public.dispatch_order_lines where dispatch_id = v_do and received_at is null;
   if v_pending = 0 then
     update public.dispatch_orders set received_at = coalesce(received_at, now()), received_by = auth.uid(), received_by_name = v_name where id = v_do;
+    -- Close the loop: tell the sending factory (Head Office sees all) it was received.
+    insert into public.notifications (author_id, factory_code, type, title, body, link, ref)
+    select auth.uid(), d.factory_code, 'dispatch', '📦 Delivery received at warehouse',
+           'Delivery order ' || coalesce(d.do_number, '') || ' fully received'
+             || case when nullif(d.warehouse_grn, '') is not null then ' · GRN ' || d.warehouse_grn else '' end
+             || ' by ' || coalesce(v_name, 'warehouse') || '.',
+           '/dispatch', 'do_received:' || d.id::text
+      from public.dispatch_orders d where d.id = v_do
+      on conflict (ref) do nothing;
   end if;
 end $$;
 grant execute on function public.confirm_do_line(uuid, text) to authenticated;
