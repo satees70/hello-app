@@ -9,6 +9,7 @@ import { useProfile } from '@/hooks/useProfile'
 // as WMS modules land (stock, putaway, picking); for now Module 1 is the Location Map.
 const LINKS = [
   { href: '/wms/locations', label: 'Location Map' },
+  { href: '/wms/stock', label: 'Stock' },
 ]
 
 export default function WmsNavbar() {

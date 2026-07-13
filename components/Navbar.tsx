@@ -269,6 +269,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     ] },
     { header: 'Warehouse (WMS)', items: [
       { href: '/wms/locations', label: 'Location Map', module: 'warehouse' as ModuleKey },
+      { href: '/wms/stock', label: 'Stock', module: 'warehouse' as ModuleKey },
     ] },
     { header: 'Setup', items: [
       { href: '/admin/packing-lines', label: 'Packing Lines', module: 'packing_lines' as ModuleKey },
@@ -287,6 +288,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/sales-orders', label: 'Sales Orders', module: 'sales' as ModuleKey },
       { href: '/dispatch/dashboard', label: 'Delivery Status', module: 'dispatch' as ModuleKey },
       { href: '/wms/locations', label: 'Location Map (WMS)', module: 'warehouse' as ModuleKey },
+      { href: '/wms/stock', label: 'Stock (WMS)', module: 'warehouse' as ModuleKey },
       { href: '/discussion', label: 'Discussion' },
     ] },
   ]
