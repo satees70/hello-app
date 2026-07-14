@@ -38,6 +38,8 @@ export default function WmsPickPage() {
   const { id } = useParams<{ id: string }>()
   const { profile, loading } = useProfile()
   const canEdit = !!profile && can(profile, 'warehouse', 'edit')
+  const isHO = profile?.factory_code === 'HEAD_OFFICE'
+  const isAdmin = profile?.role === 'admin'
 
   const [order, setOrder] = useState<Order | null>(null)
   const [lines, setLines] = useState<Line[]>([])
@@ -51,6 +53,8 @@ export default function WmsPickPage() {
   const [scanFor, setScanFor] = useState<{ line: Line; stock: Stock; qty: number } | null>(null)
   const [pickMode, setPickMode] = useState<'manual' | 'scan'>('manual')
   const [checkNote, setCheckNote] = useState('')
+  const [checkedQty, setCheckedQty] = useState<Record<string, string>>({})   // lineId → verified qty
+  const [pendingCorr, setPendingCorr] = useState(false)                       // a qty correction awaits HO
   useEffect(() => { const m = localStorage.getItem('wmsPickMode'); if (m === 'scan' || m === 'manual') setPickMode(m) }, [])
   const setMode = (m: 'manual' | 'scan') => { setPickMode(m); try { localStorage.setItem('wmsPickMode', m) } catch { /* ignore */ } }
 
@@ -72,6 +76,8 @@ export default function WmsPickPage() {
         rmap.set(k, (rmap.get(k) || 0) + Number(r.qty))
       }
     }
+    const { count: pc } = await supabase.from('wms_check_qty_requests').select('id', { count: 'exact', head: true }).eq('order_id', id).eq('status', 'Pending')
+    setPendingCorr((pc || 0) > 0)
     setOrder((o as Order) || null); setLines(lineList); setStock(st || []); setResd(rmap)
     setLocMeta(new Map(locs.map(l => [l.id, l])))
     setChosen({}); setQtyInput({})
@@ -181,13 +187,32 @@ export default function WmsPickPage() {
   }), [lines])
 
   // Checker sign-off — a second person approves the picked order before dispatch.
+  // A clean check signs off directly; a quantity change is sent to HO for approval
+  // (auto-applied if the checker is HO/admin).
   async function confirmCheck() {
     if (!canEdit) return
     setBusy('check'); setErr(''); setMsg('')
-    const { error } = await supabase.rpc('wms_check_pick', { p_order_id: id, p_note: checkNote || null })
-    setBusy('')
-    if (error) { setErr(needsCheckDb(error.message)); return }
-    setMsg('Order checked — it can now be dispatched.'); setCheckNote(''); load()
+    const corrections = lines.map(l => {
+      const cq = checkedQty[l.id]
+      const checked = cq === undefined || cq === '' ? l.qty_picked : Number(cq)
+      return { line_id: l.id, item_code: l.item_code, description: l.description, picked_qty: l.qty_picked, checked_qty: checked }
+    }).filter(c => Number(c.checked_qty) !== Number(c.picked_qty))
+
+    if (corrections.length === 0) {
+      const { error } = await supabase.rpc('wms_check_pick', { p_order_id: id, p_note: checkNote || null })
+      setBusy('')
+      if (error) { setErr(needsCheckDb(error.message)); return }
+      setMsg('Order checked — it can now be dispatched.'); setCheckNote(''); setCheckedQty({}); load(); return
+    }
+    const { data, error } = await supabase.rpc('wms_submit_check_correction', { p_order_id: id, p_note: checkNote || null, p_corrections: corrections })
+    if (error) { setBusy(''); setErr(needsCheckDb(error.message)); return }
+    if (isHO || isAdmin) {
+      const { error: e2 } = await supabase.rpc('approve_wms_check_correction', { p_id: data })
+      setBusy('')
+      if (e2) { setErr(e2.message); return }
+      setMsg('Quantities corrected and approved — order checked.'); setCheckNote(''); setCheckedQty({}); load(); return
+    }
+    setBusy(''); setMsg('Quantity change sent to Head Office for approval. Dispatch stays locked until it’s approved.'); setCheckNote(''); setCheckedQty({}); load()
   }
   const needsCheckDb = (m: string) => /wms_check_pick|pick_checked|Checked|function|column/i.test(m) && /does not exist|schema cache|could not find/i.test(m)
     ? 'This needs a database update — run db/2026-07-wms-order-check.sql in the Supabase SQL editor.' : m
@@ -295,10 +320,40 @@ export default function WmsPickPage() {
                 {order.pick_check_note && <span className="text-xs text-gray-400">· “{order.pick_check_note}”</span>}
                 <Link href={`/wms/dispatch/${order.id}`} className="ml-auto text-emerald-700 font-medium text-sm hover:underline">Dispatch →</Link>
               </div>
+            ) : order.status === 'Picked' && pendingCorr ? (
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-amber-600 font-semibold">⏳ Quantity change awaiting Head Office approval</span>
+                <span className="text-gray-500">— dispatch stays locked until it&apos;s approved.</span>
+              </div>
             ) : order.status === 'Picked' ? (
               <div>
                 <h2 className="font-semibold text-sm mb-1">Check &amp; approve this pick</h2>
-                <p className="text-xs text-gray-500 mb-3">A second person confirms the picked quantities above. Dispatch is locked until this is done. The person who picked can&apos;t check their own order.</p>
+                <p className="text-xs text-gray-500 mb-3">Confirm the picked quantities. Only change a number if it&apos;s wrong — a change is <b>sent to Head Office to approve</b>{isHO || isAdmin ? ' (applied straight away for you)' : ''}. The person who picked can&apos;t check their own order.</p>
+                <div className="overflow-x-auto border rounded-lg mb-3">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b text-xs text-gray-500"><tr>
+                      <th className="text-left px-3 py-1.5 font-medium">Item</th>
+                      <th className="text-right px-3 py-1.5 font-medium">Picked</th>
+                      <th className="text-right px-3 py-1.5 font-medium">Checked qty</th>
+                    </tr></thead>
+                    <tbody>
+                      {lines.map(l => {
+                        const cq = checkedQty[l.id] ?? String(clean(l.qty_picked))
+                        const diff = Number(cq) !== Number(l.qty_picked)
+                        return (
+                          <tr key={l.id} className="border-b last:border-0">
+                            <td className="px-3 py-1.5"><span className="font-mono">{l.item_code}</span> <span className="text-gray-400 text-xs">{l.description}</span></td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-gray-500">{fmtQty(l.qty_picked)}{l.uom ? ' ' + l.uom : ''}</td>
+                            <td className="px-3 py-1.5 text-right">
+                              <input value={cq} onChange={e => setCheckedQty(q => ({ ...q, [l.id]: e.target.value.replace(/[^0-9.]/g, '') }))}
+                                className={`w-24 border rounded px-2 py-1 text-sm text-right tabular-nums ${diff ? 'border-amber-400 bg-amber-50' : ''}`} inputMode="decimal" />
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
                 <div className="flex flex-wrap items-end gap-2">
                   <div className="flex-1 min-w-[220px]">
                     <label className="block text-xs text-gray-500 mb-1">Note <span className="text-gray-400">(optional)</span></label>

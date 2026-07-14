@@ -3,8 +3,9 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
+import { can } from '@/lib/permissions'
 
-interface DO { id: string; do_number: string | null; customer_name: string | null; order_no: string | null; vehicle: string | null; driver: string | null; remark: string | null; dispatched_by_name: string | null; dispatched_at: string }
+interface DO { id: string; order_id: string | null; do_number: string | null; customer_name: string | null; order_no: string | null; vehicle: string | null; driver: string | null; remark: string | null; dispatched_by_name: string | null; dispatched_at: string; load_checked_at: string | null; load_checked_by_name: string | null }
 interface DLine { item_code: string; description: string | null; batch_no: string; exp_date: string | null; qty: number; uom: string | null }
 interface Ord { id: string; order_no: string | null; customer_name: string | null; status: string; delivery_date: string | null }
 
@@ -16,8 +17,12 @@ const isToday = (iso: string) => new Date(iso).toDateString() === new Date().toD
 
 export default function WmsDispatchListPage() {
   const { profile, loading } = useProfile()
+  const canEdit = !!profile && can(profile, 'warehouse', 'edit')
   const [rows, setRows] = useState<DO[]>([]); const [q, setQ] = useState('')
   const [ready, setReady] = useState<Ord[]>([]); const [holding, setHolding] = useState(0)
+  const [prodOrders, setProdOrders] = useState<Set<string>>(new Set())   // order_ids that are production
+  const [loadCheckFor, setLoadCheckFor] = useState<DO | null>(null); const [loadNote, setLoadNote] = useState('')
+  const [busy, setBusy] = useState(false); const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
 
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
@@ -26,9 +31,25 @@ export default function WmsDispatchListPage() {
       supabase.from('wms_orders').select('id, order_no, customer_name, status, delivery_date').in('status', ['Checked', 'Partially Dispatched']).order('created_at', { ascending: false }).limit(50),
       supabase.from('wms_stock').select('quantity').eq('location_code', 'DISPATCH'),
     ])
-    setRows((data as DO[]) || [])
+    const dos = (data as DO[]) || []
+    setRows(dos)
     setReady((ord as Ord[]) || [])
     setHolding(clean(((hold as { quantity: number }[]) || []).reduce((s, r) => s + Number(r.quantity || 0), 0)))
+    // Which of these DOs belong to production orders (they skip the customer loading check).
+    const oids = [...new Set(dos.map(d => d.order_id).filter(Boolean) as string[])]
+    if (oids.length) {
+      const { data: os } = await supabase.from('wms_orders').select('id, source').in('id', oids).eq('source', 'production')
+      setProdOrders(new Set((os as { id: string }[] || []).map(o => o.id)))
+    } else setProdOrders(new Set())
+  }
+
+  async function doLoadCheck() {
+    if (!loadCheckFor) return
+    setBusy(true); setErr(''); setMsg('')
+    const { error } = await supabase.rpc('wms_load_check', { p_dispatch_id: loadCheckFor.id, p_note: loadNote || null })
+    setBusy(false)
+    if (error) { setErr(/wms_load_check|load_checked|function|column/i.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-check-stage-b.sql in Supabase.' : error.message); return }
+    setMsg(`Loading check recorded for ${loadCheckFor.do_number}.`); setLoadCheckFor(null); setLoadNote(''); load()
   }
   const dispatchedToday = useMemo(() => rows.filter(r => isToday(r.dispatched_at)).length, [rows])
 
@@ -59,6 +80,9 @@ export default function WmsDispatchListPage() {
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         <h1 className="text-2xl font-bold">Dispatch</h1>
         <p className="text-gray-500 text-sm mt-1 mb-5">What’s ready to ship, what’s in the holding bin, and every Delivery Order.</p>
+
+        {err && <div className="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2">{err}</div>}
+        {msg && <div className="mb-4 rounded-lg bg-green-50 border border-green-200 text-green-700 text-sm px-3 py-2">✓ {msg}</div>}
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           <div className="bg-white rounded-xl border shadow-sm px-4 py-3"><div className="text-2xl font-bold text-emerald-600 tabular-nums">{ready.length}</div><div className="text-xs text-gray-500 mt-0.5">Ready to dispatch</div></div>
@@ -94,13 +118,37 @@ export default function WmsDispatchListPage() {
                   <td className="px-4 py-2.5 text-xs">{d.vehicle || '—'}{d.driver ? ` · ${d.driver}` : ''}</td>
                   <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">{fmtTime(d.dispatched_at)}</td>
                   <td className="px-4 py-2.5 text-gray-500 text-xs">{d.dispatched_by_name}</td>
-                  <td className="px-4 py-2.5"><button onClick={() => reprint(d)} className="text-emerald-700 hover:underline text-xs font-medium">⬇ DO PDF</button></td>
+                  <td className="px-4 py-2.5 whitespace-nowrap">
+                    <div className="flex items-center gap-3">
+                      <button onClick={() => reprint(d)} className="text-emerald-700 hover:underline text-xs font-medium">⬇ DO PDF</button>
+                      {!(d.order_id && prodOrders.has(d.order_id)) && (
+                        d.load_checked_at
+                          ? <span className="text-teal-700 text-xs" title={`Loading checked by ${d.load_checked_by_name || 'staff'}`}>✓ Loaded</span>
+                          : canEdit && <button onClick={() => { setLoadCheckFor(d); setLoadNote(''); setErr('') }} className="text-teal-700 hover:underline text-xs font-medium">Loading check</button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      {loadCheckFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !busy && setLoadCheckFor(null)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-5" onClick={e => e.stopPropagation()}>
+            <h2 className="font-bold text-lg mb-1">Loading check — {loadCheckFor.do_number}</h2>
+            <p className="text-sm text-gray-500 mb-3">A second person confirms the loaded items match this Delivery Order / invoice. The person who checked the pick can’t also do the loading check.</p>
+            <label className="block text-xs text-gray-500 mb-1">Note <span className="text-gray-400">(optional)</span></label>
+            <input value={loadNote} onChange={e => setLoadNote(e.target.value)} placeholder="e.g. all items tallied to invoice" className="w-full border rounded-lg px-3 py-2 text-sm mb-4" />
+            <div className="flex gap-3">
+              <button onClick={doLoadCheck} disabled={busy} className="bg-teal-700 text-white px-5 py-2 rounded-lg hover:bg-teal-800 disabled:opacity-50 text-sm font-medium">{busy ? 'Saving…' : 'Confirm loading check'}</button>
+              <button onClick={() => !busy && setLoadCheckFor(null)} className="border px-5 py-2 rounded-lg hover:bg-gray-50 text-sm">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

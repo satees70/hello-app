@@ -55,6 +55,12 @@ interface RunModeReq {
   reason: string | null; status: string; requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
 }
 
+interface WmsCheckReq {
+  id: string; order_no: string | null; note: string | null
+  corrections: { item_code: string; picked_qty: number; checked_qty: number }[] | null
+  status: string; requested_by_name: string | null; created_at: string
+}
+
 interface MrCancelReq {
   id: string; request_no: string | null; factory_code: string | null; reason: string | null; status: string
   requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
@@ -143,6 +149,7 @@ export default function PendingChangesPage() {
   const [selSplit, setSelSplit] = useState<Set<string>>(new Set())
   const [splitFilters, setSplitFilters] = useState<Record<string, Set<string>>>({})
   const [stockAdjs, setStockAdjs] = useState<StockAdj[]>([])
+  const [wmsChecks, setWmsChecks] = useState<WmsCheckReq[]>([])
   const [selSA, setSelSA] = useState<Set<string>>(new Set())
   const [saFilters, setSaFilters] = useState<Record<string, Set<string>>>({})
   const [runModes, setRunModes] = useState<RunModeReq[]>([])
@@ -172,7 +179,7 @@ export default function PendingChangesPage() {
 
   useEffect(() => {
     if (!profile) return
-    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadFoodLoss()
+    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadFoodLoss(); loadWmsChecks()
     // Live refresh on any change-request activity, with a poll fallback
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) supabase.realtime.setAuth(data.session.access_token)
@@ -184,6 +191,7 @@ export default function PendingChangesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'do_change_requests' }, () => loadDoChanges())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'split_requests' }, () => loadSplits())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_adjustments' }, () => loadStockAdjs())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wms_check_qty_requests' }, () => loadWmsChecks())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'run_mode_requests' }, () => loadRunModes())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mr_cancel_requests' }, () => loadMrCancels())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'doc_delete_requests' }, () => loadDocDels())
@@ -194,7 +202,7 @@ export default function PendingChangesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mr_qty_move_requests' }, () => loadQtyMoves())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'food_loss_alerts' }, () => loadFoodLoss())
       .subscribe()
-    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges() }, 20000)
+    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadWmsChecks() }, 20000)
     return () => { supabase.removeChannel(channel); clearInterval(timer) }
   }, [profile])
 
@@ -258,6 +266,23 @@ export default function PendingChangesPage() {
     setSuccess('Split request rejected.'); setBusyId(''); loadSplits()
   }
 
+  async function loadWmsChecks() {
+    const { data } = await supabase.from('wms_check_qty_requests').select('id, order_no, note, corrections, status, requested_by_name, created_at').order('created_at', { ascending: false })
+    setWmsChecks((data as WmsCheckReq[]) || [])
+  }
+  async function approveWC(id: string) {
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('approve_wms_check_correction', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Pick check correction approved — order can now be dispatched.'); setBusyId(''); loadWmsChecks()
+  }
+  async function rejectWC(id: string) {
+    if (!confirm('Reject this quantity correction? The order stays locked for the checker to redo.')) return
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('reject_wms_check_correction', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Correction rejected.'); setBusyId(''); loadWmsChecks()
+  }
   async function loadStockAdjs() {
     const { data } = await supabase.from('stock_adjustments').select('*').order('created_at', { ascending: false })
     setStockAdjs((data as StockAdj[]) || [])
@@ -554,6 +579,7 @@ export default function PendingChangesPage() {
     ...doChanges.filter(c => c.status === 'Pending').map(c => P(c.id, 'Goods Received change', `${c.delivery_orders?.do_number || c.delivery_orders?.file_name || '—'} · ${c.line_label || ''}${c.field ? ' · ' + fld(c.field) + ': ' + (c.old_value ?? '—') + ' → ' + (c.new_value ?? '—') : ' · ' + c.request_type}`, c.requested_by_name, c.created_at, () => approveDo(c.id), () => rejectDo(c.id))),
     ...splits.filter(c => c.status === 'Pending').map(c => P(c.id, 'Batch split', c.label || '—', c.requested_by_name, c.created_at, () => approveSplit(c.id), () => rejectSplit(c.id))),
     ...stockAdjs.filter(a => a.status === 'Pending').map(a => P(a.id, 'Stock adjustment', `${a.item_code} ${a.direction} ${a.quantity}${a.batch_no ? ' · ' + a.batch_no : ''}`, a.requested_by_name, a.created_at, () => approveSA(a.id), () => rejectSA(a.id))),
+    ...wmsChecks.filter(w => w.status === 'Pending').map(w => P(w.id, 'Pick check qty correction', `${w.order_no || 'order'} · ${(w.corrections || []).map(c => `${c.item_code} ${c.picked_qty}→${c.checked_qty}`).join(', ')}`, w.requested_by_name, w.created_at, () => approveWC(w.id), () => rejectWC(w.id))),
     ...runModes.filter(a => a.status === 'Pending').map(a => P(a.id, 'Run mode', `${a.batch_no || a.item_code || '—'}: ${a.from_mode ?? '—'} → ${a.to_mode ?? '—'}`, a.requested_by_name, a.created_at, () => approveRM(a.id), () => rejectRM(a.id))),
     ...mrCancels.filter(a => a.status === 'Pending').map(a => P(a.id, 'Pick run cancel', a.request_no || '—', a.requested_by_name, a.created_at, () => approveMC(a.id), () => rejectMC(a.id))),
     ...docDels.filter(a => a.status === 'Pending').map(a => P(a.id, 'Document delete', a.file_name || '—', a.requested_by_name, a.created_at, () => approveDD(a), () => rejectDD(a.id))),
