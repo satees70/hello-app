@@ -4,19 +4,12 @@ import Link from 'next/link'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
 
-interface PO { id: string; po_number: string | null; supplier_name: string | null; status: string; expected_date: string | null; wms_po_lines?: { count: number }[] }
-interface Ord { id: string; order_no: string | null; customer_name: string | null; status: string; delivery_date: string | null; wms_order_lines?: { count: number }[] }
-interface Pend { id: string; item_code: string; description: string | null; batch_no: string; quantity: number }
-interface Move { id: string; move_type: string; item_code: string; from_location_code: string | null; to_location_code: string | null; quantity: number; moved_by_name: string | null; created_at: string }
+interface StockRow { item_code: string; location_code: string; batch_no: string; exp_date: string | null; quantity: number }
 
 const clean = (n: number) => Number(n.toPrecision(12))
-const fmtQty = (n: number) => clean(n).toLocaleString(undefined, { maximumFractionDigits: 4 })
-const fmtTime = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
-const STATUS_CHIP: Record<string, string> = {
-  Open: 'bg-amber-100 text-amber-700', 'Partially Received': 'bg-blue-100 text-blue-700', Review: 'bg-amber-100 text-amber-700',
-  Released: 'bg-emerald-100 text-emerald-700', Picking: 'bg-blue-100 text-blue-700', Fulfilled: 'bg-emerald-100 text-emerald-700', Picked: 'bg-emerald-100 text-emerald-700',
-}
-const MOVE_CHIP: Record<string, string> = { receipt: 'bg-sky-100 text-sky-700', putaway: 'bg-emerald-100 text-emerald-700', pick: 'bg-blue-100 text-blue-700', transfer: 'bg-violet-100 text-violet-700', adjust: 'bg-amber-100 text-amber-700', dispatch: 'bg-teal-100 text-teal-700' }
+const fmtN = (n: number) => clean(n).toLocaleString(undefined, { maximumFractionDigits: 2 })
+const STAGE = new Set(['GOODS-IN', 'DISPATCH'])
+
 const ORD_ORDER = ['Processing', 'Review', 'Released', 'Reserved', 'Picking', 'Picked', 'Partially Dispatched', 'Dispatched', 'Cancelled', 'Error']
 const ORD_COLORS: Record<string, string> = { Processing: 'bg-gray-300', Review: 'bg-amber-400', Released: 'bg-teal-300', Reserved: 'bg-teal-500', Picking: 'bg-blue-400', Picked: 'bg-emerald-400', 'Partially Dispatched': 'bg-blue-600', Dispatched: 'bg-emerald-600', Cancelled: 'bg-gray-300', Error: 'bg-red-400' }
 const PO_ORDER = ['Processing', 'Open', 'Partially Received', 'Fulfilled', 'Cancelled', 'Error']
@@ -24,55 +17,53 @@ const PO_COLORS: Record<string, string> = { Processing: 'bg-gray-300', Open: 'bg
 
 export default function WmsHome() {
   const { profile, loading } = useProfile()
-  const [pos, setPos] = useState<PO[]>([]); const [orders, setOrders] = useState<Ord[]>([])
-  const [pending, setPending] = useState<Pend[]>([]); const [moves, setMoves] = useState<Move[]>([])
-  const [counts, setCounts] = useState({ po: 0, ord: 0, pend: 0, pendQty: 0 })
+  const [work, setWork] = useState({ po: 0, putaway: 0, pick: 0, dispatch: 0 })
   const [alerts, setAlerts] = useState({ expired: 0, near: 0, low: 0, disc: 0 })
+  const [snap, setSnap] = useState({ items: 0, onHand: 0, bins: 0, batches: 0, goodsIn: 0, dispatchHold: 0, reserved: 0 })
+  const [exp, setExp] = useState({ expired: 0, w30: 0, w60: 0, w90: 0 })
   const [ordStatus, setOrdStatus] = useState<Record<string, number>>({})
   const [poStatus, setPoStatus] = useState<Record<string, number>>({})
   const [today, setToday] = useState<Record<string, number>>({})
 
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
-    const [poRes, ordRes, pendRes, mvRes, poCount, ordCount] = await Promise.all([
-      supabase.from('wms_purchase_orders').select('id, po_number, supplier_name, status, expected_date, wms_po_lines(count)').in('status', ['Open', 'Partially Received']).order('created_at', { ascending: false }).limit(6),
-      supabase.from('wms_orders').select('id, order_no, customer_name, status, delivery_date, wms_order_lines(count)').in('status', ['Review', 'Released', 'Picking']).order('created_at', { ascending: false }).limit(6),
-      supabase.from('wms_stock').select('id, item_code, description, batch_no, quantity').eq('location_code', 'GOODS-IN').gt('quantity', 0).order('item_code').limit(50),
-      supabase.from('wms_stock_moves').select('id, move_type, item_code, from_location_code, to_location_code, quantity, moved_by_name, created_at').order('created_at', { ascending: false }).limit(8),
-      supabase.from('wms_purchase_orders').select('id', { count: 'exact', head: true }).in('status', ['Open', 'Partially Received']),
-      supabase.from('wms_orders').select('id', { count: 'exact', head: true }).in('status', ['Review', 'Released', 'Picking']),
-    ])
-    const pend = (pendRes.data as Pend[]) || []
-    setPos((poRes.data as PO[]) || []); setOrders((ordRes.data as Ord[]) || []); setPending(pend); setMoves((mvRes.data as Move[]) || [])
-    setCounts({ po: poCount.count ?? 0, ord: ordCount.count ?? 0, pend: pend.length, pendQty: clean(pend.reduce((s, r) => s + Number(r.quantity || 0), 0)) })
-
-    // Alerts: expired / near-expiry (30d) / low-stock / count discrepancies
-    const todayISO = new Date().toISOString().slice(0, 10)
-    const in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)
-    const [expC, nearC, settings, stockQ, discRes] = await Promise.all([
-      supabase.from('wms_stock').select('id', { count: 'exact', head: true }).lt('exp_date', todayISO).gt('quantity', 0),
-      supabase.from('wms_stock').select('id', { count: 'exact', head: true }).gte('exp_date', todayISO).lte('exp_date', in30).gt('quantity', 0),
+    const start = new Date(); start.setHours(0, 0, 0, 0)
+    const [stock, settings, res, allOrd, allPo, todayMv, discRes] = await Promise.all([
+      fetchAll<StockRow>('wms_stock', 'item_code, location_code, batch_no, exp_date, quantity'),
       fetchAll<{ item_code: string; reorder_level: number | null }>('wms_item_settings', 'item_code, reorder_level'),
-      fetchAll<{ item_code: string; quantity: number }>('wms_stock', 'item_code, quantity'),
-      supabase.from('wms_count_lines').select('expected_qty, counted_qty, is_unexpected').not('counted_qty', 'is', null).limit(1000),
+      supabase.from('wms_reservations').select('qty').eq('status', 'active').limit(5000),
+      supabase.from('wms_orders').select('status').limit(3000),
+      supabase.from('wms_purchase_orders').select('status').limit(3000),
+      supabase.from('wms_stock_moves').select('move_type').gte('created_at', start.toISOString()).limit(5000),
+      supabase.from('wms_count_lines').select('expected_qty, counted_qty, is_unexpected').not('counted_qty', 'is', null).limit(2000),
     ])
-    const oh = new Map<string, number>()
-    for (const s of stockQ) { const k = s.item_code.toUpperCase(); oh.set(k, (oh.get(k) || 0) + Number(s.quantity)) }
-    let low = 0
-    for (const st of settings) { if (st.reorder_level == null) continue; if ((oh.get(st.item_code.toUpperCase()) || 0) <= st.reorder_level) low++ }
-    let disc = 0
-    for (const l of ((discRes.data as { expected_qty: number; counted_qty: number; is_unexpected: boolean }[]) || [])) { if (l.is_unexpected || Number(l.counted_qty) !== Number(l.expected_qty)) disc++ }
-    setAlerts({ expired: expC.count ?? 0, near: nearC.count ?? 0, low, disc })
-
-    // Pipeline status breakdown + today's completed activity
-    const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0)
-    const [{ data: allOrd }, { data: allPo }, { data: todayMv }] = await Promise.all([
-      supabase.from('wms_orders').select('status').limit(2000),
-      supabase.from('wms_purchase_orders').select('status').limit(2000),
-      supabase.from('wms_stock_moves').select('move_type').gte('created_at', startOfToday.toISOString()).limit(5000),
-    ])
+    const t0 = start.getTime()
+    let onHand = 0, goodsIn = 0, dispatchHold = 0, putawayLines = 0
+    const items = new Set<string>(), bins = new Set<string>(), batches = new Set<string>(), oh = new Map<string, number>()
+    const e = { expired: 0, w30: 0, w60: 0, w90: 0 }
+    for (const s of stock) {
+      const q = Number(s.quantity); if (q <= 0) continue
+      onHand += q; items.add(s.item_code); batches.add(`${s.item_code}|${s.batch_no}`)
+      oh.set(s.item_code.toUpperCase(), (oh.get(s.item_code.toUpperCase()) || 0) + q)
+      if (s.location_code === 'GOODS-IN') { goodsIn += q; putawayLines++ }
+      else if (s.location_code === 'DISPATCH') dispatchHold += q
+      else bins.add(s.location_code)
+      if (s.exp_date) { const d = Math.round((new Date(s.exp_date + 'T00:00:00').getTime() - t0) / 86400000); if (d < 0) e.expired++; else if (d <= 30) e.w30++; else if (d <= 60) e.w60++; else if (d <= 90) e.w90++ }
+    }
+    let low = 0; for (const st of settings) { if (st.reorder_level == null) continue; if ((oh.get(st.item_code.toUpperCase()) || 0) <= st.reorder_level) low++ }
+    let disc = 0; for (const l of ((discRes.data as { expected_qty: number; counted_qty: number; is_unexpected: boolean }[]) || [])) { if (l.is_unexpected || Number(l.counted_qty) !== Number(l.expected_qty)) disc++ }
+    const reserved = clean(((res.data as { qty: number }[]) || []).reduce((a, r) => a + Number(r.qty || 0), 0))
     const tally = (rows: { [k: string]: string }[] | null, key: string) => { const m: Record<string, number> = {}; for (const r of rows || []) m[r[key]] = (m[r[key]] || 0) + 1; return m }
-    setOrdStatus(tally(allOrd, 'status')); setPoStatus(tally(allPo, 'status')); setToday(tally(todayMv, 'move_type'))
+    const ord = tally(allOrd.data, 'status'), po = tally(allPo.data, 'status')
+    setOrdStatus(ord); setPoStatus(po); setToday(tally(todayMv.data, 'move_type'))
+    setExp(e); setAlerts({ expired: e.expired, near: e.w30, low, disc })
+    setSnap({ items: items.size, onHand: clean(onHand), bins: bins.size, batches: batches.size, goodsIn: clean(goodsIn), dispatchHold: clean(dispatchHold), reserved })
+    setWork({
+      po: (po['Open'] || 0) + (po['Partially Received'] || 0),
+      putaway: putawayLines,
+      pick: (ord['Review'] || 0) + (ord['Released'] || 0) + (ord['Reserved'] || 0) + (ord['Picking'] || 0),
+      dispatch: (ord['Picked'] || 0) + (ord['Partially Dispatched'] || 0),
+    })
   }
 
   if (loading) return <div className="p-8 text-sm text-gray-500">Loading…</div>
@@ -80,30 +71,42 @@ export default function WmsHome() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-        <h1 className="text-2xl font-bold">Warehouse — today</h1>
-        <p className="text-gray-500 text-sm mt-1 mb-6">Hello{profile?.full_name ? `, ${profile.full_name.split(' ')[0]}` : ''} — here’s what needs doing.</p>
+        <h1 className="text-2xl font-bold">Warehouse — overview</h1>
+        <p className="text-gray-500 text-sm mt-1 mb-6">Hello{profile?.full_name ? `, ${profile.full_name.split(' ')[0]}` : ''} — here’s the picture at a glance.</p>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
-          <Tile href="/wms/purchase-orders" n={counts.po} label="POs to receive" accent="text-amber-600" />
-          <Tile href="/wms/orders" n={counts.ord} label="Orders to pick" accent="text-blue-600" />
-          <Tile href="/wms/putaway" n={counts.pend} label="Pending putaway" accent="text-emerald-700" />
-          <Tile href="/wms/stock" n={counts.pendQty} label="Qty in goods-in" accent="text-gray-500" isQty />
+        <p className="text-xs font-semibold text-gray-400 tracking-wide mb-2">WORK TO DO</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          <Tile href="/wms/purchase-orders" n={work.po} label="POs to receive" accent="text-amber-600" />
+          <Tile href="/wms/putaway" n={work.putaway} label="Pending putaway" accent="text-emerald-700" />
+          <Tile href="/wms/orders" n={work.pick} label="Orders to pick" accent="text-blue-600" />
+          <Tile href="/wms/dispatch" n={work.dispatch} label="Ready to dispatch" accent="text-teal-600" />
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+        <p className="text-xs font-semibold text-gray-400 tracking-wide mb-2">NEEDS ATTENTION</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           <Tile href="/wms/reports/expiry" n={alerts.expired} label="Expired lots" accent="text-red-600" />
           <Tile href="/wms/reports/expiry" n={alerts.near} label="Near expiry (30d)" accent="text-amber-600" />
           <Tile href="/wms/reports" n={alerts.low} label="Low stock" accent="text-orange-600" />
           <Tile href="/wms/reports/activity" n={alerts.disc} label="Count discrepancies" accent="text-violet-600" />
         </div>
 
-        <div className="bg-white rounded-xl border shadow-sm p-4 mb-6">
-          <div className="text-xs font-semibold text-gray-500 mb-2">COMPLETED TODAY</div>
-          <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-            {([['receipt', 'Received'], ['putaway', 'Put away'], ['pick', 'Picked'], ['transfer', 'Transfers'], ['dispatch', 'Dispatched'], ['adjust', 'Adjusted']] as const).map(([k, l]) => (
-              <span key={k} className="flex items-center gap-1.5"><b className="tabular-nums text-emerald-700">{today[k] || 0}</b> <span className="text-gray-500">{l}</span></span>
-            ))}
-          </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
+          <Card title="Stock snapshot" href="/wms/reports" cta="Reports">
+            <Row label="Items in stock" value={fmtN(snap.items)} />
+            <Row label="Total on-hand (units)" value={fmtN(snap.onHand)} />
+            <Row label="Bins in use" value={fmtN(snap.bins)} />
+            <Row label="Distinct batches" value={fmtN(snap.batches)} />
+            <Row label="Reserved (for orders)" value={fmtN(snap.reserved)} />
+            <Row label="In goods-in (awaiting putaway)" value={fmtN(snap.goodsIn)} />
+            <Row label="In dispatch holding (packed)" value={fmtN(snap.dispatchHold)} last />
+          </Card>
+          <Card title="Expiry breakdown" href="/wms/reports/expiry" cta="Expiry alerts">
+            <Row label="🔴 Expired" value={fmtN(exp.expired)} strong={exp.expired > 0} />
+            <Row label="Within 30 days" value={fmtN(exp.w30)} strong={exp.w30 > 0} />
+            <Row label="Within 60 days" value={fmtN(exp.w60)} />
+            <Row label="Within 90 days" value={fmtN(exp.w90)} last />
+            <p className="px-4 py-2 text-xs text-gray-400">Lots with an expiry, soonest first on the expiry page.</p>
+          </Card>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
@@ -117,75 +120,44 @@ export default function WmsHome() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
-          <Panel title="To receive" href="/wms/purchase-orders" cta="All purchase orders">
-            {pos.length === 0 ? <Empty text="No open purchase orders." /> : pos.map(o => (
-              <Link key={o.id} href={`/wms/receive/${o.id}`} className="flex items-center justify-between gap-2 px-4 py-2.5 hover:bg-gray-50 border-b last:border-0">
-                <div className="min-w-0"><div className="font-mono text-sm font-medium truncate">{o.po_number || '(no number)'}</div><div className="text-xs text-gray-500 truncate">{o.supplier_name || '—'}{o.expected_date ? ` · exp ${o.expected_date}` : ''}</div></div>
-                <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CHIP[o.status] || 'bg-gray-100'}`}>{o.status}</span>
-              </Link>
+        <div className="bg-white rounded-xl border shadow-sm p-4">
+          <div className="text-xs font-semibold text-gray-400 tracking-wide mb-2">COMPLETED TODAY</div>
+          <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+            {([['receipt', 'Received'], ['putaway', 'Put away'], ['pick', 'Picked'], ['transfer', 'Transfers'], ['dispatch', 'Dispatched'], ['adjust', 'Adjusted']] as const).map(([k, l]) => (
+              <span key={k} className="flex items-center gap-1.5"><b className="tabular-nums text-emerald-700">{today[k] || 0}</b> <span className="text-gray-500">{l}</span></span>
             ))}
-          </Panel>
-
-          <Panel title="To pick" href="/wms/orders" cta="All orders">
-            {orders.length === 0 ? <Empty text="No orders waiting to pick." /> : orders.map(o => (
-              <Link key={o.id} href={`/wms/pick/${o.id}`} className="flex items-center justify-between gap-2 px-4 py-2.5 hover:bg-gray-50 border-b last:border-0">
-                <div className="min-w-0"><div className="font-mono text-sm font-medium truncate">{o.order_no || '(no number)'}</div><div className="text-xs text-gray-500 truncate">{o.customer_name || '—'}{o.delivery_date ? ` · deliver ${o.delivery_date}` : ''}</div></div>
-                <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CHIP[o.status] || 'bg-gray-100'}`}>{o.status}</span>
-              </Link>
-            ))}
-          </Panel>
-        </div>
-
-        <Panel title={`Pending putaway${counts.pend ? ` (${counts.pend})` : ''}`} href="/wms/putaway" cta="Go to putaway">
-          {pending.length === 0 ? <Empty text="Nothing waiting to be shelved." /> : pending.slice(0, 6).map(p => (
-            <div key={p.id} className="flex items-center justify-between gap-2 px-4 py-2.5 border-b last:border-0">
-              <div className="min-w-0"><span className="font-mono text-sm font-medium">{p.item_code}</span> <span className="text-xs text-gray-500 truncate">{p.description}{p.batch_no ? ` · b:${p.batch_no}` : ''}</span></div>
-              <span className="shrink-0 text-sm font-medium tabular-nums">×{fmtQty(p.quantity)}</span>
-            </div>
-          ))}
-        </Panel>
-
-        <div className="mt-6">
-          <Panel title="Recent activity" href="/wms/movements" cta="Full log">
-            {moves.length === 0 ? <Empty text="No stock movements yet." /> : moves.map(m => (
-              <div key={m.id} className="flex items-center gap-3 px-4 py-2 border-b last:border-0 text-sm">
-                <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium capitalize ${MOVE_CHIP[m.move_type] || 'bg-gray-100'}`}>{m.move_type}</span>
-                <span className="font-mono font-medium">{m.item_code}</span>
-                <span className="text-xs text-gray-400">{m.from_location_code || '—'} → {m.to_location_code || '—'}</span>
-                <span className="ml-auto tabular-nums text-gray-600">{fmtQty(m.quantity)}</span>
-                <span className="text-xs text-gray-400 hidden sm:inline whitespace-nowrap">{fmtTime(m.created_at)}</span>
-              </div>
-            ))}
-          </Panel>
+            <Link href="/wms/movements" className="ml-auto text-xs text-emerald-700 hover:underline">Movement log →</Link>
+          </div>
         </div>
       </div>
     </div>
   )
 }
 
-function Tile({ href, n, label, accent, isQty }: { href: string; n: number; label: string; accent: string; isQty?: boolean }) {
+function Tile({ href, n, label, accent }: { href: string; n: number; label: string; accent: string }) {
   return (
     <Link href={href} className="bg-white rounded-xl border shadow-sm px-4 py-3 hover:border-emerald-300 transition-colors">
-      <div className={`text-2xl font-bold tabular-nums ${accent}`}>{isQty ? fmtQty(n) : n}</div>
+      <div className={`text-2xl font-bold tabular-nums ${accent}`}>{n}</div>
       <div className="text-xs text-gray-500 mt-0.5">{label}</div>
     </Link>
   )
 }
-function Panel({ title, href, cta, children }: { title: string; href: string; cta: string; children: React.ReactNode }) {
+function Card({ title, href, cta, children }: { title: string; href: string; cta: string; children: React.ReactNode }) {
   return (
     <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-2.5 border-b bg-gray-50">
-        <h2 className="text-sm font-semibold text-gray-700">{title}</h2>
-        <Link href={href} className="text-xs text-emerald-700 hover:underline">{cta} →</Link>
-      </div>
+      <div className="flex items-center justify-between px-4 py-2.5 border-b bg-gray-50"><h2 className="text-sm font-semibold text-gray-700">{title}</h2><Link href={href} className="text-xs text-emerald-700 hover:underline">{cta} →</Link></div>
       <div>{children}</div>
     </div>
   )
 }
-function Empty({ text }: { text: string }) { return <div className="px-4 py-6 text-center text-gray-400 text-sm">{text}</div> }
-
-// Segmented status bar with a clickable count legend (each links to the filtered list).
+function Row({ label, value, strong, last }: { label: string; value: string; strong?: boolean; last?: boolean }) {
+  return (
+    <div className={`flex items-center justify-between px-4 py-2 text-sm ${last ? '' : 'border-b'}`}>
+      <span className="text-gray-600">{label}</span>
+      <span className={`tabular-nums ${strong ? 'font-bold text-red-600' : 'font-medium text-gray-800'}`}>{value}</span>
+    </div>
+  )
+}
 function StatusBar({ data, order, colors, empty, hrefBase }: { data: Record<string, number>; order: string[]; colors: Record<string, string>; empty: string; hrefBase: string }) {
   const keys = [...order.filter(k => (data[k] || 0) > 0), ...Object.keys(data).filter(k => !order.includes(k) && data[k] > 0)]
   const total = keys.reduce((s, k) => s + data[k], 0)
