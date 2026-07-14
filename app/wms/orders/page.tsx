@@ -20,7 +20,7 @@ const fmtTime = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2
 const STATUS_CHIP: Record<string, string> = {
   Processing: 'bg-gray-100 text-gray-600', Review: 'bg-amber-100 text-amber-700', Released: 'bg-emerald-100 text-emerald-700',
   Reserved: 'bg-teal-100 text-teal-700', Picking: 'bg-blue-100 text-blue-700', Picked: 'bg-emerald-100 text-emerald-700',
-  Dispatched: 'bg-emerald-100 text-emerald-700', Error: 'bg-red-100 text-red-700', Cancelled: 'bg-gray-100 text-gray-400',
+  'Partially Dispatched': 'bg-blue-100 text-blue-700', Dispatched: 'bg-emerald-100 text-emerald-700', Error: 'bg-red-100 text-red-700', Cancelled: 'bg-gray-100 text-gray-400',
 }
 
 export default function WmsOrdersPage() {
@@ -167,7 +167,7 @@ export default function WmsOrdersPage() {
                       {canEdit && o.status === 'Review' && <button onClick={() => release(o)} className="text-teal-700 font-medium hover:underline">Release</button>}
                       {['Reserved', 'Released', 'Picking', 'Picked'].includes(o.status) &&
                         <Link href={`/wms/pick/${o.id}`} className="text-emerald-700 font-medium hover:underline">Pick →</Link>}
-                      {o.status === 'Picked' && <Link href={`/wms/dispatch/${o.id}`} className="text-emerald-700 font-medium hover:underline">Dispatch →</Link>}
+                      {['Picked', 'Partially Dispatched'].includes(o.status) && <Link href={`/wms/dispatch/${o.id}`} className="text-emerald-700 font-medium hover:underline">Dispatch →</Link>}
                       <button onClick={() => viewLines(o)} className="text-emerald-700 hover:underline">View lines</button>
                       {o.file_path && <button onClick={() => viewPdf(o)} className="text-gray-500 hover:underline">PDF</button>}
                       {canEdit && ['Reserved', 'Released', 'Picking'].includes(o.status) && <button onClick={() => cancelOrder(o)} className="text-amber-600 hover:underline">Cancel</button>}

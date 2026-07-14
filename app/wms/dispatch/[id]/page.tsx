@@ -41,10 +41,21 @@ export default function WmsDispatchPage() {
       if (g) g.quantity = clean(g.quantity + Number(m.quantity))
       else grouped.set(k, { ...m, quantity: Number(m.quantity) })
     }
-    const ds: Draft[] = [...grouped.values()].map(m => {
+    // subtract what was already dispatched (for partial deliveries)
+    const { data: disps } = await supabase.from('wms_dispatches').select('id').eq('order_id', id)
+    const dispIds = (disps as { id: string }[] || []).map(d => d.id)
+    const already = new Map<string, number>()
+    if (dispIds.length) {
+      const { data: dls } = await supabase.from('wms_dispatch_lines').select('item_code, batch_no, qty').in('dispatch_id', dispIds)
+      for (const l of (dls as { item_code: string; batch_no: string; qty: number }[] || [])) {
+        const k = `${l.item_code.toUpperCase()}|${l.batch_no}`; already.set(k, (already.get(k) || 0) + Number(l.qty))
+      }
+    }
+    const ds: Draft[] = [...grouped.entries()].map(([k, m]) => {
       const ol = byItem.get(m.item_code.toUpperCase())
-      return { order_line_id: ol?.id ?? null, item_id: ol?.item_id ?? null, item_code: m.item_code, description: ol?.description ?? null, batch_no: m.batch_no, exp_date: m.exp_date, uom: ol?.uom ?? null, staged: m.quantity, qty: String(clean(m.quantity)) }
-    }).sort((a, b) => a.item_code.localeCompare(b.item_code))
+      const remain = clean(m.quantity - (already.get(k) || 0))
+      return { order_line_id: ol?.id ?? null, item_id: ol?.item_id ?? null, item_code: m.item_code, description: ol?.description ?? null, batch_no: m.batch_no, exp_date: m.exp_date, uom: ol?.uom ?? null, staged: remain, qty: remain > 0 ? String(remain) : '0' }
+    }).filter(d => d.staged > 0).sort((a, b) => a.item_code.localeCompare(b.item_code))
     setOrder(ord); setDrafts(ds)
   }, [id])
   useEffect(() => { if (profile) load() }, [profile, load])
@@ -77,9 +88,10 @@ export default function WmsDispatchPage() {
     setBusy(true); setErr('')
     const { data, error } = await supabase.rpc('wms_dispatch_order', { p_order_id: id, p_vehicle: vehicle, p_driver: driver, p_remark: remark, p_lines: lines })
     if (error) { setErr(error.message); setBusy(false); return }
-    await generatePdf((data as { do_number: string }).do_number)
+    const res = data as { do_number: string; fully_dispatched: boolean }
+    await generatePdf(res.do_number)
     setBusy(false)
-    router.push('/wms/dispatch')
+    if (res.fully_dispatched) router.push('/wms/dispatch'); else load()
   }
 
   if (loading) return <div className="p-8 text-sm text-gray-500">Loading…</div>
@@ -92,14 +104,15 @@ export default function WmsDispatchPage() {
         <h1 className="text-2xl font-bold mt-2 mb-1">Dispatch {order.order_no || '(no number)'}</h1>
         <p className="text-gray-500 text-sm mb-5">{order.customer_name || 'Customer ?'}{order.delivery_date ? ` · deliver ${order.delivery_date}` : ''} · confirm what physically ships, then print the Delivery Order.</p>
 
-        {order.status === 'Dispatched' && <p className="text-sm bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg p-3 mb-4">This order is already dispatched. Dispatching again creates another DO.</p>}
+        {order.status === 'Partially Dispatched' && <p className="text-sm bg-blue-50 text-blue-700 border border-blue-200 rounded-lg p-3 mb-4">Part of this order was already dispatched — below is what’s still in the holding bin to ship.</p>}
+        {order.status === 'Dispatched' && drafts.length === 0 && <p className="text-sm bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg p-3 mb-4">This order is fully dispatched. Reprint its Delivery Orders on the Delivery Orders page.</p>}
         {err && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg mb-4">{err}</p>}
 
         <div className="bg-white rounded-xl shadow-sm border overflow-x-auto mb-4">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b"><tr>{['Item', 'Batch', 'Exp', 'Picked', 'Ship qty', 'Unit'].map(h => <th key={h} className="text-left px-4 py-2.5 font-medium text-gray-600">{h}</th>)}</tr></thead>
+            <thead className="bg-gray-50 border-b"><tr>{['Item', 'Batch', 'Exp', 'To ship', 'Ship qty', 'Unit'].map(h => <th key={h} className="text-left px-4 py-2.5 font-medium text-gray-600">{h}</th>)}</tr></thead>
             <tbody>
-              {drafts.length === 0 && <tr><td colSpan={6} className="text-center py-8 text-gray-400">Nothing picked for this order yet.</td></tr>}
+              {drafts.length === 0 && <tr><td colSpan={6} className="text-center py-8 text-gray-400">Nothing left to dispatch (either not picked yet, or all shipped).</td></tr>}
               {drafts.map((d, i) => (
                 <tr key={i} className="border-b last:border-0">
                   <td className="px-4 py-2.5"><span className="font-mono font-medium">{d.item_code}</span> <span className="text-gray-400 text-xs">{d.description}</span></td>

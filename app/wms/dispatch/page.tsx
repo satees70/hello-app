@@ -1,25 +1,36 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
 
 interface DO { id: string; do_number: string | null; customer_name: string | null; order_no: string | null; vehicle: string | null; driver: string | null; remark: string | null; dispatched_by_name: string | null; dispatched_at: string }
 interface DLine { item_code: string; description: string | null; batch_no: string; exp_date: string | null; qty: number; uom: string | null }
+interface Ord { id: string; order_no: string | null; customer_name: string | null; status: string; delivery_date: string | null }
 
 const clean = (n: number) => Number(n.toPrecision(12))
 const fmtQty = (n: number) => clean(n).toLocaleString(undefined, { maximumFractionDigits: 4 })
 const fmtDate = (d: string | null) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB') : ''
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+const isToday = (iso: string) => new Date(iso).toDateString() === new Date().toDateString()
 
 export default function WmsDispatchListPage() {
   const { profile, loading } = useProfile()
   const [rows, setRows] = useState<DO[]>([]); const [q, setQ] = useState('')
+  const [ready, setReady] = useState<Ord[]>([]); const [holding, setHolding] = useState(0)
 
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
-    const { data } = await supabase.from('wms_dispatches').select('*').order('dispatched_at', { ascending: false }).limit(200)
+    const [{ data }, { data: ord }, { data: hold }] = await Promise.all([
+      supabase.from('wms_dispatches').select('*').order('dispatched_at', { ascending: false }).limit(200),
+      supabase.from('wms_orders').select('id, order_no, customer_name, status, delivery_date').in('status', ['Picked', 'Partially Dispatched']).order('created_at', { ascending: false }).limit(50),
+      supabase.from('wms_stock').select('quantity').eq('location_code', 'DISPATCH'),
+    ])
     setRows((data as DO[]) || [])
+    setReady((ord as Ord[]) || [])
+    setHolding(clean(((hold as { quantity: number }[]) || []).reduce((s, r) => s + Number(r.quantity || 0), 0)))
   }
+  const dispatchedToday = useMemo(() => rows.filter(r => isToday(r.dispatched_at)).length, [rows])
 
   async function reprint(d: DO) {
     const { data: ls } = await supabase.from('wms_dispatch_lines').select('item_code, description, batch_no, exp_date, qty, uom').eq('dispatch_id', d.id)
@@ -46,8 +57,29 @@ export default function WmsDispatchListPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-        <h1 className="text-2xl font-bold">Delivery Orders</h1>
-        <p className="text-gray-500 text-sm mt-1 mb-5">Dispatched orders. Reprint any Delivery Order here.</p>
+        <h1 className="text-2xl font-bold">Dispatch</h1>
+        <p className="text-gray-500 text-sm mt-1 mb-5">What’s ready to ship, what’s in the holding bin, and every Delivery Order.</p>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          <div className="bg-white rounded-xl border shadow-sm px-4 py-3"><div className="text-2xl font-bold text-blue-600 tabular-nums">{ready.length}</div><div className="text-xs text-gray-500 mt-0.5">Ready to dispatch</div></div>
+          <div className="bg-white rounded-xl border shadow-sm px-4 py-3"><div className="text-2xl font-bold text-amber-600 tabular-nums">{fmtQty(holding)}</div><div className="text-xs text-gray-500 mt-0.5">Qty in holding</div></div>
+          <div className="bg-white rounded-xl border shadow-sm px-4 py-3"><div className="text-2xl font-bold text-emerald-700 tabular-nums">{dispatchedToday}</div><div className="text-xs text-gray-500 mt-0.5">Dispatched today</div></div>
+          <div className="bg-white rounded-xl border shadow-sm px-4 py-3"><div className="text-2xl font-bold text-gray-500 tabular-nums">{rows.length}</div><div className="text-xs text-gray-500 mt-0.5">Delivery Orders</div></div>
+        </div>
+
+        {ready.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden mb-6">
+            <div className="px-4 py-2.5 border-b bg-gray-50 text-sm font-semibold text-gray-700">Ready to dispatch</div>
+            {ready.map(o => (
+              <Link key={o.id} href={`/wms/dispatch/${o.id}`} className="flex items-center justify-between gap-2 px-4 py-2.5 hover:bg-gray-50 border-b last:border-0">
+                <div className="min-w-0"><span className="font-mono text-sm font-medium">{o.order_no || '(no number)'}</span> <span className="text-xs text-gray-500 truncate">{o.customer_name || '—'}{o.delivery_date ? ` · deliver ${o.delivery_date}` : ''}</span></div>
+                <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${o.status === 'Partially Dispatched' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>{o.status}</span>
+              </Link>
+            ))}
+          </div>
+        )}
+
+        <h2 className="text-sm font-semibold text-gray-700 mb-2">Delivery Orders</h2>
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search DO / customer / order…" className="border rounded-lg px-3 py-2 text-sm w-full mb-4" />
         <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
