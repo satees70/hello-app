@@ -16,9 +16,18 @@ interface Loc { id: string; location_type: string; pick_sequence: number | null 
 const clean = (n: number) => Number(n.toPrecision(12))
 const fmtQty = (n: number) => clean(n).toLocaleString(undefined, { maximumFractionDigits: 4 })
 const fmtDate = (d: string | null) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB') : ''
-// FEFO effective expiry: real expiry, or (received date + 1 year) when none is set.
-const plusYear = (iso: string) => { const d = new Date(iso); d.setFullYear(d.getFullYear() + 1); return d.toISOString().slice(0, 10) }
-const effExp = (s: { exp_date: string | null; created_at: string }) => s.exp_date || plusYear(s.created_at)
+// FEFO effective expiry: real expiry, else (batch date YYMMDD + 1 year), else
+// (received date + 1 year). Used only to sort; never stored or shown.
+const plusYear = (ymd: string) => { const d = new Date(ymd + 'T00:00:00'); d.setFullYear(d.getFullYear() + 1); return d.toISOString().slice(0, 10) }
+const batchDate = (batch: string): string | null => {
+  const m = /^(\d{2})(\d{2})(\d{2})/.exec(batch || ''); if (!m) return null
+  const mo = Number(m[2]), d = Number(m[3]); if (mo < 1 || mo > 12 || d < 1 || d > 31) return null
+  return `20${m[1]}-${m[2]}-${m[3]}`
+}
+const effExp = (s: { exp_date: string | null; batch_no: string; created_at: string }) => {
+  if (s.exp_date) return s.exp_date
+  const bd = batchDate(s.batch_no); return bd ? plusYear(bd) : plusYear(s.created_at.slice(0, 10))
+}
 const STATUS_CHIP: Record<string, string> = {
   Review: 'bg-amber-100 text-amber-700', Released: 'bg-emerald-100 text-emerald-700',
   Picking: 'bg-blue-100 text-blue-700', Picked: 'bg-emerald-100 text-emerald-700',

@@ -1,8 +1,10 @@
 -- WMS: for FEFO ordering only, treat a batch with NO expiry as expiring 1 year
--- after it was received (wms_stock.created_at). Nothing is stored or shown — the
--- exp_date stays null everywhere; this only affects the "earliest expiry first"
--- sort in reserve / replenish / auto-pick.  Run in Supabase. Idempotent.
--- Effective expiry expression: coalesce(s.exp_date, (s.created_at + interval '1 year')::date)
+-- after its BATCH DATE (the YYMMDD the batch number starts with = the received
+-- date), falling back to wms_stock.created_at if the batch isn't a YYMMDD.
+-- Nothing is stored or shown — exp_date stays null everywhere; this only affects
+-- the "earliest expiry first" sort in reserve / replenish / auto-pick.
+-- Run in Supabase. Idempotent.
+-- Effective expiry = coalesce(exp_date, batch(YYMMDD)+1yr, created_at+1yr).
 
 create or replace function public.wms_reserve_order(p_order_id uuid)
 returns jsonb language plpgsql security definer set search_path = public as $$
@@ -18,7 +20,7 @@ begin
       select s.location_id, s.location_code, s.batch_no, s.exp_date, s.quantity
       from wms_stock s join wms_locations l on l.id = s.location_id
       where s.warehouse_code='8BT' and s.item_code = ln.item_code and s.quantity > 0 and l.location_type <> 'STAGE'
-      order by (l.location_type <> 'SL'), coalesce(s.exp_date, (s.created_at + interval '1 year')::date) asc, coalesce(l.pick_sequence,999999), s.location_code
+      order by (l.location_type <> 'SL'), coalesce(s.exp_date, case when s.batch_no ~ '^[0-9]{6}' then (to_date(substring(s.batch_no from 1 for 6), 'YYMMDD') + interval '1 year')::date end, (s.created_at + interval '1 year')::date) asc, coalesce(l.pick_sequence,999999), s.location_code
     loop
       exit when v_need <= 0;
       select coalesce(sum(qty),0) into v_resd from wms_reservations
@@ -52,7 +54,7 @@ begin
     from wms_stock s join wms_locations l on l.id = s.location_id
     where s.warehouse_code = '8BT' and s.item_code = p_item_code and s.quantity > 0
       and l.location_type = 'XS' and s.location_id <> p_to_location_id
-    order by coalesce(s.exp_date, (s.created_at + interval '1 year')::date) asc, coalesce(l.pick_sequence, 999999), s.location_code
+    order by coalesce(s.exp_date, case when s.batch_no ~ '^[0-9]{6}' then (to_date(substring(s.batch_no from 1 for 6), 'YYMMDD') + interval '1 year')::date end, (s.created_at + interval '1 year')::date) asc, coalesce(l.pick_sequence, 999999), s.location_code
   loop
     exit when v_need <= 0;
     v_take := least(r.quantity, v_need);
@@ -92,7 +94,7 @@ begin
     select s.id, s.location_id, s.location_code, s.batch_no, s.exp_date, s.quantity
     from wms_stock s join wms_locations l on l.id = s.location_id
     where s.warehouse_code = '8BT' and s.item_code = v_line.item_code and s.quantity > 0 and l.location_type <> 'STAGE'
-    order by (l.location_type <> 'SL'), coalesce(s.exp_date, (s.created_at + interval '1 year')::date) asc, coalesce(l.pick_sequence, 999999), s.location_code
+    order by (l.location_type <> 'SL'), coalesce(s.exp_date, case when s.batch_no ~ '^[0-9]{6}' then (to_date(substring(s.batch_no from 1 for 6), 'YYMMDD') + interval '1 year')::date end, (s.created_at + interval '1 year')::date) asc, coalesce(l.pick_sequence, 999999), s.location_code
   loop
     exit when v_need <= 0;
     v_take := least(r.quantity, v_need);
