@@ -48,6 +48,7 @@ export default function WmsReceivePage() {
 
   const [po, setPo] = useState<PO | null>(null)
   const [lines, setLines] = useState<Line[]>([])
+  const [suppliers, setSuppliers] = useState<{ name: string; code: string }[]>([])
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const [grnId, setGrnId] = useState<string | null>(null)
   const [busy, setBusy] = useState('')
@@ -76,14 +77,19 @@ export default function WmsReceivePage() {
   const load = useCallback(async () => {
     const { data: o } = await supabase.from('wms_purchase_orders').select('id, po_number, supplier_name, status, expected_date').eq('id', id).single()
     const { data: ls } = await supabase.from('wms_po_lines').select('*').eq('po_id', id).order('line_no')
-    setPo((o as PO) || null); setLines((ls as Line[]) || [])
+    const { data: sup } = await supabase.from('wms_suppliers').select('name, code').eq('active', true)
+    setPo((o as PO) || null); setLines((ls as Line[]) || []); setSuppliers((sup as { name: string; code: string }[]) || [])
   }, [id])
   useEffect(() => { if (profile) load() }, [profile, load])
 
   const outstanding = (l: Line) => clean(l.quantity - l.qty_received)
   // Batch defaults to today's date + a short supplier code, so the SAME item from two
   // suppliers on the same day gets distinct batches (e.g. 260714ABC vs 260714XYZ). Editable.
-  const defaultBatch = useMemo(() => TODAY + supCode(po?.supplier_name), [po])
+  const defaultBatch = useMemo(() => {
+    const nm = (po?.supplier_name || '').trim().toUpperCase()
+    const match = suppliers.find(s => s.name.trim().toUpperCase() === nm)   // preset code wins
+    return TODAY + (match?.code || supCode(po?.supplier_name))               // else derive from the name
+  }, [po, suppliers])
   const newDraft = useCallback((): Draft => ({ qty: '', batch: defaultBatch, exp: '', qc: 'pass', note: '', photo: null, preview: '' }), [defaultBatch])
   const draftOf = (l: Line) => drafts[l.id] ?? newDraft()
   const setDraft = (lineId: string, patch: Partial<Draft>) => setDrafts(d => ({ ...d, [lineId]: { ...(d[lineId] ?? newDraft()), ...patch } }))

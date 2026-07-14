@@ -31,6 +31,7 @@ export default function WmsPurchaseOrdersPage() {
 
   const [pos, setPos] = useState<PO[]>([])
   const [items, setItems] = useState<Item[]>([])
+  const [suppliers, setSuppliers] = useState<{ name: string; code: string }[]>([])
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
@@ -49,6 +50,8 @@ export default function WmsPurchaseOrdersPage() {
   async function load() {
     const { data } = await supabase.from('wms_purchase_orders').select('*, wms_po_lines(count)').order('created_at', { ascending: false }).limit(100)
     setPos((data as PO[]) || [])
+    const { data: sup } = await supabase.from('wms_suppliers').select('name, code').eq('active', true).order('name')
+    setSuppliers((sup as { name: string; code: string }[]) || [])
     if (!items.length) setItems(await fetchAll<Item>('items', 'code, description, unit', 'code'))
   }
 
@@ -147,7 +150,7 @@ export default function WmsPurchaseOrdersPage() {
             {showManual && (
               <form onSubmit={saveManual} className="mt-4 border-t pt-4 space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div><label className="block text-xs text-gray-500 mb-1">Supplier</label><input value={mSupplier} onChange={e => setMSupplier(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" required /></div>
+                  <div><label className="block text-xs text-gray-500 mb-1">Supplier</label><input list="wms-suppliers" value={mSupplier} onChange={e => setMSupplier(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" required /><datalist id="wms-suppliers">{suppliers.map(s => <option key={s.name} value={s.name}>{`${s.name} (${s.code})`}</option>)}</datalist></div>
                   <div><label className="block text-xs text-gray-500 mb-1">PO number <span className="text-gray-400">(optional)</span></label><input value={mPo} onChange={e => setMPo(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                   <div><label className="block text-xs text-gray-500 mb-1">Expected date <span className="text-gray-400">(optional)</span></label><input value={mExpected} onChange={e => setMExpected(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="e.g. 20/7/2026" /></div>
                 </div>
