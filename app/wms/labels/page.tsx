@@ -45,12 +45,15 @@ export default function WmsLabelsPage() {
     if (!bItem.trim()) return
     setBusy(true)
     const n = Math.max(1, Math.min(500, Math.round(Number(bCopies) || 1)))
-    const subs: string[] = []
-    if (bDesc) subs.push(bDesc.length > 30 ? bDesc.slice(0, 29) + '…' : bDesc)
-    subs.push(bBatch ? `Batch ${bBatch}` : 'No batch')
-    if (bExp) subs.push(`Exp ${new Date(bExp + 'T00:00:00').toLocaleDateString('en-GB')}`)
-    const one = { qrText: encodeItem(bItem, bBatch, bExp), title: bItem, subs }
-    await downloadLabels(Array.from({ length: n }, () => one), bSize, `BatchLabels_${bItem.replace(/[^a-zA-Z0-9]/g, '-')}_x${n}.pdf`)
+    const name = bDesc ? (bDesc.length > 24 ? bDesc.slice(0, 23) + '…' : bDesc) : ''
+    const expLine = bExp ? `Exp ${new Date(bExp + 'T00:00:00').toLocaleDateString('en-GB')}` : ''
+    const width = String(n).length
+    const items = Array.from({ length: n }, (_, i) => {
+      const seq = String(i + 1).padStart(width, '0')
+      const subs = [name, `Batch ${bBatch || '—'}  #${seq}/${n}`, expLine].filter(Boolean)
+      return { qrText: encodeItem(bItem, bBatch, bExp, seq), title: bItem, subs }
+    })
+    await downloadLabels(items, bSize, `BatchLabels_${bItem.replace(/[^a-zA-Z0-9]/g, '-')}_x${n}.pdf`)
     setBusy(false)
   }
 

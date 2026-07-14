@@ -5,12 +5,13 @@ import QRCode from 'qrcode'
 //   stock → "ITEM|<item_code>|<batch>|<expiry>"
 export type ParsedQr =
   | { kind: 'bin'; code: string }
-  | { kind: 'item'; item_code: string; batch: string; exp: string }
+  | { kind: 'item'; item_code: string; batch: string; exp: string; serial: string }
   | { kind: 'unknown'; raw: string }
 
 export const encodeBin = (code: string) => `BIN|${code.trim().toUpperCase()}`
-export const encodeItem = (itemCode: string, batch?: string | null, exp?: string | null) =>
-  `ITEM|${itemCode.trim()}|${(batch || '').trim()}|${(exp || '').trim()}`
+// ITEM|<code>|<batch>|<expiry>|<serial>  — serial is per-label (per physical package).
+export const encodeItem = (itemCode: string, batch?: string | null, exp?: string | null, serial?: string | null) =>
+  `ITEM|${itemCode.trim()}|${(batch || '').trim()}|${(exp || '').trim()}${serial != null && serial !== '' ? `|${serial}` : ''}`
 
 export function parseQr(raw: string): ParsedQr {
   const t = (raw || '').trim()
@@ -18,7 +19,7 @@ export function parseQr(raw: string): ParsedQr {
   if (up.startsWith('BIN|')) return { kind: 'bin', code: t.slice(4).trim().toUpperCase() }
   if (up.startsWith('ITEM|')) {
     const parts = t.split('|')
-    return { kind: 'item', item_code: (parts[1] || '').trim(), batch: (parts[2] || '').trim(), exp: (parts[3] || '').trim() }
+    return { kind: 'item', item_code: (parts[1] || '').trim(), batch: (parts[2] || '').trim(), exp: (parts[3] || '').trim(), serial: (parts[4] || '').trim() }
   }
   return { kind: 'unknown', raw: t }
 }

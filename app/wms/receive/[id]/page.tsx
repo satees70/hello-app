@@ -15,7 +15,15 @@ interface Draft { qty: string; batch: string; exp: string; qc: 'pass' | 'fail'; 
 const clean = (n: number) => Number(n.toPrecision(12))
 const fmtQty = (n: number) => clean(n).toLocaleString(undefined, { maximumFractionDigits: 4 })
 const STATUS_CHIP: Record<string, string> = { Open: 'bg-amber-100 text-amber-700', 'Partially Received': 'bg-blue-100 text-blue-700', Fulfilled: 'bg-emerald-100 text-emerald-700' }
-const blank = (): Draft => ({ qty: '', batch: '', exp: '', qc: 'pass', note: '', photo: null, preview: '' })
+// Today's date as YYMMDD (Malaysia), the usual batch-number convention.
+function todayYYMMDD(): string {
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kuala_Lumpur', year: '2-digit', month: '2-digit', day: '2-digit' }).formatToParts(new Date())
+  const g = (t: string) => p.find(x => x.type === t)?.value || ''
+  return `${g('year')}${g('month')}${g('day')}`
+}
+const TODAY = todayYYMMDD()
+// Batch defaults to today's date; staff can retype it.
+const blank = (): Draft => ({ qty: '', batch: TODAY, exp: '', qc: 'pass', note: '', photo: null, preview: '' })
 
 function compressImage(file: File): Promise<Blob> {
   return new Promise((resolve, reject) => {
@@ -54,12 +62,15 @@ export default function WmsReceivePage() {
     const d = draftOf(l)
     const n = labelCopies(l)
     if (n > 100 && !confirm(`Print ${n} labels for ${l.item_code}?`)) return
-    const subs: string[] = []
-    if (l.description) subs.push(l.description.length > 30 ? l.description.slice(0, 29) + '…' : l.description)
-    subs.push(d.batch ? `Batch ${d.batch}` : 'No batch')
-    if (d.exp) subs.push(`Exp ${new Date(d.exp + 'T00:00:00').toLocaleDateString('en-GB')}`)
-    const one = { qrText: encodeItem(l.item_code, d.batch, d.exp), title: l.item_code, subs }
-    await downloadLabels(Array.from({ length: n }, () => one), labelSize, `BatchLabels_${l.item_code.replace(/[^a-zA-Z0-9]/g, '-')}_x${n}.pdf`)
+    const name = l.description ? (l.description.length > 24 ? l.description.slice(0, 23) + '…' : l.description) : ''
+    const expLine = d.exp ? `Exp ${new Date(d.exp + 'T00:00:00').toLocaleDateString('en-GB')}` : ''
+    const width = String(n).length
+    const items = Array.from({ length: n }, (_, i) => {
+      const seq = String(i + 1).padStart(width, '0')
+      const subs = [name, `Batch ${d.batch || '—'}  #${seq}/${n}`, expLine].filter(Boolean)
+      return { qrText: encodeItem(l.item_code, d.batch, d.exp, seq), title: l.item_code, subs }
+    })
+    await downloadLabels(items, labelSize, `BatchLabels_${l.item_code.replace(/[^a-zA-Z0-9]/g, '-')}_x${n}.pdf`)
   }
 
   const load = useCallback(async () => {
