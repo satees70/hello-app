@@ -20,6 +20,7 @@ const fmtTime = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2
 const STATUS_CHIP: Record<string, string> = {
   Processing: 'bg-gray-100 text-gray-600', Review: 'bg-amber-100 text-amber-700', Released: 'bg-emerald-100 text-emerald-700',
   Reserved: 'bg-teal-100 text-teal-700', Picking: 'bg-emerald-100 text-emerald-700', Picked: 'bg-emerald-100 text-emerald-700',
+  Checked: 'bg-teal-100 text-teal-700',
   'Partially Dispatched': 'bg-emerald-100 text-emerald-700', Dispatched: 'bg-emerald-100 text-emerald-700', Error: 'bg-red-100 text-red-700', Cancelled: 'bg-gray-100 text-gray-400',
 }
 
@@ -176,9 +177,10 @@ export default function WmsOrdersPage() {
                   <td className="px-4 py-2.5 whitespace-nowrap">
                     <div className="flex gap-3 text-xs">
                       {canEdit && o.status === 'Review' && <button onClick={() => release(o)} className="text-teal-700 font-medium hover:underline">Release</button>}
-                      {['Reserved', 'Released', 'Picking', 'Picked'].includes(o.status) &&
+                      {['Reserved', 'Released', 'Picking'].includes(o.status) &&
                         <Link href={`/wms/pick/${o.id}`} className="text-emerald-700 font-medium hover:underline">Pick →</Link>}
-                      {['Picked', 'Partially Dispatched'].includes(o.status) && <Link href={`/wms/dispatch/${o.id}`} className="text-emerald-700 font-medium hover:underline">Dispatch →</Link>}
+                      {o.status === 'Picked' && <Link href={`/wms/pick/${o.id}`} className="text-teal-700 font-medium hover:underline">Check →</Link>}
+                      {['Checked', 'Partially Dispatched'].includes(o.status) && <Link href={`/wms/dispatch/${o.id}`} className="text-emerald-700 font-medium hover:underline">Dispatch →</Link>}
                       <button onClick={() => viewLines(o)} className="text-emerald-700 hover:underline">View lines</button>
                       {o.file_path && <button onClick={() => viewPdf(o)} className="text-gray-500 hover:underline">PDF</button>}
                       {canEdit && ['Reserved', 'Released', 'Picking'].includes(o.status) && <button onClick={() => cancelOrder(o)} className="text-amber-600 hover:underline">Cancel</button>}

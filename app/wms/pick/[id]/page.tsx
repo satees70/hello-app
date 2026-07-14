@@ -8,7 +8,7 @@ import { can } from '@/lib/permissions'
 import ScanGate from '@/components/ScanGate'
 import { matchBin, matchItem } from '@/lib/qr'
 
-interface Order { id: string; order_no: string | null; customer_name: string | null; status: string; delivery_date: string | null }
+interface Order { id: string; order_no: string | null; customer_name: string | null; status: string; delivery_date: string | null; source: string | null; pick_checked_by_name: string | null; pick_checked_at: string | null; pick_check_note: string | null }
 interface Line { id: string; line_no: number | null; item_id: string | null; item_code: string; description: string | null; quantity: number; qty_picked: number; uom: string | null; source_hint: string | null; remarks: string | null }
 interface Stock { id: string; item_code: string; location_id: string; location_code: string; batch_no: string; exp_date: string | null; quantity: number; created_at: string }
 interface Loc { id: string; location_type: string; pick_sequence: number | null }
@@ -31,6 +31,7 @@ const effExp = (s: { exp_date: string | null; batch_no: string; created_at: stri
 const STATUS_CHIP: Record<string, string> = {
   Review: 'bg-amber-100 text-amber-700', Released: 'bg-emerald-100 text-emerald-700',
   Picking: 'bg-emerald-100 text-emerald-700', Picked: 'bg-emerald-100 text-emerald-700',
+  Checked: 'bg-teal-100 text-teal-700',
 }
 
 export default function WmsPickPage() {
@@ -49,11 +50,12 @@ export default function WmsPickPage() {
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
   const [scanFor, setScanFor] = useState<{ line: Line; stock: Stock; qty: number } | null>(null)
   const [pickMode, setPickMode] = useState<'manual' | 'scan'>('manual')
+  const [checkNote, setCheckNote] = useState('')
   useEffect(() => { const m = localStorage.getItem('wmsPickMode'); if (m === 'scan' || m === 'manual') setPickMode(m) }, [])
   const setMode = (m: 'manual' | 'scan') => { setPickMode(m); try { localStorage.setItem('wmsPickMode', m) } catch { /* ignore */ } }
 
   const load = useCallback(async () => {
-    const { data: o } = await supabase.from('wms_orders').select('id, order_no, customer_name, status, delivery_date').eq('id', id).single()
+    const { data: o } = await supabase.from('wms_orders').select('id, order_no, customer_name, status, delivery_date, source, pick_checked_by_name, pick_checked_at, pick_check_note').eq('id', id).single()
     const { data: ls } = await supabase.from('wms_order_lines').select('*').eq('order_id', id).order('line_no')
     const lineList = (ls as Line[]) || []
     const codes = [...new Set(lineList.map(l => l.item_code))]
@@ -178,6 +180,18 @@ export default function WmsPickPage() {
     remaining: clean(lines.reduce((s, l) => s + Math.max(remainingOf(l), 0), 0)),
   }), [lines])
 
+  // Checker sign-off — a second person approves the picked order before dispatch.
+  async function confirmCheck() {
+    if (!canEdit) return
+    setBusy('check'); setErr(''); setMsg('')
+    const { error } = await supabase.rpc('wms_check_pick', { p_order_id: id, p_note: checkNote || null })
+    setBusy('')
+    if (error) { setErr(needsCheckDb(error.message)); return }
+    setMsg('Order checked — it can now be dispatched.'); setCheckNote(''); load()
+  }
+  const needsCheckDb = (m: string) => /wms_check_pick|pick_checked|Checked|function|column/i.test(m) && /does not exist|schema cache|could not find/i.test(m)
+    ? 'This needs a database update — run db/2026-07-wms-order-check.sql in the Supabase SQL editor.' : m
+
   if (loading) return <div className="p-8 text-sm text-gray-500">Loading…</div>
   if (!order) return <div className="p-8 text-sm text-gray-500">Order not found. <Link href="/wms/orders" className="text-emerald-700 underline">Back to orders</Link></div>
 
@@ -270,6 +284,34 @@ export default function WmsPickPage() {
           })}
           {lines.length === 0 && <div className="bg-white rounded-xl border p-8 text-center text-gray-400 text-sm">This order has no lines.</div>}
         </div>
+
+        {/* Checker sign-off — appears once everything is picked. */}
+        {lines.length > 0 && totals.remaining <= 0 && (
+          <div className="mt-6 bg-white rounded-xl border shadow-sm p-4">
+            {order.status === 'Checked' || order.pick_checked_at ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-teal-700 font-semibold text-sm">✓ Checked</span>
+                <span className="text-sm text-gray-500">by {order.pick_checked_by_name || 'staff'}{order.pick_checked_at ? ` · ${new Date(order.pick_checked_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</span>
+                {order.pick_check_note && <span className="text-xs text-gray-400">· “{order.pick_check_note}”</span>}
+                <Link href={`/wms/dispatch/${order.id}`} className="ml-auto text-emerald-700 font-medium text-sm hover:underline">Dispatch →</Link>
+              </div>
+            ) : order.status === 'Picked' ? (
+              <div>
+                <h2 className="font-semibold text-sm mb-1">Check &amp; approve this pick</h2>
+                <p className="text-xs text-gray-500 mb-3">A second person confirms the picked quantities above. Dispatch is locked until this is done. The person who picked can&apos;t check their own order.</p>
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="flex-1 min-w-[220px]">
+                    <label className="block text-xs text-gray-500 mb-1">Note <span className="text-gray-400">(optional)</span></label>
+                    <input value={checkNote} onChange={e => setCheckNote(e.target.value)} placeholder="e.g. all counts verified" className="w-full border rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  {canEdit && <button onClick={confirmCheck} disabled={busy === 'check'} className="bg-teal-700 text-white px-5 py-2 rounded-lg hover:bg-teal-800 disabled:opacity-50 text-sm font-medium">{busy === 'check' ? 'Saving…' : 'Confirm check'}</button>}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">This order is <b>{order.status}</b>.</p>
+            )}
+          </div>
+        )}
       </div>
 
       {scanFor && (

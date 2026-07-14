@@ -23,7 +23,7 @@ export default function WmsDispatchListPage() {
   async function load() {
     const [{ data }, { data: ord }, { data: hold }] = await Promise.all([
       supabase.from('wms_dispatches').select('*').order('dispatched_at', { ascending: false }).limit(200),
-      supabase.from('wms_orders').select('id, order_no, customer_name, status, delivery_date').in('status', ['Picked', 'Partially Dispatched']).order('created_at', { ascending: false }).limit(50),
+      supabase.from('wms_orders').select('id, order_no, customer_name, status, delivery_date').in('status', ['Checked', 'Partially Dispatched']).order('created_at', { ascending: false }).limit(50),
       supabase.from('wms_stock').select('quantity').eq('location_code', 'DISPATCH'),
     ])
     setRows((data as DO[]) || [])
