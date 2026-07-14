@@ -46,6 +46,8 @@ export default function WmsPurchaseOrdersPage() {
   const [mLines, setMLines] = useState<DraftLine[]>([{ item_code: '', description: '', quantity: '', uom: '' }])
   const [saving, setSaving] = useState(false)
 
+  const [statusFilter, setStatusFilter] = useState('')
+  useEffect(() => { const s = new URLSearchParams(window.location.search).get('status'); if (s) setStatusFilter(s) }, [])
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
     const { data } = await supabase.from('wms_purchase_orders').select('*, wms_po_lines(count)').order('created_at', { ascending: false }).limit(100)
@@ -174,12 +176,21 @@ export default function WmsPurchaseOrdersPage() {
         {err && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg mb-4">{err}</p>}
         {msg && <p className="text-emerald-700 text-sm bg-emerald-50 border border-emerald-200 p-3 rounded-lg mb-4">{msg}</p>}
 
+        <div className="flex items-center gap-2 mb-3 text-sm">
+          <span className="text-gray-500">Status:</span>
+          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="border rounded-lg px-3 py-1.5">
+            <option value="">All</option>
+            {Array.from(new Set(pos.map(o => o.status))).map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          {statusFilter && <button onClick={() => setStatusFilter('')} className="text-emerald-700 hover:underline text-xs">clear</button>}
+        </div>
+
         <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b"><tr>{['PO No', 'Supplier', 'Expected', 'Lines', 'Status', 'Added', 'Actions'].map(h => <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
             <tbody>
-              {pos.length === 0 && <tr><td colSpan={7} className="text-center py-10 text-gray-400">No purchase orders yet.</td></tr>}
-              {pos.map(o => (
+              {(statusFilter ? pos.filter(o => o.status === statusFilter) : pos).length === 0 && <tr><td colSpan={7} className="text-center py-10 text-gray-400">No purchase orders{statusFilter ? ` with status “${statusFilter}”` : ' yet'}.</td></tr>}
+              {(statusFilter ? pos.filter(o => o.status === statusFilter) : pos).map(o => (
                 <tr key={o.id} className="border-b last:border-0 hover:bg-gray-50">
                   <td className="px-4 py-2.5 font-mono">{o.po_number || <span className="text-gray-300">{o.file_name ? '(reading…)' : '—'}</span>}</td>
                   <td className="px-4 py-2.5">{o.supplier_name || <span className="text-gray-300">—</span>}</td>

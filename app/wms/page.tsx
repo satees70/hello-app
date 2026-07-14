@@ -109,11 +109,11 @@ export default function WmsHome() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
           <div className="bg-white rounded-xl border shadow-sm p-4">
             <div className="flex items-center justify-between mb-3"><div className="text-sm font-semibold text-gray-700">Customer orders</div><Link href="/wms/orders" className="text-xs text-emerald-700 hover:underline">All orders →</Link></div>
-            <StatusBar data={ordStatus} order={ORD_ORDER} colors={ORD_COLORS} empty="No orders yet." />
+            <StatusBar data={ordStatus} order={ORD_ORDER} colors={ORD_COLORS} empty="No orders yet." hrefBase="/wms/orders" />
           </div>
           <div className="bg-white rounded-xl border shadow-sm p-4">
             <div className="flex items-center justify-between mb-3"><div className="text-sm font-semibold text-gray-700">Purchase orders</div><Link href="/wms/purchase-orders" className="text-xs text-emerald-700 hover:underline">All POs →</Link></div>
-            <StatusBar data={poStatus} order={PO_ORDER} colors={PO_COLORS} empty="No purchase orders yet." />
+            <StatusBar data={poStatus} order={PO_ORDER} colors={PO_COLORS} empty="No purchase orders yet." hrefBase="/wms/purchase-orders" />
           </div>
         </div>
 
@@ -185,18 +185,18 @@ function Panel({ title, href, cta, children }: { title: string; href: string; ct
 }
 function Empty({ text }: { text: string }) { return <div className="px-4 py-6 text-center text-gray-400 text-sm">{text}</div> }
 
-// Segmented status bar with a count legend.
-function StatusBar({ data, order, colors, empty }: { data: Record<string, number>; order: string[]; colors: Record<string, string>; empty: string }) {
+// Segmented status bar with a clickable count legend (each links to the filtered list).
+function StatusBar({ data, order, colors, empty, hrefBase }: { data: Record<string, number>; order: string[]; colors: Record<string, string>; empty: string; hrefBase: string }) {
   const keys = [...order.filter(k => (data[k] || 0) > 0), ...Object.keys(data).filter(k => !order.includes(k) && data[k] > 0)]
   const total = keys.reduce((s, k) => s + data[k], 0)
   if (!total) return <div className="text-xs text-gray-400">{empty}</div>
   return (
     <>
       <div className="flex h-3 rounded-full overflow-hidden bg-gray-100">
-        {keys.map(k => <div key={k} className={colors[k] || 'bg-gray-400'} style={{ width: `${(data[k] / total) * 100}%` }} title={`${k}: ${data[k]}`} />)}
+        {keys.map(k => <Link key={k} href={`${hrefBase}?status=${encodeURIComponent(k)}`} className={`${colors[k] || 'bg-gray-400'} hover:opacity-80`} style={{ width: `${(data[k] / total) * 100}%` }} title={`${k}: ${data[k]} — click to filter`} />)}
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2.5 text-xs">
-        {keys.map(k => <span key={k} className="flex items-center gap-1.5"><span className={`w-2.5 h-2.5 rounded-sm ${colors[k] || 'bg-gray-400'}`} />{k} <b className="tabular-nums">{data[k]}</b></span>)}
+        {keys.map(k => <Link key={k} href={`${hrefBase}?status=${encodeURIComponent(k)}`} className="flex items-center gap-1.5 hover:underline"><span className={`w-2.5 h-2.5 rounded-sm ${colors[k] || 'bg-gray-400'}`} />{k} <b className="tabular-nums">{data[k]}</b></Link>)}
       </div>
     </>
   )

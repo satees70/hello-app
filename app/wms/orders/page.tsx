@@ -35,7 +35,9 @@ export default function WmsOrdersPage() {
 
   const [linesFor, setLinesFor] = useState<Order | null>(null)
   const [lines, setLines] = useState<Line[]>([])
+  const [statusFilter, setStatusFilter] = useState('')
 
+  useEffect(() => { const s = new URLSearchParams(window.location.search).get('status'); if (s) setStatusFilter(s) }, [])
   useEffect(() => { if (profile) load() }, [profile])
 
   async function load() {
@@ -144,6 +146,15 @@ export default function WmsOrdersPage() {
         {err && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg mb-4">{err}</p>}
         {msg && <p className="text-emerald-700 text-sm bg-emerald-50 border border-emerald-200 p-3 rounded-lg mb-4">{msg}</p>}
 
+        <div className="flex items-center gap-2 mb-3 text-sm">
+          <span className="text-gray-500">Status:</span>
+          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="border rounded-lg px-3 py-1.5">
+            <option value="">All</option>
+            {Array.from(new Set(orders.map(o => o.status))).map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          {statusFilter && <button onClick={() => setStatusFilter('')} className="text-emerald-700 hover:underline text-xs">clear</button>}
+        </div>
+
         <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
@@ -152,8 +163,8 @@ export default function WmsOrdersPage() {
               ))}</tr>
             </thead>
             <tbody>
-              {orders.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-gray-400">No orders yet — upload a PDF to start.</td></tr>}
-              {orders.map(o => (
+              {(statusFilter ? orders.filter(o => o.status === statusFilter) : orders).length === 0 && <tr><td colSpan={8} className="text-center py-10 text-gray-400">No orders{statusFilter ? ` with status “${statusFilter}”` : ' yet — upload a PDF to start'}.</td></tr>}
+              {(statusFilter ? orders.filter(o => o.status === statusFilter) : orders).map(o => (
                 <tr key={o.id} className="border-b last:border-0 hover:bg-gray-50">
                   <td className="px-4 py-2.5 max-w-[200px] truncate" title={o.file_name || ''}>{o.file_name}</td>
                   <td className="px-4 py-2.5 font-mono">{o.order_no || <span className="text-gray-300">—</span>}</td>
