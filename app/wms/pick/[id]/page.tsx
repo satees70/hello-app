@@ -48,6 +48,9 @@ export default function WmsPickPage() {
   const [busy, setBusy] = useState('')
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
   const [scanFor, setScanFor] = useState<{ line: Line; stock: Stock; qty: number } | null>(null)
+  const [pickMode, setPickMode] = useState<'manual' | 'scan'>('manual')
+  useEffect(() => { const m = localStorage.getItem('wmsPickMode'); if (m === 'scan' || m === 'manual') setPickMode(m) }, [])
+  const setMode = (m: 'manual' | 'scan') => { setPickMode(m); try { localStorage.setItem('wmsPickMode', m) } catch { /* ignore */ } }
 
   const load = useCallback(async () => {
     const { data: o } = await supabase.from('wms_orders').select('id, order_no, customer_name, status, delivery_date').eq('id', id).single()
@@ -192,8 +195,16 @@ export default function WmsPickPage() {
         {err && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg mb-4">{err}</p>}
         {msg && <p className="text-emerald-700 text-sm bg-emerald-50 border border-emerald-200 p-3 rounded-lg mb-4">✓ {msg}</p>}
 
-        <div className="flex flex-wrap gap-2 mb-5">
+        <div className="flex flex-wrap items-center gap-2 mb-5">
           <button onClick={downloadPickList} className="border px-4 py-2 rounded-lg hover:bg-gray-50 text-sm font-medium">⬇ Print pick list (PDF)</button>
+          {canEdit && (
+            <div className="inline-flex rounded-lg border bg-white p-1 text-sm ml-auto">
+              <span className="px-2 py-1 text-gray-400 text-xs self-center">Pick by:</span>
+              {(['manual', 'scan'] as const).map(m => (
+                <button key={m} onClick={() => setMode(m)} className={`px-3 py-1 rounded-md font-medium ${pickMode === m ? 'bg-emerald-700 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>{m === 'manual' ? 'Manual' : '📷 Scan'}</button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="space-y-3">
@@ -244,10 +255,10 @@ export default function WmsPickPage() {
                             <input value={input} onChange={e => setQtyInput(q => ({ ...q, [l.id]: e.target.value.replace(/[^0-9.]/g, '') }))}
                               className="w-24 border rounded-lg px-3 py-2 text-sm text-right tabular-nums" inputMode="decimal" />
                           </div>
-                          <button onClick={() => chosenStock && startPick(l, chosenStock, Number(input))}
+                          <button onClick={() => chosenStock && (pickMode === 'manual' ? pickFromBin(l, chosenStock, Number(input)) : startPick(l, chosenStock, Number(input)))}
                             disabled={busy === l.id || !chosenStock || !(Number(input) > 0)}
                             className="bg-emerald-700 text-white px-4 py-2 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium whitespace-nowrap">
-                            {busy === l.id ? 'Picking…' : '📷 Scan & pick'}
+                            {busy === l.id ? 'Picking…' : pickMode === 'manual' ? 'Pick' : '📷 Scan & pick'}
                           </button>
                         </div>
                       )}
