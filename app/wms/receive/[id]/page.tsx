@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
@@ -22,8 +22,8 @@ function todayYYMMDD(): string {
   return `${g('year')}${g('month')}${g('day')}`
 }
 const TODAY = todayYYMMDD()
-// Batch defaults to today's date; staff can retype it.
-const blank = (): Draft => ({ qty: '', batch: TODAY, exp: '', qc: 'pass', note: '', photo: null, preview: '' })
+// Short code from a supplier name (first 3 letters/digits), to tag the batch.
+const supCode = (name?: string | null) => (name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3)
 
 function compressImage(file: File): Promise<Blob> {
   return new Promise((resolve, reject) => {
@@ -67,7 +67,7 @@ export default function WmsReceivePage() {
     const width = String(n).length
     const items = Array.from({ length: n }, (_, i) => {
       const seq = String(i + 1).padStart(width, '0')
-      const subs = [name, `Batch ${d.batch || '—'}  #${seq}/${n}`, expLine].filter(Boolean)
+      const subs = [name, `Batch ${d.batch || '—'}  #${seq}`, expLine].filter(Boolean)
       return { qrText: encodeItem(l.item_code, d.batch, d.exp, seq), title: l.item_code, subs }
     })
     await downloadLabels(items, labelSize, `BatchLabels_${l.item_code.replace(/[^a-zA-Z0-9]/g, '-')}_x${n}.pdf`)
@@ -81,8 +81,12 @@ export default function WmsReceivePage() {
   useEffect(() => { if (profile) load() }, [profile, load])
 
   const outstanding = (l: Line) => clean(l.quantity - l.qty_received)
-  const draftOf = (l: Line) => drafts[l.id] ?? blank()
-  const setDraft = (lineId: string, patch: Partial<Draft>) => setDrafts(d => ({ ...d, [lineId]: { ...(d[lineId] ?? blank()), ...patch } }))
+  // Batch defaults to today's date + a short supplier code, so the SAME item from two
+  // suppliers on the same day gets distinct batches (e.g. 260714ABC vs 260714XYZ). Editable.
+  const defaultBatch = useMemo(() => TODAY + supCode(po?.supplier_name), [po])
+  const newDraft = useCallback((): Draft => ({ qty: '', batch: defaultBatch, exp: '', qc: 'pass', note: '', photo: null, preview: '' }), [defaultBatch])
+  const draftOf = (l: Line) => drafts[l.id] ?? newDraft()
+  const setDraft = (lineId: string, patch: Partial<Draft>) => setDrafts(d => ({ ...d, [lineId]: { ...(d[lineId] ?? newDraft()), ...patch } }))
 
   async function onPhoto(l: Line, file: File) {
     try { const blob = await compressImage(file); setDraft(l.id, { photo: blob, preview: URL.createObjectURL(blob) }) }

@@ -50,7 +50,7 @@ export default function WmsLabelsPage() {
     const width = String(n).length
     const items = Array.from({ length: n }, (_, i) => {
       const seq = String(i + 1).padStart(width, '0')
-      const subs = [name, `Batch ${bBatch || '—'}  #${seq}/${n}`, expLine].filter(Boolean)
+      const subs = [name, `Batch ${bBatch || '—'}  #${seq}`, expLine].filter(Boolean)
       return { qrText: encodeItem(bItem, bBatch, bExp, seq), title: bItem, subs }
     })
     await downloadLabels(items, bSize, `BatchLabels_${bItem.replace(/[^a-zA-Z0-9]/g, '-')}_x${n}.pdf`)
