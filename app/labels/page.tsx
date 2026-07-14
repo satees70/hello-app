@@ -29,7 +29,7 @@ const STAGES: { key: Stage; label: string }[] = [
 ]
 const STAGE_STYLE: Record<Stage, string> = {
   requested: 'bg-gray-100 text-gray-600', material: 'bg-amber-100 text-amber-700',
-  printed: 'bg-blue-100 text-blue-700', sent: 'bg-indigo-100 text-indigo-700', completed: 'bg-green-100 text-green-700',
+  printed: 'bg-emerald-100 text-emerald-700', sent: 'bg-indigo-100 text-indigo-700', completed: 'bg-green-100 text-green-700',
 }
 
 export default function LabelsPage() {
@@ -171,7 +171,7 @@ export default function LabelsPage() {
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   // Flatten to label lines
@@ -192,7 +192,7 @@ export default function LabelsPage() {
         <div className="flex flex-wrap gap-2 mb-4">
           {([{ key: 'all', label: 'All' }, ...STAGES] as { key: Stage | 'all'; label: string }[]).map(s => (
             <button key={s.key} onClick={() => { setFilter(s.key); setSel(new Set()) }}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${filter === s.key ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${filter === s.key ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
               {s.label}{s.key !== 'all' && counts[s.key] ? ` (${counts[s.key]})` : ''}
             </button>
           ))}
@@ -204,7 +204,7 @@ export default function LabelsPage() {
           const fac = facOpts.includes(manFac) ? manFac : facOpts[0]
           return (
             <div className="mb-5">
-              <button onClick={() => { setShowManual(o => !o); setError(''); setSuccess('') }} className="text-blue-600 hover:underline text-sm font-medium">
+              <button onClick={() => { setShowManual(o => !o); setError(''); setSuccess('') }} className="text-emerald-600 hover:underline text-sm font-medium">
                 {showManual ? '× Close label request' : '➕ Request a label manually'}
               </button>
               {showManual && (
@@ -228,7 +228,7 @@ export default function LabelsPage() {
                       <input value={manBatch} onChange={e => setManBatch(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" /></div>
                     <div className="flex flex-col gap-1 w-40"><span className="text-xs font-medium text-gray-600">Expiry</span>
                       <input type="date" value={manExp} onChange={e => setManExp(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" /></div>
-                    <button onClick={addManualLine} className="border border-blue-600 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 text-sm font-medium">+ Add label</button>
+                    <button onClick={addManualLine} className="border border-emerald-600 text-emerald-600 px-4 py-2 rounded-lg hover:bg-emerald-50 text-sm font-medium">+ Add label</button>
                   </div>
                   {manLines.length > 0 && (
                     <div className="mt-3 border rounded-lg overflow-x-auto">
@@ -251,7 +251,7 @@ export default function LabelsPage() {
                     </div>
                   )}
                   <div className="mt-3 flex items-center gap-3">
-                    <button onClick={() => submitManualLabel(facOpts)} disabled={busy === 'manual'} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{busy === 'manual' ? 'Submitting…' : `Submit request${manLines.length ? ` (${manLines.length})` : ''}`}</button>
+                    <button onClick={() => submitManualLabel(facOpts)} disabled={busy === 'manual'} className="bg-emerald-600 text-white px-5 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium">{busy === 'manual' ? 'Submitting…' : `Submit request${manLines.length ? ` (${manLines.length})` : ''}`}</button>
                     {manLines.length > 0 && <button onClick={() => setManLines([])} className="text-gray-500 hover:underline text-xs">Clear list</button>}
                   </div>
                 </div>
@@ -264,8 +264,8 @@ export default function LabelsPage() {
         {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}
 
         {(selPrinted.length > 0 || selSent.length > 0) && (
-          <div className="flex flex-wrap items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
-            <span className="font-medium text-blue-800">{sel.size} selected</span>
+          <div className="flex flex-wrap items-center gap-3 mb-3 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-sm">
+            <span className="font-medium text-emerald-800">{sel.size} selected</span>
             {selPrinted.length > 0 && <button onClick={() => act('send_labels', selPrinted, `${selPrinted.length} label(s) sent.`)} disabled={busy === 'send_labels'} className="bg-indigo-600 text-white px-4 py-1.5 rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium">Send {selPrinted.length} → location</button>}
             {selSent.length > 0 && <button onClick={() => act('receive_labels', selSent, `${selSent.length} label(s) received into stock.`)} disabled={busy === 'receive_labels'} className="bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">Receive {selSent.length} → stock</button>}
             <button onClick={() => setSel(new Set())} className="text-gray-500 hover:underline">Clear</button>
@@ -295,7 +295,7 @@ export default function LabelsPage() {
                     <tr className="border-b last:border-0 align-top hover:bg-gray-50">
                       <td className="px-3 py-2">{selectable && <input type="checkbox" className="h-4 w-4" checked={sel.has(it.id)} onChange={() => toggleSel(it.id)} />}</td>
                       <td className="px-3 py-2"><span className="font-mono font-medium">{it.item_code}</span><span className="block text-gray-400">{it.description}</span></td>
-                      <td className="px-3 py-2"><span className="font-mono">{r.production_batches?.item_code || it.label_for_product || '—'}</span>{r.production_batches?.description && <span className="block text-gray-700 text-xs max-w-[16rem]">{r.production_batches.description}</span>}<span className="block text-gray-400 text-xs">{r.pick_run_no || r.request_no}</span>{rawMats.length > 0 && <button onClick={() => toggleMat(it.id)} className="block text-blue-600 hover:underline text-xs mt-0.5">{openMat.has(it.id) ? '▾ hide materials' : '▸ show materials'}</button>}</td>
+                      <td className="px-3 py-2"><span className="font-mono">{r.production_batches?.item_code || it.label_for_product || '—'}</span>{r.production_batches?.description && <span className="block text-gray-700 text-xs max-w-[16rem]">{r.production_batches.description}</span>}<span className="block text-gray-400 text-xs">{r.pick_run_no || r.request_no}</span>{rawMats.length > 0 && <button onClick={() => toggleMat(it.id)} className="block text-emerald-600 hover:underline text-xs mt-0.5">{openMat.has(it.id) ? '▾ hide materials' : '▸ show materials'}</button>}</td>
                       {isHO && <td className="px-3 py-2 whitespace-nowrap text-gray-600">{factoryName(r.factory_code)}</td>}
                       <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STAGE_STYLE[stage]}`}>{STAGES.find(s => s.key === stage)?.label}</span></td>
                       <td className="px-3 py-2 text-right"><span className="font-semibold" title="Calculated by the system from the order">{Number(Number(it.requested_qty).toFixed(3))}</span></td>
@@ -308,12 +308,12 @@ export default function LabelsPage() {
                       <td className="px-3 py-2 whitespace-nowrap">
                         {it.label_photo_path
                           ? <button onClick={() => viewPhoto(it.label_photo_path!)} className="text-green-600 hover:underline text-xs">✓ View</button>
-                          : canPhoto ? <label className="text-blue-600 hover:underline text-xs cursor-pointer">{busy === `photo|${it.id}` ? '…' : '📷 Photo'}<input type="file" accept="image/*" capture="environment" className="hidden" onChange={ev => { const f = ev.target.files?.[0]; if (f) uploadPhoto(it, r, f); ev.target.value = '' }} /></label>
+                          : canPhoto ? <label className="text-emerald-600 hover:underline text-xs cursor-pointer">{busy === `photo|${it.id}` ? '…' : '📷 Photo'}<input type="file" accept="image/*" capture="environment" className="hidden" onChange={ev => { const f = ev.target.files?.[0]; if (f) uploadPhoto(it, r, f); ev.target.value = '' }} /></label>
                             : <span className="text-gray-300 text-xs">—</span>}
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap text-xs">
                         {stage === 'requested' && <span className="text-amber-600">🔒 waiting for materials</span>}
-                        {stage === 'material' && !locked && <button onClick={() => saveLabel(it, r)} disabled={busy === `save|${it.id}`} className="text-blue-600 hover:underline disabled:opacity-50">{busy === `save|${it.id}` ? 'Saving…' : 'Save details'}</button>}
+                        {stage === 'material' && !locked && <button onClick={() => saveLabel(it, r)} disabled={busy === `save|${it.id}`} className="text-emerald-600 hover:underline disabled:opacity-50">{busy === `save|${it.id}` ? 'Saving…' : 'Save details'}</button>}
                         {stage === 'material' && locked && <span className="text-amber-600">Saved — attach photo to send</span>}
                         {stage === 'printed' && canEditFac(r.factory_code) && <button onClick={() => act('send_labels', [it.id], 'Label sent.')} disabled={busy === 'send_labels'} className="bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700 disabled:opacity-50">Send</button>}
                         {stage === 'sent' && canEditFac(r.factory_code) && <button onClick={() => act('receive_labels', [it.id], 'Label received into stock.')} disabled={busy === 'receive_labels'} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">Receive → stock</button>}

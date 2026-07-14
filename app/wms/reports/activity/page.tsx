@@ -12,7 +12,7 @@ const clean = (n: number) => Number(n.toPrecision(12))
 const fmtQty = (n: number | null) => n == null ? '' : clean(n).toLocaleString(undefined, { maximumFractionDigits: 4 })
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 const dOnly = (iso: string) => iso.slice(0, 10)
-const MOVE_CHIP: Record<string, string> = { receipt: 'bg-sky-100 text-sky-700', putaway: 'bg-emerald-100 text-emerald-700', pick: 'bg-blue-100 text-blue-700', transfer: 'bg-violet-100 text-violet-700', adjust: 'bg-amber-100 text-amber-700', dispatch: 'bg-teal-100 text-teal-700' }
+const MOVE_CHIP: Record<string, string> = { receipt: 'bg-sky-100 text-sky-700', putaway: 'bg-emerald-100 text-emerald-700', pick: 'bg-emerald-100 text-emerald-700', transfer: 'bg-violet-100 text-violet-700', adjust: 'bg-amber-100 text-amber-700', dispatch: 'bg-teal-100 text-teal-700' }
 const disc = (l: CLine) => {
   if (l.counted_qty == null) return null
   if (l.is_unexpected) return 'Unexpected'

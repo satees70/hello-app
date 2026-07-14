@@ -14,7 +14,7 @@ interface Draft { qty: string; batch: string; exp: string; qc: 'pass' | 'fail'; 
 
 const clean = (n: number) => Number(n.toPrecision(12))
 const fmtQty = (n: number) => clean(n).toLocaleString(undefined, { maximumFractionDigits: 4 })
-const STATUS_CHIP: Record<string, string> = { Open: 'bg-amber-100 text-amber-700', 'Partially Received': 'bg-blue-100 text-blue-700', Fulfilled: 'bg-emerald-100 text-emerald-700' }
+const STATUS_CHIP: Record<string, string> = { Open: 'bg-amber-100 text-amber-700', 'Partially Received': 'bg-emerald-100 text-emerald-700', Fulfilled: 'bg-emerald-100 text-emerald-700' }
 // Today's date as YYMMDD (Malaysia), the usual batch-number convention.
 function todayYYMMDD(): string {
   const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kuala_Lumpur', year: '2-digit', month: '2-digit', day: '2-digit' }).formatToParts(new Date())

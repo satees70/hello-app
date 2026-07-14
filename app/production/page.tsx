@@ -39,7 +39,7 @@ const FILTERS = ['All', ...STATUSES] as const
 type Filter = typeof FILTERS[number]
 
 const STATUS_STYLE: Record<string, string> = {
-  Planned: 'bg-blue-100 text-blue-700',
+  Planned: 'bg-emerald-100 text-emerald-700',
   Requested: 'bg-indigo-100 text-indigo-700',
   'In Progress': 'bg-amber-100 text-amber-700',
   Completed: 'bg-green-100 text-green-700',
@@ -164,7 +164,7 @@ export default function ProductionPage() {
       return (
         <span className="mt-0.5 inline-flex items-center gap-2">
           <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[11px] font-medium">⚠ No recipe set ({loose})</span>
-          {can(profile, 'grinding_recipe', 'edit') && <a href="/grinding" className="text-blue-600 hover:underline text-[11px]">Create recipe →</a>}
+          {can(profile, 'grinding_recipe', 'edit') && <a href="/grinding" className="text-emerald-600 hover:underline text-[11px]">Create recipe →</a>}
         </span>
       )
     }
@@ -172,13 +172,13 @@ export default function ProductionPage() {
     if (!it) return <span className="inline-block mt-0.5 bg-red-100 text-red-700 px-1.5 py-0.5 rounded text-[11px] font-medium">⚠ Not in Items Master</span>
     if (it.type !== 'Manufactured') {
       if (!can(profile, 'items', 'edit')) return null
-      return <button onClick={() => makeManufactured(it)} className="mt-0.5 inline-block text-blue-600 hover:underline text-[11px]">Set as Manufactured</button>
+      return <button onClick={() => makeManufactured(it)} className="mt-0.5 inline-block text-emerald-600 hover:underline text-[11px]">Set as Manufactured</button>
     }
     if (boms.some(b => b.parent_item_id === it.id)) return null
     return (
       <span className="mt-0.5 inline-flex items-center gap-2">
         <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[11px] font-medium">⚠ No BOM set</span>
-        {can(profile, 'bom', 'edit') && <a href={`/admin/bom?item=${encodeURIComponent(it.code)}`} className="text-blue-600 hover:underline text-[11px]">Create BOM →</a>}
+        {can(profile, 'bom', 'edit') && <a href={`/admin/bom?item=${encodeURIComponent(it.code)}`} className="text-emerald-600 hover:underline text-[11px]">Create BOM →</a>}
       </span>
     )
   }
@@ -388,7 +388,7 @@ export default function ProductionPage() {
 
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   const dateKey = (d: string) => {
@@ -460,25 +460,25 @@ export default function ProductionPage() {
           {isHO ? ' Showing all factories.' : ` Showing factory ${profile.factory_code}.`}
         </p>
         <div className="flex items-center gap-2 mb-4">
-          <button onClick={() => { setGrindingMode(false); setFilter('All') }} className={`px-4 py-1.5 rounded-lg text-sm font-medium border ${!grindingMode ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}>Order Board</button>
+          <button onClick={() => { setGrindingMode(false); setFilter('All') }} className={`px-4 py-1.5 rounded-lg text-sm font-medium border ${!grindingMode ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}>Order Board</button>
           <button onClick={() => { setGrindingMode(true); setFilter('All') }} className={`px-4 py-1.5 rounded-lg text-sm font-medium border ${grindingMode ? 'bg-purple-600 text-white border-purple-600' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}>🌀 Grinding Board{grindingCount ? ` (${grindingCount})` : ''}</button>
         </div>
 
         {/* Summary — click to filter */}
         <div className="flex flex-wrap gap-2 mb-4 text-sm">
-          <button onClick={() => setFilter('Planned')} className={`px-3 py-1.5 rounded-lg border font-medium ${filter === 'Planned' ? 'bg-blue-600 text-white border-blue-600' : 'bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100'}`}>
+          <button onClick={() => setFilter('Planned')} className={`px-3 py-1.5 rounded-lg border font-medium ${filter === 'Planned' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100'}`}>
             ⚠ {counts['Planned'] || 0} not requested yet
           </button>
-          <button onClick={() => setFilter('Requested')} className={`px-3 py-1.5 rounded-lg border font-medium ${filter === 'Requested' ? 'bg-blue-600 text-white border-blue-600' : 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'}`}>
+          <button onClick={() => setFilter('Requested')} className={`px-3 py-1.5 rounded-lg border font-medium ${filter === 'Requested' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'}`}>
             ✓ {counts['Requested'] || 0} requested
           </button>
-          <button onClick={() => setFilter('In Progress')} className={`px-3 py-1.5 rounded-lg border font-medium ${filter === 'In Progress' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+          <button onClick={() => setFilter('In Progress')} className={`px-3 py-1.5 rounded-lg border font-medium ${filter === 'In Progress' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
             {counts['In Progress'] || 0} in progress
           </button>
-          <button onClick={() => setFilter('Completed')} className={`px-3 py-1.5 rounded-lg border font-medium ${filter === 'Completed' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+          <button onClick={() => setFilter('Completed')} className={`px-3 py-1.5 rounded-lg border font-medium ${filter === 'Completed' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
             {counts['Completed'] || 0} done
           </button>
-          {filter !== 'All' && <button onClick={() => setFilter('All')} className="px-3 py-1.5 text-blue-600 hover:underline">Show all</button>}
+          {filter !== 'All' && <button onClick={() => setFilter('All')} className="px-3 py-1.5 text-emerald-600 hover:underline">Show all</button>}
         </div>
 
         <div className="flex flex-wrap gap-2 items-center mb-4 text-sm">
@@ -507,7 +507,7 @@ export default function ProductionPage() {
             <option value="batch">Batch number</option>
           </select>
           {(dateFrom || dateTo || factoryFilter || filter !== 'All') && (
-            <button onClick={() => { setDateFrom(''); setDateTo(''); setFactoryFilter(''); setFilter('All') }} className="text-blue-600 hover:underline ml-1">Clear filters</button>
+            <button onClick={() => { setDateFrom(''); setDateTo(''); setFactoryFilter(''); setFilter('All') }} className="text-emerald-600 hover:underline ml-1">Clear filters</button>
           )}
         </div>
 
@@ -569,9 +569,9 @@ export default function ProductionPage() {
                                 <td className="px-3 py-2"><span className="font-medium">{item}</span><span className="block text-gray-500 text-xs">{members[0].description}</span>{bomBadge(item)}</td>
                                 <td className="px-3 py-2 font-semibold whitespace-nowrap">{total}</td>
                                 <td className="px-3 py-2 whitespace-nowrap">{dateLabel}</td>
-                                <td className="px-3 py-2"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">Planned</span>{members.some(dueTomorrow) && <span className="block mt-0.5 bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-[11px] font-bold whitespace-nowrap">🚚 TOMORROW DELIVERY</span>}</td>
+                                <td className="px-3 py-2"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Planned</span>{members.some(dueTomorrow) && <span className="block mt-0.5 bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-[11px] font-bold whitespace-nowrap">🚚 TOMORROW DELIVERY</span>}</td>
                                 <td className="px-3 py-2 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
-                                  <button onClick={() => { setSelected(target); setError(''); setSuccess('') }} className="text-blue-600 hover:underline text-xs font-medium">Materials</button>
+                                  <button onClick={() => { setSelected(target); setError(''); setSuccess('') }} className="text-emerald-600 hover:underline text-xs font-medium">Materials</button>
                                 </td>
                               </tr>
                               {expanded.has(key) && (
@@ -606,7 +606,7 @@ export default function ProductionPage() {
                                     </div>
                                     <div className="mt-3">
                                       <button onClick={() => { setSelected(target); setError(''); setSuccess('') }}
-                                        className="border border-blue-600 text-blue-600 px-4 py-1.5 rounded-lg hover:bg-blue-50 text-sm font-medium">Materials</button>
+                                        className="border border-emerald-600 text-emerald-600 px-4 py-1.5 rounded-lg hover:bg-emerald-50 text-sm font-medium">Materials</button>
                                       <span className="ml-2 text-gray-400 text-xs">Request materials for all {members.length} batches together. Pack line &amp; date are set on the Packing Schedule.</span>
                                     </div>
                                   </td>
@@ -619,7 +619,7 @@ export default function ProductionPage() {
                         {/* Individual batches */}
                         {singles.map(b => (
                           <Fragment key={b.id}>
-                            <tr className={`border-b last:border-0 hover:bg-gray-50 cursor-pointer ${expanded.has(b.id) ? 'bg-blue-50/40' : ''}`} onClick={() => toggleRow(b.id)}>
+                            <tr className={`border-b last:border-0 hover:bg-gray-50 cursor-pointer ${expanded.has(b.id) ? 'bg-emerald-50/40' : ''}`} onClick={() => toggleRow(b.id)}>
                               <td className="pl-3 text-gray-400">{expanded.has(b.id) ? '▾' : '▸'}</td>
                               <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}</td>
                               <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span>{bomBadge(b.item_code)}{(b.pack_line || b.pack_date) && <span className="mt-0.5 inline-block bg-teal-100 text-teal-700 px-1.5 py-0.5 rounded text-[11px] font-medium">📅 {b.pack_line || 'line ?'}{b.pack_date ? ` · ${b.pack_date.split('-').reverse().join('/')}` : ''}</span>}</td>
@@ -630,7 +630,7 @@ export default function ProductionPage() {
                                 {dueTomorrow(b) && <span className="block mt-0.5 bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-[11px] font-bold whitespace-nowrap">🚚 TOMORROW DELIVERY</span>}
                               </td>
                               <td className="px-3 py-2 text-right whitespace-nowrap">
-                                {combineOn && b.no_combine && isHO && <button onClick={e => { e.stopPropagation(); recombine(b) }} className="text-blue-600 hover:underline text-xs mr-2">↩ Re-combine</button>}
+                                {combineOn && b.no_combine && isHO && <button onClick={e => { e.stopPropagation(); recombine(b) }} className="text-emerald-600 hover:underline text-xs mr-2">↩ Re-combine</button>}
                                 {b.material_request_id && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">MR</span>}
                               </td>
                             </tr>
@@ -655,7 +655,7 @@ export default function ProductionPage() {
                                     ))}
                                   </ul>
                                   <button onClick={() => { setSelected(singleTarget(b)); setError(''); setSuccess('') }}
-                                    className="border border-blue-600 text-blue-600 px-4 py-1.5 rounded-lg hover:bg-blue-50 text-sm font-medium">Materials</button>
+                                    className="border border-emerald-600 text-emerald-600 px-4 py-1.5 rounded-lg hover:bg-emerald-50 text-sm font-medium">Materials</button>
                                   <span className="ml-2 text-gray-400 text-xs">Pack line &amp; date are set on the Packing Schedule once materials are received.</span>
 
                                   <div className="mt-4 border-t pt-3">
@@ -791,7 +791,7 @@ export default function ProductionPage() {
                         <ItemPicker items={items} value={addMat ? `${addMat.code} — ${addMat.description}` : ''} onPick={it => setAddMat(it)} placeholder="Type a material code or name…" /></div>
                       <div className="flex flex-col gap-1 w-28"><span className="text-xs font-medium text-gray-600">Qty{addMat ? ` (${addMat.unit})` : ''}</span>
                         <input type="number" step="any" value={addMatQty} onChange={e => setAddMatQty(e.target.value)} className="border rounded-lg px-3 py-2 text-sm text-right" /></div>
-                      <button onClick={addCustomRow} className="border border-blue-600 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 text-sm font-medium">+ Add</button>
+                      <button onClick={addCustomRow} className="border border-emerald-600 text-emerald-600 px-4 py-2 rounded-lg hover:bg-emerald-50 text-sm font-medium">+ Add</button>
                     </div>
                   </>
                 ) : exploded.note ? (
@@ -817,7 +817,7 @@ export default function ProductionPage() {
                             <td className="px-3 py-2 text-right">{clean(r.required)}</td>
                             <td className="px-3 py-2 text-right font-medium">{clean(r.stock)}</td>
                             <td className={`px-3 py-2 text-right font-semibold ${r.shortfall > 0 ? 'text-red-600' : 'text-green-600'}`}>{clean(r.shortfall)}</td>
-                            <td className="px-3 py-2 text-right font-semibold text-blue-700">{r.shortfall > 0 ? r.requested : 0}</td>
+                            <td className="px-3 py-2 text-right font-semibold text-emerald-700">{r.shortfall > 0 ? r.requested : 0}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -865,7 +865,7 @@ export default function ProductionPage() {
                         else if (extraN > 0) raiseExt(selected, exploded.rows.map(r => ({ code: r.code, description: r.description, unit: r.unit, qty: r.shortfall > 0 ? r.requested : 0 })), extraN, `+${extraN} extra for stock`)
                         else raiseTarget(selected)
                       }} disabled={raising || (grindingMode ? (totalShortfall > 0 ? hasRequest : !exploded.rows.some(r => r.required > 0)) : (hasRequest || (adhoc ? customRows.filter(r => Number(r.qty) > 0).length === 0 : totalShortfall <= 0)))}
-                        className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
+                        className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium">
                         {raising ? 'Raising…' : grindingMode ? (totalShortfall > 0 ? 'Raise Material Request' : 'Proceed to grinding') : adhoc ? 'Raise ad-hoc request' : extraN > 0 ? 'Raise request (+ stock)' : 'Raise Material Request'}
                       </button>
                     </div>

@@ -67,7 +67,7 @@ export default function SupplierPage() {
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   const n = (x: number) => Number(Number(x || 0).toFixed(3))
@@ -140,8 +140,8 @@ export default function SupplierPage() {
         <p className="text-gray-500 text-sm mb-4">Items on sales orders routed to <strong>SUPPLIER</strong>. Tick items, type a supplier and place one consolidated order.</p>
 
         <div className="flex gap-2 mb-5">
-          <button onClick={() => setTab('toorder')} className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${tab === 'toorder' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>To order</button>
-          <button onClick={() => setTab('placed')} className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${tab === 'placed' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>Placed orders{orders.filter(o => o.status === 'Open').length ? ` (${orders.filter(o => o.status === 'Open').length})` : ''}</button>
+          <button onClick={() => setTab('toorder')} className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${tab === 'toorder' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>To order</button>
+          <button onClick={() => setTab('placed')} className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${tab === 'placed' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>Placed orders{orders.filter(o => o.status === 'Open').length ? ` (${orders.filter(o => o.status === 'Open').length})` : ''}</button>
         </div>
 
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
@@ -187,7 +187,7 @@ export default function SupplierPage() {
                 <ItemPicker items={itemsMaster} value={addItem ? `${addItem.code} — ${addItem.description}` : ''} onPick={it => setAddItem(it)} placeholder="Type an item code or name…" /></div>
               <div className="flex flex-col gap-1 w-28"><span className="text-xs font-medium text-gray-600">Qty{addItem ? ` (${addItem.unit})` : ''}</span>
                 <input type="number" step="any" value={addQty} onChange={e => setAddQty(e.target.value)} className="border rounded-lg px-3 py-2 text-sm text-right" /></div>
-              <button onClick={addManualItem} className="border border-blue-600 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 text-sm font-medium">+ Add to order</button>
+              <button onClick={addManualItem} className="border border-emerald-600 text-emerald-600 px-4 py-2 rounded-lg hover:bg-emerald-50 text-sm font-medium">+ Add to order</button>
             </div>
           </div>
 
@@ -195,7 +195,7 @@ export default function SupplierPage() {
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search item code or description…" className="w-full sm:w-72 border rounded-lg px-3 py-2 text-sm" />
             <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={pendingOnly} onChange={e => setPendingOnly(e.target.checked)} className="h-4 w-4" /> Still to order</label>
             <button onClick={() => setTomorrowOnly(v => !v)} className={`text-xs px-3 py-1.5 rounded-full font-medium border ${tomorrowOnly ? 'bg-yellow-300 border-yellow-400 text-yellow-900' : 'bg-white border-gray-300 text-gray-600 hover:bg-yellow-50'}`}>🚚 Tomorrow{tomorrowCount ? ` (${tomorrowCount})` : ''}</button>
-            <button onClick={selectAll} className="text-blue-600 hover:underline text-xs">Select all shown</button>
+            <button onClick={selectAll} className="text-emerald-600 hover:underline text-xs">Select all shown</button>
             <span className="text-gray-400 text-xs">{list.length} item(s)</span>
           </div>
 
@@ -217,7 +217,7 @@ export default function SupplierPage() {
                       <td className="px-4 py-2 text-right text-gray-500">{openOrdered[g.code] ? n(openOrdered[g.code]) : '—'}</td>
                       <td className="px-4 py-2 text-right font-semibold text-amber-700">{n(toOrder)}</td>
                       <td className="px-4 py-2 whitespace-nowrap">{fmtDate(g.next)}</td>
-                      <td className="px-4 py-2 text-blue-600 text-xs cursor-pointer" onClick={() => toggle(g.code)}>{open.has(g.code) ? 'Hide' : 'Orders'}</td>
+                      <td className="px-4 py-2 text-emerald-600 text-xs cursor-pointer" onClick={() => toggle(g.code)}>{open.has(g.code) ? 'Hide' : 'Orders'}</td>
                     </tr>
                     {open.has(g.code) && (
                       <tr className="bg-gray-50/60"><td colSpan={8} className="px-4 py-2">
@@ -227,7 +227,7 @@ export default function SupplierPage() {
                             {g.lines.sort((a, b) => (a.delivery_date || '').localeCompare(b.delivery_date || '')).map(l => (
                               <tr key={l.id} className="border-t">
                                 <td className="px-2 py-1">{l.customer_name}</td>
-                                <td className="px-2 py-1">{l.so_number ? <button onClick={() => router.push(`/discussion?so=${encodeURIComponent(l.so_number)}`)} className="text-blue-600 hover:underline font-mono">{l.so_number}</button> : '—'}</td>
+                                <td className="px-2 py-1">{l.so_number ? <button onClick={() => router.push(`/discussion?so=${encodeURIComponent(l.so_number)}`)} className="text-emerald-600 hover:underline font-mono">{l.so_number}</button> : '—'}</td>
                                 <td className="px-2 py-1 text-right">{n(l.quantity)}</td>
                                 <td className="px-2 py-1 text-right font-medium text-amber-700">{n(l.outstanding_qty)}</td>
                                 <td className="px-2 py-1 whitespace-nowrap">{fmtDate(l.delivery_date)}</td>

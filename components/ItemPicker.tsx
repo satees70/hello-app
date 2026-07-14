@@ -24,7 +24,7 @@ export default function ItemPicker({ items, value, onPick, placeholder = 'Type a
           {matches.length === 0 && <div className="px-3 py-2 text-sm text-gray-400">No matching item — check the Items master.</div>}
           {matches.map(i => (
             <button key={i.code} type="button" onMouseDown={e => { e.preventDefault(); onPick(i); setOpen(false) }}
-              className="block w-full text-left px-3 py-2 text-sm hover:bg-blue-50 border-b last:border-0">
+              className="block w-full text-left px-3 py-2 text-sm hover:bg-emerald-50 border-b last:border-0">
               <span className="font-mono font-medium">{i.code}</span> <span className="text-gray-500">{i.description}</span>
             </button>
           ))}

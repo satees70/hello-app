@@ -46,7 +46,7 @@ interface ChangeRequest {
 
 const STATUS_STYLES: Record<string, string> = {
   Pending: 'bg-amber-100 text-amber-700',
-  Processing: 'bg-blue-100 text-blue-700',
+  Processing: 'bg-emerald-100 text-emerald-700',
   Review: 'bg-purple-100 text-purple-700',
   'Partially Confirmed': 'bg-teal-100 text-teal-700',
   Processed: 'bg-green-100 text-green-700',
@@ -146,7 +146,7 @@ export default function SalesOrdersPage() {
   const LINE_STATUS_STYLE: Record<string, string> = {
     'Pending Material Request': 'bg-gray-100 text-gray-600', 'Material Received Partial': 'bg-amber-100 text-amber-700',
     'Material Received Fully': 'bg-lime-100 text-lime-700', 'Pending Schedule': 'bg-yellow-100 text-yellow-700',
-    'Production started': 'bg-blue-100 text-blue-700', 'Production completed': 'bg-teal-100 text-teal-700',
+    'Production started': 'bg-emerald-100 text-emerald-700', 'Production completed': 'bg-teal-100 text-teal-700',
     'Delivered to warehouse': 'bg-green-100 text-green-700',
   }
 
@@ -766,7 +766,7 @@ export default function SalesOrdersPage() {
   function formatDate(iso: string) { return new Date(iso).toLocaleString() }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   const currentDoc = linesFor ? (imports.find(i => i.id === linesFor.id) || linesFor) : null
@@ -814,18 +814,18 @@ export default function SalesOrdersPage() {
           <label className="block text-sm font-medium mb-2">Sales Order PDF</label>
           <input ref={fileInputRef} type="file" accept="application/pdf"
             onChange={e => setFile(e.target.files?.[0] || null)}
-            className="block w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 file:font-medium hover:file:bg-blue-100 mb-4" />
+            className="block w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 file:font-medium hover:file:bg-emerald-100 mb-4" />
           {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
           {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded mb-3">{success}</p>}
           <button type="submit" disabled={!file || uploading}
-            className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
+            className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium">
             {uploading ? 'Uploading...' : 'Upload'}
           </button>
         </form>
 
         <h2 className="font-semibold text-lg mb-3">Uploaded Documents</h2>
         <div className="flex items-center gap-2 mb-3">
-          <button onClick={() => setDocTab('pending')} className={`px-4 py-1.5 rounded-lg text-sm font-medium border ${docTab === 'pending' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}>Pending ({pendingDocCount})</button>
+          <button onClick={() => setDocTab('pending')} className={`px-4 py-1.5 rounded-lg text-sm font-medium border ${docTab === 'pending' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}>Pending ({pendingDocCount})</button>
           <button onClick={() => setDocTab('completed')} className={`px-4 py-1.5 rounded-lg text-sm font-medium border ${docTab === 'completed' ? 'bg-green-600 text-white border-green-600' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}>✓ Completed ({completedDocCount})</button>
         </div>
         <div className="flex flex-wrap items-center gap-2 mb-2 text-sm relative z-20">
@@ -836,7 +836,7 @@ export default function SalesOrdersPage() {
           <button onClick={() => setDocTomorrow(v => !v)} className={`text-xs px-3 py-1.5 rounded-full font-medium border self-end ${docTomorrow ? 'bg-yellow-300 border-yellow-400 text-yellow-900' : 'bg-white border-gray-300 text-gray-600 hover:bg-yellow-50'}`}>🚚 Tomorrow{tomorrowDocCount ? ` (${tomorrowDocCount})` : ''}</button>
           <button onClick={() => setDocUrgent(v => !v)} className={`text-xs px-3 py-1.5 rounded-full font-medium border self-end ${docUrgent ? 'bg-red-600 border-red-700 text-white' : 'bg-white border-gray-300 text-gray-600 hover:bg-red-50'}`}>🔴 Urgent{urgentDocCount ? ` (${urgentDocCount})` : ''}</button>
           <span className="text-gray-400 text-xs self-end">{shownImports.length} of {imports.length}</span>
-          {(anyDocFilter || docSearch) && <button onClick={() => { setDocFilters({}); setDocSearch(''); setDocTomorrow(false); setDocUrgent(false) }} className="text-blue-600 hover:underline text-xs self-end">Clear</button>}
+          {(anyDocFilter || docSearch) && <button onClick={() => { setDocFilters({}); setDocSearch(''); setDocTomorrow(false); setDocUrgent(false) }} className="text-emerald-600 hover:underline text-xs self-end">Clear</button>}
         </div>
         <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[24rem] mb-8">
           <table className="w-full text-sm">
@@ -848,7 +848,7 @@ export default function SalesOrdersPage() {
               {imports.length === 0 && (<tr><td colSpan={6} className="text-center py-8 text-gray-400">No documents uploaded yet</td></tr>)}
               {imports.length > 0 && shownImports.length === 0 && (<tr><td colSpan={6} className="text-center py-8 text-gray-400">No documents match the filter.</td></tr>)}
               {shownImports.map(doc => (
-                <tr key={doc.id} className={`border-b last:border-0 hover:bg-gray-50 ${doc.urgent ? 'bg-red-50' : linesFor?.id === doc.id ? 'bg-blue-50' : ''}`}>
+                <tr key={doc.id} className={`border-b last:border-0 hover:bg-gray-50 ${doc.urgent ? 'bg-red-50' : linesFor?.id === doc.id ? 'bg-emerald-50' : ''}`}>
                   <td className="px-4 py-3 font-medium">
                     {doc.urgent && <span className="inline-block mr-2 px-1.5 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold align-middle">🔴 URGENT</span>}{doc.file_name}
                     {importSos[doc.id]?.length ? <span className="flex flex-wrap gap-1 mt-1">{importSos[doc.id].map(so => {
@@ -874,9 +874,9 @@ export default function SalesOrdersPage() {
                   </td>
                   <td className="px-4 py-3 text-gray-600">{formatDate(doc.created_at)}</td>
                   <td className="px-4 py-3 space-x-3 whitespace-nowrap">
-                    <button onClick={() => viewLines(doc)} className="text-blue-600 hover:underline text-xs">View Lines</button>
-                    {(doc.status === 'Processing' || doc.status === 'Error') && <button onClick={() => reExtract(doc)} className="text-blue-600 hover:underline text-xs">Re-read</button>}
-                    <button onClick={() => handleDownload(doc.file_path)} className="text-blue-600 hover:underline text-xs">View PDF</button>
+                    <button onClick={() => viewLines(doc)} className="text-emerald-600 hover:underline text-xs">View Lines</button>
+                    {(doc.status === 'Processing' || doc.status === 'Error') && <button onClick={() => reExtract(doc)} className="text-emerald-600 hover:underline text-xs">Re-read</button>}
+                    <button onClick={() => handleDownload(doc.file_path)} className="text-emerald-600 hover:underline text-xs">View PDF</button>
                     <button onClick={() => toggleUrgent(doc)} className={`hover:underline text-xs ${doc.urgent ? 'text-gray-500' : 'text-red-600 font-medium'}`}>{doc.urgent ? 'Clear urgent' : '🔴 Mark urgent'}</button>
                     {isHO ? <button onClick={() => handleDelete(doc)} className="text-red-600 hover:underline text-xs">Delete</button>
                       : docDelPending.has(doc.id) ? <span className="text-amber-600 text-xs">⏳ Delete requested</span>
@@ -952,7 +952,7 @@ export default function SalesOrdersPage() {
                   </div>
                 )}
                 <div className="flex gap-2 mt-4">
-                  <button onClick={submitMove} disabled={submitting} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{submitting ? 'Sending…' : 'Send request'}</button>
+                  <button onClick={submitMove} disabled={submitting} className="bg-emerald-600 text-white px-5 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium">{submitting ? 'Sending…' : 'Send request'}</button>
                   <button onClick={() => setMoveLine(null)} className="border px-5 py-2 rounded-lg hover:bg-gray-50 text-sm font-medium">Cancel</button>
                 </div>
               </div>
@@ -1007,7 +1007,7 @@ export default function SalesOrdersPage() {
                 {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
                 <div className="flex gap-3">
                   <button onClick={submitRequest} disabled={submitting}
-                    className={`text-white px-5 py-2 rounded-lg disabled:opacity-50 text-sm font-medium ${reqMode === 'delete' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                    className={`text-white px-5 py-2 rounded-lg disabled:opacity-50 text-sm font-medium ${reqMode === 'delete' ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
                     {submitting ? 'Saving…' : isFactoryConfirmed(reqLine.factory_code || '') ? (reqMode === 'delete' ? 'Submit delete request' : 'Submit request') : (reqMode === 'delete' ? 'Delete line' : 'Save change')}
                   </button>
                   <button onClick={() => setReqLine(null)} className="border px-5 py-2 rounded-lg hover:bg-gray-50 text-sm">Cancel</button>
@@ -1018,10 +1018,10 @@ export default function SalesOrdersPage() {
             {docFactories.length > 1 && (
               <div className="flex flex-wrap items-center gap-2 mb-3">
                 <span className="text-xs text-gray-500">By factory:</span>
-                <button onClick={() => setLocTab('')} className={`px-3 py-1 rounded-lg text-sm font-medium border ${locTab === '' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>All ({lines.length})</button>
+                <button onClick={() => setLocTab('')} className={`px-3 py-1 rounded-lg text-sm font-medium border ${locTab === '' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>All ({lines.length})</button>
                 {docFactories.map(fac => { const ed = facEditable(fac); const cnt = lines.filter(l => (l.factory_code || '') === fac).length; return (
-                  <button key={fac} onClick={() => setLocTab(fac)} className={`px-3 py-1 rounded-lg text-sm font-medium border ${locTab === fac ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
-                    {factoryName(fac)} ({cnt}){!ed && <span className={`ml-1 text-xs ${locTab === fac ? 'text-blue-100' : 'text-gray-400'}`}>· view only</span>}
+                  <button key={fac} onClick={() => setLocTab(fac)} className={`px-3 py-1 rounded-lg text-sm font-medium border ${locTab === fac ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                    {factoryName(fac)} ({cnt}){!ed && <span className={`ml-1 text-xs ${locTab === fac ? 'text-emerald-100' : 'text-gray-400'}`}>· view only</span>}
                   </button>
                 ) })}
               </div>
@@ -1032,7 +1032,7 @@ export default function SalesOrdersPage() {
               {hasUnmapped && <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={onlyUnmapped} onChange={e => setOnlyUnmapped(e.target.checked)} className="h-4 w-4" /> ⚠ Unmapped only</label>}
               {hasUnmapped && <button onClick={remapUnmapped} disabled={remapping} className="bg-amber-500 text-white px-3 py-1 rounded-lg hover:bg-amber-600 disabled:opacity-50 text-xs font-medium">{remapping ? 'Re-mapping…' : '🔄 Re-map unmapped lines'}</button>}
               <span className="text-gray-400 text-xs">{visibleLines.length} of {lines.length} line(s)</span>
-              {(anyFilter || lineSearch) && <button onClick={() => { setColFilters({}); setOnlyUnmapped(false); setLineSearch('') }} className="text-blue-600 hover:underline text-xs">Clear filters</button>}
+              {(anyFilter || lineSearch) && <button onClick={() => { setColFilters({}); setOnlyUnmapped(false); setLineSearch('') }} className="text-emerald-600 hover:underline text-xs">Clear filters</button>}
             </div>
 
             {hasUnmapped && (
@@ -1042,9 +1042,9 @@ export default function SalesOrdersPage() {
             )}
 
             {selectedIds.size > 0 && (
-              <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
-                <span className="font-medium text-blue-800">{selectedIds.size} line(s) selected</span>
-                <button onClick={openBulk} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 text-sm font-medium">Bulk edit</button>
+              <div className="flex items-center gap-3 mb-3 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-sm">
+                <span className="font-medium text-emerald-800">{selectedIds.size} line(s) selected</span>
+                <button onClick={openBulk} className="bg-emerald-600 text-white px-4 py-1.5 rounded-lg hover:bg-emerald-700 text-sm font-medium">Bulk edit</button>
                 <button onClick={submitBulkDelete} disabled={bulkSubmitting} className="bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50 text-sm font-medium">Delete selected</button>
                 <button onClick={() => setSelectedIds(new Set())} className="text-gray-500 hover:underline">Clear</button>
               </div>
@@ -1077,7 +1077,7 @@ export default function SalesOrdersPage() {
                 <textarea value={bulkReason} onChange={e => setBulkReason(e.target.value)} rows={2} className="w-full border rounded-lg px-3 py-2 text-sm bg-white mb-4" placeholder="Why does this need to change?" />
                 {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3">{error}</p>}
                 <div className="flex gap-3">
-                  <button onClick={submitBulk} disabled={bulkSubmitting} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{bulkSubmitting ? 'Saving…' : `Apply to ${selectedIds.size} line(s)`}</button>
+                  <button onClick={submitBulk} disabled={bulkSubmitting} className="bg-emerald-600 text-white px-5 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium">{bulkSubmitting ? 'Saving…' : `Apply to ${selectedIds.size} line(s)`}</button>
                   <button onClick={() => setBulkOpen(false)} className="border px-5 py-2 rounded-lg hover:bg-gray-50 text-sm">Cancel</button>
                 </div>
               </div>
@@ -1110,12 +1110,12 @@ export default function SalesOrdersPage() {
                   {visibleLines.map(line => {
                     const pend = pendingForLine(line.id)
                     return (
-                      <tr key={line.id} className={`border-b last:border-0 align-top ${selectedIds.has(line.id) ? 'bg-blue-50' : isDuplicate(line) ? 'bg-amber-50' : 'hover:bg-gray-50'}`}>
+                      <tr key={line.id} className={`border-b last:border-0 align-top ${selectedIds.has(line.id) ? 'bg-emerald-50' : isDuplicate(line) ? 'bg-amber-50' : 'hover:bg-gray-50'}`}>
                         <td className="px-3 py-2"><input type="checkbox" checked={selectedIds.has(line.id)} onChange={() => toggleSel(line.id)} className="h-4 w-4" />{can(profile, 'sales', 'edit', line.factory_code) && <button onClick={() => toggleGrinding(line)} title={line.is_grinding ? 'Untag grinding' : 'Tag this line for grinding'} className={`block mt-1 text-[11px] whitespace-nowrap ${line.is_grinding ? 'text-purple-600 font-semibold' : 'text-gray-400 hover:text-purple-600'}`}>{line.is_grinding ? '🌀 grinding' : '🌀 tag'}</button>}</td>
                         <td className="px-3 py-2 text-gray-700 min-w-[160px]">{line.customer_name}</td>
                         <td className="px-3 py-2 font-mono whitespace-nowrap">
                           {line.so_number
-                            ? <button onClick={() => openDisc(line.so_number)} title={discSo[line.so_number] ? `${discSo[line.so_number]} message(s) — open discussion` : 'Open discussion for this SO'} className="text-blue-600 hover:underline">{line.so_number}{discSo[line.so_number] ? <span className="ml-1 text-indigo-600">💬{discSo[line.so_number]}</span> : null}</button>
+                            ? <button onClick={() => openDisc(line.so_number)} title={discSo[line.so_number] ? `${discSo[line.so_number]} message(s) — open discussion` : 'Open discussion for this SO'} className="text-emerald-600 hover:underline">{line.so_number}{discSo[line.so_number] ? <span className="ml-1 text-indigo-600">💬{discSo[line.so_number]}</span> : null}</button>
                             : line.so_number}
                           {isDuplicate(line) && <span className="ml-1.5 inline-block align-middle bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded text-[11px] font-bold" title={dupWhere(line)}>⚠ DUP</span>}
                           {line.so_number && tomorrowSOs.has(line.so_number) && <span className="ml-1.5 inline-block align-middle bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-[11px] font-bold">🚚 TOMORROW DELIVERY</span>}
@@ -1128,8 +1128,8 @@ export default function SalesOrdersPage() {
                         <td className="px-3 py-2 min-w-[170px]">
                           {isFactoryConfirmed(line.factory_code || '')
                             ? <div>
-                                <span className="inline-block bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{factoryName(line.factory_code)} 🔒</span>
-                                {can(profile, 'sales', 'edit') && <button onClick={() => { setMoveLine(line); setMoveTo(''); setMoveReason(''); setTransferOn(false); setTransferMats([]); setError(''); setSuccess('') }} className="block text-[11px] text-blue-600 hover:underline mt-1">change factory…</button>}
+                                <span className="inline-block bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">{factoryName(line.factory_code)} 🔒</span>
+                                {can(profile, 'sales', 'edit') && <button onClick={() => { setMoveLine(line); setMoveTo(''); setMoveReason(''); setTransferOn(false); setTransferMats([]); setError(''); setSuccess('') }} className="block text-[11px] text-emerald-600 hover:underline mt-1">change factory…</button>}
                               </div>
                             : can(profile, 'sales', 'edit')
                               ? <select value={line.factory_code || ''} onChange={e => assignFactory(line, e.target.value)} className={`border rounded px-2 py-1 text-xs bg-white ${line.factory_code ? '' : 'text-red-600 border-red-300'}`}>
@@ -1140,7 +1140,7 @@ export default function SalesOrdersPage() {
                                     return <option key={f.code} value={f.code}>{factoryName(f.code)}{producing ? ' • producing' : usedBefore ? ' • used before' : ''}</option>
                                   })}
                                 </select>
-                              : (line.factory_code ? <span className="inline-block bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{factoryName(line.factory_code)}</span> : <span className="text-red-600">⚠ not set</span>)}
+                              : (line.factory_code ? <span className="inline-block bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">{factoryName(line.factory_code)}</span> : <span className="text-red-600">⚠ not set</span>)}
                           {!isFactoryConfirmed(line.factory_code || '') && prodFacByItem[line.item_code]?.size ? (
                             <div className="text-[11px] text-green-700 mt-0.5">In production at: {[...prodFacByItem[line.item_code]].map(factoryName).join(', ')}</div>
                           ) : null}
@@ -1161,7 +1161,7 @@ export default function SalesOrdersPage() {
                             : !can(profile, 'sales', 'edit', line.factory_code)
                               ? <span className="text-gray-400" title="You have view-only access for this factory">view only</span>
                               : <>
-                                <button onClick={() => openRequest(line)} className="text-blue-600 hover:underline">{isFactoryConfirmed(line.factory_code || '') ? 'Request change' : 'Edit'}</button>
+                                <button onClick={() => openRequest(line)} className="text-emerald-600 hover:underline">{isFactoryConfirmed(line.factory_code || '') ? 'Request change' : 'Edit'}</button>
                                 <button onClick={() => openDelete(line)} className="text-red-600 hover:underline ml-3">{isFactoryConfirmed(line.factory_code || '') ? 'Request delete' : 'Delete'}</button>
                               </>}
                         </td>

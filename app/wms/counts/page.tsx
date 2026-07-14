@@ -12,7 +12,7 @@ interface Task {
   wms_count_lines?: { count: number }[]
 }
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
-const STATUS_CHIP: Record<string, string> = { Counting: 'bg-blue-100 text-blue-700', Review: 'bg-amber-100 text-amber-700', Applied: 'bg-emerald-100 text-emerald-700', Cancelled: 'bg-gray-100 text-gray-400' }
+const STATUS_CHIP: Record<string, string> = { Counting: 'bg-emerald-100 text-emerald-700', Review: 'bg-amber-100 text-amber-700', Applied: 'bg-emerald-100 text-emerald-700', Cancelled: 'bg-gray-100 text-gray-400' }
 const SCOPE_LABEL: Record<string, string> = { full: 'Full count', bins: 'Bins', zones: 'Zones', items: 'Items' }
 
 export default function WmsCountsPage() {

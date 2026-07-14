@@ -61,7 +61,7 @@ export default function WmsDispatchListPage() {
         <p className="text-gray-500 text-sm mt-1 mb-5">What’s ready to ship, what’s in the holding bin, and every Delivery Order.</p>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-          <div className="bg-white rounded-xl border shadow-sm px-4 py-3"><div className="text-2xl font-bold text-blue-600 tabular-nums">{ready.length}</div><div className="text-xs text-gray-500 mt-0.5">Ready to dispatch</div></div>
+          <div className="bg-white rounded-xl border shadow-sm px-4 py-3"><div className="text-2xl font-bold text-emerald-600 tabular-nums">{ready.length}</div><div className="text-xs text-gray-500 mt-0.5">Ready to dispatch</div></div>
           <div className="bg-white rounded-xl border shadow-sm px-4 py-3"><div className="text-2xl font-bold text-amber-600 tabular-nums">{fmtQty(holding)}</div><div className="text-xs text-gray-500 mt-0.5">Qty in holding</div></div>
           <div className="bg-white rounded-xl border shadow-sm px-4 py-3"><div className="text-2xl font-bold text-emerald-700 tabular-nums">{dispatchedToday}</div><div className="text-xs text-gray-500 mt-0.5">Dispatched today</div></div>
           <div className="bg-white rounded-xl border shadow-sm px-4 py-3"><div className="text-2xl font-bold text-gray-500 tabular-nums">{rows.length}</div><div className="text-xs text-gray-500 mt-0.5">Delivery Orders</div></div>
@@ -73,7 +73,7 @@ export default function WmsDispatchListPage() {
             {ready.map(o => (
               <Link key={o.id} href={`/wms/dispatch/${o.id}`} className="flex items-center justify-between gap-2 px-4 py-2.5 hover:bg-gray-50 border-b last:border-0">
                 <div className="min-w-0"><span className="font-mono text-sm font-medium">{o.order_no || '(no number)'}</span> <span className="text-xs text-gray-500 truncate">{o.customer_name || '—'}{o.delivery_date ? ` · deliver ${o.delivery_date}` : ''}</span></div>
-                <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${o.status === 'Partially Dispatched' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>{o.status}</span>
+                <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${o.status === 'Partially Dispatched' ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-100 text-emerald-700'}`}>{o.status}</span>
               </Link>
             ))}
           </div>

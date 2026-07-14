@@ -255,7 +255,7 @@ export default function DriverTodayPage() {
 
                         {delivered && (
                           <div className="mt-2 text-sm text-gray-600 flex flex-wrap items-center gap-x-4 gap-y-1">
-                            {photoOrder?.delivery_photo_path && <button onClick={() => viewPhoto(photoOrder.delivery_photo_path!)} className="text-blue-600 underline">View photo</button>}
+                            {photoOrder?.delivery_photo_path && <button onClick={() => viewPhoto(photoOrder.delivery_photo_path!)} className="text-emerald-600 underline">View photo</button>}
                             {noteText && <span className="text-gray-500">“{noteText}”</span>}
                             <button onClick={() => undoDeliver(g)} className="text-xs text-gray-400 underline">Undo</button>
                           </div>
@@ -263,7 +263,7 @@ export default function DriverTodayPage() {
 
                         {!delivered && openKey !== g.key && (
                           <button onClick={() => { setOpenKey(g.key); setPhoto(null); setNote('') }}
-                            className="mt-3 w-full rounded-md bg-blue-600 px-3 py-2.5 text-sm font-medium text-white hover:bg-blue-700">
+                            className="mt-3 w-full rounded-md bg-emerald-600 px-3 py-2.5 text-sm font-medium text-white hover:bg-emerald-700">
                             Mark delivered{g.orders.length > 1 ? ` (${g.orders.length} orders)` : ''}
                           </button>
                         )}

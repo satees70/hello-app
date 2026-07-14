@@ -11,9 +11,9 @@ const fmtN = (n: number) => clean(n).toLocaleString(undefined, { maximumFraction
 const STAGE = new Set(['GOODS-IN', 'DISPATCH'])
 
 const ORD_ORDER = ['Processing', 'Review', 'Released', 'Reserved', 'Picking', 'Picked', 'Partially Dispatched', 'Dispatched', 'Cancelled', 'Error']
-const ORD_COLORS: Record<string, string> = { Processing: 'bg-gray-300', Review: 'bg-amber-400', Released: 'bg-teal-300', Reserved: 'bg-teal-500', Picking: 'bg-blue-400', Picked: 'bg-emerald-400', 'Partially Dispatched': 'bg-blue-600', Dispatched: 'bg-emerald-600', Cancelled: 'bg-gray-300', Error: 'bg-red-400' }
+const ORD_COLORS: Record<string, string> = { Processing: 'bg-gray-300', Review: 'bg-amber-400', Released: 'bg-teal-300', Reserved: 'bg-teal-500', Picking: 'bg-emerald-400', Picked: 'bg-emerald-400', 'Partially Dispatched': 'bg-emerald-600', Dispatched: 'bg-emerald-600', Cancelled: 'bg-gray-300', Error: 'bg-red-400' }
 const PO_ORDER = ['Processing', 'Open', 'Partially Received', 'Fulfilled', 'Cancelled', 'Error']
-const PO_COLORS: Record<string, string> = { Processing: 'bg-gray-300', Open: 'bg-amber-400', 'Partially Received': 'bg-blue-400', Fulfilled: 'bg-emerald-500', Cancelled: 'bg-gray-300', Error: 'bg-red-400' }
+const PO_COLORS: Record<string, string> = { Processing: 'bg-gray-300', Open: 'bg-amber-400', 'Partially Received': 'bg-emerald-400', Fulfilled: 'bg-emerald-500', Cancelled: 'bg-gray-300', Error: 'bg-red-400' }
 
 export default function WmsHome() {
   const { profile, loading } = useProfile()
@@ -78,7 +78,7 @@ export default function WmsHome() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           <Tile href="/wms/purchase-orders" n={work.po} label="POs to receive" accent="text-amber-600" />
           <Tile href="/wms/putaway" n={work.putaway} label="Pending putaway" accent="text-emerald-700" />
-          <Tile href="/wms/orders" n={work.pick} label="Orders to pick" accent="text-blue-600" />
+          <Tile href="/wms/orders" n={work.pick} label="Orders to pick" accent="text-emerald-600" />
           <Tile href="/wms/dispatch" n={work.dispatch} label="Ready to dispatch" accent="text-teal-600" />
         </div>
 

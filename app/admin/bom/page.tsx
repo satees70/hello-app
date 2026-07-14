@@ -34,7 +34,7 @@ function ItemCombo({ items, value, onChange, placeholder }: {
           {matches.length === 0 && <li className="px-3 py-2 text-gray-400">No matches</li>}
           {matches.map(i => (
             <li key={i.id} onMouseDown={() => { onChange(i.id); setOpen(false) }}
-              className="px-3 py-2 hover:bg-blue-50 cursor-pointer">
+              className="px-3 py-2 hover:bg-emerald-50 cursor-pointer">
               <span className="font-mono">{i.code}</span> <span className="text-gray-500">— {i.description}{i.type === 'Manufactured' ? ' (Manufactured)' : ''}</span>
             </li>
           ))}
@@ -287,8 +287,8 @@ export default function BomPage() {
           <div className="flex flex-wrap items-center gap-3">
             <button onClick={downloadBomTemplate} className="border px-4 py-2 rounded-lg hover:bg-gray-50 text-sm">Download template</button>
             <input ref={bulkRef} type="file" accept=".csv,text/csv" disabled={bulkBusy} onChange={handleBulkUpload}
-              className="block text-sm text-gray-700 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 file:font-medium hover:file:bg-blue-100" />
-            {bulkBusy && <span className="text-blue-600 text-sm">Importing…</span>}
+              className="block text-sm text-gray-700 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 file:font-medium hover:file:bg-emerald-100" />
+            {bulkBusy && <span className="text-emerald-600 text-sm">Importing…</span>}
           </div>
           {bulkMsg && <p className="text-sm mt-3 bg-gray-50 border rounded p-2">{bulkMsg}</p>}
         </div>
@@ -305,7 +305,7 @@ export default function BomPage() {
                 <p className="text-sm text-gray-600 mb-1">Used in <strong>{traceParents.length}</strong> product recipe(s) — click to open:</p>
                 <ul className="space-y-0.5">
                   {traceParents.map(p => (
-                    <li key={p.id}><button onClick={() => { setParentId(p.id); setError(''); setSuccess(''); window.scrollTo({ top: 0, behavior: 'smooth' }) }} className="text-blue-600 hover:underline text-sm text-left"><span className="font-mono">{p.code}</span> — {p.description}</button></li>
+                    <li key={p.id}><button onClick={() => { setParentId(p.id); setError(''); setSuccess(''); window.scrollTo({ top: 0, behavior: 'smooth' }) }} className="text-emerald-600 hover:underline text-sm text-left"><span className="font-mono">{p.code}</span> — {p.description}</button></li>
                   ))}
                 </ul>
               </div>)}
@@ -349,7 +349,7 @@ export default function BomPage() {
                 </>
               ) : <p className="text-xs text-green-600">✓ Every item in this group has a recipe.</p>}
               {groupFilter && gWith.length > 0 && (
-                <button onClick={() => setShowDone(s => !s)} className="text-blue-600 hover:underline text-xs mt-2">{showDone ? 'Hide' : 'Show'} items with a recipe ({gWith.length})</button>
+                <button onClick={() => setShowDone(s => !s)} className="text-emerald-600 hover:underline text-xs mt-2">{showDone ? 'Hide' : 'Show'} items with a recipe ({gWith.length})</button>
               )}
               {groupFilter && showDone && (
                 <div className="flex flex-wrap gap-1.5 mt-2 max-h-48 overflow-y-auto">
@@ -409,7 +409,7 @@ export default function BomPage() {
                   </select>
                 </div>
                 <button onClick={addComponent}
-                  className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">
+                  className="bg-emerald-600 text-white px-5 py-2 rounded-lg hover:bg-emerald-700 text-sm font-medium">
                   Add
                 </button>
               </div>
@@ -449,7 +449,7 @@ export default function BomPage() {
                           <>
                             <td className="px-4 py-3 font-mono font-medium">
                               {ci?.code || '—'}
-                              <button onClick={() => { setEditRowId(c.id); setError('') }} className="ml-2 text-blue-600 hover:underline text-xs font-sans font-normal">change</button>
+                              <button onClick={() => { setEditRowId(c.id); setError('') }} className="ml-2 text-emerald-600 hover:underline text-xs font-sans font-normal">change</button>
                             </td>
                             <td className="px-4 py-3 text-gray-700">{ci?.description || '(item not found)'}</td>
                           </>
@@ -497,7 +497,7 @@ export default function BomPage() {
             {components.length > 0 && canEdit && (
               <div className="flex items-center gap-3 mt-4">
                 <button onClick={saveAll} disabled={!dirty || saving}
-                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
+                  className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium">
                   {saving ? 'Saving…' : 'Save all changes'}
                 </button>
                 {dirty

@@ -34,7 +34,7 @@ function normDate(v: unknown): string {
 function cellView(v: string): React.ReactNode {
   const t = String(v ?? '').trim()   // values from the upload sometimes carry leading/trailing spaces
   if (!t) return ''
-  if (/^https?:\/\//i.test(t)) return <a href={t} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">Open ↗</a>
+  if (/^https?:\/\//i.test(t)) return <a href={t} target="_blank" rel="noopener noreferrer" className="text-emerald-600 underline">Open ↗</a>
   const m = t.match(/^(\d{4})-(\d{2})-(\d{2})$/)
   if (m) return `${m[3]}/${m[2]}/${m[1]}`
   return t
@@ -62,7 +62,7 @@ const STATUS_CHIP: Record<string, string> = {
   'Material Received Partial': 'bg-amber-100 text-amber-700',
   'Material Received Fully': 'bg-lime-100 text-lime-700',
   'Pending Schedule': 'bg-yellow-100 text-yellow-700',
-  'Production started': 'bg-blue-100 text-blue-700',
+  'Production started': 'bg-emerald-100 text-emerald-700',
   'Production completed': 'bg-teal-100 text-teal-700',
   'Delivered to warehouse': 'bg-green-100 text-green-700',
 }
@@ -423,7 +423,7 @@ export default function DeliverySchedulePage() {
   ), [sched, routeFilter, dateFilter])
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   return (
@@ -487,8 +487,8 @@ export default function DeliverySchedulePage() {
                   </select></label>
               </div>
 
-              <div className="flex flex-wrap items-end gap-3 mt-4 p-3 bg-blue-50 rounded-lg">
-                <span className="text-sm font-medium text-blue-900 self-center">{sel.size} selected →</span>
+              <div className="flex flex-wrap items-end gap-3 mt-4 p-3 bg-emerald-50 rounded-lg">
+                <span className="text-sm font-medium text-emerald-900 self-center">{sel.size} selected →</span>
                 <label className="block"><span className="text-xs text-gray-500">Assign to line</span>
                   <select value={assignLine} onChange={e => setAssignLine(e.target.value)} className="block w-48 border rounded-lg px-3 py-2 text-sm mt-1">
                     {/* exact-date label only — a brand-new date shows blank labels (no carry-over) */}
@@ -496,7 +496,7 @@ export default function DeliverySchedulePage() {
                   </select></label>
                 <label className="block"><span className="text-xs text-gray-500">Delivery date (you set this)</span>
                   <input type="date" value={date} onChange={e => setDate(e.target.value)} className="block border rounded-lg px-3 py-2 text-sm mt-1" /></label>
-                <button onClick={assignSelected} disabled={busy === 'assign' || sel.size === 0} className="px-5 py-2 rounded-lg bg-blue-700 text-white text-sm font-semibold hover:bg-blue-800 disabled:opacity-50">
+                <button onClick={assignSelected} disabled={busy === 'assign' || sel.size === 0} className="px-5 py-2 rounded-lg bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 disabled:opacity-50">
                   {busy === 'assign' ? 'Assigning…' : `Assign ${sel.size || ''} to ${assignLine}`}
                 </button>
               </div>
@@ -517,7 +517,7 @@ export default function DeliverySchedulePage() {
                       const schedSome = scheduledSOs.has(m.so)   // scheduled on some day
                       const carry = isCarry(m.so)                // scheduled exactly the day before → green
                       return (
-                      <tr key={m.i} className={`border-t ${sel.has(m.i) ? 'bg-blue-100' : hold ? 'bg-red-100' : carry ? 'bg-green-100' : dueT ? 'bg-yellow-100' : 'hover:bg-gray-50'}`}>
+                      <tr key={m.i} className={`border-t ${sel.has(m.i) ? 'bg-emerald-100' : hold ? 'bg-red-100' : carry ? 'bg-green-100' : dueT ? 'bg-yellow-100' : 'hover:bg-gray-50'}`}>
                         <td className="px-3 py-1.5 whitespace-nowrap"><input type="checkbox" checked={sel.has(m.i)} onChange={() => toggleRow(m.i)} className="h-4 w-4" />{schedSome && <span className={`ml-1 text-[10px] font-semibold ${carry ? 'text-green-700' : 'text-gray-400'}`} title="Already on the schedule for another day">on {schedWhere(m.so)}</span>}</td>
                         {headers.map((h, i) => { const key = h || `Column ${i + 1}`; return <td key={i} className="px-3 py-1.5 text-gray-700">{cellView(m.data[key])}</td> })}
                       </tr>
@@ -534,7 +534,7 @@ export default function DeliverySchedulePage() {
               <div className="flex flex-wrap gap-2">
                 {uploads.map(u => (
                   <span key={u.id} className="inline-flex items-center gap-1.5 bg-gray-100 rounded-full pl-3 pr-2 py-1 text-xs">
-                    <button onClick={() => openUpload(u)} className="text-blue-600 hover:underline" title="Re-open to amend / continue scheduling">📄 {u.file_name}</button>
+                    <button onClick={() => openUpload(u)} className="text-emerald-600 hover:underline" title="Re-open to amend / continue scheduling">📄 {u.file_name}</button>
                     <span className="text-gray-400">{new Date(u.created_at).toLocaleDateString()}</span>
                     <button onClick={() => deleteUpload(u)} className="text-gray-400 hover:text-red-600">✕</button>
                   </span>

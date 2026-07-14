@@ -10,7 +10,7 @@ export default function NoAccessPage() {
           Your account doesn&apos;t have permission to view this part of the system.
           If you think you should, please ask Head Office to update your permissions.
         </p>
-        <a href="/dashboard" className="inline-block bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">
+        <a href="/dashboard" className="inline-block bg-emerald-600 text-white px-5 py-2 rounded-lg hover:bg-emerald-700 text-sm font-medium">
           Back to dashboard
         </a>
       </div>

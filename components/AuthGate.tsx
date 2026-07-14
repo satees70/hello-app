@@ -20,7 +20,7 @@ export default function AuthGate({ children, requireModule, hideBar }: { childre
       <div className="p-8 text-center">
         <p className="font-medium text-gray-800">No access</p>
         <p className="text-sm text-gray-500 mt-1">Your account doesn&apos;t have permission for this page. Ask an admin to grant it.</p>
-        <button onClick={() => supabase.auth.signOut()} className="mt-3 text-sm text-blue-600 hover:underline">Sign out</button>
+        <button onClick={() => supabase.auth.signOut()} className="mt-3 text-sm text-emerald-600 hover:underline">Sign out</button>
       </div>
     )
   }
@@ -30,7 +30,7 @@ export default function AuthGate({ children, requireModule, hideBar }: { childre
       {!hideBar && (
         <div className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-2 text-sm">
           <span className="text-gray-500">Signed in as <b className="text-gray-800">{profile.full_name || profile.username}</b></span>
-          <button onClick={() => supabase.auth.signOut()} className="text-blue-600 hover:underline">Sign out</button>
+          <button onClick={() => supabase.auth.signOut()} className="text-emerald-600 hover:underline">Sign out</button>
         </div>
       )}
       {children}

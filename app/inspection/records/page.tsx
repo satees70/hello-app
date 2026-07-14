@@ -82,7 +82,7 @@ export default function InspectionRecordsPage() {
                   <td className="px-3 py-2 whitespace-nowrap text-gray-600">{S(r, 'done_by') || '—'}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-600">{factoryName(r.factory_code)}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-400">{fmt(r.created_at)}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">{r.production_batch_id && <a href={`/inspection?batch=${r.production_batch_id}`} className="text-blue-600 hover:underline">Open →</a>}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">{r.production_batch_id && <a href={`/inspection?batch=${r.production_batch_id}`} className="text-emerald-600 hover:underline">Open →</a>}</td>
                 </tr>
               ))}
             </tbody>

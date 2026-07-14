@@ -53,7 +53,7 @@ export default function FactoriesPage() {
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   return (
@@ -87,7 +87,7 @@ export default function FactoriesPage() {
                   <td className="px-4 py-2"><input value={nameEdits[f.code] ?? f.name} onChange={e => setNameEdits(prev => ({ ...prev, [f.code]: e.target.value }))} className="border rounded px-2 py-1 text-sm w-full max-w-xs" /></td>
                   <td className="px-4 py-2 whitespace-nowrap">
                     {(nameEdits[f.code] !== undefined && nameEdits[f.code] !== f.name)
-                      ? <button onClick={() => rename(f)} disabled={busy === `name|${f.code}`} className="text-blue-600 hover:underline text-xs disabled:opacity-50">{busy === `name|${f.code}` ? 'Saving…' : 'Save'}</button>
+                      ? <button onClick={() => rename(f)} disabled={busy === `name|${f.code}`} className="text-emerald-600 hover:underline text-xs disabled:opacity-50">{busy === `name|${f.code}` ? 'Saving…' : 'Save'}</button>
                       : <span className="text-gray-300 text-xs">—</span>}
                   </td>
                 </tr>

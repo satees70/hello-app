@@ -70,7 +70,7 @@ export default function PackingLinesPage() {
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   const factoryName = (code: string) => factories.find(f => f.code === code)?.name || code
@@ -127,7 +127,7 @@ export default function PackingLinesPage() {
                   <td className="px-4 py-2"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${l.active ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'}`}>{l.active ? 'Active' : 'Hidden'}</span></td>
                   {(canEdit || canDelete) && (
                     <td className="px-4 py-2 whitespace-nowrap">
-                      {canEdit && <button onClick={() => toggleActive(l)} className="text-blue-600 hover:underline text-xs mr-3">{l.active ? 'Hide' : 'Show'}</button>}
+                      {canEdit && <button onClick={() => toggleActive(l)} className="text-emerald-600 hover:underline text-xs mr-3">{l.active ? 'Hide' : 'Show'}</button>}
                       {canDelete && <button onClick={() => remove(l)} className="text-red-600 hover:underline text-xs">Delete</button>}
                     </td>
                   )}

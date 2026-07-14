@@ -164,7 +164,7 @@ export default function WmsCountPage() {
         <div className="flex flex-wrap items-center gap-3 mt-2 mb-1">
           <h1 className="text-2xl font-bold">{task.count_no}{task.name ? ` · ${task.name}` : ''}</h1>
           {task.blind && <span className="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium">Blind</span>}
-          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${applied ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>{task.status}</span>
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${applied ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-100 text-emerald-700'}`}>{task.status}</span>
         </div>
         <p className="text-gray-500 text-sm mb-5">{counted}/{lines.length} lines counted · {discreps.length} discrepanc{discreps.length === 1 ? 'y' : 'ies'}{applied ? ` · applied by ${task.applied_by_name}` : ''}</p>
 

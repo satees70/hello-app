@@ -12,7 +12,7 @@ export default function BlockedPage() {
           <br /><br />
           Please connect to the office Wi-Fi and try again, or contact Head Office if you believe this is a mistake.
         </p>
-        <a href="/login" className="inline-block bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">
+        <a href="/login" className="inline-block bg-emerald-600 text-white px-5 py-2 rounded-lg hover:bg-emerald-700 text-sm font-medium">
           Back to login
         </a>
       </div>

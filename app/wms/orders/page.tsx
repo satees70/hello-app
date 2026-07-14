@@ -19,8 +19,8 @@ const fmtQty = (n: number) => clean(n).toLocaleString(undefined, { maximumFracti
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 const STATUS_CHIP: Record<string, string> = {
   Processing: 'bg-gray-100 text-gray-600', Review: 'bg-amber-100 text-amber-700', Released: 'bg-emerald-100 text-emerald-700',
-  Reserved: 'bg-teal-100 text-teal-700', Picking: 'bg-blue-100 text-blue-700', Picked: 'bg-emerald-100 text-emerald-700',
-  'Partially Dispatched': 'bg-blue-100 text-blue-700', Dispatched: 'bg-emerald-100 text-emerald-700', Error: 'bg-red-100 text-red-700', Cancelled: 'bg-gray-100 text-gray-400',
+  Reserved: 'bg-teal-100 text-teal-700', Picking: 'bg-emerald-100 text-emerald-700', Picked: 'bg-emerald-100 text-emerald-700',
+  'Partially Dispatched': 'bg-emerald-100 text-emerald-700', Dispatched: 'bg-emerald-100 text-emerald-700', Error: 'bg-red-100 text-red-700', Cancelled: 'bg-gray-100 text-gray-400',
 }
 
 export default function WmsOrdersPage() {

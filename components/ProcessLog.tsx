@@ -132,7 +132,7 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields, 
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   return (
@@ -141,7 +141,7 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields, 
       <div className="max-w-6xl mx-auto px-6 py-8">
         <div className="flex items-center justify-between mb-1">
           <h1 className="text-2xl font-bold">{title}</h1>
-          {(editing || (canEdit && myFactoryOptions.length > 0)) && <button onClick={() => (editing ? close() : openNew())} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">{editing ? 'Cancel' : '+ New record'}</button>}
+          {(editing || (canEdit && myFactoryOptions.length > 0)) && <button onClick={() => (editing ? close() : openNew())} className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 text-sm font-medium">{editing ? 'Cancel' : '+ New record'}</button>}
         </div>
         {subtitle && <p className="text-gray-500 text-sm mb-5">{subtitle}</p>}
 
@@ -162,7 +162,7 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields, 
               {!isHO && visibleRows.map(r => (
                 <tr key={r.id as string} className="border-b last:border-0 hover:bg-gray-50">
                   {listFields.map(fl => <td key={fl.key} className="px-3 py-2 whitespace-nowrap">{cell(r, fl)}</td>)}
-                  <td className="px-3 py-2 text-right"><button onClick={() => openEdit(r)} className="text-blue-600 hover:underline">{canEditFac(r.factory_code as string) ? 'Open' : 'View'}</button></td>
+                  <td className="px-3 py-2 text-right"><button onClick={() => openEdit(r)} className="text-emerald-600 hover:underline">{canEditFac(r.factory_code as string) ? 'Open' : 'View'}</button></td>
                 </tr>
               ))}
               {isHO && [...new Set(visibleRows.map(r => r.factory_code as string))].map(fc => {
@@ -177,7 +177,7 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields, 
                       <tr key={r.id as string} className="border-b last:border-0 hover:bg-gray-50">
                         <td className="px-3 py-2 whitespace-nowrap">{factoryName(r.factory_code as string)}</td>
                         {listFields.map(fl => <td key={fl.key} className="px-3 py-2 whitespace-nowrap">{cell(r, fl)}</td>)}
-                        <td className="px-3 py-2 text-right"><button onClick={() => openEdit(r)} className="text-blue-600 hover:underline">{canEditFac(r.factory_code as string) ? 'Open' : 'View'}</button></td>
+                        <td className="px-3 py-2 text-right"><button onClick={() => openEdit(r)} className="text-emerald-600 hover:underline">{canEditFac(r.factory_code as string) ? 'Open' : 'View'}</button></td>
                       </tr>
                     ))}
                   </Fragment>
@@ -231,7 +231,7 @@ export default function ProcessLog({ table, title, subtitle, moduleKey, fields, 
             </div>
             {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mt-3">{error}</p>}
             <div className="flex flex-wrap gap-2 mt-4 items-center">
-              {formEditable && <button onClick={save} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{saving ? 'Saving…' : 'Save'}</button>}
+              {formEditable && <button onClick={save} disabled={saving} className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium">{saving ? 'Saving…' : 'Save'}</button>}
               {applyAction && formEditable && editing !== 'new' && (
                 (editing as Record<string, unknown>)[applyAction.flagField]
                   ? <span className="text-green-700 text-sm font-medium">✓ {applyAction.doneLabel}</span>

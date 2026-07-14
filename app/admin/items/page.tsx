@@ -223,7 +223,7 @@ export default function ItemsPage() {
           <h1 className="text-2xl font-bold">Items Master</h1>
           {isHO && canEdit && (
             <button onClick={openCreate}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">
+              className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 text-sm font-medium">
               + Add Item
             </button>
           )}
@@ -250,8 +250,8 @@ export default function ItemsPage() {
             <div className="flex flex-wrap items-center gap-3">
               <button onClick={downloadTemplate} className="border px-4 py-2 rounded-lg hover:bg-gray-50 text-sm">Download template</button>
               <input ref={bulkRef} type="file" accept=".csv,text/csv" disabled={bulkBusy} onChange={handleBulkUpload}
-                className="block text-sm text-gray-700 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 file:font-medium hover:file:bg-blue-100" />
-              {bulkBusy && <span className="text-blue-600 text-sm">Importing…</span>}
+                className="block text-sm text-gray-700 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 file:font-medium hover:file:bg-emerald-100" />
+              {bulkBusy && <span className="text-emerald-600 text-sm">Importing…</span>}
             </div>
             {bulkMsg && <p className="text-sm mt-3 bg-gray-50 border rounded p-2">{bulkMsg}</p>}
           </div>
@@ -317,7 +317,7 @@ export default function ItemsPage() {
             {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded">{error}</p>}
             <div className="flex gap-3">
               <button type="submit" disabled={saving}
-                className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
+                className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium">
                 {saving ? 'Saving...' : editing && !isHO ? 'Send for approval' : 'Save'}
               </button>
               <button type="button" onClick={() => setShowForm(false)}
@@ -340,8 +340,8 @@ export default function ItemsPage() {
         </div>
 
         {canEdit && selected.size > 0 && (
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 mb-3 flex flex-wrap items-end gap-3 text-sm">
-            <span className="font-medium text-blue-800">{selected.size} selected — bulk set:</span>
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-3 flex flex-wrap items-end gap-3 text-sm">
+            <span className="font-medium text-emerald-800">{selected.size} selected — bulk set:</span>
             <div className="flex flex-col gap-1"><span className="text-xs text-gray-600">Field</span>
               <select value={bulkField} onChange={e => { setBulkField(e.target.value); setBulkValue('') }} className="border rounded px-2 py-1.5 bg-white">
                 {ITEM_FIELDS.filter(f => f.key !== 'description').map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
@@ -357,7 +357,7 @@ export default function ItemsPage() {
                 <input value={bulkValue} onChange={e => setBulkValue(e.target.value)} className="border rounded px-2 py-1.5" />
               )}
             </div>
-            <button onClick={applyBulk} disabled={bulkEditBusy || (!isHO && !hasCap(profile, 'request_item_change'))} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{bulkEditBusy ? 'Working…' : isHO ? 'Apply to selected' : 'Request for selected'}</button>
+            <button onClick={applyBulk} disabled={bulkEditBusy || (!isHO && !hasCap(profile, 'request_item_change'))} className="bg-emerald-600 text-white px-4 py-1.5 rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium">{bulkEditBusy ? 'Working…' : isHO ? 'Apply to selected' : 'Request for selected'}</button>
             <button onClick={() => setSelected(new Set())} className="text-gray-500 hover:underline">Clear</button>
           </div>
         )}
@@ -394,7 +394,7 @@ export default function ItemsPage() {
                   </td>
                   {(canEdit || canDelete) && (
                     <td className="px-4 py-3 flex gap-2 items-center">
-                      {canEdit && (isHO || hasCap(profile, 'request_item_change')) && <button onClick={() => openEdit(item)} className="text-blue-600 hover:underline text-xs">{isHO ? 'Edit' : 'Request edit'}</button>}
+                      {canEdit && (isHO || hasCap(profile, 'request_item_change')) && <button onClick={() => openEdit(item)} className="text-emerald-600 hover:underline text-xs">{isHO ? 'Edit' : 'Request edit'}</button>}
                       {canDelete && isHO && <button onClick={() => handleDelete(item.id)} className="text-red-500 hover:underline text-xs">Delete</button>}
                       {pendingItemIds.has(item.id) && <span className="text-amber-600 text-xs whitespace-nowrap">⏳ pending</span>}
                     </td>

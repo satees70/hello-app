@@ -142,7 +142,7 @@ export default function TransportPage() {
           <label className="flex items-center gap-1.5"><input type="checkbox" checked={pendingOnly} onChange={e => setPendingOnly(e.target.checked)} />Needs a lorry or driver</label>
           {isHO && <div className="w-48"><span className="text-xs text-gray-500">Factory</span><MultiFilter values={[...new Set(orders.map(o => factoryName(o.factory_code)))].sort()} selected={facF} onChange={setFacF} /></div>}
           <span className="text-amber-700 text-xs">🚚 {needLorry} need a lorry · 👤 {needDriver} need a driver</span>
-          <button onClick={() => setShowParking(v => !v)} className="text-xs text-blue-600 hover:underline">🅿 Lorry parking</button>
+          <button onClick={() => setShowParking(v => !v)} className="text-xs text-emerald-600 hover:underline">🅿 Lorry parking</button>
         </div>
 
         {lorryReqs.length > 0 && (
@@ -193,7 +193,7 @@ export default function TransportPage() {
               {grNeedDriver.map(g => (
                 <li key={g.id} className="flex flex-wrap items-center gap-2 text-sm border-b last:border-0 pb-2 last:pb-0">
                   <span className="inline-flex items-center gap-1 bg-teal-50 text-teal-800 rounded-full px-2.5 py-0.5 text-xs font-medium">🚚 {g.vehicle}</span>
-                  <a href={`/incoming?transport=${g.id}`} className="font-mono text-blue-600 hover:underline" title="Open this delivery on Goods Received">{g.do_number || '—'} ↗</a>
+                  <a href={`/incoming?transport=${g.id}`} className="font-mono text-emerald-600 hover:underline" title="Open this delivery on Goods Received">{g.do_number || '—'} ↗</a>
                   <span className="text-gray-500">→ {factoryName(g.factory_code)}</span>
                   <select value="" onChange={e => assignGrDriver(g.id, e.target.value)} disabled={busy === 'gr' + g.id} className="border rounded px-2 py-1 text-xs ml-auto">
                     <option value="">Assign driver…</option>
@@ -244,7 +244,7 @@ export default function TransportPage() {
                   <Fragment key={o.id}>
                   <tr className="border-b last:border-0 align-top">
                     <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">
-                      <button onClick={() => setExpanded(s => { const n = new Set(s); n.has(o.id) ? n.delete(o.id) : n.add(o.id); return n })} className="text-blue-600 hover:underline" title="Show items">
+                      <button onClick={() => setExpanded(s => { const n = new Set(s); n.has(o.id) ? n.delete(o.id) : n.add(o.id); return n })} className="text-emerald-600 hover:underline" title="Show items">
                         {expanded.has(o.id) ? '▾ ' : '▸ '}{o.do_number || '—'}
                       </button>
                     </td>
@@ -272,7 +272,7 @@ export default function TransportPage() {
                             )
                           })()}
                           <div className="flex items-center gap-2">
-                            <button onClick={() => request(o, 'lorry')} disabled={!editable || busy === o.id + 'lorryreq'} className="text-xs text-blue-600 hover:underline disabled:opacity-50">{o.lorry_requested_at ? 'Re-request' : '📞 Request lorry'}</button>
+                            <button onClick={() => request(o, 'lorry')} disabled={!editable || busy === o.id + 'lorryreq'} className="text-xs text-emerald-600 hover:underline disabled:opacity-50">{o.lorry_requested_at ? 'Re-request' : '📞 Request lorry'}</button>
                             {o.lorry_requested_at && <span className="text-[11px] text-amber-600">requested {fmt(o.lorry_requested_at)}</span>}
                           </div>
                         </div>
@@ -293,7 +293,7 @@ export default function TransportPage() {
                             {crew.map(c => <option key={c} value={c}>{c}</option>)}
                           </select>
                           <div className="flex items-center gap-2">
-                            <button onClick={() => request(o, 'driver')} disabled={!editable || busy === o.id + 'driverreq'} className="text-xs text-blue-600 hover:underline disabled:opacity-50">Re-request</button>
+                            <button onClick={() => request(o, 'driver')} disabled={!editable || busy === o.id + 'driverreq'} className="text-xs text-emerald-600 hover:underline disabled:opacity-50">Re-request</button>
                             {o.driver_requested_at && <span className="text-[11px] text-amber-600">requested {fmt(o.driver_requested_at)}</span>}
                           </div>
                         </div>

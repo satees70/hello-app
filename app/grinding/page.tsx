@@ -297,7 +297,7 @@ export default function GrindingPage() {
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   const activeRecipes = recipes.filter(r => r.active)
@@ -312,7 +312,7 @@ export default function GrindingPage() {
     : 'New'
   const STATUS_STYLE: Record<string, string> = {
     New: 'bg-gray-100 text-gray-700', 'In production': 'bg-amber-100 text-amber-700',
-    Completed: 'bg-green-100 text-green-700', Sent: 'bg-blue-100 text-blue-700',
+    Completed: 'bg-green-100 text-green-700', Sent: 'bg-emerald-100 text-emerald-700',
   }
   const grDist = (get: (r: GrindingRecord) => string) => [...new Set(records.map(get))].filter(Boolean).sort()
   const grVal = { factory: (r: GrindingRecord) => factoryName(r.factory_code), product: (r: GrindingRecord) => r.product || '—', type: (r: GrindingRecord) => r.recipe_type || '—', grindby: (r: GrindingRecord) => r.grind_by || '—', status: recStatus }
@@ -329,8 +329,8 @@ export default function GrindingPage() {
 
         {/* Tabs */}
         <div className="flex gap-2 mb-5 border-b">
-          <button onClick={() => setTab('production')} className={`px-4 py-2 text-sm font-medium border-b-2 ${tab === 'production' ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-500'}`}>Production</button>
-          {canRecipeView && <button onClick={() => setTab('recipes')} className={`px-4 py-2 text-sm font-medium border-b-2 ${tab === 'recipes' ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-500'}`}>Recipes</button>}
+          <button onClick={() => setTab('production')} className={`px-4 py-2 text-sm font-medium border-b-2 ${tab === 'production' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500'}`}>Production</button>
+          {canRecipeView && <button onClick={() => setTab('recipes')} className={`px-4 py-2 text-sm font-medium border-b-2 ${tab === 'recipes' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500'}`}>Recipes</button>}
         </div>
 
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-4">{error}</p>}
@@ -357,7 +357,7 @@ export default function GrindingPage() {
                   <label className="block text-xs text-gray-500 mb-1">Number of lots</label>
                   <input value={prodLots} onChange={e => setProdLots(e.target.value)} placeholder="e.g. 5" className="border rounded-lg px-3 py-2 text-sm w-28" />
                 </div>
-                <button onClick={produce} disabled={producing || !prodSearch || !prodLots} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{producing ? 'Producing…' : 'Produce'}</button>
+                <button onClick={produce} disabled={producing || !prodSearch || !prodLots} className="bg-emerald-600 text-white px-5 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium">{producing ? 'Producing…' : 'Produce'}</button>
                 {activeRecipes.length === 0 && <span className="text-xs text-amber-600">No recipes yet — ask the mixer to add one in the Recipes tab.</span>}
               </div>
             )}
@@ -392,7 +392,7 @@ export default function GrindingPage() {
                       <td className="px-3 py-2 whitespace-nowrap">{r.grind_by || '—'}</td>
                       <td className="px-3 py-2 text-right">{outQty(r.id) ? Number(outQty(r.id).toFixed(3)) : '—'}</td>
                       <td className="px-3 py-2 whitespace-nowrap"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[recStatus(r)] || 'bg-gray-100 text-gray-700'}`}>{recStatus(r)}</span></td>
-                      <td className="px-3 py-2 text-right"><button onClick={() => openRecord(r)} className="text-blue-600 hover:underline">Open</button></td>
+                      <td className="px-3 py-2 text-right"><button onClick={() => openRecord(r)} className="text-emerald-600 hover:underline">Open</button></td>
                     </tr>
                   ))}
                   {isHO && [...new Set(visibleRecords.map(r => r.factory_code))].map(fc => {
@@ -414,7 +414,7 @@ export default function GrindingPage() {
                             <td className="px-3 py-2 whitespace-nowrap">{r.grind_by || '—'}</td>
                             <td className="px-3 py-2 text-right">{outQty(r.id) ? Number(outQty(r.id).toFixed(3)) : '—'}</td>
                             <td className="px-3 py-2 whitespace-nowrap"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[recStatus(r)] || 'bg-gray-100 text-gray-700'}`}>{recStatus(r)}</span></td>
-                            <td className="px-3 py-2 text-right"><button onClick={() => openRecord(r)} className="text-blue-600 hover:underline">Open</button></td>
+                            <td className="px-3 py-2 text-right"><button onClick={() => openRecord(r)} className="text-emerald-600 hover:underline">Open</button></td>
                           </tr>
                         ))}
                       </Fragment>
@@ -428,7 +428,7 @@ export default function GrindingPage() {
 
         {tab === 'recipes' && canRecipeView && (
           <>
-            {canCreateRecipe && <button onClick={newRecipe} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium mb-4">+ New recipe</button>}
+            {canCreateRecipe && <button onClick={newRecipe} className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 text-sm font-medium mb-4">+ New recipe</button>}
             <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[28rem]">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b sticky top-0 z-10">
@@ -444,7 +444,7 @@ export default function GrindingPage() {
                       <td className="px-3 py-2 text-xs">{(compByRecipe[r.id] || []).map((c, i) => <div key={i}>{c.item} — {c.qty_per_lot}</div>)}{!(compByRecipe[r.id]?.length) && '—'}</td>
                       <td className="px-3 py-2">{r.active ? 'Yes' : 'No'}</td>
                       <td className="px-3 py-2 text-right whitespace-nowrap">
-                        {canRecipeEdit && <><button onClick={() => openRecipe(r)} className="text-blue-600 hover:underline">Edit</button><button onClick={() => deleteRecipe(r)} className="text-red-600 hover:underline ml-3">Delete</button></>}
+                        {canRecipeEdit && <><button onClick={() => openRecipe(r)} className="text-emerald-600 hover:underline">Edit</button><button onClick={() => deleteRecipe(r)} className="text-red-600 hover:underline ml-3">Delete</button></>}
                       </td>
                     </tr>
                   ))}
@@ -560,7 +560,7 @@ export default function GrindingPage() {
             <div className="mb-4 border rounded-lg p-3">
               <div className="flex items-center justify-between mb-2">
                 <div className="text-sm font-semibold">Output products</div>
-                {recEdit && <button type="button" onClick={addOutput} className="text-blue-600 hover:underline text-xs">+ Add output</button>}
+                {recEdit && <button type="button" onClick={addOutput} className="text-emerald-600 hover:underline text-xs">+ Add output</button>}
               </div>
               {outputs.length === 0 && <p className="text-sm text-gray-400">No output added yet.</p>}
               {outputs.length > 0 && (
@@ -591,7 +591,7 @@ export default function GrindingPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              {(recEdit || recRecipeEdit) && <button onClick={() => saveRecord(false)} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{saving ? 'Saving…' : 'Save'}</button>}
+              {(recEdit || recRecipeEdit) && <button onClick={() => saveRecord(false)} disabled={saving} className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium">{saving ? 'Saving…' : 'Save'}</button>}
               {recEdit && (openRec.posted_at
                 ? <span className="text-green-700 text-sm font-medium">✓ In finished goods</span>
                 : <button onClick={() => saveRecord(true)} disabled={saving || badOutputs.length > 0 || !outputs.some(o => o.item.trim() && Number(o.qty) > 0)}
@@ -622,7 +622,7 @@ export default function GrindingPage() {
             <div className="mb-4">
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-sm font-medium">Ingredients (quantity per 1 lot)</label>
-                <button type="button" onClick={() => setRecipeForm({ ...recipeForm, components: [...recipeForm.components, { item: '', qty_per_lot: '' }] })} className="text-blue-600 hover:underline text-xs">+ Add ingredient</button>
+                <button type="button" onClick={() => setRecipeForm({ ...recipeForm, components: [...recipeForm.components, { item: '', qty_per_lot: '' }] })} className="text-emerald-600 hover:underline text-xs">+ Add ingredient</button>
               </div>
               <div className="space-y-2">
                 {recipeForm.components.map((c, i) => (
@@ -635,7 +635,7 @@ export default function GrindingPage() {
               </div>
             </div>
             <div className="flex gap-2">
-              <button onClick={saveRecipe} disabled={saving || !recipeForm.product.trim()} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{saving ? 'Saving…' : 'Save recipe'}</button>
+              <button onClick={saveRecipe} disabled={saving || !recipeForm.product.trim()} className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium">{saving ? 'Saving…' : 'Save recipe'}</button>
               <button onClick={() => { setEditRecipe(null); setRecipeForm(null) }} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
             </div>
           </div>

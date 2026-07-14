@@ -135,7 +135,7 @@ export default function ImportShipmentsPage() {
           <h1 className="text-2xl font-bold">Import shipments</h1>
           {canEdit && (
             <div className="flex items-center gap-2">
-              <label className={`text-sm font-medium px-4 py-2 rounded-lg border cursor-pointer ${docBusy ? 'bg-gray-100 text-gray-400 border-gray-200' : 'border-blue-600 text-blue-600 hover:bg-blue-50'}`}>
+              <label className={`text-sm font-medium px-4 py-2 rounded-lg border cursor-pointer ${docBusy ? 'bg-gray-100 text-gray-400 border-gray-200' : 'border-emerald-600 text-emerald-600 hover:bg-emerald-50'}`}>
                 {docBusy || '⬆ Start from a document'}
                 <input ref={fileRef} type="file" accept="application/pdf" onChange={startFromDocument} disabled={!!docBusy} className="hidden" />
               </label>
@@ -172,7 +172,7 @@ export default function ImportShipmentsPage() {
                 const agg = byShipment[s.id]
                 const running = agg && (agg.dem > 0 || agg.det > 0)
                 return (
-                  <tr key={s.id} className="border-b last:border-0 hover:bg-blue-50/40 cursor-pointer" onClick={() => router.push(`/import/${s.id}`)}>
+                  <tr key={s.id} className="border-b last:border-0 hover:bg-emerald-50/40 cursor-pointer" onClick={() => router.push(`/import/${s.id}`)}>
                     <td className="px-4 py-2 font-medium whitespace-nowrap">{s.reference || <span className="text-gray-400 italic">(from document…)</span>}</td>
                     <td className="px-4 py-2 text-gray-700">{supplierName[s.supplier_id || ''] || <span className="text-gray-400">—</span>}</td>
                     <td className="px-4 py-2"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[s.status] || 'bg-gray-100 text-gray-700'}`}>{s.status}</span></td>

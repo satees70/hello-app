@@ -133,7 +133,7 @@ export default function GrindingMachinesPage() {
                   placeholder="Anything useful for maintenance later…" className="block w-full mt-0.5 rounded border border-gray-300 px-2 py-1.5 text-sm" />
               </label>
             </div>
-            <button type="submit" disabled={saving} className="mt-3 rounded-md bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+            <button type="submit" disabled={saving} className="mt-3 rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50">
               {saving ? 'Adding…' : 'Add machine'}
             </button>
           </form>

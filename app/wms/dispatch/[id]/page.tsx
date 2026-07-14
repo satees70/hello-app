@@ -104,7 +104,7 @@ export default function WmsDispatchPage() {
         <h1 className="text-2xl font-bold mt-2 mb-1">Dispatch {order.order_no || '(no number)'}</h1>
         <p className="text-gray-500 text-sm mb-5">{order.customer_name || 'Customer ?'}{order.delivery_date ? ` · deliver ${order.delivery_date}` : ''} · confirm what physically ships, then print the Delivery Order.</p>
 
-        {order.status === 'Partially Dispatched' && <p className="text-sm bg-blue-50 text-blue-700 border border-blue-200 rounded-lg p-3 mb-4">Part of this order was already dispatched — below is what’s still in the holding bin to ship.</p>}
+        {order.status === 'Partially Dispatched' && <p className="text-sm bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg p-3 mb-4">Part of this order was already dispatched — below is what’s still in the holding bin to ship.</p>}
         {order.status === 'Dispatched' && drafts.length === 0 && <p className="text-sm bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg p-3 mb-4">This order is fully dispatched. Reprint its Delivery Orders on the Delivery Orders page.</p>}
         {err && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg mb-4">{err}</p>}
 

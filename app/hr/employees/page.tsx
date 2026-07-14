@@ -363,7 +363,7 @@ export default function EmployeesSetupPage() {
               Set active from attendance
             </button>
             <button onClick={pullNames} disabled={pulling}
-              className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+              className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50">
               {pulling ? 'Pulling…' : 'Pull names from ZKLink'}
             </button>
           </div>

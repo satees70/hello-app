@@ -87,7 +87,7 @@ export default function ImportSuppliersPage() {
                   <td className="px-4 py-2 text-gray-600">{s.email || '—'}</td>
                   <td className="px-4 py-2 text-gray-600">{s.phone || '—'}</td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
-                    {canEdit && <button onClick={() => openEdit(s)} className="text-blue-600 hover:underline text-xs mr-3">Edit</button>}
+                    {canEdit && <button onClick={() => openEdit(s)} className="text-emerald-600 hover:underline text-xs mr-3">Edit</button>}
                     {canDelete && <button onClick={() => remove(s)} className="text-red-500 hover:underline text-xs">Delete</button>}
                   </td>
                 </tr>

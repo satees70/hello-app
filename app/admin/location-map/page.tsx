@@ -71,7 +71,7 @@ export default function LocationMapPage() {
             <p className="text-gray-500 text-sm mt-1">Map location codes to factories</p>
           </div>
           <button onClick={openCreate}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">
+            className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 text-sm font-medium">
             + Add Mapping
           </button>
         </div>
@@ -97,7 +97,7 @@ export default function LocationMapPage() {
             {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded">{error}</p>}
             <div className="flex gap-3">
               <button type="submit" disabled={saving}
-                className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
+                className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium">
                 {saving ? 'Saving...' : 'Save'}
               </button>
               <button type="button" onClick={() => setShowForm(false)}
@@ -123,12 +123,12 @@ export default function LocationMapPage() {
                 <tr key={row.id} className="border-b last:border-0 hover:bg-gray-50">
                   <td className="px-4 py-3 font-mono font-medium">{row.location_code}</td>
                   <td className="px-4 py-3">
-                    <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs font-medium">
+                    <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full text-xs font-medium">
                       {getFactoryName(row.factory_code)}
                     </span>
                   </td>
                   <td className="px-4 py-3 flex gap-3">
-                    <button onClick={() => openEdit(row)} className="text-blue-600 hover:underline text-xs">Edit</button>
+                    <button onClick={() => openEdit(row)} className="text-emerald-600 hover:underline text-xs">Edit</button>
                     <button onClick={() => handleDelete(row.id)} className="text-red-500 hover:underline text-xs">Delete</button>
                   </td>
                 </tr>

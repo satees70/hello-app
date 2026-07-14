@@ -52,7 +52,7 @@ const ACTIVE = ['Open', 'Partially Received']
 
 const STATUS_STYLE: Record<string, string> = {
   Open: 'bg-amber-100 text-amber-700',
-  'Partially Received': 'bg-blue-100 text-blue-700',
+  'Partially Received': 'bg-emerald-100 text-emerald-700',
   Fulfilled: 'bg-green-100 text-green-700',
 }
 
@@ -294,7 +294,7 @@ export default function MaterialRequestsPage() {
   const labelStage = (r: MaterialRequest, it: MRItem): { key: string; label: string; cls: string } => {
     if (it.label_received_at) return { key: 'completed', label: 'Completed', cls: 'bg-green-100 text-green-700' }
     if (it.label_sent_at) return { key: 'sent', label: 'Sent', cls: 'bg-indigo-100 text-indigo-700' }
-    if (Number(it.label_print_qty) > 0 && (it.label_batch_no || it.label_exp_date)) return { key: 'printed', label: 'Printed', cls: 'bg-blue-100 text-blue-700' }
+    if (Number(it.label_print_qty) > 0 && (it.label_batch_no || it.label_exp_date)) return { key: 'printed', label: 'Printed', cls: 'bg-emerald-100 text-emerald-700' }
     if (rawFraction(r) >= 1) return { key: 'material', label: 'Material received', cls: 'bg-amber-100 text-amber-700' }
     return { key: 'requested', label: 'Requested', cls: 'bg-gray-100 text-gray-600' }
   }
@@ -463,7 +463,7 @@ export default function MaterialRequestsPage() {
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   const shown = filter === 'All' || filter === 'Combined picking' ? requests : requests.filter(r => r.status === filter)
@@ -543,7 +543,7 @@ export default function MaterialRequestsPage() {
           const toPick = per ? Math.ceil(g.requested / per) : r(g.requested)
           return (
             <div key={`m|${prefix}|${g.code}`} className={`border rounded-lg p-2.5 ${editable && g.received >= g.requested ? 'bg-green-50/40' : ''}`}>
-              <div className="flex items-baseline justify-between gap-2"><span className="font-mono font-medium text-sm">{g.code}</span><span className="text-blue-700 font-semibold text-sm">{toPick} {per ? 'roll' : g.unit}</span></div>
+              <div className="flex items-baseline justify-between gap-2"><span className="font-mono font-medium text-sm">{g.code}</span><span className="text-emerald-700 font-semibold text-sm">{toPick} {per ? 'roll' : g.unit}</span></div>
               <div className="text-gray-600 text-xs">{g.description}</div>
               {editable && <div className="text-xs text-gray-500 mt-1">Received <strong className="text-gray-700">{per ? r(g.received / per) : r(g.received)}</strong> · Remaining <strong className={remaining > 0 ? 'text-red-600' : 'text-green-600'}>{per ? r(remaining / per) : r(remaining)}</strong></div>}
             </div>
@@ -571,7 +571,7 @@ export default function MaterialRequestsPage() {
                   <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{g.code}</td>
                   <td className="px-3 py-2 text-gray-600">{g.description}</td>
                   <td className="px-3 py-2 text-gray-500">{per ? 'roll' : g.unit}</td>
-                  <td className="px-3 py-2 text-right font-semibold text-blue-700">{toPick}{per ? <span className="text-gray-400 font-normal"> ({r(g.requested)} pc)</span> : null}</td>
+                  <td className="px-3 py-2 text-right font-semibold text-emerald-700">{toPick}{per ? <span className="text-gray-400 font-normal"> ({r(g.requested)} pc)</span> : null}</td>
                   {editable && <>
                     <td className="px-3 py-2 text-right text-gray-700">{recv}</td>
                     <td className={`px-3 py-2 text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{rem}</td>
@@ -601,13 +601,13 @@ export default function MaterialRequestsPage() {
           <div className="flex gap-2 mb-5">
             {TAB_FILTERS.map(f => (
               <button key={f} onClick={() => setFilter(f)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${filter === f ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${filter === f ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
                 {f}{f === 'Not requested' ? (notReq.length ? ` (${notReq.length})` : '') : (f !== 'All' && counts[f] ? ` (${counts[f]})` : '')}
               </button>
             ))}
           </div>
         )}
-        {isWarehouse && <p className="text-gray-500 text-sm bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mb-4">📦 Warehouse view — released pick runs only. Enter the SO number and record what you pick.</p>}
+        {isWarehouse && <p className="text-gray-500 text-sm bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 mb-4">📦 Warehouse view — released pick runs only. Enter the SO number and record what you pick.</p>}
 
         {!isWarehouse && canEdit && (() => {
           // Only locations this user is allowed to edit can be requested for
@@ -617,18 +617,18 @@ export default function MaterialRequestsPage() {
           const fac = facOpts.includes(manFac) ? manFac : facOpts[0]
           return (
             <div className="mb-5">
-              <button onClick={() => { setShowManual(o => !o); setError(''); setSuccess('') }} className="text-blue-600 hover:underline text-sm font-medium">
+              <button onClick={() => { setShowManual(o => !o); setError(''); setSuccess('') }} className="text-emerald-600 hover:underline text-sm font-medium">
                 {showManual ? '× Close manual request' : '➕ Request a material manually'}
               </button>
               {showManual && (
                 <div className="mt-2 bg-white border rounded-xl shadow-sm p-4">
                   <p className="text-gray-500 text-xs mb-3">Raise materials by hand (not from a batch recipe). Load a product&apos;s recipe and tweak it, or add items one by one, then <strong>Submit request</strong> — they join <strong>Waiting to release</strong> for that factory.</p>
-                  <div className="flex flex-wrap items-end gap-3 mb-3 bg-blue-50/50 border border-blue-100 rounded-lg p-3">
+                  <div className="flex flex-wrap items-end gap-3 mb-3 bg-emerald-50/50 border border-emerald-100 rounded-lg p-3">
                     <div className="flex flex-col gap-1 flex-1 min-w-[16rem]"><span className="text-xs font-medium text-gray-600">Load from a product&apos;s recipe (optional)</span>
                       <ItemPicker items={itemsMaster} value={recipeProduct ? `${recipeProduct.code} — ${recipeProduct.description}` : ''} onPick={it => setRecipeProduct(it)} placeholder="Pick the product to copy its BOM…" /></div>
                     <div className="flex flex-col gap-1 w-28"><span className="text-xs font-medium text-gray-600">Units to make</span>
                       <input type="number" step="any" value={recipeUnits} onChange={e => setRecipeUnits(e.target.value)} className="border rounded-lg px-3 py-2 text-sm text-right" /></div>
-                    <button onClick={loadRecipeIntoManual} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">Load recipe</button>
+                    <button onClick={loadRecipeIntoManual} className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 text-sm font-medium">Load recipe</button>
                   </div>
                   <div className="flex flex-wrap items-end gap-3">
                     {facOpts.length > 1 && (
@@ -642,7 +642,7 @@ export default function MaterialRequestsPage() {
                     </div>
                     <div className="flex flex-col gap-1 w-28"><span className="text-xs font-medium text-gray-600">Qty{manItem ? ` (${manItem.unit})` : ''}</span>
                       <input type="number" step="any" value={manQty} onChange={e => setManQty(e.target.value)} className="border rounded-lg px-3 py-2 text-sm text-right" /></div>
-                    <button onClick={addManualLine} className="border border-blue-600 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 text-sm font-medium">+ Add item</button>
+                    <button onClick={addManualLine} className="border border-emerald-600 text-emerald-600 px-4 py-2 rounded-lg hover:bg-emerald-50 text-sm font-medium">+ Add item</button>
                   </div>
                   {manLines.length > 0 && (
                     <div className="mt-3 border rounded-lg overflow-hidden">
@@ -662,7 +662,7 @@ export default function MaterialRequestsPage() {
                     </div>
                   )}
                   <div className="mt-3 flex items-center gap-3">
-                    <button onClick={submitManualRequest} disabled={busy === 'manual'} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{busy === 'manual' ? 'Submitting…' : `Submit request${manLines.length ? ` (${manLines.length} item${manLines.length > 1 ? 's' : ''})` : ''}`}</button>
+                    <button onClick={submitManualRequest} disabled={busy === 'manual'} className="bg-emerald-600 text-white px-5 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium">{busy === 'manual' ? 'Submitting…' : `Submit request${manLines.length ? ` (${manLines.length} item${manLines.length > 1 ? 's' : ''})` : ''}`}</button>
                     {manLines.length > 0 && <button onClick={() => setManLines([])} className="text-gray-500 hover:underline text-xs">Clear list</button>}
                   </div>
                 </div>
@@ -681,7 +681,7 @@ export default function MaterialRequestsPage() {
             const byFac: Record<string, PlannedBatch[]> = {}; list.forEach(b => { (byFac[b.factory_code] = byFac[b.factory_code] || []).push(b) })
             return (
               <div className="space-y-5 max-h-[40rem] overflow-y-auto pr-1">
-                <p className="text-gray-500 text-sm">These planned batches have <strong>no material request yet</strong>. Raise materials for them on the <a href="/production" className="text-blue-600 hover:underline">Order Board</a> (Materials button).</p>
+                <p className="text-gray-500 text-sm">These planned batches have <strong>no material request yet</strong>. Raise materials for them on the <a href="/production" className="text-emerald-600 hover:underline">Order Board</a> (Materials button).</p>
                 {Object.keys(byFac).sort().map(fac => (
                   <div key={fac} className="bg-white rounded-xl shadow-sm border overflow-hidden">
                     <div className="px-4 py-2 bg-amber-50 border-b text-sm font-semibold text-amber-800">🏭 {isHO ? factoryName(fac) : fac} <span className="font-normal text-amber-600">· {byFac[fac].length} batch(es) not requested</span></div>
@@ -724,7 +724,7 @@ export default function MaterialRequestsPage() {
                           <span className="font-semibold">{isHO ? factoryName(fac) : fac}</span>
                           <span className="text-sm text-gray-400">· {Object.keys(waiting[fac]).length} material(s) waiting</span>
                           {canEditFac(fac) && <button onClick={() => release(fac)} disabled={busy === `release|${fac}`}
-                            className="ml-auto bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">
+                            className="ml-auto bg-emerald-600 text-white px-4 py-1.5 rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium">
                             {busy === `release|${fac}` ? 'Releasing…' : 'Release to warehouse →'}
                           </button>}
                         </div>
@@ -756,7 +756,7 @@ export default function MaterialRequestsPage() {
                           {RUN_BUCKETS.map(b => <option key={b} value={b}>{BUCKET_LABEL[b]}</option>)}
                         </select></div>
                       <span className="text-gray-400 text-xs">{orderedRuns.length} run(s)</span>
-                      {(runFac || runBkt) && <button onClick={() => { setRunFac(''); setRunBkt('') }} className="text-blue-600 hover:underline text-xs">Clear</button>}
+                      {(runFac || runBkt) && <button onClick={() => { setRunFac(''); setRunBkt('') }} className="text-emerald-600 hover:underline text-xs">Clear</button>}
                     </div>
                   )}
                   <div className="space-y-4">
@@ -773,7 +773,7 @@ export default function MaterialRequestsPage() {
                           <div className="flex flex-wrap items-center gap-3 mb-4">
                             <span className="font-semibold">{isHO ? factoryName(run.factory) : run.factory}</span>
                             <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 font-mono">{run.runNo}</span>
-                            <a href={`/discussion?topic=${encodeURIComponent(run.runNo)}`} className="text-blue-600 hover:underline text-xs" title="Discuss this pick run — reply the SO, or question a wrong PR">💬 Discuss</a>
+                            <a href={`/discussion?topic=${encodeURIComponent(run.runNo)}`} className="text-emerald-600 hover:underline text-xs" title="Discuss this pick run — reply the SO, or question a wrong PR">💬 Discuss</a>
                             <span className="text-sm text-gray-400">released {new Date(run.released_at).toLocaleString()}{run.reqs[0]?.created_by_name ? ` · raised by ${run.reqs[0].created_by_name}` : ''}</span>
                             {filter !== 'Labels' && <>
                             <span className="flex items-center gap-2 ml-auto shrink-0">
@@ -782,13 +782,13 @@ export default function MaterialRequestsPage() {
                                 <>
                                   <span className="font-mono font-medium text-sm">{run.reqs[0].warehouse_so_no}</span>
                                   {run.reqs[0].so_set_by_name && <span className="text-[11px] text-gray-400">by {run.reqs[0].so_set_by_name}{run.reqs[0].so_set_at ? ` · ${new Date(run.reqs[0].so_set_at).toLocaleString()}` : ''}</span>}
-                                  {canEditFac(run.factory) && hasCap(profile, 'so_edit') && <button onClick={() => requestSoChange(run)} className="text-blue-600 hover:underline text-xs">Request change</button>}
+                                  {canEditFac(run.factory) && hasCap(profile, 'so_edit') && <button onClick={() => requestSoChange(run)} className="text-emerald-600 hover:underline text-xs">Request change</button>}
                                 </>
                               ) : canEditFac(run.factory) && hasCap(profile, 'so_edit') ? (
                                 <>
                                   <input value={soEdits[run.runNo] ?? ''} onChange={e => setSoEdits(prev => ({ ...prev, [run.runNo]: e.target.value }))}
                                     placeholder="enter SO number" className="border rounded px-2 py-1 text-xs w-40 shrink-0" />
-                                  <button onClick={() => saveSo(run)} disabled={busy === `so|${run.runNo}`} className="text-blue-600 hover:underline text-xs disabled:opacity-50">{busy === `so|${run.runNo}` ? 'Saving…' : 'Save'}</button>
+                                  <button onClick={() => saveSo(run)} disabled={busy === `so|${run.runNo}`} className="text-emerald-600 hover:underline text-xs disabled:opacity-50">{busy === `so|${run.runNo}` ? 'Saving…' : 'Save'}</button>
                                 </>
                               ) : <span className="text-gray-300 text-xs">—</span>}
                             </span>
@@ -802,7 +802,7 @@ export default function MaterialRequestsPage() {
                               <div className="flex items-center gap-2 mb-2">
                                 <span className="text-sm font-semibold text-gray-700">📦 From warehouse</span>
                                 <button onClick={() => downloadPickRunPdf(run.runNo, run.factory, run.released_at, warehouse, 'Warehouse')}
-                                  className="ml-auto border border-blue-600 text-blue-600 px-3 py-1 rounded-lg hover:bg-blue-50 text-xs font-medium">⬇ Warehouse PDF</button>
+                                  className="ml-auto border border-emerald-600 text-emerald-600 px-3 py-1 rounded-lg hover:bg-emerald-50 text-xs font-medium">⬇ Warehouse PDF</button>
                               </div>
                               {renderMatTable(warehouse, `${rkey}|wh`, true)}
                             </div>
@@ -852,16 +852,16 @@ export default function MaterialRequestsPage() {
                                               <div className="flex items-center justify-between gap-2"><div className="text-gray-600 text-xs">{it.description}</div><LabelBadge r={r} it={it} /></div>
                                               {locked ? <div className="text-amber-700 text-xs mt-1">🔒 locked until GRN uploaded</div> : (
                                                 <div className="mt-2 grid grid-cols-2 gap-2">
-                                                  <label className="text-xs text-gray-500">Available now<div className="font-semibold text-blue-700">{avail}</div></label>
+                                                  <label className="text-xs text-gray-500">Available now<div className="font-semibold text-emerald-700">{avail}</div></label>
                                                   <label className="text-xs text-gray-500">Print qty<input type="number" min="0" max={avail} value={le.qty} onChange={e => setLe({ qty: e.target.value })} className="border rounded px-2 py-1 text-sm w-full" /></label>
                                                   <label className="text-xs text-gray-500">Batch No.<input value={le.batch} onChange={e => setLe({ batch: e.target.value })} placeholder="batch no." className="border rounded px-2 py-1 text-sm w-full" /></label>
                                                   <label className="text-xs text-gray-500">Expiry<input type="date" value={le.exp} onChange={e => setLe({ exp: e.target.value })} className="border rounded px-2 py-1 text-sm w-full" /></label>
-                                                  <button onClick={() => saveLabel(it, r)} disabled={busy === `label|${it.id}`} className="col-span-2 bg-blue-600 text-white rounded px-3 py-1.5 text-sm font-medium disabled:opacity-50">{busy === `label|${it.id}` ? 'Saving…' : 'Save'}{(it.label_batch_no || it.label_exp_date) ? ' ✓' : ''}</button>
+                                                  <button onClick={() => saveLabel(it, r)} disabled={busy === `label|${it.id}`} className="col-span-2 bg-emerald-600 text-white rounded px-3 py-1.5 text-sm font-medium disabled:opacity-50">{busy === `label|${it.id}` ? 'Saving…' : 'Save'}{(it.label_batch_no || it.label_exp_date) ? ' ✓' : ''}</button>
                                                   {it.label_received_at ? <span className="col-span-2 text-green-600 text-xs font-medium">✓ Sent to stock</span> : (
                                                     <div className="col-span-2 flex items-center gap-3">
                                                       {it.label_photo_path
                                                         ? <button onClick={() => viewLabelPhoto(it.label_photo_path!)} className="text-green-600 hover:underline text-xs">✓ Photo</button>
-                                                        : <label className="text-blue-600 hover:underline text-xs cursor-pointer">{busy === `lphoto|${it.id}` ? '…' : '📷 Photo'}<input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) uploadLabelPhoto(it, r, f); e.target.value = '' }} /></label>}
+                                                        : <label className="text-emerald-600 hover:underline text-xs cursor-pointer">{busy === `lphoto|${it.id}` ? '…' : '📷 Photo'}<input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) uploadLabelPhoto(it, r, f); e.target.value = '' }} /></label>}
                                                       <label className="text-xs text-gray-600 flex items-center gap-1"><input type="checkbox" className="h-4 w-4" checked={selLabels.has(it.id)} onChange={() => toggleLabel(it.id)} /> send</label>
                                                     </div>
                                                   )}
@@ -894,17 +894,17 @@ export default function MaterialRequestsPage() {
                                                   <td className={`px-3 py-2 text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{remaining}</td>
                                                   <td className="px-3 py-2 whitespace-nowrap"><LabelBadge r={r} it={it} /></td>
                                                   {!locked && <>
-                                                    <td className="px-3 py-2 text-right font-semibold text-blue-700">{avail}</td>
+                                                    <td className="px-3 py-2 text-right font-semibold text-emerald-700">{avail}</td>
                                                     <td className="px-3 py-2"><input type="number" min="0" max={avail} value={le.qty} onChange={e => setLe({ qty: e.target.value })} className="border rounded px-2 py-1 text-xs w-20 text-right" /></td>
                                                     <td className="px-3 py-2"><input value={le.batch} onChange={e => setLe({ batch: e.target.value })} placeholder="batch no." className="border rounded px-2 py-1 text-xs w-28" /></td>
                                                     <td className="px-3 py-2"><input type="date" min="2020-01-01" max="2100-12-31" value={le.exp} onChange={e => setLe({ exp: e.target.value })} className="border rounded px-2 py-1 text-xs" /></td>
                                                     <td className="px-3 py-2 whitespace-nowrap">
                                                       {it.label_received_at ? <span className="text-green-600 text-xs font-medium">✓ Sent to stock</span> : (<>
-                                                        <button onClick={() => saveLabel(it, r)} disabled={busy === `label|${it.id}`} className="text-blue-600 hover:underline text-xs disabled:opacity-50">{busy === `label|${it.id}` ? 'Saving…' : 'Save'}</button>{(it.label_batch_no || it.label_exp_date) && <span className="text-green-600 text-xs ml-0.5">✓</span>}
+                                                        <button onClick={() => saveLabel(it, r)} disabled={busy === `label|${it.id}`} className="text-emerald-600 hover:underline text-xs disabled:opacity-50">{busy === `label|${it.id}` ? 'Saving…' : 'Save'}</button>{(it.label_batch_no || it.label_exp_date) && <span className="text-green-600 text-xs ml-0.5">✓</span>}
                                                         <span className="text-gray-300 mx-1">·</span>
                                                         {it.label_photo_path
                                                           ? <button onClick={() => viewLabelPhoto(it.label_photo_path!)} className="text-green-600 hover:underline text-xs">✓ Photo</button>
-                                                          : <label className="text-blue-600 hover:underline text-xs cursor-pointer">{busy === `lphoto|${it.id}` ? '…' : '📷 Photo'}<input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) uploadLabelPhoto(it, r, f); e.target.value = '' }} /></label>}
+                                                          : <label className="text-emerald-600 hover:underline text-xs cursor-pointer">{busy === `lphoto|${it.id}` ? '…' : '📷 Photo'}<input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) uploadLabelPhoto(it, r, f); e.target.value = '' }} /></label>}
                                                         <span className="text-gray-300 mx-1">·</span>
                                                         <input type="checkbox" className="h-4 w-4 align-middle" checked={selLabels.has(it.id)} onChange={() => toggleLabel(it.id)} title="Tick to send into stock" />
                                                       </>)}
@@ -979,12 +979,12 @@ export default function MaterialRequestsPage() {
                             <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{it.item_code}</td>
                             <td className="px-3 py-2 text-gray-600">{it.description}</td>
                             <td className="px-3 py-2 text-gray-500">{it.unit}</td>
-                            <td className="px-3 py-2 text-right font-semibold text-blue-700">{it.requested_qty}</td>
+                            <td className="px-3 py-2 text-right font-semibold text-emerald-700">{it.requested_qty}</td>
                             <td className="px-3 py-2 text-right text-gray-700">{it.received_qty}</td>
                             <td className={`px-3 py-2 text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{remaining}</td>
                             {canEditFac(r.factory_code) && <td className="px-3 py-2 whitespace-nowrap text-right">
                               {movePending.has(it.id) ? <span className="text-amber-600 text-xs">⏳ move pending</span>
-                                : it.received_qty > 0 && hasCap(profile, 'move_received_qty') && moveTargets(it, r).length > 0 ? <button onClick={() => openMove(it, r)} className="text-blue-600 hover:underline text-xs">Move qty</button>
+                                : it.received_qty > 0 && hasCap(profile, 'move_received_qty') && moveTargets(it, r).length > 0 ? <button onClick={() => openMove(it, r)} className="text-emerald-600 hover:underline text-xs">Move qty</button>
                                   : null}
                             </td>}
                           </tr>
@@ -1025,7 +1025,7 @@ export default function MaterialRequestsPage() {
                   <input value={moveReason} onChange={e => setMoveReason(e.target.value)} placeholder="Why move it?" className="w-full border rounded-lg px-3 py-2" /></div>
               </div>
               <div className="flex gap-2 mt-5">
-                <button onClick={submitMove} disabled={busy === 'move'} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{busy === 'move' ? 'Sending…' : 'Send for approval'}</button>
+                <button onClick={submitMove} disabled={busy === 'move'} className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium">{busy === 'move' ? 'Sending…' : 'Send for approval'}</button>
                 <button onClick={() => setMoveSrc(null)} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
               </div>
             </div>

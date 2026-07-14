@@ -120,7 +120,7 @@ export default function AllowedNetworksPage() {
             <span className="font-mono text-lg">{myIp || '…'}</span>
             {myIp && !myIpListed && (
               <button onClick={() => addIp(myIp, label)} disabled={busy}
-                className="bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-50">
+                className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700 text-sm font-medium disabled:opacity-50">
                 + Add this IP as allowed
               </button>
             )}
@@ -144,7 +144,7 @@ export default function AllowedNetworksPage() {
                 className="border rounded-lg px-3 py-2 text-sm w-48 font-mono" />
             </div>
             <button onClick={() => addIp(ip, label)} disabled={busy}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-50">Add</button>
+              className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 text-sm font-medium disabled:opacity-50">Add</button>
           </div>
         </div>
 
@@ -167,7 +167,7 @@ export default function AllowedNetworksPage() {
                         onKeyDown={e => { if (e.key === 'Enter') saveEdit(n); if (e.key === 'Escape') setEditId(null) }}
                         placeholder="Office name" className="border rounded-lg px-2 py-1 text-sm w-48" />
                     ) : (
-                      <>{n.label || '—'}{n.ip.trim() === myIp.trim() && <span className="ml-2 text-xs text-blue-600">(this device)</span>}</>
+                      <>{n.label || '—'}{n.ip.trim() === myIp.trim() && <span className="ml-2 text-xs text-emerald-600">(this device)</span>}</>
                     )}
                   </td>
                   <td className="px-4 py-3 font-mono">{n.ip}</td>
@@ -179,12 +179,12 @@ export default function AllowedNetworksPage() {
                   <td className="px-4 py-3 text-right whitespace-nowrap">
                     {editId === n.id ? (
                       <>
-                        <button onClick={() => saveEdit(n)} className="text-blue-600 hover:underline text-sm font-medium">Save</button>
+                        <button onClick={() => saveEdit(n)} className="text-emerald-600 hover:underline text-sm font-medium">Save</button>
                         <button onClick={() => setEditId(null)} className="text-gray-500 hover:underline text-sm ml-3">Cancel</button>
                       </>
                     ) : (
                       <>
-                        <button onClick={() => startEdit(n)} className="text-blue-600 hover:underline text-sm">Edit</button>
+                        <button onClick={() => startEdit(n)} className="text-emerald-600 hover:underline text-sm">Edit</button>
                         <button onClick={() => removeRow(n)} className="text-red-600 hover:underline text-sm ml-3">Remove</button>
                       </>
                     )}
