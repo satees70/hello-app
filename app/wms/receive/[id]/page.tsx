@@ -22,8 +22,7 @@ function todayYYMMDD(): string {
   return `${g('year')}${g('month')}${g('day')}`
 }
 const TODAY = todayYYMMDD()
-// Short code from a supplier name (first 3 letters/digits), to tag the batch.
-const supCode = (name?: string | null) => (name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3)
+const pad2 = (n: number) => String(n).padStart(2, '0')
 
 function compressImage(file: File): Promise<Blob> {
   return new Promise((resolve, reject) => {
@@ -48,7 +47,7 @@ export default function WmsReceivePage() {
 
   const [po, setPo] = useState<PO | null>(null)
   const [lines, setLines] = useState<Line[]>([])
-  const [suppliers, setSuppliers] = useState<{ name: string; code: string }[]>([])
+  const [runNo, setRunNo] = useState('01')   // today's running batch number (YYMMDD/NN)
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const [grnId, setGrnId] = useState<string | null>(null)
   const [busy, setBusy] = useState('')
@@ -77,19 +76,20 @@ export default function WmsReceivePage() {
   const load = useCallback(async () => {
     const { data: o } = await supabase.from('wms_purchase_orders').select('id, po_number, supplier_name, status, expected_date').eq('id', id).single()
     const { data: ls } = await supabase.from('wms_po_lines').select('*').eq('po_id', id).order('line_no')
-    const { data: sup } = await supabase.from('wms_suppliers').select('name, code').eq('active', true)
-    setPo((o as PO) || null); setLines((ls as Line[]) || []); setSuppliers((sup as { name: string; code: string }[]) || [])
+    // Next running number for today = 1 + the highest NN already used in a YYMMDD/NN batch today.
+    const { data: todayB } = await supabase.from('wms_grn_lines').select('batch_no').like('batch_no', `${TODAY}/%`)
+    let mx = 0
+    for (const r of (todayB as { batch_no: string }[] || [])) { const m = /\/(\d+)\s*$/.exec(r.batch_no || ''); if (m) mx = Math.max(mx, parseInt(m[1], 10)) }
+    setPo((o as PO) || null); setLines((ls as Line[]) || []); setRunNo(pad2(mx + 1))
   }, [id])
   useEffect(() => { if (profile) load() }, [profile, load])
 
   const outstanding = (l: Line) => clean(l.quantity - l.qty_received)
   // Batch defaults to today's date + a short supplier code, so the SAME item from two
   // suppliers on the same day gets distinct batches (e.g. 260714ABC vs 260714XYZ). Editable.
-  const defaultBatch = useMemo(() => {
-    const nm = (po?.supplier_name || '').trim().toUpperCase()
-    const match = suppliers.find(s => s.name.trim().toUpperCase() === nm)   // preset code wins
-    return TODAY + (match?.code || supCode(po?.supplier_name))               // else derive from the name
-  }, [po, suppliers])
+  // All lines in this receiving session default to today's YYMMDD/NN, so each delivery
+  // gets a distinct batch (a 2nd delivery of the same item today becomes /NN+1).
+  const defaultBatch = useMemo(() => `${TODAY}/${runNo}`, [runNo])
   const newDraft = useCallback((): Draft => ({ qty: '', batch: defaultBatch, exp: '', qc: 'pass', note: '', photo: null, preview: '' }), [defaultBatch])
   const draftOf = (l: Line) => drafts[l.id] ?? newDraft()
   const setDraft = (lineId: string, patch: Partial<Draft>) => setDrafts(d => ({ ...d, [lineId]: { ...(d[lineId] ?? newDraft()), ...patch } }))
