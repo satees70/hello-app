@@ -10,12 +10,15 @@ import { matchBin, matchItem } from '@/lib/qr'
 
 interface Order { id: string; order_no: string | null; customer_name: string | null; status: string; delivery_date: string | null }
 interface Line { id: string; line_no: number | null; item_id: string | null; item_code: string; description: string | null; quantity: number; qty_picked: number; uom: string | null; source_hint: string | null; remarks: string | null }
-interface Stock { id: string; item_code: string; location_id: string; location_code: string; batch_no: string; exp_date: string | null; quantity: number }
+interface Stock { id: string; item_code: string; location_id: string; location_code: string; batch_no: string; exp_date: string | null; quantity: number; created_at: string }
 interface Loc { id: string; location_type: string; pick_sequence: number | null }
 
 const clean = (n: number) => Number(n.toPrecision(12))
 const fmtQty = (n: number) => clean(n).toLocaleString(undefined, { maximumFractionDigits: 4 })
 const fmtDate = (d: string | null) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB') : ''
+// FEFO effective expiry: real expiry, or (received date + 1 year) when none is set.
+const plusYear = (iso: string) => { const d = new Date(iso); d.setFullYear(d.getFullYear() + 1); return d.toISOString().slice(0, 10) }
+const effExp = (s: { exp_date: string | null; created_at: string }) => s.exp_date || plusYear(s.created_at)
 const STATUS_CHIP: Record<string, string> = {
   Review: 'bg-amber-100 text-amber-700', Released: 'bg-emerald-100 text-emerald-700',
   Picking: 'bg-blue-100 text-blue-700', Picked: 'bg-emerald-100 text-emerald-700',
@@ -43,7 +46,7 @@ export default function WmsPickPage() {
     const lineList = (ls as Line[]) || []
     const codes = [...new Set(lineList.map(l => l.item_code))]
     const st = codes.length
-      ? (await supabase.from('wms_stock').select('id, item_code, location_id, location_code, batch_no, exp_date, quantity').in('item_code', codes)).data as Stock[]
+      ? (await supabase.from('wms_stock').select('id, item_code, location_id, location_code, batch_no, exp_date, quantity, created_at').in('item_code', codes)).data as Stock[]
       : []
     const locs = await fetchAll<Loc>('wms_locations', 'id, location_type, pick_sequence')
     // stock reserved for OTHER orders — not available to this one
@@ -71,7 +74,7 @@ export default function WmsPickPage() {
       const la = locMeta.get(a.location_id), lb = locMeta.get(b.location_id)
       const slA = la?.location_type === 'SL' ? 0 : 1, slB = lb?.location_type === 'SL' ? 0 : 1
       if (slA !== slB) return slA - slB
-      const ea = a.exp_date || '9999-12-31', eb = b.exp_date || '9999-12-31'
+      const ea = effExp(a), eb = effExp(b)   // no expiry → treated as received + 1 year (FEFO only)
       if (ea !== eb) return ea < eb ? -1 : 1
       return (la?.pick_sequence ?? 999999) - (lb?.pick_sequence ?? 999999) || a.location_code.localeCompare(b.location_code)
     })
