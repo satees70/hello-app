@@ -294,6 +294,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const warehouseGroups = [
     { header: 'Warehouse', items: [
       { href: '/warehouse', label: 'Warehouse Receiving', module: 'goods_received' as ModuleKey },
+      { href: '/warehouse/pick-production', label: 'Pick for Production', module: 'material_requests' as ModuleKey },
       { href: '/material-requests', label: 'Pick Runs', module: 'material_requests' as ModuleKey },
       { href: '/incoming', label: 'Goods Received', module: 'goods_received' as ModuleKey },
       { href: '/sales-orders', label: 'Sales Orders', module: 'sales' as ModuleKey },
