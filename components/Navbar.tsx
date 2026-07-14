@@ -295,24 +295,30 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   // "Production" (the receiving / supply-to-production flow) and "WMS" (the warehouse
   // management system). The green "EASWARI WMS" bar only appears on the main portal.
   const warehouseGroups: { header?: string; items: Item[] }[] = [
+    // Ordered by the process: demand → pick for the factory → receive → dispatch.
     { header: 'Production', items: [
-      { href: '/warehouse', label: 'Warehouse Receiving', module: 'goods_received' },
-      { href: '/warehouse/pick-production', label: 'Pick for Production', module: 'material_requests' },
-      { href: '/material-requests', label: 'Pick Runs', module: 'material_requests' },
-      { href: '/incoming', label: 'Goods Received', module: 'goods_received' },
       { href: '/sales-orders', label: 'Sales Orders', module: 'sales' },
+      { href: '/material-requests', label: 'Pick Runs', module: 'material_requests' },
+      { href: '/warehouse/pick-production', label: 'Pick for Production', module: 'material_requests' },
+      { href: '/incoming', label: 'Goods Received', module: 'goods_received' },
+      { href: '/warehouse', label: 'Warehouse Receiving', module: 'goods_received' },
       { href: '/dispatch/dashboard', label: 'Delivery Status', module: 'dispatch' },
       { href: '/discussion', label: 'Discussion' },
     ] },
+    // Ordered by the warehouse process: inbound → store → outbound → control.
     { header: 'WMS', items: [
-      { href: '/wms/stock', label: 'Stock', module: 'warehouse' },
-      { href: '/wms/locations', label: 'Location Map', module: 'warehouse' },
-      { href: '/wms/putaway', label: 'Putaway', module: 'warehouse' },
-      { href: '/wms/orders', label: 'Orders to Pick', module: 'warehouse' },
-      { href: '/wms/transfers', label: 'Transfers', module: 'warehouse' },
-      { href: '/wms/dispatch', label: 'Delivery Orders', module: 'warehouse' },
+      // Inbound
       { href: '/wms/purchase-orders', label: 'Purchase Orders', module: 'warehouse' },
       { href: '/wms/suppliers', label: 'Suppliers', module: 'warehouse' },
+      { href: '/wms/putaway', label: 'Putaway', module: 'warehouse' },
+      // Store
+      { href: '/wms/stock', label: 'Stock', module: 'warehouse' },
+      { href: '/wms/locations', label: 'Location Map', module: 'warehouse' },
+      { href: '/wms/transfers', label: 'Transfers', module: 'warehouse' },
+      // Outbound
+      { href: '/wms/orders', label: 'Orders to Pick', module: 'warehouse' },
+      { href: '/wms/dispatch', label: 'Delivery Orders', module: 'warehouse' },
+      // Control
       { href: '/wms/counts', label: 'Stock Counts', module: 'warehouse' },
       { href: '/wms/movements', label: 'Movements', module: 'warehouse' },
       { href: '/wms/reports/expiry', label: 'Expiry Alerts', module: 'warehouse' },

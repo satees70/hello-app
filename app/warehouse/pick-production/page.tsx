@@ -349,7 +349,7 @@ export default function PickForProductionPage() {
                                     <button key={s.id} onClick={() => addOverride(run.runId, g, s)} className="w-full text-left px-2 py-1.5 text-sm hover:bg-purple-50 flex items-center gap-2">
                                       <span className="font-mono text-xs">{s.item_code}</span>
                                       <span className="text-xs text-gray-500 truncate">{s.description}</span>
-                                      <span className="ml-auto text-xs text-gray-400">bin {s.location_code} · {round(Number(s.quantity))} {s.uom || ''}</span>
+                                      <span className="ml-auto text-xs text-gray-400">bin {s.location_code}{s.batch_no ? ` · batch ${s.batch_no}` : ''} · {round(Number(s.quantity))} {s.uom || ''}</span>
                                       {s.production_only && <span className="text-[10px] text-purple-700 bg-purple-50 rounded px-1">🔒</span>}
                                     </button>
                                   ))}
