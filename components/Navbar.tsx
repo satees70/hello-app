@@ -304,15 +304,20 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/dispatch/dashboard', label: 'Delivery Status', module: 'dispatch' },
       { href: '/discussion', label: 'Discussion' },
     ] },
+    // Ordered by the warehouse process: inbound → store → outbound → control.
     { header: 'WMS', items: [
-      { href: '/wms/stock', label: 'Stock', module: 'warehouse' },
-      { href: '/wms/locations', label: 'Location Map', module: 'warehouse' },
-      { href: '/wms/putaway', label: 'Putaway', module: 'warehouse' },
-      { href: '/wms/orders', label: 'Orders to Pick', module: 'warehouse' },
-      { href: '/wms/transfers', label: 'Transfers', module: 'warehouse' },
-      { href: '/wms/dispatch', label: 'Delivery Orders', module: 'warehouse' },
+      // Inbound
       { href: '/wms/purchase-orders', label: 'Purchase Orders', module: 'warehouse' },
       { href: '/wms/suppliers', label: 'Suppliers', module: 'warehouse' },
+      { href: '/wms/putaway', label: 'Putaway', module: 'warehouse' },
+      // Store
+      { href: '/wms/stock', label: 'Stock', module: 'warehouse' },
+      { href: '/wms/locations', label: 'Location Map', module: 'warehouse' },
+      { href: '/wms/transfers', label: 'Transfers', module: 'warehouse' },
+      // Outbound
+      { href: '/wms/orders', label: 'Orders to Pick', module: 'warehouse' },
+      { href: '/wms/dispatch', label: 'Delivery Orders', module: 'warehouse' },
+      // Control
       { href: '/wms/counts', label: 'Stock Counts', module: 'warehouse' },
       { href: '/wms/movements', label: 'Movements', module: 'warehouse' },
       { href: '/wms/reports/expiry', label: 'Expiry Alerts', module: 'warehouse' },
