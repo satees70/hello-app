@@ -1,5 +1,6 @@
 'use client'
 import Navbar from '@/components/Navbar'
+import FactoryOverview from '@/components/FactoryOverview'
 import { useProfile } from '@/hooks/useProfile'
 import { can, type ModuleKey } from '@/lib/permissions'
 import Link from 'next/link'
@@ -54,9 +55,11 @@ export default function DashboardPage() {
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-10">
         <h1 className="text-2xl font-bold mb-1">Welcome, {profile.full_name || profile.email}</h1>
-        <p className="text-gray-500 mb-8">
+        <p className="text-gray-500 mb-6">
           {isHO ? 'Head Office — you can see all factories' : `Factory: ${profile.factory_code}`}
         </p>
+
+        <FactoryOverview />
 
         <div className="space-y-7">
           {groups.map((g, gi) => (
