@@ -46,11 +46,18 @@ export default function WmsReceivePage() {
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
   const [labelSize, setLabelSize] = useState('55x35')
 
+  // One label per package: copies default to the qty (received qty if typed, else
+  // the outstanding/ordered qty), so staff don't key a count. Capped at 500.
+  const labelCopies = (l: Line) => Math.max(1, Math.min(500, Math.round(Number(draftOf(l).qty) || outstanding(l) || 1)))
+
   async function printLabel(l: Line) {
     const d = draftOf(l)
+    const n = labelCopies(l)
+    if (n > 100 && !confirm(`Print ${n} labels for ${l.item_code}?`)) return
     const subs = [d.batch ? `Batch ${d.batch}` : 'No batch']
     if (d.exp) subs.push(`Exp ${new Date(d.exp + 'T00:00:00').toLocaleDateString('en-GB')}`)
-    await downloadLabels([{ qrText: encodeItem(l.item_code, d.batch, d.exp), title: l.item_code, subs }], labelSize, `BatchLabel_${l.item_code.replace(/[^a-zA-Z0-9]/g, '-')}.pdf`)
+    const one = { qrText: encodeItem(l.item_code, d.batch, d.exp), title: l.item_code, subs }
+    await downloadLabels(Array.from({ length: n }, () => one), labelSize, `BatchLabels_${l.item_code.replace(/[^a-zA-Z0-9]/g, '-')}_x${n}.pdf`)
   }
 
   const load = useCallback(async () => {
@@ -156,7 +163,7 @@ export default function WmsReceivePage() {
                     {d.qc === 'fail' && <div className="col-span-2 sm:col-span-6"><input value={d.note} onChange={e => setDraft(l.id, { note: e.target.value })} placeholder="QC fail reason…" className="w-full border rounded-lg px-2 py-1.5 text-sm" /></div>}
                     <div className="col-span-2 sm:col-span-6 flex items-center gap-3">
                       {d.preview && <img src={d.preview} alt="" className="h-14 rounded border" />}
-                      <button type="button" onClick={() => printLabel(l)} className="text-xs text-emerald-700 hover:underline">🏷 Print batch label</button>
+                      <button type="button" onClick={() => printLabel(l)} className="text-xs text-emerald-700 hover:underline">🏷 Print {labelCopies(l)} label{labelCopies(l) > 1 ? 's' : ''}</button>
                     </div>
                   </div>
                 )}

@@ -17,7 +17,7 @@ export default function WmsLabelsPage() {
   const [busy, setBusy] = useState(false); const [prog, setProg] = useState('')
 
   const [aisle, setAisle] = useState(''); const [type, setType] = useState(''); const [size, setSize] = useState('55x35')
-  const [bItem, setBItem] = useState(''); const [bDesc, setBDesc] = useState(''); const [bBatch, setBBatch] = useState(''); const [bExp, setBExp] = useState(''); const [bSize, setBSize] = useState('55x35')
+  const [bItem, setBItem] = useState(''); const [bDesc, setBDesc] = useState(''); const [bBatch, setBBatch] = useState(''); const [bExp, setBExp] = useState(''); const [bSize, setBSize] = useState('55x35'); const [bCopies, setBCopies] = useState('1')
 
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
@@ -44,9 +44,11 @@ export default function WmsLabelsPage() {
   async function printBatch() {
     if (!bItem.trim()) return
     setBusy(true)
+    const n = Math.max(1, Math.min(500, Math.round(Number(bCopies) || 1)))
     const subs = [bBatch ? `Batch ${bBatch}` : 'No batch']
     if (bExp) subs.push(`Exp ${new Date(bExp + 'T00:00:00').toLocaleDateString('en-GB')}`)
-    await downloadLabels([{ qrText: encodeItem(bItem, bBatch, bExp), title: bItem, subs }], bSize, `BatchLabel_${bItem.replace(/[^a-zA-Z0-9]/g, '-')}.pdf`)
+    const one = { qrText: encodeItem(bItem, bBatch, bExp), title: bItem, subs }
+    await downloadLabels(Array.from({ length: n }, () => one), bSize, `BatchLabels_${bItem.replace(/[^a-zA-Z0-9]/g, '-')}_x${n}.pdf`)
     setBusy(false)
   }
 
@@ -79,8 +81,9 @@ export default function WmsLabelsPage() {
             <div><label className="block text-xs text-gray-500 mb-1">Batch</label><input value={bBatch} onChange={e => setBBatch(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm font-mono" placeholder="260630" /></div>
             <div><label className="block text-xs text-gray-500 mb-1">Expiry</label><input type="date" value={bExp} onChange={e => setBExp(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
             <div><label className="block text-xs text-gray-500 mb-1">Size</label><select value={bSize} onChange={e => setBSize(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm">{Object.entries(LABEL_SIZES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></div>
+            <div><label className="block text-xs text-gray-500 mb-1">Copies <span className="text-gray-400">(one per package)</span></label><input value={bCopies} onChange={e => setBCopies(e.target.value.replace(/[^0-9]/g, ''))} className="w-full border rounded-lg px-3 py-2 text-sm text-right tabular-nums" inputMode="numeric" /></div>
           </div>
-          <button onClick={printBatch} disabled={busy || !bItem.trim()} className="bg-emerald-700 text-white px-5 py-2 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium">Print batch label (PDF)</button>
+          <button onClick={printBatch} disabled={busy || !bItem.trim()} className="bg-emerald-700 text-white px-5 py-2 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium">Print {Math.max(1, Math.min(500, Math.round(Number(bCopies) || 1)))} label{Math.max(1, Math.round(Number(bCopies) || 1)) > 1 ? 's' : ''} (PDF)</button>
         </div>
       </div>
     </div>
