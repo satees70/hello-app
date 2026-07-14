@@ -16,6 +16,7 @@ interface Stock {
   exp_date: string | null
   quantity: number
   uom: string | null
+  production_only?: boolean | null
 }
 interface Item { code: string; description: string; unit: string }
 interface Loc { id: string; code: string; location_type: string; active: boolean }
@@ -123,6 +124,15 @@ export default function WmsStockPage() {
     setBusy(false)
     if (error) { setErr(error.message); return }
     setShowForm(false); load()
+  }
+
+  async function toggleProd(r: Stock) {
+    if (!canEdit) return
+    const on = !r.production_only
+    if (on && !confirm(`Reserve this batch of ${r.item_code} for PRODUCTION only?\n\nIt will be blocked from customer/trading picking and dispatch.`)) return
+    const { error } = await supabase.rpc('wms_tag_production', { p_stock_id: r.id, p_on: on })
+    if (error) { alert(error.message); return }
+    load()
   }
 
   async function remove(r: Stock) {
@@ -277,7 +287,9 @@ export default function WmsStockPage() {
               )}
               {filtered.map(r => (
                 <tr key={r.id} className="border-b last:border-0 hover:bg-gray-50">
-                  <td className="px-4 py-2.5 font-mono font-medium">{r.item_code}</td>
+                  <td className="px-4 py-2.5 font-mono font-medium">{r.item_code}
+                    {r.production_only && <div className="text-[10px] font-sans font-semibold text-purple-700 bg-purple-50 rounded px-1 py-0.5 inline-block mt-0.5">🔒 Production only</div>}
+                  </td>
                   <td className="px-4 py-2.5 text-gray-600 max-w-[240px] truncate">{r.description}</td>
                   <td className="px-4 py-2.5 font-mono">{r.location_code}</td>
                   <td className="px-4 py-2.5 font-mono text-xs">{r.batch_no || <span className="text-gray-300">—</span>}</td>
@@ -290,6 +302,7 @@ export default function WmsStockPage() {
                     {canEdit ? (
                       <div className="flex gap-3">
                         <button onClick={() => openEdit(r)} className="text-emerald-700 hover:underline text-xs">Adjust</button>
+                        <button onClick={() => toggleProd(r)} className={`hover:underline text-xs ${r.production_only ? 'text-purple-700 font-medium' : 'text-purple-500'}`}>{r.production_only ? 'Release to trading' : 'For production'}</button>
                         <button onClick={() => remove(r)} className="text-red-500 hover:underline text-xs">Remove</button>
                       </div>
                     ) : <span className="text-gray-300 text-xs">—</span>}
