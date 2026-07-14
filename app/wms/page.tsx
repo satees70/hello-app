@@ -16,7 +16,11 @@ const STATUS_CHIP: Record<string, string> = {
   Open: 'bg-amber-100 text-amber-700', 'Partially Received': 'bg-blue-100 text-blue-700', Review: 'bg-amber-100 text-amber-700',
   Released: 'bg-emerald-100 text-emerald-700', Picking: 'bg-blue-100 text-blue-700', Fulfilled: 'bg-emerald-100 text-emerald-700', Picked: 'bg-emerald-100 text-emerald-700',
 }
-const MOVE_CHIP: Record<string, string> = { receipt: 'bg-sky-100 text-sky-700', putaway: 'bg-emerald-100 text-emerald-700', pick: 'bg-blue-100 text-blue-700', transfer: 'bg-violet-100 text-violet-700', adjust: 'bg-amber-100 text-amber-700' }
+const MOVE_CHIP: Record<string, string> = { receipt: 'bg-sky-100 text-sky-700', putaway: 'bg-emerald-100 text-emerald-700', pick: 'bg-blue-100 text-blue-700', transfer: 'bg-violet-100 text-violet-700', adjust: 'bg-amber-100 text-amber-700', dispatch: 'bg-teal-100 text-teal-700' }
+const ORD_ORDER = ['Processing', 'Review', 'Released', 'Reserved', 'Picking', 'Picked', 'Partially Dispatched', 'Dispatched', 'Cancelled', 'Error']
+const ORD_COLORS: Record<string, string> = { Processing: 'bg-gray-300', Review: 'bg-amber-400', Released: 'bg-teal-300', Reserved: 'bg-teal-500', Picking: 'bg-blue-400', Picked: 'bg-emerald-400', 'Partially Dispatched': 'bg-blue-600', Dispatched: 'bg-emerald-600', Cancelled: 'bg-gray-300', Error: 'bg-red-400' }
+const PO_ORDER = ['Processing', 'Open', 'Partially Received', 'Fulfilled', 'Cancelled', 'Error']
+const PO_COLORS: Record<string, string> = { Processing: 'bg-gray-300', Open: 'bg-amber-400', 'Partially Received': 'bg-blue-400', Fulfilled: 'bg-emerald-500', Cancelled: 'bg-gray-300', Error: 'bg-red-400' }
 
 export default function WmsHome() {
   const { profile, loading } = useProfile()
@@ -24,6 +28,9 @@ export default function WmsHome() {
   const [pending, setPending] = useState<Pend[]>([]); const [moves, setMoves] = useState<Move[]>([])
   const [counts, setCounts] = useState({ po: 0, ord: 0, pend: 0, pendQty: 0 })
   const [alerts, setAlerts] = useState({ expired: 0, near: 0, low: 0, disc: 0 })
+  const [ordStatus, setOrdStatus] = useState<Record<string, number>>({})
+  const [poStatus, setPoStatus] = useState<Record<string, number>>({})
+  const [today, setToday] = useState<Record<string, number>>({})
 
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
@@ -56,6 +63,16 @@ export default function WmsHome() {
     let disc = 0
     for (const l of ((discRes.data as { expected_qty: number; counted_qty: number; is_unexpected: boolean }[]) || [])) { if (l.is_unexpected || Number(l.counted_qty) !== Number(l.expected_qty)) disc++ }
     setAlerts({ expired: expC.count ?? 0, near: nearC.count ?? 0, low, disc })
+
+    // Pipeline status breakdown + today's completed activity
+    const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0)
+    const [{ data: allOrd }, { data: allPo }, { data: todayMv }] = await Promise.all([
+      supabase.from('wms_orders').select('status').limit(2000),
+      supabase.from('wms_purchase_orders').select('status').limit(2000),
+      supabase.from('wms_stock_moves').select('move_type').gte('created_at', startOfToday.toISOString()).limit(5000),
+    ])
+    const tally = (rows: { [k: string]: string }[] | null, key: string) => { const m: Record<string, number> = {}; for (const r of rows || []) m[r[key]] = (m[r[key]] || 0) + 1; return m }
+    setOrdStatus(tally(allOrd, 'status')); setPoStatus(tally(allPo, 'status')); setToday(tally(todayMv, 'move_type'))
   }
 
   if (loading) return <div className="p-8 text-sm text-gray-500">Loading…</div>
@@ -78,6 +95,26 @@ export default function WmsHome() {
           <Tile href="/wms/reports/expiry" n={alerts.near} label="Near expiry (30d)" accent="text-amber-600" />
           <Tile href="/wms/reports" n={alerts.low} label="Low stock" accent="text-orange-600" />
           <Tile href="/wms/reports/activity" n={alerts.disc} label="Count discrepancies" accent="text-violet-600" />
+        </div>
+
+        <div className="bg-white rounded-xl border shadow-sm p-4 mb-6">
+          <div className="text-xs font-semibold text-gray-500 mb-2">COMPLETED TODAY</div>
+          <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+            {([['receipt', 'Received'], ['putaway', 'Put away'], ['pick', 'Picked'], ['transfer', 'Transfers'], ['dispatch', 'Dispatched'], ['adjust', 'Adjusted']] as const).map(([k, l]) => (
+              <span key={k} className="flex items-center gap-1.5"><b className="tabular-nums text-emerald-700">{today[k] || 0}</b> <span className="text-gray-500">{l}</span></span>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
+          <div className="bg-white rounded-xl border shadow-sm p-4">
+            <div className="flex items-center justify-between mb-3"><div className="text-sm font-semibold text-gray-700">Customer orders</div><Link href="/wms/orders" className="text-xs text-emerald-700 hover:underline">All orders →</Link></div>
+            <StatusBar data={ordStatus} order={ORD_ORDER} colors={ORD_COLORS} empty="No orders yet." />
+          </div>
+          <div className="bg-white rounded-xl border shadow-sm p-4">
+            <div className="flex items-center justify-between mb-3"><div className="text-sm font-semibold text-gray-700">Purchase orders</div><Link href="/wms/purchase-orders" className="text-xs text-emerald-700 hover:underline">All POs →</Link></div>
+            <StatusBar data={poStatus} order={PO_ORDER} colors={PO_COLORS} empty="No purchase orders yet." />
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
@@ -147,3 +184,20 @@ function Panel({ title, href, cta, children }: { title: string; href: string; ct
   )
 }
 function Empty({ text }: { text: string }) { return <div className="px-4 py-6 text-center text-gray-400 text-sm">{text}</div> }
+
+// Segmented status bar with a count legend.
+function StatusBar({ data, order, colors, empty }: { data: Record<string, number>; order: string[]; colors: Record<string, string>; empty: string }) {
+  const keys = [...order.filter(k => (data[k] || 0) > 0), ...Object.keys(data).filter(k => !order.includes(k) && data[k] > 0)]
+  const total = keys.reduce((s, k) => s + data[k], 0)
+  if (!total) return <div className="text-xs text-gray-400">{empty}</div>
+  return (
+    <>
+      <div className="flex h-3 rounded-full overflow-hidden bg-gray-100">
+        {keys.map(k => <div key={k} className={colors[k] || 'bg-gray-400'} style={{ width: `${(data[k] / total) * 100}%` }} title={`${k}: ${data[k]}`} />)}
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2.5 text-xs">
+        {keys.map(k => <span key={k} className="flex items-center gap-1.5"><span className={`w-2.5 h-2.5 rounded-sm ${colors[k] || 'bg-gray-400'}`} />{k} <b className="tabular-nums">{data[k]}</b></span>)}
+      </div>
+    </>
+  )
+}
