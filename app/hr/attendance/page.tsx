@@ -318,7 +318,7 @@ export default function AttendancePage() {
           <p className="text-sm text-gray-500">Worked hours and overtime (over each shift&apos;s threshold). Kuala Lumpur time.</p>
         </div>
         <button onClick={syncNow} disabled={syncing}
-          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+          className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50">
           {syncing ? 'Syncing…' : 'Sync now'}
         </button>
       </div>
@@ -518,13 +518,13 @@ export default function AttendancePage() {
                             <option value="">leave type…</option>
                             {LEAVE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                           </select>
-                          <button onClick={() => reviewSession(b.code, dateKey)} className="text-xs text-blue-600 underline">enter times…</button>
+                          <button onClick={() => reviewSession(b.code, dateKey)} className="text-xs text-emerald-600 underline">enter times…</button>
                         </span>
                       ) : result.needsReview ? (
                         <div>
                           <div className="text-xs text-amber-700 mb-1">{result.reviewReason}</div>
                           <div className="flex flex-wrap gap-1">
-                            <button onClick={() => reviewTime(b.code, dateKey)} className="rounded border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs text-blue-700 hover:bg-blue-100">Enter time…</button>
+                            <button onClick={() => reviewTime(b.code, dateKey)} className="rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700 hover:bg-emerald-100">Enter time…</button>
                             <button onClick={() => saveReview(b.code, dateKey, 'span')} title="Ignore the missing/odd punch: count first punch → last punch, minus 1 hour lunch" className="rounded border border-green-300 bg-green-50 px-2 py-0.5 text-xs text-green-700 hover:bg-green-100">First→last −1h</button>
                             <button onClick={() => saveReview(b.code, dateKey, 'deduct')} className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50">Deduct lunch</button>
                             <button onClick={() => saveReview(b.code, dateKey, 'worked_through')} className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50">Worked through</button>
@@ -547,7 +547,7 @@ export default function AttendancePage() {
                         <span className="inline-flex items-center gap-2">
                           {manualTime
                             ? <span className="rounded bg-orange-100 px-2 py-0.5 text-xs text-orange-800" title="A clock time was entered manually">✎ manual ({manualTime})</span>
-                            : <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800">reviewed</span>}
+                            : <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800">reviewed</span>}
                           <button onClick={() => clearReview(b.code, dateKey)} className="text-xs text-gray-400 underline">clear</button>
                         </span>
                       ) : result.halfDay ? (
@@ -559,7 +559,7 @@ export default function AttendancePage() {
                             <option value="">other half = pick…</option>
                             {LEAVE_TYPES.filter(t => t !== 'Half').map(t => <option key={t} value={t}>{t}</option>)}
                           </select>
-                          <button onClick={() => reviewSession(b.code, dateKey)} className="text-xs text-blue-600 underline">enter times…</button>
+                          <button onClick={() => reviewSession(b.code, dateKey)} className="text-xs text-emerald-600 underline">enter times…</button>
                           {forceHalf && <button onClick={() => saveDayFlag(b.code, dateKey, { force_half: false })} className="text-xs text-gray-400 underline" title="Undo — count as a full day again">undo ½</button>}
                         </span>
                       ) : result.presentDay ? (

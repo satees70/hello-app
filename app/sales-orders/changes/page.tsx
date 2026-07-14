@@ -483,7 +483,7 @@ export default function PendingChangesPage() {
   function fmt(iso: string | null) { return iso ? new Date(iso).toLocaleString() : '—' }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   const shown = filter === 'All' ? requests : requests.filter(r => r.status === filter)
@@ -585,7 +585,7 @@ export default function PendingChangesPage() {
         <div className="flex gap-2 mb-4">
           {FILTERS.map(f => (
             <button key={f} onClick={() => setFilter(f)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${filter === f ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${filter === f ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
               {f}{f !== 'All' && counts[f] ? ` (${counts[f]})` : ''}
             </button>
           ))}
@@ -598,7 +598,7 @@ export default function PendingChangesPage() {
         {isHO && (filter === 'Pending' || filter === 'All') && (
           <div className="mb-6 bg-white rounded-xl shadow-sm border">
             <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b bg-gray-50 flex-wrap">
-              <span className="font-semibold">📋 All pending — <span className="text-blue-700">{allPending.length}</span> request(s) in one place</span>
+              <span className="font-semibold">📋 All pending — <span className="text-emerald-700">{allPending.length}</span> request(s) in one place</span>
               {allPending.length > 0 && <button onClick={approveAllPending} disabled={approvingAll} className="bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium">{approvingAll ? 'Approving…' : `✓ Approve all (${allPending.length})`}</button>}
             </div>
             <div className="overflow-auto max-h-[28rem]">
@@ -612,7 +612,7 @@ export default function PendingChangesPage() {
                       <td className="px-3 py-2 min-w-[240px]">{p.summary}</td>
                       <td className="px-3 py-2 whitespace-nowrap"><span className="block">{p.by || '—'}</span><span className="block text-gray-400">{fmt(p.at)}</span></td>
                       <td className="px-3 py-2 whitespace-nowrap"><div className="flex gap-2">
-                        {p.query && <button onClick={() => p.query!()} disabled={approvingAll} className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 disabled:opacity-50">Raise query</button>}
+                        {p.query && <button onClick={() => p.query!()} disabled={approvingAll} className="bg-emerald-600 text-white px-3 py-1 rounded hover:bg-emerald-700 disabled:opacity-50">Raise query</button>}
                         <button onClick={() => p.approve()} disabled={approvingAll} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">{p.reject ? 'Approve' : 'Acknowledge'}</button>
                         {p.reject && <button onClick={() => p.reject!()} disabled={approvingAll} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>}
                       </div></td>
@@ -626,8 +626,8 @@ export default function PendingChangesPage() {
         )}
 
         {isHO && selPendingIds.length > 0 && (
-          <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
-            <span className="font-medium text-blue-800">{selPendingIds.length} pending selected</span>
+          <div className="flex items-center gap-3 mb-3 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-sm">
+            <span className="font-medium text-emerald-800">{selPendingIds.length} pending selected</span>
             <button onClick={() => bulkAct('approve_change_request', selPendingIds, 'approve')} disabled={bulkBusy} className="bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">Approve selected</button>
             <button onClick={() => bulkAct('reject_change_request', selPendingIds, 'reject')} disabled={bulkBusy} className="bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50 font-medium">Reject selected</button>
             <button onClick={() => setSelCr(new Set())} className="text-gray-500 hover:underline">Clear</button>
@@ -658,7 +658,7 @@ export default function PendingChangesPage() {
             <tbody>
               {shownF.length === 0 && (<tr><td colSpan={10} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} change requests{Object.values(crFilters).some(s => s && s.size) ? ' match the filter' : ''}.</td></tr>)}
               {shownF.map(r => (
-                <tr key={r.id} className={`border-b last:border-0 align-top ${selCr.has(r.id) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                <tr key={r.id} className={`border-b last:border-0 align-top ${selCr.has(r.id) ? 'bg-emerald-50' : 'hover:bg-gray-50'}`}>
                   {isHO && <td className="px-3 py-2">{r.status === 'Pending' ? <input type="checkbox" checked={selCr.has(r.id)} onChange={() => toggleCr(r.id)} className="h-4 w-4" /> : null}</td>}
                   <td className="px-3 py-2 min-w-[140px]">
                     <span className="font-mono font-medium">{r.sales_order_lines?.so_number || '—'}</span>
@@ -706,8 +706,8 @@ export default function PendingChangesPage() {
         <h2 className="text-lg font-semibold mt-8 mb-2">Timer cancellations</h2>
         <p className="text-gray-500 text-sm mb-3">{isHO ? 'Approve to clear a timer that was pressed by mistake.' : 'Track your requests to cancel a timer.'}</p>
         {isHO && selCorrIds.length > 0 && (
-          <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
-            <span className="font-medium text-blue-800">{selCorrIds.length} pending selected</span>
+          <div className="flex items-center gap-3 mb-3 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-sm">
+            <span className="font-medium text-emerald-800">{selCorrIds.length} pending selected</span>
             <button onClick={() => bulkAct('approve_correction', selCorrIds, 'approve')} disabled={bulkBusy} className="bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">Approve selected</button>
             <button onClick={() => bulkAct('reject_correction', selCorrIds, 'reject')} disabled={bulkBusy} className="bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50 font-medium">Reject selected</button>
             <button onClick={() => setSelCorr(new Set())} className="text-gray-500 hover:underline">Clear</button>
@@ -732,7 +732,7 @@ export default function PendingChangesPage() {
             <tbody>
               {shownCorr.length === 0 && (<tr><td colSpan={7} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} timer cancellations.</td></tr>)}
               {shownCorr.map(c => (
-                <tr key={c.id} className={`border-b last:border-0 align-top ${selCorr.has(c.id) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                <tr key={c.id} className={`border-b last:border-0 align-top ${selCorr.has(c.id) ? 'bg-emerald-50' : 'hover:bg-gray-50'}`}>
                   {isHO && <td className="px-3 py-2">{c.status === 'Pending' ? <input type="checkbox" checked={selCorr.has(c.id)} onChange={() => setSelCorr(p => { const n = new Set(p); n.has(c.id) ? n.delete(c.id) : n.add(c.id); return n })} className="h-4 w-4" /> : null}</td>}
                   <td className="px-3 py-2 min-w-[200px]">{c.label || c.timer_key}</td>
                   <td className="px-3 py-2 text-gray-600 min-w-[140px]">{c.reason || '—'}</td>
@@ -759,8 +759,8 @@ export default function PendingChangesPage() {
         <h2 className="text-lg font-semibold mt-8 mb-2">Goods Received changes</h2>
         <p className="text-gray-500 text-sm mb-3">{isHO ? 'Approve to apply edits, or delete a received line (this reverses its stock).' : 'Track your edit/delete requests on Goods Received lines.'}</p>
         {isHO && selDoIds.length > 0 && (
-          <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
-            <span className="font-medium text-blue-800">{selDoIds.length} pending selected</span>
+          <div className="flex items-center gap-3 mb-3 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-sm">
+            <span className="font-medium text-emerald-800">{selDoIds.length} pending selected</span>
             <button onClick={() => bulkAct('approve_do_change', selDoIds, 'approve')} disabled={bulkBusy} className="bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">Approve selected</button>
             <button onClick={() => bulkAct('reject_do_change', selDoIds, 'reject')} disabled={bulkBusy} className="bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50 font-medium">Reject selected</button>
             <button onClick={() => setSelDo(new Set())} className="text-gray-500 hover:underline">Clear</button>
@@ -787,7 +787,7 @@ export default function PendingChangesPage() {
             <tbody>
               {shownDo.length === 0 && (<tr><td colSpan={9} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} Goods Received changes.</td></tr>)}
               {shownDo.map(c => (
-                <tr key={c.id} className={`border-b last:border-0 align-top ${selDo.has(c.id) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                <tr key={c.id} className={`border-b last:border-0 align-top ${selDo.has(c.id) ? 'bg-emerald-50' : 'hover:bg-gray-50'}`}>
                   {isHO && <td className="px-3 py-2">{c.status === 'Pending' ? <input type="checkbox" checked={selDo.has(c.id)} onChange={() => setSelDo(p => { const n = new Set(p); n.has(c.id) ? n.delete(c.id) : n.add(c.id); return n })} className="h-4 w-4" /> : null}</td>}
                   <td className="px-3 py-2 min-w-[140px]">
                     <span className="font-mono font-medium">{c.delivery_orders?.do_number || '—'}</span>
@@ -823,8 +823,8 @@ export default function PendingChangesPage() {
         <h2 className="text-lg font-semibold mt-8 mb-2">Batch splits &amp; un-combine</h2>
         <p className="text-gray-500 text-sm mb-3">{isHO ? 'Approve to pull an order into its own batch, or to run a grouped batch on its own. Nothing is deleted.' : 'Track your requests to split an order out, or to run a batch on its own.'}</p>
         {isHO && selSplitIds.length > 0 && (
-          <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
-            <span className="font-medium text-blue-800">{selSplitIds.length} pending selected</span>
+          <div className="flex items-center gap-3 mb-3 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-sm">
+            <span className="font-medium text-emerald-800">{selSplitIds.length} pending selected</span>
             <button onClick={() => bulkAct('approve_split', selSplitIds, 'approve')} disabled={bulkBusy} className="bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">Approve selected</button>
             <button onClick={() => bulkAct('reject_split', selSplitIds, 'reject')} disabled={bulkBusy} className="bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50 font-medium">Reject selected</button>
             <button onClick={() => setSelSplit(new Set())} className="text-gray-500 hover:underline">Clear</button>
@@ -849,7 +849,7 @@ export default function PendingChangesPage() {
             <tbody>
               {shownSplit.length === 0 && (<tr><td colSpan={7} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} batch splits.</td></tr>)}
               {shownSplit.map(c => (
-                <tr key={c.id} className={`border-b last:border-0 align-top ${selSplit.has(c.id) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                <tr key={c.id} className={`border-b last:border-0 align-top ${selSplit.has(c.id) ? 'bg-emerald-50' : 'hover:bg-gray-50'}`}>
                   {isHO && <td className="px-3 py-2">{c.status === 'Pending' ? <input type="checkbox" checked={selSplit.has(c.id)} onChange={() => setSelSplit(p => { const n = new Set(p); n.has(c.id) ? n.delete(c.id) : n.add(c.id); return n })} className="h-4 w-4" /> : null}</td>}
                   <td className="px-3 py-2 min-w-[220px]">{c.label || '—'}</td>
                   <td className="px-3 py-2 text-gray-600 min-w-[120px]">{c.reason || '—'}</td>
@@ -876,8 +876,8 @@ export default function PendingChangesPage() {
         <h2 className="text-lg font-semibold mt-8 mb-2">Stock adjustments</h2>
         <p className="text-gray-500 text-sm mb-3">{isHO ? 'Approve to apply a manual stock IN/OUT. IN adds a lot; OUT removes earliest-expiry first.' : 'Track your manual stock in/out requests.'}</p>
         {isHO && selSAIds.length > 0 && (
-          <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
-            <span className="font-medium text-blue-800">{selSAIds.length} pending selected</span>
+          <div className="flex items-center gap-3 mb-3 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-sm">
+            <span className="font-medium text-emerald-800">{selSAIds.length} pending selected</span>
             <button onClick={() => bulkAct('approve_stock_adjustment', selSAIds, 'approve')} disabled={bulkBusy} className="bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">Approve selected</button>
             <button onClick={() => bulkAct('reject_stock_adjustment', selSAIds, 'reject')} disabled={bulkBusy} className="bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50 font-medium">Reject selected</button>
             <button onClick={() => setSelSA(new Set())} className="text-gray-500 hover:underline">Clear</button>
@@ -902,7 +902,7 @@ export default function PendingChangesPage() {
             <tbody>
               {shownSA.length === 0 && (<tr><td colSpan={10} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} stock adjustments.</td></tr>)}
               {shownSA.map(a => (
-                <tr key={a.id} className={`border-b last:border-0 align-top ${selSA.has(a.id) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                <tr key={a.id} className={`border-b last:border-0 align-top ${selSA.has(a.id) ? 'bg-emerald-50' : 'hover:bg-gray-50'}`}>
                   {isHO && <td className="px-3 py-2">{a.status === 'Pending' ? <input type="checkbox" checked={selSA.has(a.id)} onChange={() => setSelSA(p => { const n = new Set(p); n.has(a.id) ? n.delete(a.id) : n.add(a.id); return n })} className="h-4 w-4" /> : null}</td>}
                   <td className="px-3 py-2 min-w-[160px]"><span className="font-mono font-medium">{a.item_code}</span><span className="block text-gray-400">{a.description}</span></td>
                   <td className="px-3 py-2 whitespace-nowrap">{a.direction === 'in' ? <span className="text-green-700 font-medium">➕ IN</span> : <span className="text-red-600 font-medium">➖ OUT</span>}</td>
@@ -932,8 +932,8 @@ export default function PendingChangesPage() {
         <h2 className="text-lg font-semibold mt-8 mb-2">Run-mode changes</h2>
         <p className="text-gray-500 text-sm mb-3">{isHO ? 'Approve to switch a batch between Auto and Manual. The open material request is recalculated (roll vs pieces).' : 'Track your requests to change a batch run mode.'}</p>
         {isHO && selRMIds.length > 0 && (
-          <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
-            <span className="font-medium text-blue-800">{selRMIds.length} pending selected</span>
+          <div className="flex items-center gap-3 mb-3 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-sm">
+            <span className="font-medium text-emerald-800">{selRMIds.length} pending selected</span>
             <button onClick={() => bulkAct('approve_run_mode', selRMIds, 'approve')} disabled={bulkBusy} className="bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">Approve selected</button>
             <button onClick={() => bulkAct('reject_run_mode', selRMIds, 'reject')} disabled={bulkBusy} className="bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50 font-medium">Reject selected</button>
             <button onClick={() => setSelRM(new Set())} className="text-gray-500 hover:underline">Clear</button>
@@ -958,7 +958,7 @@ export default function PendingChangesPage() {
             <tbody>
               {shownRM.length === 0 && (<tr><td colSpan={8} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} run-mode changes.</td></tr>)}
               {shownRM.map(a => (
-                <tr key={a.id} className={`border-b last:border-0 align-top ${selRM.has(a.id) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                <tr key={a.id} className={`border-b last:border-0 align-top ${selRM.has(a.id) ? 'bg-emerald-50' : 'hover:bg-gray-50'}`}>
                   {isHO && <td className="px-3 py-2">{a.status === 'Pending' ? <input type="checkbox" checked={selRM.has(a.id)} onChange={() => setSelRM(p => { const n = new Set(p); n.has(a.id) ? n.delete(a.id) : n.add(a.id); return n })} className="h-4 w-4" /> : null}</td>}
                   <td className="px-3 py-2 whitespace-nowrap"><span className="font-mono font-medium">{a.batch_no}</span><span className="block text-gray-400">{a.item_code}</span></td>
                   <td className="px-3 py-2 whitespace-nowrap"><span className="capitalize">{a.from_mode}</span> <span className="mx-1">→</span> <span className="capitalize font-medium text-gray-800">{a.to_mode}</span></td>
@@ -986,8 +986,8 @@ export default function PendingChangesPage() {
         <h2 className="text-lg font-semibold mt-8 mb-2">Material request cancellations</h2>
         <p className="text-gray-500 text-sm mb-3">{isHO ? 'Approve to cancel a material request that was already sent to the warehouse. Its batches are freed (only if nothing was received).' : 'Track your requests to cancel a released material request.'}</p>
         {isHO && selMCIds.length > 0 && (
-          <div className="flex items-center gap-3 mb-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
-            <span className="font-medium text-blue-800">{selMCIds.length} pending selected</span>
+          <div className="flex items-center gap-3 mb-3 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-sm">
+            <span className="font-medium text-emerald-800">{selMCIds.length} pending selected</span>
             <button onClick={() => bulkAct('approve_mr_cancel', selMCIds, 'approve')} disabled={bulkBusy} className="bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">Approve selected</button>
             <button onClick={() => bulkAct('reject_mr_cancel', selMCIds, 'reject')} disabled={bulkBusy} className="bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50 font-medium">Reject selected</button>
             <button onClick={() => setSelMC(new Set())} className="text-gray-500 hover:underline">Clear</button>
@@ -1012,7 +1012,7 @@ export default function PendingChangesPage() {
             <tbody>
               {shownMC.length === 0 && (<tr><td colSpan={7} className="text-center py-8 text-gray-400">No {filter !== 'All' ? filter.toLowerCase() : ''} material request cancellations.</td></tr>)}
               {shownMC.map(a => (
-                <tr key={a.id} className={`border-b last:border-0 align-top ${selMC.has(a.id) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                <tr key={a.id} className={`border-b last:border-0 align-top ${selMC.has(a.id) ? 'bg-emerald-50' : 'hover:bg-gray-50'}`}>
                   {isHO && <td className="px-3 py-2">{a.status === 'Pending' ? <input type="checkbox" checked={selMC.has(a.id)} onChange={() => setSelMC(p => { const n = new Set(p); n.has(a.id) ? n.delete(a.id) : n.add(a.id); return n })} className="h-4 w-4" /> : null}</td>}
                   <td className="px-3 py-2 whitespace-nowrap font-mono font-medium">{a.request_no}</td>
                   <td className="px-3 py-2 text-gray-600 min-w-[120px]">{a.reason}</td>

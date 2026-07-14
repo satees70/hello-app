@@ -147,8 +147,8 @@ export default function UsersPage() {
                   <td className="px-3 py-1.5 font-semibold text-gray-700">{grp}</td>
                   <td colSpan={3}></td>
                   <td className="px-3 py-1.5 text-center text-xs space-x-2 whitespace-nowrap">
-                    <button type="button" onClick={() => setGroup(loc, grp, 'view')} className="text-blue-600 hover:underline">View all</button>
-                    <button type="button" onClick={() => setGroup(loc, grp, 'edit')} className="text-blue-600 hover:underline">Edit all</button>
+                    <button type="button" onClick={() => setGroup(loc, grp, 'view')} className="text-emerald-600 hover:underline">View all</button>
+                    <button type="button" onClick={() => setGroup(loc, grp, 'edit')} className="text-emerald-600 hover:underline">Edit all</button>
                     <button type="button" onClick={() => setGroup(loc, grp, 'none')} className="text-gray-400 hover:underline">Off</button>
                   </td>
                 </tr>
@@ -165,9 +165,9 @@ export default function UsersPage() {
                       </td>
                     ))}
                     <td className="px-3 py-2 text-center text-xs space-x-1.5 whitespace-nowrap">
-                      <button type="button" onClick={() => setRow(loc, m.key, 'view')} className="text-blue-600 hover:underline">View</button>
-                      <button type="button" onClick={() => setRow(loc, m.key, 'edit')} className="text-blue-600 hover:underline">Edit</button>
-                      <button type="button" onClick={() => setRow(loc, m.key, 'full')} className="text-blue-600 hover:underline">Full</button>
+                      <button type="button" onClick={() => setRow(loc, m.key, 'view')} className="text-emerald-600 hover:underline">View</button>
+                      <button type="button" onClick={() => setRow(loc, m.key, 'edit')} className="text-emerald-600 hover:underline">Edit</button>
+                      <button type="button" onClick={() => setRow(loc, m.key, 'full')} className="text-emerald-600 hover:underline">Full</button>
                       <button type="button" onClick={() => setRow(loc, m.key, 'none')} className="text-gray-400 hover:underline">Off</button>
                     </td>
                   </tr>
@@ -225,7 +225,7 @@ export default function UsersPage() {
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold">User Management</h1>
           <button onClick={() => (mode === 'closed' ? openCreate() : closeForm())}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium">
+            className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 text-sm font-medium">
             {mode === 'closed' ? '+ Add User' : 'Cancel'}
           </button>
         </div>
@@ -292,7 +292,7 @@ export default function UsersPage() {
                     ))}
                   </div>
                   {form.factory_codes.length === 0 && <p className="text-xs text-amber-600 mt-1">Select at least one factory (or tick Head Office).</p>}
-                  {form.factory_codes.length > 1 && <p className="text-xs text-blue-600 mt-1">This user will see all {form.factory_codes.length} selected factories together (merged view).</p>}
+                  {form.factory_codes.length > 1 && <p className="text-xs text-emerald-600 mt-1">This user will see all {form.factory_codes.length} selected factories together (merged view).</p>}
                 </>
               )}
               {(() => {
@@ -317,7 +317,7 @@ export default function UsersPage() {
             </div>
 
             {/* Warehouse staff: restricted Material Requests view */}
-            <label className="flex items-start gap-2 cursor-pointer bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+            <label className="flex items-start gap-2 cursor-pointer bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
               <input type="checkbox" className="h-4 w-4 mt-0.5" checked={form.warehouse_user}
                 onChange={e => setForm({ ...form, warehouse_user: e.target.checked })} />
               <span className="text-sm">
@@ -346,8 +346,8 @@ export default function UsersPage() {
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-sm font-medium">Permissions (per section)</label>
                   <div className="text-xs space-x-3">
-                    <button type="button" onClick={() => setAll(true)} className="text-blue-600 hover:underline">Tick all</button>
-                    <button type="button" onClick={() => setAll(false)} className="text-blue-600 hover:underline">Clear all</button>
+                    <button type="button" onClick={() => setAll(true)} className="text-emerald-600 hover:underline">Tick all</button>
+                    <button type="button" onClick={() => setAll(false)} className="text-emerald-600 hover:underline">Clear all</button>
                   </div>
                 </div>
                 {/* Plain-language legend so it's obvious what each column does */}
@@ -392,8 +392,8 @@ export default function UsersPage() {
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-sm font-medium">Special permissions</label>
                   <div className="text-xs space-x-3">
-                    <button type="button" onClick={() => setForm(p => ({ ...p, capabilities: defaultCaps() }))} className="text-blue-600 hover:underline">Allow all</button>
-                    <button type="button" onClick={() => setForm(p => ({ ...p, capabilities: Object.fromEntries(CAPABILITIES.map(c => [c.key, false])) }))} className="text-blue-600 hover:underline">Disallow all</button>
+                    <button type="button" onClick={() => setForm(p => ({ ...p, capabilities: defaultCaps() }))} className="text-emerald-600 hover:underline">Allow all</button>
+                    <button type="button" onClick={() => setForm(p => ({ ...p, capabilities: Object.fromEntries(CAPABILITIES.map(c => [c.key, false])) }))} className="text-emerald-600 hover:underline">Disallow all</button>
                   </div>
                 </div>
                 <p className="text-xs text-gray-400 mb-2">Specific actions on top of the grid. A user still needs the section&apos;s Edit (and factory access) — these let you switch the sensitive ones on/off per person.</p>
@@ -413,7 +413,7 @@ export default function UsersPage() {
             {success && <p className="text-green-600 text-sm bg-green-50 p-2 rounded">{success}</p>}
             <div className="flex gap-2">
               <button type="submit" disabled={saving}
-                className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">
+                className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium">
                 {saving ? 'Saving...' : mode === 'edit' ? 'Save Changes' : 'Create User'}
               </button>
               <button type="button" onClick={closeForm} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
@@ -454,7 +454,7 @@ export default function UsersPage() {
                     <td className="px-4 py-3 text-gray-600">{u.username || <span className="text-gray-400">{u.email}</span>}</td>
                     <td className="px-4 py-3">
                       {(u.factory_codes?.length ? u.factory_codes : [u.factory_code]).filter(Boolean).map(fc => (
-                        <span key={fc} className={`mr-1 mb-1 inline-block px-2 py-0.5 rounded-full text-xs font-medium ${fc === 'HEAD_OFFICE' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                        <span key={fc} className={`mr-1 mb-1 inline-block px-2 py-0.5 rounded-full text-xs font-medium ${fc === 'HEAD_OFFICE' ? 'bg-purple-100 text-purple-700' : 'bg-emerald-100 text-emerald-700'}`}>
                           {fc === 'HEAD_OFFICE' ? 'Head Office' : fc}
                         </span>
                       ))}
@@ -462,7 +462,7 @@ export default function UsersPage() {
                     <td className="px-4 py-3 capitalize">{u.role}</td>
                     <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${al.cls}`}>{al.text}</span></td>
                     <td className="px-4 py-3 text-right whitespace-nowrap space-x-3">
-                      <button onClick={() => openEdit(u)} className="text-blue-600 hover:underline text-sm font-medium">Edit</button>
+                      <button onClick={() => openEdit(u)} className="text-emerald-600 hover:underline text-sm font-medium">Edit</button>
                       <button onClick={() => openCopy(u)} className="text-gray-600 hover:underline text-sm font-medium" title="Create a new user with the same access">Copy</button>
                     </td>
                   </tr>

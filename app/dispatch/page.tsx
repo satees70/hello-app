@@ -606,7 +606,7 @@ export default function DispatchPage() {
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   const myCodes = profile.factory_codes && profile.factory_codes.length ? profile.factory_codes : [profile.factory_code]
@@ -652,7 +652,7 @@ export default function DispatchPage() {
                 <label className="text-xs text-gray-600">Note (optional)
                   <input value={lrNote} onChange={e => setLrNote(e.target.value)} placeholder="e.g. urgent" className="block mt-0.5 border rounded-lg px-2 py-1.5 text-sm w-40" />
                 </label>
-                <button onClick={requestLorry} disabled={busy} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">📞 Request lorry</button>
+                <button onClick={requestLorry} disabled={busy} className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium">📞 Request lorry</button>
                 <button onClick={requestDriver} disabled={busy} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium">👤 Request driver</button>
               </div>
             </div>
@@ -765,7 +765,7 @@ export default function DispatchPage() {
               )}
               <div className="flex flex-col gap-1 min-w-[220px] flex-1">
                 <span className="text-xs font-medium text-gray-600 flex items-center justify-between gap-2">Material
-                  <label className="font-normal text-[11px] text-blue-600 inline-flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={manual} onChange={e => { setManual(e.target.checked); setCode(''); setLotId(''); setManBatch('') }} className="h-3.5 w-3.5" /> Not in stock? Pick from all items</label>
+                  <label className="font-normal text-[11px] text-emerald-600 inline-flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={manual} onChange={e => { setManual(e.target.checked); setCode(''); setLotId(''); setManBatch('') }} className="h-3.5 w-3.5" /> Not in stock? Pick from all items</label>
                 </span>
                 {manual ? (
                   <ItemPicker items={items} value={item ? `${item.code} — ${item.description}` : ''} onPick={it => setCode(it.code)} placeholder="Type a code or name…" />
@@ -889,7 +889,7 @@ export default function DispatchPage() {
                         <span className="font-mono">{v.item_code}</span>
                         <span className="text-gray-400 flex-1 truncate">{v.description}{v.batch_no ? ` · ${v.batch_no}` : ''}{edited && <span className="text-teal-600"> · edited</span>}</span>
                         <span className="font-medium whitespace-nowrap">× {v.quantity}</span>
-                        <button onClick={() => openEditCart({ kind: 'fg', batchId: b.id })} className="text-blue-600 text-xs hover:underline">edit</button>
+                        <button onClick={() => openEditCart({ kind: 'fg', batchId: b.id })} className="text-emerald-600 text-xs hover:underline">edit</button>
                         <button onClick={() => toggle(b.id)} className="text-red-500 text-xs hover:underline">remove</button>
                       </div>
                     ) })}
@@ -899,7 +899,7 @@ export default function DispatchPage() {
                         <span className="font-mono">{r.itemCode}</span>
                         <span className="text-gray-400 flex-1 truncate">{r.description} · batch {r.batchNo || '—'}{r.reason ? ` · ${r.reason}` : ''}</span>
                         <span className="font-medium whitespace-nowrap">× {r.qty} {r.unit}</span>
-                        <button onClick={() => openEditCart({ kind: 'ret', index: i })} className="text-blue-600 text-xs hover:underline">edit</button>
+                        <button onClick={() => openEditCart({ kind: 'ret', index: i })} className="text-emerald-600 text-xs hover:underline">edit</button>
                         <button onClick={() => setReturnCart(c => c.filter((_, j) => j !== i))} className="text-red-500 text-xs hover:underline">remove</button>
                       </div>
                     ))}
@@ -940,11 +940,11 @@ export default function DispatchPage() {
                           📦 Received {fmt(o.received_at)}{o.received_by_name ? ` · ${o.received_by_name}` : ''}
                           {o.warehouse_grn && <span className="block text-gray-600">GRN: <span className="font-mono">{o.warehouse_grn}</span></span>}
                         </div>
-                      : canReceive && <a href="/warehouse" className="mt-1 inline-block text-blue-600 hover:underline text-xs">📷 Receive per item →</a>)}
+                      : canReceive && <a href="/warehouse" className="mt-1 inline-block text-emerald-600 hover:underline text-xs">📷 Receive per item →</a>)}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-600">{o.created_by_name || '—'}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-400">{fmt(o.created_at)}</td>
-                  <td className="px-3 py-2 whitespace-nowrap"><button onClick={() => printDO(o)} className="text-blue-600 hover:underline">🖨 Print</button></td>
+                  <td className="px-3 py-2 whitespace-nowrap"><button onClick={() => printDO(o)} className="text-emerald-600 hover:underline">🖨 Print</button></td>
                   <td className="px-3 py-2 text-gray-600">
                     {(o.dispatch_order_lines || []).map((l, i) => (
                       <span key={`f${i}`} className="block whitespace-nowrap mb-0.5">
@@ -952,7 +952,7 @@ export default function DispatchPage() {
                         {fgEditPending.has(l.id)
                           ? <span className="ml-2 text-amber-600 text-xs">⏳ edit pending approval</span>
                           : canFac(o.factory_code) && hasCap(profile, 'request_return_edit')
-                            ? <button onClick={() => openFgEdit(l, o)} className="ml-2 text-blue-600 hover:underline text-xs">Edit</button>
+                            ? <button onClick={() => openFgEdit(l, o)} className="ml-2 text-emerald-600 hover:underline text-xs">Edit</button>
                             : null}
                         {(() => {
                           const so = (l.batch_id && soByBatch[l.batch_id]) || soByDoItem[`${o.do_number}|${l.item_code}`] || ''
@@ -965,7 +965,7 @@ export default function DispatchPage() {
                         })()}
                         {!((l.batch_id && soByBatch[l.batch_id]) || soByDoItem[`${o.do_number}|${l.item_code}`]) && canFac(o.factory_code) && (() => {
                           const cands = pendingDetailForItem(l.item_code, o.factory_code)
-                          return cands.length ? <span className="block ml-5 text-xs text-amber-700">⚠ no SO linked · {cands.length} pending order(s) for this item <button onClick={() => openLink(l.id, false, l.item_code, l.description, o.factory_code, l.quantity)} disabled={busy} className="text-blue-600 hover:underline disabled:opacity-50 font-medium">🔗 Link to order(s)</button></span> : null
+                          return cands.length ? <span className="block ml-5 text-xs text-amber-700">⚠ no SO linked · {cands.length} pending order(s) for this item <button onClick={() => openLink(l.id, false, l.item_code, l.description, o.factory_code, l.quantity)} disabled={busy} className="text-emerald-600 hover:underline disabled:opacity-50 font-medium">🔗 Link to order(s)</button></span> : null
                         })()}
                       </span>
                     ))}
@@ -975,10 +975,10 @@ export default function DispatchPage() {
                         {editPending.has(l.id)
                           ? <span className="ml-2 text-amber-600 text-xs">⏳ edit pending approval</span>
                           : canFac(o.factory_code) && hasCap(profile, 'request_return_edit')
-                            ? <button onClick={() => openRetEdit({ id: l.id, factory_code: o.factory_code, item_code: l.item_code, description: l.description, batch_no: l.batch_no, exp_date: l.exp_date, quantity: l.quantity, reason: l.reason, created_by_name: null, created_at: o.created_at })} className="ml-2 text-blue-600 hover:underline text-xs">Edit</button>
+                            ? <button onClick={() => openRetEdit({ id: l.id, factory_code: o.factory_code, item_code: l.item_code, description: l.description, batch_no: l.batch_no, exp_date: l.exp_date, quantity: l.quantity, reason: l.reason, created_by_name: null, created_at: o.created_at })} className="ml-2 text-emerald-600 hover:underline text-xs">Edit</button>
                             : null}
                         {(() => { const so = soByDoItem[`${o.do_number}|${l.item_code}`]; const bits = [so ? `SO ${so}` : '', l.batch_no ? `batch ${l.batch_no}` : '', l.exp_date ? `exp ${fmtD(l.exp_date)}` : ''].filter(Boolean); return bits.length ? <span className="ml-2 text-xs text-orange-400">· {bits.join(' · ')}</span> : null })()}
-                        {!soByDoItem[`${o.do_number}|${l.item_code}`] && canFac(o.factory_code) && (() => { const cands = pendingDetailForItem(l.item_code, o.factory_code); return cands.length ? <span className="block ml-5 text-xs text-amber-700">⚠ {cands.length} pending order(s) for this item <button onClick={() => openLink(l.id, true, l.item_code, l.description, o.factory_code, l.quantity)} disabled={busy} className="text-blue-600 hover:underline disabled:opacity-50 font-medium">🔗 Link to order(s)</button></span> : null })()}
+                        {!soByDoItem[`${o.do_number}|${l.item_code}`] && canFac(o.factory_code) && (() => { const cands = pendingDetailForItem(l.item_code, o.factory_code); return cands.length ? <span className="block ml-5 text-xs text-amber-700">⚠ {cands.length} pending order(s) for this item <button onClick={() => openLink(l.id, true, l.item_code, l.description, o.factory_code, l.quantity)} disabled={busy} className="text-emerald-600 hover:underline disabled:opacity-50 font-medium">🔗 Link to order(s)</button></span> : null })()}
                       </span>
                     ))}
                   </td>
@@ -1018,7 +1018,7 @@ export default function DispatchPage() {
                 <input value={editWhy} onChange={e => setEditWhy(e.target.value)} placeholder="Why are you changing it?" className="w-full border rounded-lg px-3 py-2" /></div>
             </div>
             <div className="flex gap-2 mt-5">
-              <button onClick={submitRetEdit} disabled={busy} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{busy ? 'Saving…' : isHO ? 'Apply' : 'Send for approval'}</button>
+              <button onClick={submitRetEdit} disabled={busy} className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium">{busy ? 'Saving…' : isHO ? 'Apply' : 'Send for approval'}</button>
               <button onClick={() => setEditRet(null)} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
             </div>
           </div>
@@ -1053,7 +1053,7 @@ export default function DispatchPage() {
               </>}
             </div>
             <div className="flex gap-2 mt-5">
-              <button onClick={saveEditCart} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 font-medium">Save</button>
+              <button onClick={saveEditCart} className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700 font-medium">Save</button>
               <button onClick={() => setEcart(null)} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
             </div>
           </div>
@@ -1081,7 +1081,7 @@ export default function DispatchPage() {
                 <input value={fgWhy} onChange={e => setFgWhy(e.target.value)} placeholder="Why are you changing it?" className="w-full border rounded-lg px-3 py-2" /></div>
             </div>
             <div className="flex gap-2 mt-5">
-              <button onClick={submitFgEdit} disabled={busy} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{busy ? 'Saving…' : isHO ? 'Apply' : 'Send for approval'}</button>
+              <button onClick={submitFgEdit} disabled={busy} className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium">{busy ? 'Saving…' : isHO ? 'Apply' : 'Send for approval'}</button>
               <button onClick={() => setFgEdit(null)} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
             </div>
           </div>
@@ -1117,7 +1117,7 @@ export default function DispatchPage() {
               </div>
               <p className={`text-xs mb-3 ${allocated > linkModal.qty ? 'text-red-600 font-medium' : 'text-gray-500'}`}>Allocated {Number(allocated.toFixed(3))} of {linkModal.qty}{allocated > linkModal.qty ? ' — more than delivered!' : ''}</p>
               <div className="flex gap-2">
-                <button onClick={submitLink} disabled={busy || allocated <= 0} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">{busy ? 'Linking…' : 'Link & mark delivered'}</button>
+                <button onClick={submitLink} disabled={busy || allocated <= 0} className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium">{busy ? 'Linking…' : 'Link & mark delivered'}</button>
                 <button onClick={() => setLinkModal(null)} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
               </div>
             </div>

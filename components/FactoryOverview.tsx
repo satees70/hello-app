@@ -100,7 +100,7 @@ export default function FactoryOverview() {
       {loading ? <div className="text-gray-400 py-10 text-center">Loading overview…</div> : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-            <Kpi label="Open orders" value={view.openOrders} color="text-blue-600" />
+            <Kpi label="Open orders" value={view.openOrders} color="text-emerald-600" />
             <Kpi label="Order lines pending" value={view.pendingLines} color="text-amber-600" />
             <Kpi label="Items in production" value={view.inProdCount} color="text-indigo-600" />
             <Kpi label="Ready to dispatch" value={view.readyCount} color="text-green-600" />
@@ -124,7 +124,7 @@ export default function FactoryOverview() {
                       {view.rows.map(r => (
                         <tr key={r.code} className="border-t">
                           <td className="px-4 py-1.5">{facName(r.code)}</td>
-                          <td className="px-2 py-1.5 text-right text-blue-700">{r.openSOs || '—'}</td>
+                          <td className="px-2 py-1.5 text-right text-emerald-700">{r.openSOs || '—'}</td>
                           <td className="px-2 py-1.5 text-right text-amber-700">{r.pendingLines || '—'}</td>
                           <td className="px-2 py-1.5 text-right text-indigo-700">{r.inProd || '—'}</td>
                           <td className="px-4 py-1.5 text-right text-green-700">{r.ready || '—'}</td>

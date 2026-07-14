@@ -30,7 +30,7 @@ const effExp = (s: { exp_date: string | null; batch_no: string; created_at: stri
 }
 const STATUS_CHIP: Record<string, string> = {
   Review: 'bg-amber-100 text-amber-700', Released: 'bg-emerald-100 text-emerald-700',
-  Picking: 'bg-blue-100 text-blue-700', Picked: 'bg-emerald-100 text-emerald-700',
+  Picking: 'bg-emerald-100 text-emerald-700', Picked: 'bg-emerald-100 text-emerald-700',
 }
 
 export default function WmsPickPage() {

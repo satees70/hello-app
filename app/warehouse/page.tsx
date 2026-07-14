@@ -110,7 +110,7 @@ export default function WarehouseReceivingPage() {
   }
 
   if (pLoading && !pErr) return <div className="flex min-h-screen items-center justify-center">Loading…</div>
-  if (pErr) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{pErr}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (pErr) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{pErr}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   const rq = q.trim().toLowerCase()
@@ -158,7 +158,7 @@ export default function WarehouseReceivingPage() {
                       <input value={grnVal} disabled={!canReceive} onChange={e => setGrnEdits(m => ({ ...m, [o.id]: e.target.value }))}
                         placeholder="e.g. GRN-00123" className="border rounded-lg px-2 py-1 text-sm w-44 disabled:bg-gray-100" />
                       {canReceive && (grnEdits[o.id] ?? o.warehouse_grn ?? '') !== (o.warehouse_grn ?? '') &&
-                        <button onClick={() => saveGrn(o)} className="bg-blue-600 text-white px-3 py-1 rounded-lg text-xs hover:bg-blue-700">Save GRN</button>}
+                        <button onClick={() => saveGrn(o)} className="bg-emerald-600 text-white px-3 py-1 rounded-lg text-xs hover:bg-emerald-700">Save GRN</button>}
                     </div>
 
                     <div className="divide-y">
@@ -171,10 +171,10 @@ export default function WarehouseReceivingPage() {
                             <span className="block text-gray-400 text-xs ml-5">× {l.quantity}{l.batch_no ? ` · batch ${l.batch_no}` : ''}{l.reason ? ` · ${l.reason}` : ''}{l.received_at ? ` · ✓ ${l.received_by_name || ''} ${fmt(l.received_at)}` : ''}</span>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
-                            {l.photo_path && <button onClick={() => viewPhoto(l.photo_path!)} className="text-blue-600 hover:underline text-xs">📷 photo</button>}
+                            {l.photo_path && <button onClick={() => viewPhoto(l.photo_path!)} className="text-emerald-600 hover:underline text-xs">📷 photo</button>}
                             {canReceive && (l.received_at
                               ? <button onClick={() => undoItem(l)} className="text-gray-400 hover:underline text-xs">undo</button>
-                              : <label className={`cursor-pointer text-xs px-3 py-1.5 rounded-lg font-medium ${busyLine === l.id ? 'bg-gray-200 text-gray-500' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+                              : <label className={`cursor-pointer text-xs px-3 py-1.5 rounded-lg font-medium ${busyLine === l.id ? 'bg-gray-200 text-gray-500' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>
                                   {busyLine === l.id ? 'Saving…' : '📷 Photo + confirm'}
                                   <input type="file" accept="image/*" capture="environment" className="hidden" disabled={busyLine === l.id}
                                     onChange={e => { const f = e.target.files?.[0]; if (f) takePhoto(l, o.id, f); e.target.value = '' }} />

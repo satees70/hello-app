@@ -157,7 +157,7 @@ function FoodLossQueries({ profile }: { profile: { factory_code: string; factory
             <div className="text-sm text-gray-700 mt-1">❓ {a.query} <span className="text-gray-400">— {a.query_by_name}</span></div>
             <div className="flex gap-2 mt-2">
               <input value={ans[a.id] || ''} onChange={e => setAns(p => ({ ...p, [a.id]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') answer(a) }} placeholder="Type your answer…" className="flex-1 border rounded-lg px-3 py-2 text-sm" />
-              <button onClick={() => answer(a)} disabled={busy === a.id || !(ans[a.id] || '').trim()} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{busy === a.id ? 'Sending…' : 'Answer'}</button>
+              <button onClick={() => answer(a)} disabled={busy === a.id || !(ans[a.id] || '').trim()} className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium">{busy === a.id ? 'Sending…' : 'Answer'}</button>
             </div>
           </div>
         ))}
@@ -324,7 +324,7 @@ export default function InspectionPage() {
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   const s = (k: string) => (f[k] as string) || ''
@@ -353,7 +353,7 @@ export default function InspectionPage() {
           <h1 className="text-2xl font-bold">Packing &amp; Finished Goods Inspection Record <span className="text-gray-400 font-normal text-sm">P07-F01 Ver.06</span></h1>
           <div className="flex gap-2">
             <button onClick={() => window.print()} className="border px-4 py-2 rounded-lg hover:bg-gray-50 text-sm font-medium">🖨 Print / PDF</button>
-            <button onClick={save} disabled={busy} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{busy ? 'Saving…' : 'Save'}</button>
+            <button onClick={save} disabled={busy} className="bg-emerald-600 text-white px-5 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium">{busy ? 'Saving…' : 'Save'}</button>
           </div>
         </div>
         {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded mb-3 no-print">{error}</p>}
@@ -368,7 +368,7 @@ export default function InspectionPage() {
 
           {/* Production run — at the top */}
           {batchId && (
-            <div className="border-t pt-3 bg-blue-50/40 -mx-5 px-5 py-3">
+            <div className="border-t pt-3 bg-emerald-50/40 -mx-5 px-5 py-3">
               <div className="font-semibold text-sm mb-2">Production run <span className="font-normal text-gray-500">· batch {batchNo}</span></div>
               <div className="mb-3">
                 <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -394,7 +394,7 @@ export default function InspectionPage() {
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-2">
                 <Field label="Quantity produced"><In k="qty_produced" type="number" /></Field>
                 <div className="flex items-end">
-                  <button onClick={recordProductionFromForm} disabled={recording} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium w-full no-print">{recording ? 'Recording…' : 'Record production'}</button>
+                  <button onClick={recordProductionFromForm} disabled={recording} className="bg-emerald-600 text-white px-4 py-1.5 rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium w-full no-print">{recording ? 'Recording…' : 'Record production'}</button>
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-4 text-xs text-gray-600">
@@ -448,7 +448,7 @@ export default function InspectionPage() {
                                 {lots.map(lt => <option key={lt.batch_no} value={lt.batch_no}>{lt.batch_no} · {n(lt.qty_remaining)} {m.unit}{lt.exp_date ? ` · exp ${lt.exp_date.split('-').reverse().join('/')}` : ''}</option>)}
                               </select>
                             : <input key={j} value={u.batch} onChange={e => setUse(i, j, 'batch', e.target.value)} placeholder="no stock — type" className="border rounded px-2 py-1.5 text-sm w-44 block" />)}
-                          <button type="button" onClick={() => addUse(i)} className="text-blue-600 hover:underline text-xs no-print">+ add batch</button>
+                          <button type="button" onClick={() => addUse(i)} className="text-emerald-600 hover:underline text-xs no-print">+ add batch</button>
                         </div>
                       </td>
                       <td className="px-3 py-2 align-top">

@@ -16,7 +16,7 @@ interface Transfer {
 }
 
 const STATUS_STYLE: Record<string, string> = {
-  Pending: 'bg-amber-100 text-amber-700', Sent: 'bg-blue-100 text-blue-700', Received: 'bg-green-100 text-green-700',
+  Pending: 'bg-amber-100 text-amber-700', Sent: 'bg-emerald-100 text-emerald-700', Received: 'bg-green-100 text-green-700',
 }
 
 export default function TransfersPage() {
@@ -104,7 +104,7 @@ export default function TransfersPage() {
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   const shown = transfers.filter(t => filter === 'all' || t.status === filter)
@@ -150,7 +150,7 @@ export default function TransfersPage() {
                 {pickItem && fromF && lotsFor(pickItem.code, fromF).map(l => <option key={l.id} value={l.id}>{l.batch_no || '(no batch)'} · exp {fmtD(l.exp_date)} · {l.qty_remaining} left</option>)}
               </select></div>
             <div className="w-24"><span className="text-xs text-gray-500">Qty</span><input type="number" step="any" min="0" value={pickQty} onChange={e => setPickQty(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-            <button onClick={addCartItem} className="px-4 py-2 rounded-lg border border-blue-600 text-blue-600 text-sm font-medium hover:bg-blue-50">+ Add item</button>
+            <button onClick={addCartItem} className="px-4 py-2 rounded-lg border border-emerald-600 text-emerald-600 text-sm font-medium hover:bg-emerald-50">+ Add item</button>
           </div>
           {cart.length > 0 && (
             <ul className="mb-3 space-y-1">
@@ -163,7 +163,7 @@ export default function TransfersPage() {
             </ul>
           )}
           <input value={reason} onChange={e => setReason(e.target.value)} placeholder="Reason (optional)" className="w-full border rounded-lg px-3 py-2 text-sm mb-3" />
-          <button onClick={createTransfer} disabled={busy === 'new'} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-50">{busy === 'new' ? 'Creating…' : 'Create transfer'}</button>
+          <button onClick={createTransfer} disabled={busy === 'new'} className="bg-emerald-600 text-white px-5 py-2 rounded-lg hover:bg-emerald-700 text-sm font-medium disabled:opacity-50">{busy === 'new' ? 'Creating…' : 'Create transfer'}</button>
           <p className="text-xs text-gray-400 mt-2">After creating, the sending factory confirms dispatch (stock leaves), then the receiving factory confirms receipt (stock arrives).</p>
         </div>
 
@@ -195,7 +195,7 @@ export default function TransfersPage() {
                   {t.received_at && <span>Received by {t.received_by_name} · {new Date(t.received_at).toLocaleString()}</span>}
                 </div>
                 <div className="flex gap-2">
-                  {canSend(t) && <button onClick={() => act('confirm_transfer_send', t.id, 'Dispatch confirmed — stock left ' + factoryName(t.from_factory) + '.')} disabled={busy === t.id} className="text-sm px-3 py-1.5 rounded-lg bg-blue-700 text-white hover:bg-blue-800 disabled:opacity-50">{busy === t.id ? '…' : 'Confirm dispatch'}</button>}
+                  {canSend(t) && <button onClick={() => act('confirm_transfer_send', t.id, 'Dispatch confirmed — stock left ' + factoryName(t.from_factory) + '.')} disabled={busy === t.id} className="text-sm px-3 py-1.5 rounded-lg bg-emerald-700 text-white hover:bg-emerald-800 disabled:opacity-50">{busy === t.id ? '…' : 'Confirm dispatch'}</button>}
                   {canReceive(t) && <button onClick={() => act('confirm_transfer_receive', t.id, 'Receipt confirmed — stock added to ' + factoryName(t.to_factory) + '.')} disabled={busy === t.id} className="text-sm px-3 py-1.5 rounded-lg bg-green-700 text-white hover:bg-green-800 disabled:opacity-50">{busy === t.id ? '…' : 'Confirm receipt'}</button>}
                   {t.status === 'Pending' && !canSend(t) && <span className="text-xs text-gray-400">waiting for {factoryName(t.from_factory)} to dispatch</span>}
                   {t.status === 'Sent' && !canReceive(t) && <span className="text-xs text-gray-400">waiting for {factoryName(t.to_factory)} to receive</span>}

@@ -66,7 +66,7 @@ export default function StockPage() {
   const lotOrder = (l: Lot) => l.exp_date || batchInfo(l.batch_no).date || l.received_at.slice(0, 10)
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })() // local date (not UTC)
@@ -127,7 +127,7 @@ export default function StockPage() {
                           <div className="flex flex-wrap items-baseline gap-2 mb-2">
                             <span className="font-mono font-semibold">{code}</span>
                             <span className="text-gray-500 text-sm">{desc}</span>
-                            <span className="ml-auto text-sm">On hand: <strong className="text-blue-700">{num(total)}</strong>{pcsPerRoll[code] ? <span className="text-gray-500"> pc (≈ {num(Math.round((total / pcsPerRoll[code]) * 100) / 100)} rolls)</span> : null}</span>
+                            <span className="ml-auto text-sm">On hand: <strong className="text-emerald-700">{num(total)}</strong>{pcsPerRoll[code] ? <span className="text-gray-500"> pc (≈ {num(Math.round((total / pcsPerRoll[code]) * 100) / 100)} rolls)</span> : null}</span>
                           </div>
                           <div className="overflow-x-auto border rounded-lg">
                             <table className="w-full text-sm">

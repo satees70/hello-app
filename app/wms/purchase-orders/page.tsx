@@ -21,7 +21,7 @@ const clean = (n: number) => Number(n.toPrecision(12))
 const fmtQty = (n: number) => clean(n).toLocaleString(undefined, { maximumFractionDigits: 4 })
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 const STATUS_CHIP: Record<string, string> = {
-  Processing: 'bg-gray-100 text-gray-600', Open: 'bg-amber-100 text-amber-700', 'Partially Received': 'bg-blue-100 text-blue-700',
+  Processing: 'bg-gray-100 text-gray-600', Open: 'bg-amber-100 text-amber-700', 'Partially Received': 'bg-emerald-100 text-emerald-700',
   Fulfilled: 'bg-emerald-100 text-emerald-700', Cancelled: 'bg-gray-100 text-gray-400', Error: 'bg-red-100 text-red-700',
 }
 

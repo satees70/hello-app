@@ -17,7 +17,7 @@ const allItems = (o: DO): Line[] => [...(o.dispatch_order_lines || []), ...(o.ma
 type Stage = 'awaiting' | 'out' | 'received'
 const stageOf = (o: DO): Stage => o.received_at ? 'received' : o.departed_at ? 'out' : 'awaiting'
 const STAGE_LABEL: Record<Stage, string> = { awaiting: 'Awaiting lorry out', out: 'Out for delivery', received: 'Received' }
-const STAGE_STYLE: Record<Stage, string> = { awaiting: 'bg-gray-100 text-gray-600', out: 'bg-blue-100 text-blue-700', received: 'bg-green-100 text-green-700' }
+const STAGE_STYLE: Record<Stage, string> = { awaiting: 'bg-gray-100 text-gray-600', out: 'bg-emerald-100 text-emerald-700', received: 'bg-green-100 text-green-700' }
 
 function Kpi({ label, value, color }: { label: string; value: number; color: string }) {
   return (
@@ -71,7 +71,7 @@ export default function DispatchDashboardPage() {
   }, [orders])
 
   if (pLoading && !pErr) return <div className="flex min-h-screen items-center justify-center">Loading…</div>
-  if (pErr) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{pErr}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (pErr) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{pErr}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   const lineProg = (o: DO) => { const ls = allItems(o); return `${ls.filter(l => l.received_at).length}/${ls.length}` }
@@ -82,7 +82,7 @@ export default function DispatchDashboardPage() {
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
           <h1 className="text-2xl font-bold">Delivery Orders — status</h1>
-          <a href="/dispatch" className="text-sm text-blue-600 hover:underline">Go to Dispatch →</a>
+          <a href="/dispatch" className="text-sm text-emerald-600 hover:underline">Go to Dispatch →</a>
         </div>
         <p className="text-gray-500 text-sm mb-5">Where every delivery order sits: created → out for delivery → received at the warehouse.</p>
 
@@ -91,7 +91,7 @@ export default function DispatchDashboardPage() {
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
               <Kpi label="Awaiting lorry out" value={s.awaiting.length} color="text-gray-700" />
-              <Kpi label="Out for delivery" value={s.out.length} color="text-blue-600" />
+              <Kpi label="Out for delivery" value={s.out.length} color="text-emerald-600" />
               <Kpi label="Received today" value={s.receivedToday.length} color="text-green-600" />
               <Kpi label="Received · GRN missing" value={s.grnMissing.length} color="text-amber-600" />
             </div>
@@ -125,7 +125,7 @@ export default function DispatchDashboardPage() {
                         <tr key={code} className="border-t">
                           <td className="px-4 py-1.5">{facName(code)}</td>
                           <td className="px-2 py-1.5 text-right text-gray-600">{d.awaiting || '—'}</td>
-                          <td className="px-2 py-1.5 text-right text-blue-700">{d.out || '—'}</td>
+                          <td className="px-2 py-1.5 text-right text-emerald-700">{d.out || '—'}</td>
                           <td className="px-4 py-1.5 text-right text-green-700">{d.received || '—'}</td>
                         </tr>
                       ))}

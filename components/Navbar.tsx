@@ -326,15 +326,15 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     .filter(g => g.items.length > 0)
   return (
     <>
-      <nav className="bg-blue-700 text-white px-4 sm:px-6 flex items-center justify-between gap-3 relative z-50">
+      <nav className="bg-emerald-700 text-white px-4 sm:px-6 flex items-center justify-between gap-3 relative z-50">
         <div className="flex items-stretch gap-0.5 min-w-0">
-          <span className="font-bold text-lg shrink-0 self-center mr-3">EASWARI{onWarehouse && <span className="font-normal text-blue-200"> Warehouse</span>}</span>
+          <span className="font-bold text-lg shrink-0 self-center mr-3">EASWARI{onWarehouse && <span className="font-normal text-emerald-200"> Warehouse</span>}</span>
           <div className="hidden md:flex items-stretch flex-wrap gap-0.5 min-w-0">
           {menuGroups.map((g, gi) => {
             // Top-level group with no header → render its items as direct bar links
             if (!g.header) return g.items.map(l => (
               <Link key={l.href} href={l.href} onClick={() => setOpenMenu(null)}
-                className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-3 text-sm hover:bg-blue-800 ${pathname === l.href ? 'bg-blue-800 font-semibold' : ''}`}>
+                className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-3 text-sm hover:bg-emerald-800 ${pathname === l.href ? 'bg-emerald-800 font-semibold' : ''}`}>
                 {l.label}
                 {l.href === '/sales-orders/changes' && isHO && pendingCount > 0 && (
                   <span className="bg-red-500 text-white text-xs font-semibold rounded-full min-w-[1.25rem] text-center px-1.5 py-0.5 leading-none">{pendingCount}</span>
@@ -349,14 +349,14 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
                 <button
                   onClick={() => setOpenMenu(open ? null : g.header!)}
                   onMouseEnter={() => { if (openMenu) setOpenMenu(g.header!) }}
-                  className={`inline-flex items-center gap-1 px-3 py-3 text-sm hover:bg-blue-800 ${open || activeHere ? 'bg-blue-800 font-semibold' : ''}`}>
+                  className={`inline-flex items-center gap-1 px-3 py-3 text-sm hover:bg-emerald-800 ${open || activeHere ? 'bg-emerald-800 font-semibold' : ''}`}>
                   {g.header}<span className="text-[10px] opacity-80">▾</span>
                 </button>
                 {open && (
                   <div className="absolute left-0 top-full z-50 w-56 bg-white text-gray-800 rounded-b-lg shadow-xl border py-1.5">
                     {g.items.map(l => (
                       <Link key={l.href} href={l.href} onClick={() => setOpenMenu(null)}
-                        className={`flex items-center justify-between px-4 py-2 text-sm hover:bg-blue-50 ${pathname === l.href ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700'}`}>
+                        className={`flex items-center justify-between px-4 py-2 text-sm hover:bg-emerald-50 ${pathname === l.href ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'text-gray-700'}`}>
                         <span>{l.label}</span>
                       </Link>
                     ))}
@@ -370,7 +370,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
         <div className="flex items-center gap-2 sm:gap-4 text-sm shrink-0">
           {/* Notification bell */}
           <div className="relative">
-            <button onClick={openNotifs} className="relative inline-flex items-center justify-center w-9 h-9 rounded hover:bg-blue-800" aria-label="Notifications" title="Notifications">
+            <button onClick={openNotifs} className="relative inline-flex items-center justify-center w-9 h-9 rounded hover:bg-emerald-800" aria-label="Notifications" title="Notifications">
               <span className="text-lg leading-none">🔔</span>
               {unseenCount > 0 && <span className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[16px] h-4 px-1 flex items-center justify-center">{unseenCount > 99 ? '99+' : unseenCount}</span>}
             </button>
@@ -381,12 +381,12 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
                   <div className="px-4 py-2 border-b sticky top-0 bg-white flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
                     <span className="font-semibold text-sm">Notifications</span>
                     <span className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
-                      <button onClick={sendTest} className="text-blue-600 hover:underline text-xs">Send test</button>
-                      <button onClick={diagnosePush} className="text-blue-600 hover:underline text-xs">Check phone push</button>
-                      {unseenCount > 0 && <button onClick={markAllRead} className="text-blue-600 hover:underline text-xs">Mark all read</button>}
+                      <button onClick={sendTest} className="text-emerald-600 hover:underline text-xs">Send test</button>
+                      <button onClick={diagnosePush} className="text-emerald-600 hover:underline text-xs">Check phone push</button>
+                      {unseenCount > 0 && <button onClick={markAllRead} className="text-emerald-600 hover:underline text-xs">Mark all read</button>}
                       {pushSupported() && (pushOn
                         ? <span className="text-green-600 text-xs">✓ On this device</span>
-                        : <button onClick={enableThisDevice} className="text-blue-600 hover:underline text-xs">Enable on this phone</button>)}
+                        : <button onClick={enableThisDevice} className="text-emerald-600 hover:underline text-xs">Enable on this phone</button>)}
                     </span>
                   </div>
                   {notifs.length === 0 && <p className="px-4 py-6 text-center text-gray-400 text-sm">Nothing yet.</p>}
@@ -394,9 +394,9 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
                     const unseen = !notifSeenAt || n.created_at > notifSeenAt
                     const go = () => { setNotifOpen(false); if (n.link) router.push(n.link) }
                     return (
-                      <div key={n.id} className={`flex items-start border-b last:border-0 hover:bg-gray-50 ${unseen ? 'bg-blue-50/60' : ''}`}>
+                      <div key={n.id} className={`flex items-start border-b last:border-0 hover:bg-gray-50 ${unseen ? 'bg-emerald-50/60' : ''}`}>
                         <button onClick={go} className="flex items-start gap-2 text-left min-w-0 flex-1 px-4 py-2">
-                          {unseen && <span className="mt-1 w-2 h-2 rounded-full bg-blue-500 shrink-0" />}
+                          {unseen && <span className="mt-1 w-2 h-2 rounded-full bg-emerald-500 shrink-0" />}
                           <div className="min-w-0">
                             <div className="text-sm font-medium truncate">{n.title}</div>
                             {n.body && <div className="text-xs text-gray-500">{n.body}</div>}
@@ -411,15 +411,15 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
               </>
             )}
           </div>
-          <span className="bg-blue-800 px-2 sm:px-3 py-1 rounded-full text-xs whitespace-nowrap">
+          <span className="bg-emerald-800 px-2 sm:px-3 py-1 rounded-full text-xs whitespace-nowrap">
             {factoryLabel}
           </span>
           <span className="hidden md:inline">{fullName || 'User'}</span>
-          <button onClick={handleLogout} className="hidden sm:inline-block bg-white text-blue-700 px-3 py-1 rounded hover:bg-blue-50 text-xs font-medium">
+          <button onClick={handleLogout} className="hidden sm:inline-block bg-white text-emerald-700 px-3 py-1 rounded hover:bg-emerald-50 text-xs font-medium">
             Logout
           </button>
           {/* Mobile hamburger */}
-          <button onClick={() => setMobileOpen(o => !o)} className="md:hidden inline-flex items-center justify-center w-9 h-9 rounded hover:bg-blue-800 relative" aria-label="Menu">
+          <button onClick={() => setMobileOpen(o => !o)} className="md:hidden inline-flex items-center justify-center w-9 h-9 rounded hover:bg-emerald-800 relative" aria-label="Menu">
             <span className="text-xl leading-none">{mobileOpen ? '✕' : '☰'}</span>
             {isHO && pendingCount > 0 && !mobileOpen && <span className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[10px] font-semibold rounded-full min-w-[1rem] text-center px-1 leading-tight">{pendingCount}</span>}
           </button>
@@ -428,13 +428,13 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
 
       {/* Mobile slide-down menu */}
       {mobileOpen && (
-        <div className="md:hidden bg-blue-700 text-white border-t border-blue-600 max-h-[80vh] overflow-y-auto relative z-50">
+        <div className="md:hidden bg-emerald-700 text-white border-t border-emerald-600 max-h-[80vh] overflow-y-auto relative z-50">
           {menuGroups.map((g, gi) => (
-            <div key={gi} className="border-b border-blue-600/60 py-1">
-              {g.header && <div className="px-4 pt-2 pb-1 text-[11px] uppercase tracking-wide text-blue-200">{g.header}</div>}
+            <div key={gi} className="border-b border-emerald-600/60 py-1">
+              {g.header && <div className="px-4 pt-2 pb-1 text-[11px] uppercase tracking-wide text-emerald-200">{g.header}</div>}
               {g.items.map(l => (
                 <Link key={l.href} href={l.href} onClick={() => setMobileOpen(false)}
-                  className={`flex items-center justify-between px-5 py-2.5 text-sm ${pathname === l.href ? 'bg-blue-800 font-semibold' : 'hover:bg-blue-800'}`}>
+                  className={`flex items-center justify-between px-5 py-2.5 text-sm ${pathname === l.href ? 'bg-emerald-800 font-semibold' : 'hover:bg-emerald-800'}`}>
                   <span>{l.label}</span>
                   {l.href === '/sales-orders/changes' && isHO && pendingCount > 0 && (
                     <span className="bg-red-500 text-white text-xs font-semibold rounded-full min-w-[1.25rem] text-center px-1.5 py-0.5 leading-none">{pendingCount}</span>
@@ -443,7 +443,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
               ))}
             </div>
           ))}
-          <button onClick={handleLogout} className="w-full text-left px-5 py-3 text-sm font-medium hover:bg-blue-800">Logout</button>
+          <button onClick={handleLogout} className="w-full text-left px-5 py-3 text-sm font-medium hover:bg-emerald-800">Logout</button>
         </div>
       )}
       {/* click-away backdrop (below the nav so other top menus stay clickable) */}
@@ -453,10 +453,10 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
         <div className="fixed bottom-4 right-4 z-50 space-y-2">
           {toasts.map(t => (
             <button key={t.id} onClick={() => router.push('/sales-orders/changes')}
-              className="block w-72 text-left bg-white text-gray-800 border border-blue-200 shadow-lg rounded-lg px-4 py-3 text-sm hover:bg-blue-50">
-              <span className="font-semibold text-blue-700">{t.title}</span>
+              className="block w-72 text-left bg-white text-gray-800 border border-emerald-200 shadow-lg rounded-lg px-4 py-3 text-sm hover:bg-emerald-50">
+              <span className="font-semibold text-emerald-700">{t.title}</span>
               <span className="block text-gray-600 mt-0.5">{t.message}</span>
-              <span className="block text-blue-600 text-xs mt-1">Click to view →</span>
+              <span className="block text-emerald-600 text-xs mt-1">Click to view →</span>
             </button>
           ))}
         </div>

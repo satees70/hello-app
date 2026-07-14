@@ -29,7 +29,7 @@ interface Item { id: string; code: string; description: string; unit: string; su
 interface BomComp { parent_item_id: string; component_item_id: string; quantity: number; use_mode: string }
 
 const STATUS_STYLE: Record<string, string> = {
-  Planned: 'bg-blue-100 text-blue-700',
+  Planned: 'bg-emerald-100 text-emerald-700',
   Requested: 'bg-indigo-100 text-indigo-700',
   'In Progress': 'bg-amber-100 text-amber-700',
   Completed: 'bg-green-100 text-green-700',
@@ -195,7 +195,7 @@ export default function PackingPage() {
                 </div>
               ))}
             </div>
-            {a.labels.some(l => l.shortfall > 0) && <a href="/labels" className="text-blue-600 hover:underline">Print &amp; receive these in Receiving → Labels →</a>}
+            {a.labels.some(l => l.shortfall > 0) && <a href="/labels" className="text-emerald-600 hover:underline">Print &amp; receive these in Receiving → Labels →</a>}
           </div>
         )}
       </div>
@@ -230,7 +230,7 @@ export default function PackingPage() {
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   const fmtDate = (d: string) => d.split('-').reverse().join('/')
@@ -269,7 +269,7 @@ export default function PackingPage() {
         <input type="date" value={packEdit[b.id]?.date ?? b.pack_date ?? today} onChange={e => setField({ date: e.target.value })} className="border rounded px-2 py-1 text-xs" />
         <div className="flex flex-col items-start text-xs">
           <span className="px-2 py-1 rounded bg-gray-100 text-gray-700 whitespace-nowrap">{(b.run_mode || 'auto') === 'manual' ? 'Manual' : 'Auto'}</span>
-          {hasCap(profile, 'request_run_mode') && <button type="button" onClick={() => requestRunModeChange(b)} className="text-blue-600 hover:underline mt-0.5 whitespace-nowrap">change (needs approval)</button>}
+          {hasCap(profile, 'request_run_mode') && <button type="button" onClick={() => requestRunModeChange(b)} className="text-emerald-600 hover:underline mt-0.5 whitespace-nowrap">change (needs approval)</button>}
         </div>
         <button onClick={() => savePack(b)} disabled={savingId === b.id} className="bg-teal-600 text-white px-3 py-1 rounded-lg hover:bg-teal-700 disabled:opacity-50 text-xs font-medium">{savingId === b.id ? 'Saving…' : 'Schedule'}</button>
       </div>
@@ -300,7 +300,7 @@ export default function PackingPage() {
         <div className="flex flex-wrap gap-2 items-center mb-4 text-sm">
           <span className="text-gray-500">Pack date:</span>
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-2 bg-white" />
-          <button onClick={() => setDate(today)} className="text-blue-600 hover:underline">Today</button>
+          <button onClick={() => setDate(today)} className="text-emerald-600 hover:underline">Today</button>
           <label className="flex items-center gap-2 cursor-pointer ml-2"><input type="checkbox" checked={hideDone} onChange={e => setHideDone(e.target.checked)} className="h-4 w-4" /><span className="text-gray-700">Hide completed</span></label>
           <button onClick={() => setTomorrowOnly(v => !v)}
             className={`text-sm px-3 py-1 rounded-full font-medium border ${tomorrowOnly ? 'bg-yellow-300 border-yellow-400 text-yellow-900' : 'bg-white border-gray-300 text-gray-600 hover:bg-yellow-50'}`}>
@@ -368,7 +368,7 @@ export default function PackingPage() {
                 {isHO && <span className="text-xs text-gray-500">{factoryName(b.factory_code)}</span>}
               </div>
               <div className="mt-1"><span className="font-medium">{b.item_code}</span> <span className="text-gray-500 text-sm">×{b.total_quantity}</span><span className="block text-gray-500 text-xs">{b.description}</span></div>
-              <button onClick={() => toggleMat(b.id)} className="text-blue-600 hover:underline text-xs mt-1">{openMat.has(b.id) ? '▾ hide materials' : '▸ show materials'}</button>
+              <button onClick={() => toggleMat(b.id)} className="text-emerald-600 hover:underline text-xs mt-1">{openMat.has(b.id) ? '▾ hide materials' : '▸ show materials'}</button>
               {openMat.has(b.id) && <div className="mt-2"><MaterialTable b={b} /></div>}
               <div className="mt-3 pt-2 border-t">{canEditFac(b.factory_code) ? <PackForm b={b} /> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${partial(b) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{partial(b) ? `Enough for ${availability(b).units}` : 'Materials ready'}</span>}</div>
             </div>
@@ -389,7 +389,7 @@ export default function PackingPage() {
                     {multiFac && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(b.factory_code)}</td>}
                     <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}{partial(b) && <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700 align-middle">make {availability(b).units} now</span>}</td>
                     <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span>
-                      <button onClick={() => toggleMat(b.id)} className="text-blue-600 hover:underline text-xs mt-0.5">{openMat.has(b.id) ? '▾ hide materials' : '▸ show materials'}</button></td>
+                      <button onClick={() => toggleMat(b.id)} className="text-emerald-600 hover:underline text-xs mt-0.5">{openMat.has(b.id) ? '▾ hide materials' : '▸ show materials'}</button></td>
                     <td className="px-3 py-2 text-right font-semibold">{b.total_quantity}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-gray-600">{b.delivery_date ? fmtDate(b.delivery_date) : '—'}{dueTomorrow(b) && <span className="block mt-0.5 bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-[11px] font-bold">🚚 TOMORROW</span>}</td>
                     <td className="px-3 py-2">{canEditFac(b.factory_code) ? <PackForm b={b} /> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${partial(b) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{partial(b) ? `Enough for ${availability(b).units}` : 'Materials ready'}</span>}</td>
@@ -422,7 +422,7 @@ export default function PackingPage() {
                     {multiFac && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(b.factory_code)}</td>}
                     <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">{b.batch_no}</td>
                     <td className="px-3 py-2"><span className="font-medium">{b.item_code}</span><span className="block text-gray-500 text-xs">{b.description}</span>
-                      <button onClick={() => toggleMat(b.id)} className="text-blue-600 hover:underline text-xs mt-0.5">{openMat.has(b.id) ? '▾ hide materials' : '▸ show materials'}</button></td>
+                      <button onClick={() => toggleMat(b.id)} className="text-emerald-600 hover:underline text-xs mt-0.5">{openMat.has(b.id) ? '▾ hide materials' : '▸ show materials'}</button></td>
                     <td className="px-3 py-2 text-right font-semibold">{b.total_quantity}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-gray-600">{b.delivery_date ? fmtDate(b.delivery_date) : '—'}{dueTomorrow(b) && <span className="block mt-0.5 bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-[11px] font-bold">🚚 TOMORROW</span>}</td>
                     <td className="px-3 py-2"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{waitReason(b)}</span></td>

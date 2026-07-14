@@ -19,7 +19,7 @@ const STATUS_LABEL: Record<Status, string> = {
 }
 const STATUS_STYLE: Record<Status, string> = {
   working: 'bg-green-100 text-green-700', present: 'bg-teal-100 text-teal-700', absent: 'bg-red-100 text-red-700',
-  leave: 'bg-blue-100 text-blue-700', off: 'bg-gray-100 text-gray-500', holiday: 'bg-purple-100 text-purple-700', unknown: 'bg-gray-100 text-gray-400',
+  leave: 'bg-emerald-100 text-emerald-700', off: 'bg-gray-100 text-gray-500', holiday: 'bg-purple-100 text-purple-700', unknown: 'bg-gray-100 text-gray-400',
 }
 
 // Plain-English guess of which punch is missing, from the punch times alone.
@@ -36,7 +36,7 @@ function missingHint(times: string[]): string {
 
 function Kpi({ label, value, color, active, onClick }: { label: string; value: number; color: string; active?: boolean; onClick?: () => void }) {
   return (
-    <button type="button" onClick={onClick} className={`text-left bg-white rounded-xl border shadow-sm p-4 w-full transition ${onClick ? 'cursor-pointer hover:border-gray-400' : ''} ${active ? 'ring-2 ring-blue-500 border-blue-400' : ''}`}>
+    <button type="button" onClick={onClick} className={`text-left bg-white rounded-xl border shadow-sm p-4 w-full transition ${onClick ? 'cursor-pointer hover:border-gray-400' : ''} ${active ? 'ring-2 ring-emerald-500 border-emerald-400' : ''}`}>
       <div className="text-xs text-gray-500">{label}</div>
       <div className={`text-3xl font-bold ${color}`}>{value}</div>
     </button>
@@ -272,7 +272,7 @@ export default function HrDashboardPage() {
             <option value="">All locations</option>
             {locations.map(l => <option key={l} value={l}>{l}</option>)}
           </select>
-          <button onClick={syncNow} disabled={syncing} className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap">{syncing ? 'Syncing…' : '↻ Sync from clock'}</button>
+          <button onClick={syncNow} disabled={syncing} className="text-sm bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 whitespace-nowrap">{syncing ? 'Syncing…' : '↻ Sync from clock'}</button>
         </div>
       </div>
       <p className="text-gray-500 text-sm mb-5">
@@ -288,7 +288,7 @@ export default function HrDashboardPage() {
             <Kpi label={isToday ? 'Working now' : 'Present'} value={isToday ? workingNow : presentTotal} color="text-green-600" active={filter === 'working'} onClick={() => setFilter(f => f === 'working' ? null : 'working')} />
             <Kpi label="Late today" value={lateCount} color="text-amber-600" active={filter === 'late'} onClick={() => setFilter(f => f === 'late' ? null : 'late')} />
             <Kpi label="Absent" value={absentCount} color="text-red-600" active={filter === 'absent'} onClick={() => setFilter(f => f === 'absent' ? null : 'absent')} />
-            <Kpi label="On leave" value={leaveCount} color="text-blue-600" active={filter === 'leave'} onClick={() => setFilter(f => f === 'leave' ? null : 'leave')} />
+            <Kpi label="On leave" value={leaveCount} color="text-emerald-600" active={filter === 'leave'} onClick={() => setFilter(f => f === 'leave' ? null : 'leave')} />
           </div>
 
           <div className="grid lg:grid-cols-3 gap-4 mb-4">
@@ -300,13 +300,13 @@ export default function HrDashboardPage() {
                   { value: onTime, color: '#16a34a' },
                   { value: lateCount, color: '#d97706' },
                   { value: absentCount, color: '#dc2626' },
-                  { value: leaveCount, color: '#2563eb' },
+                  { value: leaveCount, color: '#059669' },
                 ]} />
                 <ul className="text-sm space-y-1.5">
                   <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-sm bg-green-600 inline-block" /> On time <b className="ml-auto">{onTime}</b></li>
                   <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-sm bg-amber-600 inline-block" /> Late <b className="ml-auto">{lateCount}</b></li>
                   <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-sm bg-red-600 inline-block" /> Absent <b className="ml-auto">{absentCount}</b></li>
-                  <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-sm bg-blue-600 inline-block" /> On leave <b className="ml-auto">{leaveCount}</b></li>
+                  <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-sm bg-emerald-600 inline-block" /> On leave <b className="ml-auto">{leaveCount}</b></li>
                 </ul>
               </div>
             </div>
@@ -318,7 +318,7 @@ export default function HrDashboardPage() {
                 {trend.map((t, i) => (
                   <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1">
                     <span className="text-[11px] text-gray-500">{t.present}</span>
-                    <div className="w-full rounded-t bg-blue-500" style={{ height: `${(t.present / trendMax) * 100}%`, minHeight: t.present ? 4 : 0 }} />
+                    <div className="w-full rounded-t bg-emerald-500" style={{ height: `${(t.present / trendMax) * 100}%`, minHeight: t.present ? 4 : 0 }} />
                     <span className="text-[11px] text-gray-400">{t.day}</span>
                   </div>
                 ))}
@@ -353,7 +353,7 @@ export default function HrDashboardPage() {
                     <li key={r.code} className="flex items-center gap-2 px-4 py-2 text-sm">
                       <span className="font-medium">{r.name}</span>
                       <span className="text-gray-400 text-xs">{r.code}</span>
-                      <select value={r.leaveType || ''} disabled={saving} onChange={e => setLeave(r.code, e.target.value)} className="ml-auto text-xs border rounded px-1.5 py-1 bg-blue-50 text-blue-700 font-medium">
+                      <select value={r.leaveType || ''} disabled={saving} onChange={e => setLeave(r.code, e.target.value)} className="ml-auto text-xs border rounded px-1.5 py-1 bg-emerald-50 text-emerald-700 font-medium">
                         {r.leaveType && !LEAVE_TYPES.includes(r.leaveType) && <option value={r.leaveType}>{r.leaveType}</option>}
                         {LEAVE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                         <option value="">✕ remove</option>
@@ -390,7 +390,7 @@ export default function HrDashboardPage() {
           <div className="bg-white rounded-xl border shadow-sm mb-4">
             <div className="px-4 py-2 border-b font-semibold text-sm flex flex-wrap items-center gap-x-2">
               <span>⚠ Punch issues to review <span className="text-gray-400 font-normal">· {visibleIssues.length}{locFilter ? ` in ${locFilter}` : ''} · last 30 days</span></span>
-              <a href="/hr/attendance" className="ml-auto text-xs font-normal text-blue-600 hover:underline">Fix in Attendance &amp; OT →</a>
+              <a href="/hr/attendance" className="ml-auto text-xs font-normal text-emerald-600 hover:underline">Fix in Attendance &amp; OT →</a>
             </div>
             {visibleIssues.length === 0 ? (
               <p className="px-4 py-4 text-gray-400 text-sm">No punch issues 🎉 — every clock-in has a matching clock-out.</p>
@@ -417,7 +417,7 @@ export default function HrDashboardPage() {
           <div className="bg-white rounded-xl border shadow-sm">
             <div className="px-4 py-2 border-b font-semibold text-sm flex flex-wrap items-center gap-x-2 gap-y-1">
               <span>Live attendance <span className="text-gray-400 font-normal">· {presentTotal} in / {visibleRows.length} staff</span></span>
-              {filter && <span className="font-normal text-xs text-blue-600">· showing {filterLabel} ({shownRows.length}) <button onClick={() => setFilter(null)} className="underline ml-1">show all</button></span>}
+              {filter && <span className="font-normal text-xs text-emerald-600">· showing {filterLabel} ({shownRows.length}) <button onClick={() => setFilter(null)} className="underline ml-1">show all</button></span>}
               <select value={sortBy} onChange={e => setSortBy(e.target.value as 'latest' | 'name')} className="ml-auto text-xs font-normal border rounded px-1.5 py-1 bg-white">
                 <option value="latest">Latest clock-in first</option>
                 <option value="name">Name (A–Z)</option>

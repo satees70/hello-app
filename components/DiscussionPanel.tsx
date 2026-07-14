@@ -158,8 +158,8 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
             <div className="flex flex-wrap items-center gap-1.5">
               <input list="disc-so-list" value={newSo} onChange={e => setNewSo(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && newSo.trim()) { openThread('s:' + newSo.trim().toUpperCase()); setNewSo('') } }} placeholder="Open order (SO#)…" className="flex-1 min-w-0 border rounded-lg px-2 py-1.5 text-sm" />
               <datalist id="disc-so-list">{soList.map(so => <option key={so} value={so} />)}</datalist>
-              <button onClick={() => { if (newSo.trim()) { openThread('s:' + newSo.trim().toUpperCase()); setNewSo('') } }} disabled={!newSo.trim()} className="bg-blue-600 text-white px-2.5 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm">Open</button>
-              <button onClick={() => openThread(GENERAL)} className={`px-2.5 py-1.5 rounded-lg text-sm border ${thread === GENERAL ? 'bg-blue-50 border-blue-300' : 'hover:bg-gray-50'}`}>General</button>
+              <button onClick={() => { if (newSo.trim()) { openThread('s:' + newSo.trim().toUpperCase()); setNewSo('') } }} disabled={!newSo.trim()} className="bg-emerald-600 text-white px-2.5 py-1.5 rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm">Open</button>
+              <button onClick={() => openThread(GENERAL)} className={`px-2.5 py-1.5 rounded-lg text-sm border ${thread === GENERAL ? 'bg-emerald-50 border-emerald-300' : 'hover:bg-gray-50'}`}>General</button>
             </div>
             <div className="flex items-center gap-1.5">
               <input value={newTicket} onChange={e => setNewTicket(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && newTicket.trim()) { openThread('t:' + newTicket.trim()); setNewTicket('') } }} placeholder="Raise a ticket / topic…" className="flex-1 min-w-0 border rounded-lg px-2 py-1.5 text-sm" />
@@ -168,7 +168,7 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
           </div>
           <div className="flex gap-1 px-2 py-1.5 border-b text-xs overflow-x-auto">
             {([['all', 'All', threads.length], ['so', '🧾 SO', tabCount.so], ['pr', '📦 Material Req', tabCount.pr], ['other', '🎫 Other', tabCount.other]] as const).map(([k, lbl, n]) => (
-              <button key={k} onClick={() => setThreadTab(k)} className={`px-2 py-1 rounded-lg whitespace-nowrap border ${threadTab === k ? 'bg-blue-600 text-white border-blue-600' : 'bg-white hover:bg-gray-50'}`}>{lbl}{n ? ` (${n})` : ''}</button>
+              <button key={k} onClick={() => setThreadTab(k)} className={`px-2 py-1 rounded-lg whitespace-nowrap border ${threadTab === k ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white hover:bg-gray-50'}`}>{lbl}{n ? ` (${n})` : ''}</button>
             ))}
           </div>
           <div className="flex-1 overflow-y-auto divide-y">
@@ -176,7 +176,7 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
             {shownThreads.map(t => {
               const active = thread === t.key
               return (
-                <button key={t.key} onClick={() => openThread(t.key)} className={`w-full text-left px-3 py-2.5 flex items-start gap-2 ${active ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                <button key={t.key} onClick={() => openThread(t.key)} className={`w-full text-left px-3 py-2.5 flex items-start gap-2 ${active ? 'bg-emerald-50' : 'hover:bg-gray-50'}`}>
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                       <span className="font-semibold text-gray-800 text-sm break-words">{labelOf(t.key)}</span>
@@ -201,7 +201,7 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
           ) : (<>
             <div className="px-4 py-2.5 border-b flex items-center gap-2">
               {thread!.startsWith('s:')
-                ? <a href={`/sales-orders?so=${encodeURIComponent(thread!.slice(2))}`} className="font-semibold text-blue-600 hover:underline" title="Open this order in Sales Orders">{labelOf(thread!)} ↗</a>
+                ? <a href={`/sales-orders?so=${encodeURIComponent(thread!.slice(2))}`} className="font-semibold text-emerald-600 hover:underline" title="Open this order in Sales Orders">{labelOf(thread!)} ↗</a>
                 : <span className="font-semibold">{labelOf(thread!)}</span>}
               {custOf(thread!) && <span className="text-gray-500 text-sm">· {custOf(thread!)}</span>}
               <span className="text-gray-400 text-sm">· {shown.length} msg</span>
@@ -215,15 +215,15 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
                 const mine = m.author_id === me
                 return (
                   <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[80%] rounded-lg px-3 py-1.5 text-sm ${mine ? 'bg-blue-600 text-white' : 'bg-white border'}`}>
+                    <div className={`max-w-[80%] rounded-lg px-3 py-1.5 text-sm ${mine ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>
                       {!mine && <div className="text-xs font-medium text-gray-500">{m.author_name || 'Someone'}</div>}
                       {((m.mention_ids && m.mention_ids.length > 0) || (m.mention_factories && m.mention_factories.length > 0)) && <div className="mb-0.5 flex flex-wrap gap-1">
-                        {(m.mention_ids || []).map(id => <span key={id} className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${mine ? 'bg-blue-500 text-white' : 'bg-amber-100 text-amber-800'}`}>@{nameOf(id)}</span>)}
-                        {(m.mention_factories || []).map(fc => <span key={fc} className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${mine ? 'bg-blue-500 text-white' : 'bg-teal-100 text-teal-800'}`}>@{fc} (all)</span>)}
+                        {(m.mention_ids || []).map(id => <span key={id} className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${mine ? 'bg-emerald-500 text-white' : 'bg-amber-100 text-amber-800'}`}>@{nameOf(id)}</span>)}
+                        {(m.mention_factories || []).map(fc => <span key={fc} className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${mine ? 'bg-emerald-500 text-white' : 'bg-teal-100 text-teal-800'}`}>@{fc} (all)</span>)}
                       </div>}
                       {m.body && <div className="whitespace-pre-wrap break-words">{m.body}</div>}
-                      {m.attachment_path && <button onClick={() => openAttachment(m.attachment_path!)} className={`mt-1 inline-flex items-center gap-1 text-xs underline break-all ${mine ? 'text-blue-100' : 'text-blue-600'}`}>📎 {m.attachment_name || 'attachment'}</button>}
-                      <div className={`text-[10px] mt-0.5 ${mine ? 'text-blue-100' : 'text-gray-400'}`}>{fmt(m.created_at)}</div>
+                      {m.attachment_path && <button onClick={() => openAttachment(m.attachment_path!)} className={`mt-1 inline-flex items-center gap-1 text-xs underline break-all ${mine ? 'text-emerald-100' : 'text-emerald-600'}`}>📎 {m.attachment_name || 'attachment'}</button>}
+                      <div className={`text-[10px] mt-0.5 ${mine ? 'text-emerald-100' : 'text-gray-400'}`}>{fmt(m.created_at)}</div>
                     </div>
                   </div>
                 )
@@ -259,7 +259,7 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
               )}
               <input value={body} onChange={e => setBody(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
                 placeholder={thread === GENERAL ? 'Type a message…' : `Message · ${labelOf(thread!)}…`} className="flex-1 min-w-[10rem] border rounded-lg px-3 py-2 text-sm" />
-              <button onClick={send} disabled={sending || (!body.trim() && !file)} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{sending ? 'Sending…' : 'Send'}</button>
+              <button onClick={send} disabled={sending || (!body.trim() && !file)} className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium">{sending ? 'Sending…' : 'Send'}</button>
             </div>
             {err && <p className="text-red-500 text-xs px-3 pb-2">Couldn’t send: {err}</p>}
           </>)}

@@ -233,7 +233,7 @@ export default function PickForProductionPage() {
   const fmt = (iso: string) => new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 
   if (pLoading && !pErr) return <div className="flex min-h-screen items-center justify-center">Loading…</div>
-  if (pErr) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{pErr}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (pErr) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{pErr}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   return (
@@ -242,7 +242,7 @@ export default function PickForProductionPage() {
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
           <h1 className="text-2xl font-bold">Pick for Production</h1>
-          <a href="/material-requests" className="text-sm text-blue-600 hover:underline">Combined picking →</a>
+          <a href="/material-requests" className="text-sm text-emerald-600 hover:underline">Combined picking →</a>
         </div>
         <p className="text-gray-500 text-sm mb-5">Released <b>pick runs</b> from Combined picking. Production asked in <b>kg</b>; you send <b>bags</b> — pick the bags, the system tallies them to the target and sends them straight to the factory. Over is fine; you can’t send short.</p>
 
@@ -337,7 +337,7 @@ export default function PickForProductionPage() {
                             ))}
 
                             <div className="flex flex-wrap gap-3 mt-2">
-                              {sug && <button onClick={() => applySuggestion(run.runId, g)} disabled={!canPick} className="text-xs text-blue-600 hover:underline">↺ Last time: {sug.code}{sug.kgpb ? ` (${sug.kgpb}kg)` : ''} — apply</button>}
+                              {sug && <button onClick={() => applySuggestion(run.runId, g)} disabled={!canPick} className="text-xs text-emerald-600 hover:underline">↺ Last time: {sug.code}{sug.kgpb ? ` (${sug.kgpb}kg)` : ''} — apply</button>}
                               {canPick && <button onClick={() => { setPick(pick === okey ? '' : okey); setPickQ('') }} className="text-xs text-purple-700 hover:underline">⇄ Switch bag / material</button>}
                             </div>
 

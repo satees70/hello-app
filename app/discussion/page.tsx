@@ -88,7 +88,7 @@ export default function DiscussionPage() {
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   const isSpecial = sel === 'warehouse' || sel === 'goods_received'
@@ -105,10 +105,10 @@ export default function DiscussionPage() {
 
         {/* Channel selector */}
         <div className="flex flex-wrap items-center gap-2 mb-4">
-          <button onClick={() => setSel('warehouse')} className={`px-3 py-1.5 rounded-lg text-sm border ${sel === 'warehouse' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white hover:bg-gray-50'}`}>🏢 Warehouse</button>
-          <button onClick={() => setSel('goods_received')} className={`px-3 py-1.5 rounded-lg text-sm border ${sel === 'goods_received' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white hover:bg-gray-50'}`}>📦 Goods Received</button>
+          <button onClick={() => setSel('warehouse')} className={`px-3 py-1.5 rounded-lg text-sm border ${sel === 'warehouse' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white hover:bg-gray-50'}`}>🏢 Warehouse</button>
+          <button onClick={() => setSel('goods_received')} className={`px-3 py-1.5 rounded-lg text-sm border ${sel === 'goods_received' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white hover:bg-gray-50'}`}>📦 Goods Received</button>
           {groups.map(g => (
-            <button key={g.id} onClick={() => setSel(g.id)} className={`px-3 py-1.5 rounded-lg text-sm border ${sel === g.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white hover:bg-gray-50'}`}>🔒 {g.name}</button>
+            <button key={g.id} onClick={() => setSel(g.id)} className={`px-3 py-1.5 rounded-lg text-sm border ${sel === g.id ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white hover:bg-gray-50'}`}>🔒 {g.name}</button>
           ))}
           <div className="flex items-center gap-1">
             <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') createGroup() }} placeholder="New group name…" className="border rounded-lg px-2 py-1.5 text-sm w-40" />
@@ -120,7 +120,7 @@ export default function DiscussionPage() {
         {selGroup && (
           <div className="flex items-center gap-3 mb-3 text-sm text-gray-500">
             <span>Private group · created by {selGroup.created_by_name || '—'}</span>
-            {isManager(selGroup) && <button onClick={() => openManage(selGroup)} className="text-blue-600 hover:underline">👥 Manage members</button>}
+            {isManager(selGroup) && <button onClick={() => openManage(selGroup)} className="text-emerald-600 hover:underline">👥 Manage members</button>}
             {isManager(selGroup) && <button onClick={() => deleteGroup(selGroup)} className="text-red-600 hover:underline">🗑 Delete group</button>}
           </div>
         )}
@@ -143,7 +143,7 @@ export default function DiscussionPage() {
                 <option value="">Add a person…</option>
                 {users.filter(u => !members.includes(u.id)).map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
               </select>
-              <button onClick={() => addMember(addPick)} disabled={!addPick} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm disabled:opacity-50">Add</button>
+              <button onClick={() => addMember(addPick)} disabled={!addPick} className="bg-emerald-600 text-white px-3 py-2 rounded-lg text-sm disabled:opacity-50">Add</button>
             </div>
             <ul className="space-y-1 max-h-72 overflow-auto">
               {members.length === 0 && <li className="text-sm text-gray-400">No members yet.</li>}

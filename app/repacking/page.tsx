@@ -111,7 +111,7 @@ export default function RepackingPage() {
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   const previewLines = [...lines, ...(pickItem && Number(qty) > 0 ? [{ ...pickItem, qty: Number(qty) }] : [])]
@@ -184,7 +184,7 @@ export default function RepackingPage() {
                     </tr>
                   ))}
                   {pickItem && Number(qty) > 0 && (
-                    <tr className="border-t bg-blue-50/40">
+                    <tr className="border-t bg-emerald-50/40">
                       <td className="px-3 py-2 font-mono">{pickItem.code}</td>
                       <td className="px-3 py-2 text-gray-600">{pickItem.description}</td>
                       <td className="px-3 py-2 text-right">{Number(qty)} {pickItem.unit}</td>
@@ -197,7 +197,7 @@ export default function RepackingPage() {
           )}
 
           <button type="button" onClick={submit} disabled={busy === 'create' || facOpts.length === 0}
-            className="px-5 py-2.5 rounded-lg bg-blue-700 text-white text-sm font-semibold hover:bg-blue-800 disabled:opacity-50">
+            className="px-5 py-2.5 rounded-lg bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 disabled:opacity-50">
             {busy === 'create' ? 'Creating…' : 'Create repack order'}
           </button>
         </div>

@@ -61,7 +61,7 @@ export default function ShipmentDetailPage() {
 
   if (loading && !profileError) return <div className="p-8 text-sm text-gray-500">Loading…</div>
   if (profileError) return <div className="p-8 text-sm text-red-600">{profileError}</div>
-  if (notFound) return <div className="p-8 text-sm text-gray-500">Shipment not found. <button onClick={() => router.push('/import')} className="text-blue-600 hover:underline">Back to list</button></div>
+  if (notFound) return <div className="p-8 text-sm text-gray-500">Shipment not found. <button onClick={() => router.push('/import')} className="text-emerald-600 hover:underline">Back to list</button></div>
   if (!profile || !shipment) return null
 
   const totalDeclared = items.reduce((s, i) => s + Number(i.declared_weight || 0), 0)
@@ -71,7 +71,7 @@ export default function ShipmentDetailPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-        <button onClick={() => router.push('/import')} className="text-blue-600 hover:underline text-sm mb-3">← All shipments</button>
+        <button onClick={() => router.push('/import')} className="text-emerald-600 hover:underline text-sm mb-3">← All shipments</button>
 
         {/* Summary strip */}
         <div className="flex flex-wrap items-center gap-x-6 gap-y-1 mb-4">
@@ -161,7 +161,7 @@ function Header({ shipment, suppliers, canEdit, canDelete, onSaved, onDeleted }:
       </div>
       {canEdit && (
         <div className="flex items-center gap-3 mt-4">
-          <button onClick={save} disabled={saving} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{saving ? 'Saving…' : 'Save details'}</button>
+          <button onClick={save} disabled={saving} className="bg-emerald-600 text-white px-5 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium">{saving ? 'Saving…' : 'Save details'}</button>
           {msg && <span className={`text-sm ${msg === 'Saved.' ? 'text-green-600' : 'text-red-500'}`}>{msg}</span>}
           {canDelete && <button onClick={del} className="ml-auto text-red-500 hover:underline text-sm">Delete shipment</button>}
         </div>
@@ -259,7 +259,7 @@ function Items({ shipmentId, items, containers, master, canEdit, reload }: {
               <input type="number" step="any" value={qty} onChange={e => setQty(e.target.value)} className="border rounded-lg px-3 py-2 text-sm text-right" /></div>
             <div className="flex flex-col gap-1 w-32"><span className="text-xs font-medium text-gray-600">Declared wt (kg)</span>
               <input type="number" step="any" value={weight} onChange={e => setWeight(e.target.value)} className="border rounded-lg px-3 py-2 text-sm text-right" /></div>
-            <button onClick={add} disabled={busy} className="border border-blue-600 text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 disabled:opacity-50 text-sm font-medium">+ Add item</button>
+            <button onClick={add} disabled={busy} className="border border-emerald-600 text-emerald-600 px-4 py-2 rounded-lg hover:bg-emerald-50 disabled:opacity-50 text-sm font-medium">+ Add item</button>
           </div>
         </div>
       )}
@@ -283,7 +283,7 @@ function BillsOfLading({ shipmentId, bls, canEdit, reload }: {
     <section className="bg-white rounded-xl shadow-sm border p-5 mb-5">
       <div className="flex items-center justify-between mb-3">
         <h2 className="font-semibold">Bills of Lading <span className="text-gray-400 font-normal text-sm">({bls.length})</span></h2>
-        {canEdit && <button onClick={add} disabled={busy} className="border border-blue-600 text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-50 disabled:opacity-50 text-sm font-medium">+ Add BL</button>}
+        {canEdit && <button onClick={add} disabled={busy} className="border border-emerald-600 text-emerald-600 px-3 py-1.5 rounded-lg hover:bg-emerald-50 disabled:opacity-50 text-sm font-medium">+ Add BL</button>}
       </div>
       {bls.length === 0 && <p className="text-gray-400 text-sm">No Bills of Lading yet.</p>}
       <div className="space-y-4">
@@ -345,7 +345,7 @@ function BLCard({ bl, canEdit, reload }: { bl: ImportBL; canEdit: boolean; reloa
       </div>
       {canEdit && (
         <div className="flex items-center gap-3 mt-3">
-          <button onClick={save} disabled={saving} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{saving ? 'Saving…' : 'Save BL'}</button>
+          <button onClick={save} disabled={saving} className="bg-emerald-600 text-white px-4 py-1.5 rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium">{saving ? 'Saving…' : 'Save BL'}</button>
           {msg && <span className={`text-sm ${msg === 'Saved.' ? 'text-green-600' : 'text-red-500'}`}>{msg}</span>}
           <button onClick={remove} className="ml-auto text-red-500 hover:underline text-xs">Remove</button>
         </div>
@@ -371,7 +371,7 @@ function Containers({ shipmentId, containers, bls, charges, canEdit, reload, rel
     <section className="bg-white rounded-xl shadow-sm border p-5 mb-5">
       <div className="flex items-center justify-between mb-1">
         <h2 className="font-semibold">Containers <span className="text-gray-400 font-normal text-sm">({containers.length})</span></h2>
-        {canEdit && <button onClick={add} disabled={busy} className="border border-blue-600 text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-50 disabled:opacity-50 text-sm font-medium">+ Add container</button>}
+        {canEdit && <button onClick={add} disabled={busy} className="border border-emerald-600 text-emerald-600 px-3 py-1.5 rounded-lg hover:bg-emerald-50 disabled:opacity-50 text-sm font-medium">+ Add container</button>}
       </div>
       <p className="text-xs text-gray-400 mb-3">Demurrage counts from <b>available at port</b> → <b>gate-out</b>; detention from <b>gate-out</b> → <b>empty returned</b>. Free days fall back from the BL. Both count up to today while still running.</p>
       {containers.length === 0 && <p className="text-gray-400 text-sm">No containers yet.</p>}
@@ -452,7 +452,7 @@ function ContainerCard({ c, bls, charge, canEdit, reload, reloadCharges }: {
 
       {canEdit && (
         <div className="flex items-center gap-3 mt-3">
-          <button onClick={save} disabled={saving} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">{saving ? 'Saving…' : 'Save container'}</button>
+          <button onClick={save} disabled={saving} className="bg-emerald-600 text-white px-4 py-1.5 rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium">{saving ? 'Saving…' : 'Save container'}</button>
           {msg && <span className={`text-sm ${msg === 'Saved.' ? 'text-green-600' : 'text-red-500'}`}>{msg}</span>}
           <button onClick={remove} className="ml-auto text-red-500 hover:underline text-xs">Remove</button>
         </div>
@@ -466,7 +466,7 @@ function ContainerCard({ c, bls, charge, canEdit, reload, reloadCharges }: {
 // review what it found, and apply it to the shipment. Fully optional.
 // ---------------------------------------------------------------------------
 const DOC_STATUS_STYLE: Record<string, string> = {
-  Uploaded: 'bg-gray-100 text-gray-600', Processing: 'bg-blue-100 text-blue-700',
+  Uploaded: 'bg-gray-100 text-gray-600', Processing: 'bg-emerald-100 text-emerald-700',
   Review: 'bg-amber-100 text-amber-700', Applied: 'bg-green-100 text-green-700', Error: 'bg-red-100 text-red-700',
 }
 
@@ -540,7 +540,7 @@ function Documents({ shipment, documents, suppliers, master, profileId, profileN
       <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
         <h2 className="font-semibold">Documents <span className="text-gray-400 font-normal text-sm">({documents.length})</span></h2>
         {canEdit && (
-          <label className={`text-sm font-medium px-4 py-2 rounded-lg cursor-pointer ${busy ? 'bg-gray-200 text-gray-400' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+          <label className={`text-sm font-medium px-4 py-2 rounded-lg cursor-pointer ${busy ? 'bg-gray-200 text-gray-400' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>
             {busy ? 'Working…' : '⬆ Upload & auto-fill'}
             <input type="file" accept="application/pdf" onChange={onFile} disabled={busy} className="hidden" />
           </label>
@@ -558,9 +558,9 @@ function Documents({ shipment, documents, suppliers, master, profileId, profileN
               <span className="text-sm font-medium">{doc.file_name || 'document.pdf'}</span>
               <span className="text-xs text-gray-400">{DOC_TYPE_LABEL[doc.doc_type] || 'Document'}{doc.uploaded_by_name ? ` · ${doc.uploaded_by_name}` : ''} · {new Date(doc.created_at).toLocaleDateString()}</span>
               <div className="ml-auto flex items-center gap-3 text-xs">
-                <button onClick={() => view(doc)} className="text-blue-600 hover:underline">View</button>
+                <button onClick={() => view(doc)} className="text-emerald-600 hover:underline">View</button>
                 {canEdit && doc.status === 'Review' && <button onClick={() => setReviewing(reviewing === doc.id ? null : doc.id)} className="text-amber-700 font-medium hover:underline">{reviewing === doc.id ? 'Hide' : 'Review & apply'}</button>}
-                {canEdit && (doc.status === 'Error' || doc.status === 'Processing') && <button onClick={() => reExtract(doc)} className="text-blue-600 hover:underline">Re-read</button>}
+                {canEdit && (doc.status === 'Error' || doc.status === 'Processing') && <button onClick={() => reExtract(doc)} className="text-emerald-600 hover:underline">Re-read</button>}
                 {canEdit && <button onClick={() => remove(doc)} className="text-red-500 hover:underline">Delete</button>}
               </div>
             </div>
@@ -674,7 +674,7 @@ function DocumentReview({ doc, extracted, shipment, suppliers, master, profileId
       <div className="flex flex-wrap gap-x-6 gap-y-2 mb-3">
         {(matched || extracted.supplier_name) && (
           <label className="inline-flex items-center gap-2"><input type="checkbox" className={chk} checked={applySupplier} onChange={e => setApplySupplier(e.target.checked)} />
-            Supplier: <b>{matched ? matched.name : extracted.supplier_name}</b> {matched ? <span className="text-xs text-green-600">(existing)</span> : <span className="text-xs text-blue-600">(will be added)</span>}</label>
+            Supplier: <b>{matched ? matched.name : extracted.supplier_name}</b> {matched ? <span className="text-xs text-green-600">(existing)</span> : <span className="text-xs text-emerald-600">(will be added)</span>}</label>
         )}
         {extracted.reference && (
           <label className="inline-flex items-center gap-2"><input type="checkbox" className={chk} checked={applyReference} onChange={e => setApplyReference(e.target.checked)} />

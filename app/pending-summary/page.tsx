@@ -31,7 +31,7 @@ const STATUS_STYLE: Record<string, string> = {
   'Material Received Partial': 'bg-yellow-100 text-yellow-700',
   'Material Received Fully': 'bg-lime-100 text-lime-700',
   'Pending Schedule': 'bg-purple-100 text-purple-700',
-  'Production started': 'bg-blue-100 text-blue-700',
+  'Production started': 'bg-emerald-100 text-emerald-700',
   'Production completed': 'bg-teal-100 text-teal-700',
 }
 // Statuses that mean the line is finished — excluded from the pending list.

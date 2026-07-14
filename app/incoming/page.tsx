@@ -35,7 +35,7 @@ interface MRItem { id: string; item_code: string; unit: string; requested_qty: n
 interface MatReq { id: string; factory_code: string; status: string; pick_run_no: string | null; material_request_items: MRItem[] }
 
 const STATUS_STYLES: Record<string, string> = {
-  Processing: 'bg-blue-100 text-blue-700',
+  Processing: 'bg-emerald-100 text-emerald-700',
   Review: 'bg-purple-100 text-purple-700',
   'Partially Received': 'bg-teal-100 text-teal-700',
   Received: 'bg-green-100 text-green-700',
@@ -60,7 +60,7 @@ function grStage(d: { vehicle?: string | null; loaded_at?: string | null; driver
 const GR_LABEL: Record<GrStage, string> = { none: 'Not started', lorry: 'Lorry assigned', loaded: 'Loaded', driver: 'Driver assigned', sent: 'On the way', received: 'Received' }
 const GR_STYLE: Record<GrStage, string> = {
   none: 'bg-gray-100 text-gray-500', lorry: 'bg-teal-100 text-teal-700', loaded: 'bg-amber-100 text-amber-800',
-  driver: 'bg-indigo-100 text-indigo-700', sent: 'bg-blue-100 text-blue-700', received: 'bg-green-100 text-green-700',
+  driver: 'bg-indigo-100 text-indigo-700', sent: 'bg-emerald-100 text-emerald-700', received: 'bg-green-100 text-green-700',
 }
 
 // Searchable item picker — type a code OR a name, then click a row. Works on every browser
@@ -83,7 +83,7 @@ function ItemCombo({ items, value, onPick }: { items: { code: string; descriptio
           {matches.length === 0 && <div className="px-3 py-2 text-sm text-gray-400">No matching item — check the code is in the Items master.</div>}
           {matches.map(i => (
             <button key={i.code} type="button" onMouseDown={e => { e.preventDefault(); onPick(i.code, i.description, i.unit); setOpen(false) }}
-              className="block w-full text-left px-3 py-2 text-sm hover:bg-blue-50 border-b last:border-0">
+              className="block w-full text-left px-3 py-2 text-sm hover:bg-emerald-50 border-b last:border-0">
               <span className="font-mono font-medium">{i.code}</span> <span className="text-gray-500">{i.description}</span>
             </button>
           ))}
@@ -211,8 +211,8 @@ export default function IncomingPage() {
   }
   const reqCtl = (l: DoLine) => (
     <span className="whitespace-nowrap text-xs">
-      {l.received_at && <><button onClick={() => requestCorrectQty(l)} className="text-blue-600 hover:underline">Correct qty</button><span className="text-gray-300 mx-1">·</span></>}
-      <button onClick={() => openEditReq(l)} className="text-blue-600 hover:underline">Request edit</button>
+      {l.received_at && <><button onClick={() => requestCorrectQty(l)} className="text-emerald-600 hover:underline">Correct qty</button><span className="text-gray-300 mx-1">·</span></>}
+      <button onClick={() => openEditReq(l)} className="text-emerald-600 hover:underline">Request edit</button>
       <span className="text-gray-300 mx-1">·</span>
       <button onClick={() => requestDeleteLine(l)} className="text-red-600 hover:underline">delete</button>
     </span>
@@ -511,7 +511,7 @@ export default function IncomingPage() {
         ? <button onClick={() => viewLinePhoto(l.photo_path!)} className="text-green-600 hover:underline text-xs">✓ View{editable ? ' / retake' : ''}</button>
         : <span className="text-amber-600 text-xs">no photo</span>}
       {editable && (
-        <label className="cursor-pointer text-blue-600 hover:underline text-xs">
+        <label className="cursor-pointer text-emerald-600 hover:underline text-xs">
           {busyLine === l.id ? '…' : '📷 Photo'}
           <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) onLinePhoto(l, f); e.target.value = '' }} />
         </label>
@@ -537,7 +537,7 @@ export default function IncomingPage() {
     return (
       <span className="flex items-center gap-2 whitespace-nowrap">
         <button onClick={() => receiveLine(l)} disabled={!ready || busyLine === l.id}
-          className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-medium disabled:opacity-40">
+          className="bg-emerald-600 text-white px-3 py-1 rounded text-xs font-medium disabled:opacity-40">
           {busyLine === l.id ? '…' : 'Receive'}
         </button>
         <button onClick={() => reportShortOver(l)} disabled={!ready || busyLine === l.id}
@@ -664,7 +664,7 @@ export default function IncomingPage() {
   }
 
   if (loading && !profileError) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (profileError) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{profileError}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   return (
@@ -679,7 +679,7 @@ export default function IncomingPage() {
 
         <div className="bg-white rounded-xl shadow-sm border p-6 mb-8 flex flex-wrap items-center gap-3">
           <input ref={fileRef} type="file" accept=".pdf,application/pdf" onChange={onFile} className="hidden" />
-          <button onClick={() => fileRef.current?.click()} disabled={uploading} className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">
+          <button onClick={() => fileRef.current?.click()} disabled={uploading} className="bg-emerald-600 text-white px-5 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium">
             {uploading ? 'Uploading…' : '📄 Upload Delivery Order PDF'}
           </button>
           <span className="text-sm text-gray-400">Choose the warehouse PDF — it uploads and is read automatically.</span>
@@ -703,10 +703,10 @@ export default function IncomingPage() {
               </div>
               <div className="text-xs text-gray-500 mt-1">{doc.do_number ? <span className="font-mono">{doc.do_number}</span> : '—'} · {isHO ? factoryName(doc.factory_code) : doc.factory_code} · {new Date(doc.created_at).toLocaleDateString()}</div>
               <div className="flex flex-wrap gap-3 mt-2 pt-2 border-t text-xs">
-                <button onClick={() => viewLines(doc)} className="text-blue-600 hover:underline font-medium">View Lines</button>
-                {(doc.status === 'Processing' || doc.status === 'Error') && <button onClick={() => reExtract(doc)} className="text-blue-600 hover:underline">Re-read</button>}
+                <button onClick={() => viewLines(doc)} className="text-emerald-600 hover:underline font-medium">View Lines</button>
+                {(doc.status === 'Processing' || doc.status === 'Error') && <button onClick={() => reExtract(doc)} className="text-emerald-600 hover:underline">Re-read</button>}
                 <button onClick={() => setTransportDoc(doc)} className="text-teal-700 hover:underline">🚚 Transport{doc.transport_received_at ? ' ✅' : doc.vehicle ? ' •' : ''}</button>
-                <button onClick={() => handleViewPdf(doc.file_path)} className="text-blue-600 hover:underline">View PDF</button>
+                <button onClick={() => handleViewPdf(doc.file_path)} className="text-emerald-600 hover:underline">View PDF</button>
                 <button onClick={() => handleDelete(doc)} className="text-red-500 hover:underline ml-auto">Delete</button>
               </div>
             </div>
@@ -740,14 +740,14 @@ export default function IncomingPage() {
                   <td className="px-4 py-3 whitespace-nowrap">{(() => { const st = grStage(doc); return <button onClick={() => setTransportDoc(doc)} className={`px-2 py-0.5 rounded-full text-xs font-medium ${GR_STYLE[st]} hover:opacity-80`}>{GR_LABEL[st]}</button> })()}{!!doc.vehicle && !doc.driver_name && !doc.transport_received_at && <span className="block text-[11px] text-amber-600 mt-0.5">⚠ needs driver</span>}</td>
                   <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{new Date(doc.created_at).toLocaleString()}</td>
                   <td className="px-4 py-3 whitespace-nowrap flex gap-3 items-center">
-                    <button onClick={() => viewLines(doc)} className="text-blue-600 hover:underline text-xs">View Lines</button>
+                    <button onClick={() => viewLines(doc)} className="text-emerald-600 hover:underline text-xs">View Lines</button>
                     {(doc.status === 'Processing' || doc.status === 'Error') && (
-                      <button onClick={() => reExtract(doc)} className="text-blue-600 hover:underline text-xs">Re-read</button>
+                      <button onClick={() => reExtract(doc)} className="text-emerald-600 hover:underline text-xs">Re-read</button>
                     )}
                     <button onClick={() => setTransportDoc(doc)} className="text-teal-700 hover:underline text-xs whitespace-nowrap">
                       🚚 Transport{doc.transport_received_at ? ' ✅' : doc.vehicle ? ' •' : ''}
                     </button>
-                    <button onClick={() => handleViewPdf(doc.file_path)} className="text-blue-600 hover:underline text-xs">View PDF</button>
+                    <button onClick={() => handleViewPdf(doc.file_path)} className="text-emerald-600 hover:underline text-xs">View PDF</button>
                     <button onClick={() => handleDelete(doc)} className="text-red-500 hover:underline text-xs">Delete</button>
                   </td>
                 </tr>
@@ -762,7 +762,7 @@ export default function IncomingPage() {
               <h2 className="font-semibold text-lg">{linesFor.do_number || linesFor.file_name} <span className="text-gray-400 font-normal text-sm">· {isHO ? factoryName(linesFor.factory_code) : linesFor.factory_code} · {linesFor.do_date || '—'}</span></h2>
               <div className="flex items-center gap-3">
                 <button onClick={raiseIssue} className="text-amber-700 bg-amber-50 border border-amber-300 hover:bg-amber-100 rounded-lg px-3 py-1 text-xs font-medium">🚩 Raise issue</button>
-                <a href={`/discussion?topic=${encodeURIComponent(linesFor.do_number || linesFor.file_name || linesFor.id)}`} className="text-blue-600 hover:underline text-xs">💬 Discussion</a>
+                <a href={`/discussion?topic=${encodeURIComponent(linesFor.do_number || linesFor.file_name || linesFor.id)}`} className="text-emerald-600 hover:underline text-xs">💬 Discussion</a>
                 <button onClick={() => setLinesFor(null)} className="text-gray-400 hover:text-gray-600 text-sm">Close</button>
               </div>
             </div>
@@ -770,7 +770,7 @@ export default function IncomingPage() {
               const linked = !!linesFor.pick_run_no && requests.some(r => r.pick_run_no === linesFor.pick_run_no)
               return (
                 <div className="mb-2 text-sm flex flex-wrap items-center gap-2">
-                  {linesFor.so_number && <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-mono text-xs">SO {linesFor.so_number}</span>}
+                  {linesFor.so_number && <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-mono text-xs">SO {linesFor.so_number}</span>}
                   {linesFor.pick_run_no && <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-mono text-xs">{linesFor.pick_run_no}</span>}
                   <span className={linked ? 'text-green-700 text-xs' : 'text-amber-600 text-xs'}>{linked ? '✓ matched to its pick run — received items fill this run first' : 'no open pick run found with this number — items match by code (oldest request first)'}</span>
                 </div>
@@ -816,7 +816,7 @@ export default function IncomingPage() {
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm mt-2">
                       <span className="text-gray-500">Delivered: <strong className="text-gray-800">{l.quantity} {l.unit}</strong></span>
                       <span className="text-gray-500">Batch: <span className="font-mono">{l.batch_no || '—'}</span></span>
-                      {c.known && c.factor !== null && <span className="text-gray-500">Into stock: <strong className="text-blue-700">{c.into} {c.unit}</strong>{c.factor !== 1 ? <span className="text-gray-400"> ({l.quantity}×{c.factor})</span> : null}</span>}
+                      {c.known && c.factor !== null && <span className="text-gray-500">Into stock: <strong className="text-emerald-700">{c.into} {c.unit}</strong>{c.factor !== 1 ? <span className="text-gray-400"> ({l.quantity}×{c.factor})</span> : null}</span>}
                     </div>
                     <div className="mt-3 pt-2 border-t flex flex-wrap items-center gap-3">
                       <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">{qcBox(l, editable)} QC checked</label>
@@ -850,7 +850,7 @@ export default function IncomingPage() {
                         <td className="px-3 py-2 text-gray-600">{l.description}</td>
                         <td className="px-3 py-2 text-right font-semibold whitespace-nowrap">{l.quantity} {l.unit}</td>
                         <td className="px-3 py-2 font-mono">{l.batch_no || '—'}</td>
-                        <td className="px-3 py-2 text-right whitespace-nowrap">{!c.known || c.factor === null ? '—' : <span className="font-semibold text-blue-700">{c.into} {c.unit}{c.factor !== 1 ? <span className="text-gray-400 font-normal"> ({l.quantity}×{c.factor})</span> : null}</span>}</td>
+                        <td className="px-3 py-2 text-right whitespace-nowrap">{!c.known || c.factor === null ? '—' : <span className="font-semibold text-emerald-700">{c.into} {c.unit}{c.factor !== 1 ? <span className="text-gray-400 font-normal"> ({l.quantity}×{c.factor})</span> : null}</span>}</td>
                         <td className="px-3 py-2 whitespace-nowrap">{statusNode(c.known, c.factor, c.matched)}</td>
                         <td className="px-3 py-2 whitespace-nowrap"><div className="flex flex-col items-start gap-1">{receiveBtn(l)}{reqCtl(l)}</div></td>
                       </tr>
@@ -869,7 +869,7 @@ export default function IncomingPage() {
                     <button onClick={tickAllQc} className="sm:ml-auto border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 font-medium text-sm w-full sm:w-auto">✓ Tick all QC</button>
                   )}
                   <button onClick={receiveAllReady} disabled={receiving || readyCount === 0}
-                    className={`bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium w-full sm:w-auto${lines.some(l => !l.received_at && !l.qc_checked) && canEditFac(linesFor.factory_code) ? '' : ' sm:ml-auto'}`}>
+                    className={`bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium w-full sm:w-auto${lines.some(l => !l.received_at && !l.qc_checked) && canEditFac(linesFor.factory_code) ? '' : ' sm:ml-auto'}`}>
                     {receiving ? 'Receiving…' : `Receive all ready${readyCount ? ` (${readyCount})` : ''}`}
                   </button>
                 </div>
@@ -916,7 +916,7 @@ export default function IncomingPage() {
               <div>
                 <label className="block text-sm font-medium mb-1">Lorry</label>
                 {doc.vehicle
-                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-teal-50 text-teal-800 rounded-full px-2.5 py-1 text-sm font-medium">🚚 {doc.vehicle}</span><span className="text-xs text-gray-400">{by(doc.lorry_assigned_by)}</span>{canWh && <button onClick={() => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'lorry', p_value: null })} disabled={tBusy} className="text-xs text-blue-600 hover:underline">change</button>}</div>
+                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-teal-50 text-teal-800 rounded-full px-2.5 py-1 text-sm font-medium">🚚 {doc.vehicle}</span><span className="text-xs text-gray-400">{by(doc.lorry_assigned_by)}</span>{canWh && <button onClick={() => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'lorry', p_value: null })} disabled={tBusy} className="text-xs text-emerald-600 hover:underline">change</button>}</div>
                   : canWh
                     ? <select value="" onChange={e => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'lorry', p_value: e.target.value })} disabled={tBusy} className="border rounded-lg px-2 py-1.5 text-sm w-full">
                         <option value="">Assign a lorry…</option>
@@ -941,7 +941,7 @@ export default function IncomingPage() {
               <div>
                 <label className="block text-sm font-medium mb-1">Driver <span className="text-gray-400 font-normal">(can be assigned later)</span></label>
                 {doc.driver_name
-                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 rounded-full px-2.5 py-1 text-sm font-medium">👤 {doc.driver_name}</span><span className="text-xs text-gray-400">{by(doc.driver_assigned_by)}</span>{canWh && <button onClick={() => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'driver', p_value: null })} disabled={tBusy} className="text-xs text-blue-600 hover:underline">change</button>}</div>
+                  ? <div className="flex items-center gap-2"><span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 rounded-full px-2.5 py-1 text-sm font-medium">👤 {doc.driver_name}</span><span className="text-xs text-gray-400">{by(doc.driver_assigned_by)}</span>{canWh && <button onClick={() => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'driver', p_value: null })} disabled={tBusy} className="text-xs text-emerald-600 hover:underline">change</button>}</div>
                   : canWh
                     ? <select value="" onChange={e => grTransport('assign_gr_transport', { p_doc_id: doc.id, p_kind: 'driver', p_value: e.target.value })} disabled={tBusy} className="border rounded-lg px-2 py-1.5 text-sm w-full">
                         <option value="">Assign a driver…</option>
@@ -1013,7 +1013,7 @@ export default function IncomingPage() {
               ))}
             </div>
             <div className="flex gap-2 mt-5">
-              <button onClick={submitEditReq} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 font-medium">Send for approval</button>
+              <button onClick={submitEditReq} className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700 font-medium">Send for approval</button>
               <button onClick={() => setEditReq(null)} className="border px-6 py-2 rounded-lg hover:bg-gray-50 font-medium">Cancel</button>
             </div>
           </div>

@@ -9,7 +9,7 @@ export default function DashboardPage() {
   const { profile, loading, error } = useProfile()
 
   if (loading && !error) return <div className="flex min-h-screen items-center justify-center">Loading...</div>
-  if (error) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{error}</p><a href="/login" className="text-blue-600 underline">Back to login</a></div>
+  if (error) return <div className="flex min-h-screen items-center justify-center flex-col gap-4"><p className="text-red-500 text-lg">{error}</p><a href="/login" className="text-emerald-600 underline">Back to login</a></div>
   if (!profile) return null
 
   const isHO = profile.factory_code === 'HEAD_OFFICE'

@@ -17,7 +17,7 @@ const fmtTime = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2
 
 const TYPE_CHIP: Record<string, string> = {
   putaway: 'bg-emerald-100 text-emerald-700',
-  pick: 'bg-blue-100 text-blue-700',
+  pick: 'bg-emerald-100 text-emerald-700',
   adjust: 'bg-amber-100 text-amber-700',
   transfer: 'bg-violet-100 text-violet-700',
 }
