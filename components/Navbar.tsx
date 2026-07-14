@@ -290,20 +290,34 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       ...(isHO ? [{ href: '/admin/allowed-networks', label: 'Allowed Networks' }] : []),
     ] },
   ]
-  // On the warehouse subdomain, show only the documents the warehouse works with.
-  const warehouseGroups = [
-    { header: 'Warehouse', items: [
-      { href: '/warehouse', label: 'Warehouse Receiving', module: 'goods_received' as ModuleKey },
-      { href: '/warehouse/pick-production', label: 'Pick for Production', module: 'material_requests' as ModuleKey },
-      { href: '/material-requests', label: 'Pick Runs', module: 'material_requests' as ModuleKey },
-      { href: '/incoming', label: 'Goods Received', module: 'goods_received' as ModuleKey },
-      { href: '/sales-orders', label: 'Sales Orders', module: 'sales' as ModuleKey },
-      { href: '/dispatch/dashboard', label: 'Delivery Status', module: 'dispatch' as ModuleKey },
-      { href: '/wms/locations', label: 'Location Map (WMS)', module: 'warehouse' as ModuleKey },
-      { href: '/wms/stock', label: 'Stock (WMS)', module: 'warehouse' as ModuleKey },
-      { href: '/wms/putaway', label: 'Putaway (WMS)', module: 'warehouse' as ModuleKey },
-      { href: '/wms/orders', label: 'Orders to Pick (WMS)', module: 'warehouse' as ModuleKey },
+  // On the warehouse subdomain this is the ONE and only nav — no separate green WMS
+  // bar. Everything lives under two dropdowns so nothing is hidden in another page:
+  // "Production" (the receiving / supply-to-production flow) and "WMS" (the warehouse
+  // management system). The green "EASWARI WMS" bar only appears on the main portal.
+  const warehouseGroups: { header?: string; items: Item[] }[] = [
+    { header: 'Production', items: [
+      { href: '/warehouse', label: 'Warehouse Receiving', module: 'goods_received' },
+      { href: '/warehouse/pick-production', label: 'Pick for Production', module: 'material_requests' },
+      { href: '/material-requests', label: 'Pick Runs', module: 'material_requests' },
+      { href: '/incoming', label: 'Goods Received', module: 'goods_received' },
+      { href: '/sales-orders', label: 'Sales Orders', module: 'sales' },
+      { href: '/dispatch/dashboard', label: 'Delivery Status', module: 'dispatch' },
       { href: '/discussion', label: 'Discussion' },
+    ] },
+    { header: 'WMS', items: [
+      { href: '/wms/stock', label: 'Stock', module: 'warehouse' },
+      { href: '/wms/locations', label: 'Location Map', module: 'warehouse' },
+      { href: '/wms/putaway', label: 'Putaway', module: 'warehouse' },
+      { href: '/wms/orders', label: 'Orders to Pick', module: 'warehouse' },
+      { href: '/wms/transfers', label: 'Transfers', module: 'warehouse' },
+      { href: '/wms/dispatch', label: 'Delivery Orders', module: 'warehouse' },
+      { href: '/wms/purchase-orders', label: 'Purchase Orders', module: 'warehouse' },
+      { href: '/wms/suppliers', label: 'Suppliers', module: 'warehouse' },
+      { href: '/wms/counts', label: 'Stock Counts', module: 'warehouse' },
+      { href: '/wms/movements', label: 'Movements', module: 'warehouse' },
+      { href: '/wms/reports/expiry', label: 'Expiry Alerts', module: 'warehouse' },
+      { href: '/wms/reports', label: 'Reports', module: 'warehouse' },
+      { href: '/wms/labels', label: 'Labels (QR)', module: 'warehouse' },
     ] },
   ]
   // Hide links the user has no View permission for (admins/HO/unconfigured see all).

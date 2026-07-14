@@ -1,12 +1,17 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
+import Navbar from '@/components/Navbar'
 
 // Green nav banner for the WMS (warehouse management) module, so it reads as its own
 // area, distinct from the blue portal / Warehouse Receiving. More links get added here
 // as WMS modules land (stock, putaway, picking); for now Module 1 is the Location Map.
+// EXCEPTION: on the warehouse subdomain (warehouse.srrieaswari.com) the whole area is
+// ONE app, so we defer to the single blue "EASWARI Warehouse" nav instead of showing a
+// second, different-looking bar here.
 const LINKS = [
   { href: '/wms', label: 'Home' },
   { href: '/wms/locations', label: 'Location Map' },
@@ -27,6 +32,16 @@ const LINKS = [
 export default function WmsNavbar() {
   const { profile } = useProfile()
   const pathname = usePathname()
+  const [onWarehouse, setOnWarehouse] = useState(false)   // warehouse.srrieaswari.com
+  useEffect(() => { if (typeof window !== 'undefined') setOnWarehouse(window.location.host.startsWith('warehouse.')) }, [])
+
+  // On the warehouse subdomain, show the same single blue warehouse nav as every
+  // other warehouse page — no separate green bar, so it reads as one app.
+  if (onWarehouse) {
+    if (!profile) return null
+    return <Navbar factoryCode={profile.factory_code} fullName={profile.full_name || ''} role={profile.role} />
+  }
+
   return (
     <nav className="bg-emerald-700 text-white">
       <div className="max-w-6xl mx-auto px-4 flex flex-wrap items-center gap-1 min-h-14 py-1">
