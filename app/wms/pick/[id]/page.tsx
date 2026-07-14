@@ -29,6 +29,7 @@ export default function WmsPickPage() {
   const [order, setOrder] = useState<Order | null>(null)
   const [lines, setLines] = useState<Line[]>([])
   const [stock, setStock] = useState<Stock[]>([])
+  const [resd, setResd] = useState<Map<string, number>>(new Map())   // reserved by OTHER orders
   const [locMeta, setLocMeta] = useState<Map<string, Loc>>(new Map())
   const [chosen, setChosen] = useState<Record<string, string>>({})   // lineId -> stock.id
   const [qtyInput, setQtyInput] = useState<Record<string, string>>({})
@@ -45,16 +46,28 @@ export default function WmsPickPage() {
       ? (await supabase.from('wms_stock').select('id, item_code, location_id, location_code, batch_no, exp_date, quantity').in('item_code', codes)).data as Stock[]
       : []
     const locs = await fetchAll<Loc>('wms_locations', 'id, location_type, pick_sequence')
-    setOrder((o as Order) || null); setLines(lineList); setStock(st || [])
+    // stock reserved for OTHER orders — not available to this one
+    const rmap = new Map<string, number>()
+    if (codes.length) {
+      const { data: res } = await supabase.from('wms_reservations').select('item_code, location_id, batch_no, qty').eq('status', 'active').neq('order_id', id).in('item_code', codes)
+      for (const r of (res as { item_code: string; location_id: string; batch_no: string; qty: number }[] || [])) {
+        const k = `${r.item_code.toUpperCase()}|${r.location_id}|${r.batch_no}`
+        rmap.set(k, (rmap.get(k) || 0) + Number(r.qty))
+      }
+    }
+    setOrder((o as Order) || null); setLines(lineList); setStock(st || []); setResd(rmap)
     setLocMeta(new Map(locs.map(l => [l.id, l])))
     setChosen({}); setQtyInput({})
   }, [id])
 
   useEffect(() => { if (profile) load() }, [profile, load])
 
+  // On-hand minus what OTHER orders have reserved at that exact bin/batch.
+  const availQty = useCallback((s: Stock) => clean(s.quantity - (resd.get(`${s.item_code.toUpperCase()}|${s.location_id}|${s.batch_no}`) || 0)), [resd])
+
   // Available stock for an item, best-first: SL bins, then earliest expiry, then walking order.
   const availFor = useCallback((itemCode: string) => {
-    return stock.filter(s => s.item_code === itemCode && s.quantity > 0 && locMeta.get(s.location_id)?.location_type !== 'STAGE').slice().sort((a, b) => {
+    return stock.filter(s => s.item_code === itemCode && availQty(s) > 0 && locMeta.get(s.location_id)?.location_type !== 'STAGE').slice().sort((a, b) => {
       const la = locMeta.get(a.location_id), lb = locMeta.get(b.location_id)
       const slA = la?.location_type === 'SL' ? 0 : 1, slB = lb?.location_type === 'SL' ? 0 : 1
       if (slA !== slB) return slA - slB
@@ -62,7 +75,7 @@ export default function WmsPickPage() {
       if (ea !== eb) return ea < eb ? -1 : 1
       return (la?.pick_sequence ?? 999999) - (lb?.pick_sequence ?? 999999) || a.location_code.localeCompare(b.location_code)
     })
-  }, [stock, locMeta])
+  }, [stock, locMeta, availQty])
 
   const remainingOf = (l: Line) => clean(l.quantity - l.qty_picked)
 
@@ -176,10 +189,10 @@ export default function WmsPickPage() {
             const rem = remainingOf(l)
             const done = rem <= 0
             const avail = availFor(l.item_code)
-            const totalAvail = clean(avail.reduce((s, a) => s + a.quantity, 0))
+            const totalAvail = clean(avail.reduce((s, a) => s + availQty(a), 0))
             const chosenId = chosen[l.id] ?? avail[0]?.id ?? ''
             const chosenStock = avail.find(a => a.id === chosenId) || avail[0]
-            const defQty = chosenStock ? Math.min(rem, chosenStock.quantity) : rem
+            const defQty = chosenStock ? Math.min(rem, availQty(chosenStock)) : rem
             const input = qtyInput[l.id] ?? (rem > 0 ? String(clean(defQty)) : '')
             return (
               <div key={l.id} className={`bg-white rounded-xl border shadow-sm p-4 ${done ? 'opacity-70' : ''}`}>
@@ -209,7 +222,7 @@ export default function WmsPickPage() {
                               className="w-full border rounded-lg px-3 py-2 text-sm">
                               {avail.map((a, i) => (
                                 <option key={a.id} value={a.id}>
-                                  {a.location_code}{a.batch_no ? ` · b:${a.batch_no}` : ' · no batch'}{a.exp_date ? ` · exp ${fmtDate(a.exp_date)}` : ''} — {fmtQty(a.quantity)} on hand{i === 0 ? '  (suggested)' : ''}
+                                  {a.location_code}{a.batch_no ? ` · b:${a.batch_no}` : ' · no batch'}{a.exp_date ? ` · exp ${fmtDate(a.exp_date)}` : ''} — {fmtQty(availQty(a))} available{i === 0 ? '  (suggested)' : ''}
                                 </option>
                               ))}
                             </select>

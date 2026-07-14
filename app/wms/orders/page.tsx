@@ -19,7 +19,8 @@ const fmtQty = (n: number) => clean(n).toLocaleString(undefined, { maximumFracti
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 const STATUS_CHIP: Record<string, string> = {
   Processing: 'bg-gray-100 text-gray-600', Review: 'bg-amber-100 text-amber-700', Released: 'bg-emerald-100 text-emerald-700',
-  Picking: 'bg-blue-100 text-blue-700', Picked: 'bg-emerald-100 text-emerald-700', Error: 'bg-red-100 text-red-700', Cancelled: 'bg-gray-100 text-gray-400',
+  Reserved: 'bg-teal-100 text-teal-700', Picking: 'bg-blue-100 text-blue-700', Picked: 'bg-emerald-100 text-emerald-700',
+  Dispatched: 'bg-emerald-100 text-emerald-700', Error: 'bg-red-100 text-red-700', Cancelled: 'bg-gray-100 text-gray-400',
 }
 
 export default function WmsOrdersPage() {
@@ -96,6 +97,22 @@ export default function WmsOrdersPage() {
     if (data?.signedUrl) window.open(data.signedUrl, '_blank')
   }
 
+  async function release(o: Order) {
+    if (!canEdit) return
+    setErr(''); setMsg('')
+    const { data, error } = await supabase.rpc('wms_reserve_order', { p_order_id: o.id })
+    if (error) { setErr(error.message); return }
+    const r = data as { reserved: number; shortfall: number }
+    setMsg(r.shortfall > 0 ? `Released & reserved ${r.reserved} — short ${r.shortfall} (not enough free stock).` : `Released & reserved stock for ${o.order_no || 'order'}.`)
+    load()
+  }
+  async function cancelOrder(o: Order) {
+    if (!canEdit || !confirm(`Cancel ${o.order_no || 'this order'} and release its reserved stock?`)) return
+    const { error } = await supabase.rpc('wms_cancel_order', { p_order_id: o.id })
+    if (error) { setErr(error.message); return }
+    load()
+  }
+
   async function del(o: Order) {
     if (!confirm(`Delete order "${o.file_name || o.order_no}" and its lines?`)) return
     if (o.file_path) await supabase.storage.from('wms-orders').remove([o.file_path])
@@ -147,11 +164,14 @@ export default function WmsOrdersPage() {
                   <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">{fmtTime(o.created_at)}</td>
                   <td className="px-4 py-2.5 whitespace-nowrap">
                     <div className="flex gap-3 text-xs">
-                      {['Review', 'Released', 'Picking', 'Picked'].includes(o.status) &&
+                      {canEdit && o.status === 'Review' && <button onClick={() => release(o)} className="text-teal-700 font-medium hover:underline">Release</button>}
+                      {['Reserved', 'Released', 'Picking', 'Picked'].includes(o.status) &&
                         <Link href={`/wms/pick/${o.id}`} className="text-emerald-700 font-medium hover:underline">Pick →</Link>}
+                      {o.status === 'Picked' && <Link href={`/wms/dispatch/${o.id}`} className="text-emerald-700 font-medium hover:underline">Dispatch →</Link>}
                       <button onClick={() => viewLines(o)} className="text-emerald-700 hover:underline">View lines</button>
                       {o.file_path && <button onClick={() => viewPdf(o)} className="text-gray-500 hover:underline">PDF</button>}
-                      {canEdit && <button onClick={() => reRead(o)} className="text-gray-500 hover:underline">Re-read</button>}
+                      {canEdit && ['Reserved', 'Released', 'Picking'].includes(o.status) && <button onClick={() => cancelOrder(o)} className="text-amber-600 hover:underline">Cancel</button>}
+                      {canEdit && o.file_path && <button onClick={() => reRead(o)} className="text-gray-500 hover:underline">Re-read</button>}
                       {canEdit && <button onClick={() => del(o)} className="text-red-500 hover:underline">Delete</button>}
                     </div>
                   </td>

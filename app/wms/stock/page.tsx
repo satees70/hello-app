@@ -34,6 +34,7 @@ export default function WmsStockPage() {
   const [rows, setRows] = useState<Stock[]>([])
   const [items, setItems] = useState<Item[]>([])
   const [locs, setLocs] = useState<Loc[]>([])
+  const [resd, setResd] = useState<Map<string, { qty: number; orders: string[] }>>(new Map())
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -59,6 +60,18 @@ export default function WmsStockPage() {
       fetchAll<Loc>('wms_locations', 'id, code, location_type, active', 'code'),
     ])
     setRows(s); setItems(it); setLocs(lo)
+    const { data: res } = await supabase.from('wms_reservations').select('item_code, location_id, batch_no, qty, wms_orders(order_no)').eq('status', 'active')
+    type ResRow = { item_code: string; location_id: string; batch_no: string; qty: number; wms_orders: { order_no: string | null } | { order_no: string | null }[] | null }
+    const m = new Map<string, { qty: number; orders: Set<string> }>()
+    for (const r of ((res as unknown as ResRow[]) || [])) {
+      const k = `${r.item_code.toUpperCase()}|${r.location_id}|${r.batch_no}`
+      const e = m.get(k) || { qty: 0, orders: new Set<string>() }
+      e.qty += Number(r.qty)
+      const on = Array.isArray(r.wms_orders) ? r.wms_orders[0]?.order_no : r.wms_orders?.order_no
+      if (on) e.orders.add(on)
+      m.set(k, e)
+    }
+    setResd(new Map([...m].map(([k, v]) => [k, { qty: v.qty, orders: [...v.orders] }])))
   }
 
   const locByCode = useMemo(() => new Map(locs.map(l => [l.code.toUpperCase(), l])), [locs])
@@ -269,7 +282,10 @@ export default function WmsStockPage() {
                   <td className="px-4 py-2.5 font-mono">{r.location_code}</td>
                   <td className="px-4 py-2.5 font-mono text-xs">{r.batch_no || <span className="text-gray-300">—</span>}</td>
                   <td className="px-4 py-2.5 text-xs">{fmtDate(r.exp_date) || <span className="text-gray-300">—</span>}</td>
-                  <td className="px-4 py-2.5 font-medium tabular-nums">{fmtQty(r.quantity)}{r.uom ? <span className="text-gray-400 text-xs"> {r.uom}</span> : ''}</td>
+                  <td className="px-4 py-2.5 font-medium tabular-nums">
+                    {fmtQty(r.quantity)}{r.uom ? <span className="text-gray-400 text-xs"> {r.uom}</span> : ''}
+                    {(() => { const rv = resd.get(`${r.item_code.toUpperCase()}|${r.location_id}|${r.batch_no}`); return rv ? <div className="text-[11px] font-normal text-teal-600">🔒 {fmtQty(rv.qty)} reserved{rv.orders.length ? ` · ${rv.orders.slice(0, 2).join(', ')}` : ''}</div> : null })()}
+                  </td>
                   <td className="px-4 py-2.5 whitespace-nowrap">
                     {canEdit ? (
                       <div className="flex gap-3">
