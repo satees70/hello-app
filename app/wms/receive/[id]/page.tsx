@@ -54,7 +54,9 @@ export default function WmsReceivePage() {
     const d = draftOf(l)
     const n = labelCopies(l)
     if (n > 100 && !confirm(`Print ${n} labels for ${l.item_code}?`)) return
-    const subs = [d.batch ? `Batch ${d.batch}` : 'No batch']
+    const subs: string[] = []
+    if (l.description) subs.push(l.description.length > 30 ? l.description.slice(0, 29) + '…' : l.description)
+    subs.push(d.batch ? `Batch ${d.batch}` : 'No batch')
     if (d.exp) subs.push(`Exp ${new Date(d.exp + 'T00:00:00').toLocaleDateString('en-GB')}`)
     const one = { qrText: encodeItem(l.item_code, d.batch, d.exp), title: l.item_code, subs }
     await downloadLabels(Array.from({ length: n }, () => one), labelSize, `BatchLabels_${l.item_code.replace(/[^a-zA-Z0-9]/g, '-')}_x${n}.pdf`)

@@ -10,25 +10,28 @@ export const LABEL_SIZES: Record<string, { w: number; h: number; label: string }
 export interface LabelItem { qrText: string; title: string; subs: string[] }
 
 const titleFont = (len: number) => (len > 16 ? 9 : len > 12 ? 11 : len > 8 ? 14 : 18)
+const lineH = (ptFont: number) => ptFont * 0.3528 * 1.15   // mm per line
 
+// Stack title + sub-lines from the top of the text area, wrapping long text onto
+// extra lines instead of overlapping (item names can be long).
 function draw(doc: jsPDF, w: number, h: number, qrUrl: string, title: string, subs: string[]) {
-  if (w >= h) {
-    const qs = Math.min(h - 6, w * 0.4)
-    doc.addImage(qrUrl, 'PNG', 3, (h - qs) / 2, qs, qs)
-    const tx = qs + 6
-    const fs = titleFont(title.length)
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(fs)
-    doc.text(title, tx, h / 2 - 1, { maxWidth: w - tx - 2, lineHeightFactor: 1.05 })
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8)
-    subs.forEach((s, i) => doc.text(s, tx, h / 2 + 5 + i * 4, { maxWidth: w - tx - 2 }))
-  } else {
-    const qs = Math.min(w - 8, h * 0.55)
-    doc.addImage(qrUrl, 'PNG', (w - qs) / 2, 3, qs, qs)
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(titleFont(title.length))
-    doc.text(title, w / 2, qs + 8, { align: 'center', maxWidth: w - 4, lineHeightFactor: 1.05 })
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8)
-    subs.forEach((s, i) => doc.text(s, w / 2, qs + 13 + i * 4, { align: 'center', maxWidth: w - 4 }))
-  }
+  const square = w < h
+  const qs = square ? Math.min(w - 8, h * 0.46) : Math.min(h - 6, w * 0.4)
+  const qx = square ? (w - qs) / 2 : 3
+  const qy = square ? 3 : (h - qs) / 2
+  doc.addImage(qrUrl, 'PNG', qx, qy, qs, qs)
+
+  const tx = square ? w / 2 : qs + 6
+  const tw = square ? w - 4 : w - (qs + 6) - 2
+  const align: 'center' | 'left' = square ? 'center' : 'left'
+  let y = square ? qy + qs + 5 : 6
+
+  const fs = titleFont(title.length)
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(fs)
+  for (const line of doc.splitTextToSize(title, tw)) { doc.text(line, tx, y, { align }); y += lineH(fs) }
+  y += 1.5
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8)
+  for (const s of subs) for (const line of doc.splitTextToSize(s, tw)) { doc.text(line, tx, y, { align }); y += lineH(8) }
 }
 
 export async function downloadLabels(items: LabelItem[], sizeKey: string, filename: string, onProgress?: (i: number, n: number) => void) {
