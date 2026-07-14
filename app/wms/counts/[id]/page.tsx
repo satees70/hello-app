@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase, fetchAll } from '@/lib/supabase'
@@ -42,6 +42,14 @@ export default function WmsCountPage() {
   const [inputs, setInputs] = useState<Record<string, string>>({})
   const [uItem, setUItem] = useState(''); const [uDesc, setUDesc] = useState(''); const [uBatch, setUBatch] = useState(''); const [uQty, setUQty] = useState('')
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
+  const [prodScanOpen, setProdScanOpen] = useState(false); const [scanMsg, setScanMsg] = useState('')
+
+  // Refs so the continuous product-scan loop always sees fresh data + serializes writes.
+  const linesRef = useRef<CLine[]>([]); useEffect(() => { linesRef.current = lines }, [lines])
+  const seenRef = useRef<Set<string>>(new Set())      // exact labels scanned this session (dedupe same bag)
+  const tallyRef = useRef<Map<string, number>>(new Map())  // running count per item|batch
+  const createdRef = useRef<Map<string, string>>(new Map())
+  const queueRef = useRef<string[]>([]); const pumpingRef = useRef(false)
 
   const load = useCallback(async () => {
     const { data: t } = await supabase.from('wms_count_tasks').select('*').eq('id', id).single()
@@ -84,6 +92,42 @@ export default function WmsCountPage() {
     setBusy(false)
     if (error) { setErr(error.message); return }
     setUItem(''); setUDesc(''); setUBatch(''); setUQty(''); load()
+  }
+
+  // --- Scan products to tally (each scanned batch label = +1 in the active bin) ---
+  function openProdScan() { seenRef.current = new Set(); tallyRef.current = new Map(); createdRef.current = new Map(); setScanMsg(''); setProdScanOpen(true) }
+  function enqueueScan(raw: string) { queueRef.current.push(raw); pump() }
+  async function pump() {
+    if (pumpingRef.current) return
+    pumpingRef.current = true
+    try { while (queueRef.current.length) await handleScan(queueRef.current.shift()!) } finally { pumpingRef.current = false }
+  }
+  async function handleScan(raw: string) {
+    if (!canEdit || !activeBin || applied) return
+    if (seenRef.current.has(raw)) { setScanMsg('⚠ already scanned that exact label'); return }
+    const p = parseQr(raw)
+    if (p.kind !== 'item') { setScanMsg('⚠ not a product label'); return }
+    seenRef.current.add(raw)
+    const item = p.item_code, batch = p.batch, key = `${item.toUpperCase()}|${batch}`
+    const nq = (tallyRef.current.get(key) || 0) + 1; tallyRef.current.set(key, nq)
+    const meta = { counted_by: profile?.id, counted_by_name: profile?.full_name, counted_at: new Date().toISOString() }
+    let target = linesRef.current.find(l => l.location_code === activeBin && l.item_code.toUpperCase() === item.toUpperCase() && l.batch_no === batch)
+    const cid = createdRef.current.get(key); if (!target && cid) target = linesRef.current.find(l => l.id === cid)
+    if (target) {
+      const t = target
+      const { error } = await supabase.from('wms_count_lines').update({ counted_qty: nq, ...meta }).eq('id', t.id)
+      if (error) { setScanMsg(error.message); return }
+      const upd = linesRef.current.map(l => l.id === t.id ? { ...l, counted_qty: nq } : l); linesRef.current = upd; setLines(upd)
+    } else {
+      const loc = locByCode.get(activeBin.toUpperCase())
+      const { data: itemRow } = await supabase.from('items').select('id, description').eq('code', item).maybeSingle()
+      const ir = itemRow as { id: string; description: string } | null
+      const { data: ins, error } = await supabase.from('wms_count_lines').insert({ task_id: id, location_id: loc?.id ?? null, location_code: activeBin, item_id: ir?.id ?? null, item_code: item, description: ir?.description ?? null, batch_no: batch, expected_qty: 0, counted_qty: nq, is_unexpected: true, ...meta }).select().single()
+      if (error) { setScanMsg(error.message); return }
+      const nl = ins as CLine; createdRef.current.set(key, nl.id)
+      const upd = [...linesRef.current, nl]; linesRef.current = upd; setLines(upd)
+    }
+    setScanMsg(`✓ ${item}${batch ? ' · ' + batch : ''} → ${nq}`)
   }
 
   async function toggleSkip(line: CLine) {
@@ -147,7 +191,10 @@ export default function WmsCountPage() {
 
             {activeBin && (
               <div className="bg-white rounded-xl shadow-sm border p-5 mb-4">
-                <h2 className="font-semibold mb-3">Bin <span className="font-mono">{activeBin}</span></h2>
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="font-semibold">Bin <span className="font-mono">{activeBin}</span></h2>
+                  <button onClick={openProdScan} className="bg-emerald-700 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-800 text-sm font-medium">📷 Scan products</button>
+                </div>
                 <div className="space-y-2">
                   {binLines.length === 0 && <p className="text-sm text-gray-400">System expects nothing here — add anything you find below.</p>}
                   {binLines.map(l => (
@@ -220,6 +267,18 @@ export default function WmsCountPage() {
             <div className="flex items-center justify-between mb-2"><h2 className="font-semibold">Scan a bin</h2><button onClick={() => setScanOpen(false)} className="text-gray-400 text-lg">✕</button></div>
             <QrScanner onDetect={onScan} onError={m => setErr(m)} />
             <p className="text-xs text-gray-400 mt-2">Point at the bin’s QR label.</p>
+          </div>
+        </div>
+      )}
+
+      {prodScanOpen && (
+        <div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4" onClick={() => setProdScanOpen(false)}>
+          <div className="bg-white rounded-xl w-full max-w-sm p-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2"><h2 className="font-semibold">Scan products into <span className="font-mono">{activeBin}</span></h2><button onClick={() => setProdScanOpen(false)} className="text-gray-400 text-lg">✕</button></div>
+            <QrScanner onDetect={enqueueScan} onError={setScanMsg} />
+            <div className={`mt-2 text-center text-sm font-medium min-h-[1.5rem] ${scanMsg.startsWith('✓') ? 'text-emerald-700' : scanMsg.startsWith('⚠') ? 'text-amber-600' : 'text-gray-500'}`}>{scanMsg || 'Scan each bag / pack…'}</div>
+            <p className="text-xs text-gray-400 mt-1">Each unique label counts once. An item not expected here is added as “found”.</p>
+            <button onClick={() => setProdScanOpen(false)} className="mt-3 w-full border py-2 rounded-lg text-sm font-medium hover:bg-gray-50">Done</button>
           </div>
         </div>
       )}
