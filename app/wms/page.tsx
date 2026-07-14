@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
+import { supabase, fetchAll } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
 
 interface PO { id: string; po_number: string | null; supplier_name: string | null; status: string; expected_date: string | null; wms_po_lines?: { count: number }[] }
@@ -23,6 +23,7 @@ export default function WmsHome() {
   const [pos, setPos] = useState<PO[]>([]); const [orders, setOrders] = useState<Ord[]>([])
   const [pending, setPending] = useState<Pend[]>([]); const [moves, setMoves] = useState<Move[]>([])
   const [counts, setCounts] = useState({ po: 0, ord: 0, pend: 0, pendQty: 0 })
+  const [alerts, setAlerts] = useState({ expired: 0, near: 0, low: 0, disc: 0 })
 
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
@@ -37,6 +38,24 @@ export default function WmsHome() {
     const pend = (pendRes.data as Pend[]) || []
     setPos((poRes.data as PO[]) || []); setOrders((ordRes.data as Ord[]) || []); setPending(pend); setMoves((mvRes.data as Move[]) || [])
     setCounts({ po: poCount.count ?? 0, ord: ordCount.count ?? 0, pend: pend.length, pendQty: clean(pend.reduce((s, r) => s + Number(r.quantity || 0), 0)) })
+
+    // Alerts: expired / near-expiry (30d) / low-stock / count discrepancies
+    const todayISO = new Date().toISOString().slice(0, 10)
+    const in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)
+    const [expC, nearC, settings, stockQ, discRes] = await Promise.all([
+      supabase.from('wms_stock').select('id', { count: 'exact', head: true }).lt('exp_date', todayISO).gt('quantity', 0),
+      supabase.from('wms_stock').select('id', { count: 'exact', head: true }).gte('exp_date', todayISO).lte('exp_date', in30).gt('quantity', 0),
+      fetchAll<{ item_code: string; reorder_level: number | null }>('wms_item_settings', 'item_code, reorder_level'),
+      fetchAll<{ item_code: string; quantity: number }>('wms_stock', 'item_code, quantity'),
+      supabase.from('wms_count_lines').select('expected_qty, counted_qty, is_unexpected').not('counted_qty', 'is', null).limit(1000),
+    ])
+    const oh = new Map<string, number>()
+    for (const s of stockQ) { const k = s.item_code.toUpperCase(); oh.set(k, (oh.get(k) || 0) + Number(s.quantity)) }
+    let low = 0
+    for (const st of settings) { if (st.reorder_level == null) continue; if ((oh.get(st.item_code.toUpperCase()) || 0) <= st.reorder_level) low++ }
+    let disc = 0
+    for (const l of ((discRes.data as { expected_qty: number; counted_qty: number; is_unexpected: boolean }[]) || [])) { if (l.is_unexpected || Number(l.counted_qty) !== Number(l.expected_qty)) disc++ }
+    setAlerts({ expired: expC.count ?? 0, near: nearC.count ?? 0, low, disc })
   }
 
   if (loading) return <div className="p-8 text-sm text-gray-500">Loading…</div>
@@ -52,6 +71,13 @@ export default function WmsHome() {
           <Tile href="/wms/orders" n={counts.ord} label="Orders to pick" accent="text-blue-600" />
           <Tile href="/wms/putaway" n={counts.pend} label="Pending putaway" accent="text-emerald-700" />
           <Tile href="/wms/stock" n={counts.pendQty} label="Qty in goods-in" accent="text-gray-500" isQty />
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+          <Tile href="/wms/reports/expiry" n={alerts.expired} label="Expired lots" accent="text-red-600" />
+          <Tile href="/wms/reports/expiry" n={alerts.near} label="Near expiry (30d)" accent="text-amber-600" />
+          <Tile href="/wms/reports" n={alerts.low} label="Low stock" accent="text-orange-600" />
+          <Tile href="/wms/reports/activity" n={alerts.disc} label="Count discrepancies" accent="text-violet-600" />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">

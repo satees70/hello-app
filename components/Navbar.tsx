@@ -277,6 +277,8 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/wms/orders', label: 'Orders to Pick', module: 'warehouse' as ModuleKey },
       { href: '/wms/dispatch', label: 'Delivery Orders', module: 'warehouse' as ModuleKey },
       { href: '/wms/counts', label: 'Stock Counts', module: 'warehouse' as ModuleKey },
+      { href: '/wms/reports/expiry', label: 'Expiry Alerts', module: 'warehouse' as ModuleKey },
+      { href: '/wms/reports', label: 'Reports', module: 'warehouse' as ModuleKey },
       { href: '/wms/labels', label: 'Labels (QR)', module: 'warehouse' as ModuleKey },
       { href: '/wms/movements', label: 'Movements', module: 'warehouse' as ModuleKey },
     ] },

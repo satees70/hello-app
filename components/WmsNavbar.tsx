@@ -18,6 +18,8 @@ const LINKS = [
   { href: '/wms/orders', label: 'Orders to Pick' },
   { href: '/wms/dispatch', label: 'Delivery Orders' },
   { href: '/wms/counts', label: 'Stock Counts' },
+  { href: '/wms/reports/expiry', label: 'Expiry' },
+  { href: '/wms/reports', label: 'Reports' },
   { href: '/wms/labels', label: 'Labels' },
   { href: '/wms/movements', label: 'Movements' },
 ]
