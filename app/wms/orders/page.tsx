@@ -10,7 +10,18 @@ interface Order {
   id: string; order_no: string | null; customer_name: string | null; order_date: string | null; delivery_date: string | null
   file_name: string | null; file_path: string | null; status: string; source: string
   error_message: string | null; uploaded_by_name: string | null; created_at: string
+  assigned_to: string | null; assigned_to_name: string | null; pick_started_at: string | null; pick_completed_at: string | null
   wms_order_lines?: { count: number }[]
+}
+interface User { id: string; full_name: string | null }
+
+// Pick duration for KPI: mins between start and finish, else "picking…" while in progress.
+const pickDur = (o: Order) => {
+  if (!o.pick_started_at) return ''
+  const end = o.pick_completed_at ? new Date(o.pick_completed_at).getTime() : Date.now()
+  const mins = Math.max(0, Math.round((end - new Date(o.pick_started_at).getTime()) / 60000))
+  const s = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`
+  return o.pick_completed_at ? `⏱ ${s}` : `⏱ ${s}…`
 }
 interface Line { id: string; line_no: number | null; item_id: string | null; item_code: string; description: string | null; quantity: number; uom: string | null; source_hint: string | null; remarks: string | null }
 
@@ -29,6 +40,7 @@ export default function WmsOrdersPage() {
   const canEdit = !!profile && can(profile, 'warehouse', 'edit')
 
   const [orders, setOrders] = useState<Order[]>([])
+  const [users, setUsers] = useState<User[]>([])
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
@@ -45,6 +57,16 @@ export default function WmsOrdersPage() {
     const { data } = await supabase.from('wms_orders')
       .select('*, wms_order_lines(count)').order('created_at', { ascending: false }).limit(100)
     setOrders((data as Order[]) || [])
+    const { data: us } = await supabase.from('profiles').select('id, full_name').order('full_name')
+    setUsers((us as User[]) || [])
+  }
+
+  async function assign(o: Order, userId: string) {
+    if (!canEdit) return
+    setErr(''); setMsg('')
+    const { error } = await supabase.rpc('wms_assign_order', { p_order_id: o.id, p_user_id: userId || null })
+    if (error) { setErr(/wms_assign_order|assigned_to|function|column/i.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-picker-kpi.sql in Supabase.' : error.message); return }
+    load()
   }
 
   async function handleUpload(e: React.FormEvent) {
@@ -159,12 +181,12 @@ export default function WmsOrdersPage() {
         <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
-              <tr>{['File', 'Order No', 'Customer', 'Delivery', 'Lines', 'Status', 'Uploaded', 'Actions'].map(h => (
+              <tr>{['File', 'Order No', 'Customer', 'Delivery', 'Lines', 'Status', 'Picker', 'Uploaded', 'Actions'].map(h => (
                 <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>
               ))}</tr>
             </thead>
             <tbody>
-              {(statusFilter ? orders.filter(o => o.status === statusFilter) : orders).length === 0 && <tr><td colSpan={8} className="text-center py-10 text-gray-400">No orders{statusFilter ? ` with status “${statusFilter}”` : ' yet — upload a PDF to start'}.</td></tr>}
+              {(statusFilter ? orders.filter(o => o.status === statusFilter) : orders).length === 0 && <tr><td colSpan={9} className="text-center py-10 text-gray-400">No orders{statusFilter ? ` with status “${statusFilter}”` : ' yet — upload a PDF to start'}.</td></tr>}
               {(statusFilter ? orders.filter(o => o.status === statusFilter) : orders).map(o => (
                 <tr key={o.id} className="border-b last:border-0 hover:bg-gray-50">
                   <td className="px-4 py-2.5 max-w-[200px] truncate" title={o.file_name || ''}>{o.file_name}</td>
@@ -173,6 +195,15 @@ export default function WmsOrdersPage() {
                   <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">{o.delivery_date || <span className="text-gray-300">—</span>}</td>
                   <td className="px-4 py-2.5 tabular-nums">{o.wms_order_lines?.[0]?.count ?? 0}</td>
                   <td className="px-4 py-2.5"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CHIP[o.status] || 'bg-gray-100'}`}>{o.status}</span></td>
+                  <td className="px-4 py-2.5 whitespace-nowrap">
+                    {canEdit
+                      ? <select value={o.assigned_to || ''} onChange={e => assign(o, e.target.value)} className="border rounded px-1.5 py-1 text-xs max-w-[130px]">
+                          <option value="">— unassigned —</option>
+                          {users.map(u => <option key={u.id} value={u.id}>{u.full_name || u.id.slice(0, 6)}</option>)}
+                        </select>
+                      : <span className="text-xs text-gray-600">{o.assigned_to_name || '—'}</span>}
+                    {pickDur(o) && <div className="text-[10px] text-gray-400 mt-0.5">{pickDur(o)}</div>}
+                  </td>
                   <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">{fmtTime(o.created_at)}</td>
                   <td className="px-4 py-2.5 whitespace-nowrap">
                     <div className="flex gap-3 text-xs">

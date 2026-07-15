@@ -8,7 +8,7 @@ import { can } from '@/lib/permissions'
 import ScanGate from '@/components/ScanGate'
 import { matchBin, matchItem } from '@/lib/qr'
 
-interface Order { id: string; order_no: string | null; customer_name: string | null; status: string; delivery_date: string | null; source: string | null; pick_checked_by_name: string | null; pick_checked_at: string | null; pick_check_note: string | null }
+interface Order { id: string; order_no: string | null; customer_name: string | null; status: string; delivery_date: string | null; source: string | null; pick_checked_by_name: string | null; pick_checked_at: string | null; pick_check_note: string | null; assigned_to_name: string | null; pick_started_at: string | null }
 interface Line { id: string; line_no: number | null; item_id: string | null; item_code: string; description: string | null; quantity: number; qty_picked: number; uom: string | null; source_hint: string | null; remarks: string | null; no_stock?: boolean; no_stock_qty?: number | null; no_stock_by_name?: string | null }
 interface Stock { id: string; item_code: string; location_id: string; location_code: string; batch_no: string; exp_date: string | null; quantity: number; created_at: string }
 interface Loc { id: string; location_type: string; pick_sequence: number | null }
@@ -59,7 +59,7 @@ export default function WmsPickPage() {
   const setMode = (m: 'manual' | 'scan') => { setPickMode(m); try { localStorage.setItem('wmsPickMode', m) } catch { /* ignore */ } }
 
   const load = useCallback(async () => {
-    const { data: o } = await supabase.from('wms_orders').select('id, order_no, customer_name, status, delivery_date, source, pick_checked_by_name, pick_checked_at, pick_check_note').eq('id', id).single()
+    const { data: o } = await supabase.from('wms_orders').select('id, order_no, customer_name, status, delivery_date, source, pick_checked_by_name, pick_checked_at, pick_check_note, assigned_to_name, pick_started_at').eq('id', id).single()
     const { data: ls } = await supabase.from('wms_order_lines').select('*').eq('order_id', id).order('line_no')
     const lineList = (ls as Line[]) || []
     const codes = [...new Set(lineList.map(l => l.item_code))]
@@ -241,7 +241,11 @@ export default function WmsPickPage() {
           <h1 className="text-2xl font-bold">Pick {order.order_no || '(no number)'}</h1>
           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CHIP[order.status] || 'bg-gray-100 text-gray-600'}`}>{order.status}</span>
         </div>
-        <p className="text-gray-500 text-sm mb-6">{order.customer_name || 'Customer ?'}{order.delivery_date ? ` · deliver ${order.delivery_date}` : ''} · {totals.done}/{totals.lines} lines done · {fmtQty(totals.remaining)} still to pick</p>
+        <p className="text-gray-500 text-sm mb-1">{order.customer_name || 'Customer ?'}{order.delivery_date ? ` · deliver ${order.delivery_date}` : ''} · {totals.done}/{totals.lines} lines done · {fmtQty(totals.remaining)} still to pick</p>
+        <p className="text-gray-400 text-xs mb-6">
+          {order.assigned_to_name ? `👤 Picker: ${order.assigned_to_name}` : '👤 Unassigned'}
+          {order.pick_started_at ? ` · started ${new Date(order.pick_started_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}
+        </p>
 
         {!canEdit && <p className="text-sm bg-amber-50 text-amber-700 border border-amber-200 rounded-lg p-3 mb-4">You have view-only warehouse access, so you can’t book picks.</p>}
         {err && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg mb-4">{err}</p>}
