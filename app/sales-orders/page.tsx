@@ -35,6 +35,9 @@ interface SalesLine {
   delivered_qty?: number | null
   delivered_do?: string | null
   is_grinding?: boolean | null
+  balance_cancelled_at?: string | null
+  balance_cancel_no?: string | null
+  balance_cancelled_qty?: number | null
 }
 
 interface ChangeRequest {
@@ -1162,6 +1165,7 @@ export default function SalesOrdersPage() {
                           ) : null}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">
+                          {line.balance_cancelled_at && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700 mr-1" title={`Balance cancelled${line.balance_cancelled_qty != null ? ' · ' + line.balance_cancelled_qty : ''}`}>Cancel note{line.balance_cancel_no ? ` · ${line.balance_cancel_no}` : ''}</span>}
                           {line.is_grinding
                             ? <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700" title="Routed to the Grinding board">🌀 Grinding</span>
                             : Number(line.delivered_qty || 0) > 0

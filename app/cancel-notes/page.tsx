@@ -6,14 +6,14 @@ import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
 
 interface Note {
-  id: string; so_number: string | null; customer_name: string | null; item_code: string | null; description: string | null
+  id: string; cancel_note_no: string | null; so_number: string | null; customer_name: string | null; item_code: string | null; description: string | null
   factory_code: string | null; ordered_qty: number | null; delivered_qty: number | null; cancel_qty: number | null
   reason: string | null; status: string
   requested_by_name: string | null; reviewed_by_name: string | null; reviewed_at: string | null; created_at: string
 }
 interface Cand {
   line_id: string; so_number: string | null; customer_name: string | null; item_code: string | null; description: string | null
-  factory_code: string | null; ordered_qty: number | null; delivered_qty: number | null; balance: number | null
+  factory_code: string | null; delivery_date: string | null; ordered_qty: number | null; delivered_qty: number | null; balance: number | null
 }
 
 const STATUS_STYLE: Record<string, string> = {
@@ -29,6 +29,7 @@ export default function CancelNotesPage() {
   const [cands, setCands] = useState<Cand[]>([])
   const [selCand, setSelCand] = useState<Set<string>>(new Set())
   const [candReason, setCandReason] = useState('')
+  const [candQ, setCandQ] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
@@ -41,17 +42,23 @@ export default function CancelNotesPage() {
     setCands((c as Cand[]) || [])
   }
   // Group the candidate lines by SO so a whole order can be cancelled in one tick.
-  const groups = useMemo(() => {
+  const allGroups = useMemo(() => {
     const m = new Map<string, Cand[]>()
     cands.forEach(c => { const k = c.so_number || '—'; const a = m.get(k) || []; a.push(c); m.set(k, a) })
     return [...m.entries()].map(([so, lines]) => ({
       so, lines, ids: lines.map(l => l.line_id),
       customer: lines[0]?.customer_name || '',
       factories: [...new Set(lines.map(l => l.factory_code).filter(Boolean))].join(', '),
-      items: lines.map(l => l.item_code).filter(Boolean) as string[],
+      deliveryDate: lines.map(l => l.delivery_date).filter(Boolean).sort()[0] || '',
+      items: lines.map(l => ({ code: l.item_code || '', name: l.description || '' })),
       balance: lines.reduce((s, l) => s + Number(l.balance || 0), 0),
     }))
   }, [cands])
+  const groups = useMemo(() => {
+    const n = candQ.trim().toLowerCase()
+    if (!n) return allGroups
+    return allGroups.filter(g => `${g.so} ${g.customer} ${g.factories} ${g.deliveryDate} ${g.items.map(i => i.code + ' ' + i.name).join(' ')}`.toLowerCase().includes(n))
+  }, [allGroups, candQ])
   const groupChecked = (ids: string[]) => ids.length > 0 && ids.every(id => selCand.has(id))
   const toggleGroup = (ids: string[]) => setSelCand(p => { const n = new Set(p); const all = ids.every(id => n.has(id)); ids.forEach(id => all ? n.delete(id) : n.add(id)); return n })
   const selSoCount = groups.filter(g => groupChecked(g.ids)).length
@@ -82,7 +89,7 @@ export default function CancelNotesPage() {
   const n = q.trim().toLowerCase()
   const shown = notes.filter(x =>
     (!statusF || x.status === statusF) &&
-    (!n || `${x.so_number} ${x.customer_name} ${x.item_code} ${x.description} ${x.reason}`.toLowerCase().includes(n)))
+    (!n || `${x.cancel_note_no} ${x.so_number} ${x.customer_name} ${x.item_code} ${x.description} ${x.reason}`.toLowerCase().includes(n)))
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -109,23 +116,25 @@ export default function CancelNotesPage() {
               </div>
             )}
           </div>
+          <div className="px-4 py-2 border-b"><input value={candQ} onChange={e => setCandQ(e.target.value)} placeholder="Search SO / customer / item / factory / date…" className="border rounded-lg px-3 py-2 text-sm w-full" /></div>
           <div className="overflow-x-auto max-h-80">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b sticky top-0"><tr>
                 <th className="px-3 py-2"><input type="checkbox" checked={cands.length > 0 && selCand.size === cands.length} onChange={e => setSelCand(e.target.checked ? new Set(cands.map(c => c.line_id)) : new Set())} className="h-4 w-4" /></th>
-                {['SO', 'Customer', 'Items', 'Factory', 'Balance'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}
+                {['SO', 'Customer', 'Items', 'Delivery', 'Factory', 'Balance'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}
               </tr></thead>
               <tbody>
-                {groups.length === 0 && <tr><td colSpan={6} className="text-center py-6 text-gray-400">Nothing outstanding is off the schedule. 🎉</td></tr>}
+                {groups.length === 0 && <tr><td colSpan={7} className="text-center py-6 text-gray-400">{candQ ? 'No match.' : 'Nothing outstanding is off the schedule. 🎉'}</td></tr>}
                 {groups.map(g => (
                   <tr key={g.so} className={`border-b last:border-0 ${groupChecked(g.ids) ? 'bg-orange-50' : 'hover:bg-gray-50'}`}>
                     <td className="px-3 py-2 align-top"><input type="checkbox" checked={groupChecked(g.ids)} onChange={() => toggleGroup(g.ids)} className="h-4 w-4" /></td>
                     <td className="px-3 py-2 font-mono whitespace-nowrap align-top">{g.so}</td>
                     <td className="px-3 py-2 min-w-[140px] align-top">{g.customer || '—'}</td>
-                    <td className="px-3 py-2 align-top">
-                      <span className="text-gray-700">{g.items.length} item{g.items.length === 1 ? '' : 's'}</span>
-                      <span className="block text-xs text-gray-500">{g.items.slice(0, 3).join(', ')}{g.items.length > 3 ? ` +${g.items.length - 3} more` : ''}</span>
+                    <td className="px-3 py-2 align-top min-w-[220px]">
+                      {g.items.slice(0, 4).map((it, i) => <div key={i} className="text-xs"><span className="font-mono text-gray-700">{it.code}</span>{it.name ? <span className="text-gray-500"> — {it.name}</span> : null}</div>)}
+                      {g.items.length > 4 && <div className="text-[11px] text-gray-400">+{g.items.length - 4} more</div>}
                     </td>
+                    <td className="px-3 py-2 whitespace-nowrap text-gray-600 align-top">{g.deliveryDate ? g.deliveryDate.split('-').reverse().join('/') : '—'}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-gray-600 align-top">{g.factories || '—'}</td>
                     <td className="px-3 py-2 text-right tabular-nums font-semibold text-orange-600 align-top">{Number(g.balance.toFixed(3))}</td>
                   </tr>
@@ -151,13 +160,14 @@ export default function CancelNotesPage() {
         <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
-              <tr>{['SO', 'Customer', 'Item', 'Ordered', 'Delivered', 'Cancelled', 'Reason', 'Status', 'Requested', 'Reviewed'].map(h =>
+              <tr>{['No.', 'SO', 'Customer', 'Item', 'Ordered', 'Delivered', 'Cancelled', 'Reason', 'Status', 'Requested', 'Reviewed'].map(h =>
                 <th key={h} className="text-left px-3 py-2.5 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr>
             </thead>
             <tbody>
-              {shown.length === 0 && <tr><td colSpan={10} className="text-center py-10 text-gray-400">No cancel notes.</td></tr>}
+              {shown.length === 0 && <tr><td colSpan={11} className="text-center py-10 text-gray-400">No cancel notes.</td></tr>}
               {shown.map(x => (
                 <tr key={x.id} className="border-b last:border-0 hover:bg-gray-50 align-top">
+                  <td className="px-3 py-2 font-mono whitespace-nowrap font-semibold text-gray-700">{x.cancel_note_no || <span className="text-gray-300">—</span>}</td>
                   <td className="px-3 py-2 font-mono whitespace-nowrap">{x.so_number || '—'}</td>
                   <td className="px-3 py-2 min-w-[140px]">{x.customer_name || '—'}</td>
                   <td className="px-3 py-2"><span className="font-medium">{x.item_code}</span>{x.description ? <span className="block text-xs text-gray-500">{x.description}</span> : null}</td>
