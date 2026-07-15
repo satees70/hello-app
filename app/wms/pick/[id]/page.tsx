@@ -8,10 +8,10 @@ import { can } from '@/lib/permissions'
 import ScanGate from '@/components/ScanGate'
 import { matchBin, matchItem } from '@/lib/qr'
 
-interface Order { id: string; order_no: string | null; customer_name: string | null; status: string; delivery_date: string | null; source: string | null; pick_checked_by_name: string | null; pick_checked_at: string | null; pick_check_note: string | null; assigned_to_name: string | null; pick_started_at: string | null }
+interface Order { id: string; order_no: string | null; customer_name: string | null; status: string; delivery_date: string | null; source: string | null; pick_checked_by_name: string | null; pick_checked_at: string | null; pick_check_note: string | null; assigned_to_name: string | null; pick_started_at: string | null; pick_completed_at: string | null }
 interface Line { id: string; line_no: number | null; item_id: string | null; item_code: string; description: string | null; quantity: number; qty_picked: number; uom: string | null; source_hint: string | null; remarks: string | null; no_stock?: boolean; no_stock_qty?: number | null; no_stock_by_name?: string | null }
 interface Stock { id: string; item_code: string; location_id: string; location_code: string; batch_no: string; exp_date: string | null; quantity: number; created_at: string }
-interface Loc { id: string; location_type: string; pick_sequence: number | null }
+interface Loc { id: string; location_type: string; pick_sequence: number | null; pickable: boolean }
 
 const clean = (n: number) => Number(n.toPrecision(12))
 const fmtQty = (n: number) => clean(n).toLocaleString(undefined, { maximumFractionDigits: 4 })
@@ -59,14 +59,14 @@ export default function WmsPickPage() {
   const setMode = (m: 'manual' | 'scan') => { setPickMode(m); try { localStorage.setItem('wmsPickMode', m) } catch { /* ignore */ } }
 
   const load = useCallback(async () => {
-    const { data: o } = await supabase.from('wms_orders').select('id, order_no, customer_name, status, delivery_date, source, pick_checked_by_name, pick_checked_at, pick_check_note, assigned_to_name, pick_started_at').eq('id', id).single()
+    const { data: o } = await supabase.from('wms_orders').select('id, order_no, customer_name, status, delivery_date, source, pick_checked_by_name, pick_checked_at, pick_check_note, assigned_to_name, pick_started_at, pick_completed_at').eq('id', id).single()
     const { data: ls } = await supabase.from('wms_order_lines').select('*').eq('order_id', id).order('line_no')
     const lineList = (ls as Line[]) || []
     const codes = [...new Set(lineList.map(l => l.item_code))]
     const st = codes.length
       ? (await supabase.from('wms_stock').select('id, item_code, location_id, location_code, batch_no, exp_date, quantity, created_at').in('item_code', codes)).data as Stock[]
       : []
-    const locs = await fetchAll<Loc>('wms_locations', 'id, location_type, pick_sequence')
+    const locs = await fetchAll<Loc>('wms_locations', 'id, location_type, pick_sequence, pickable')
     // stock reserved for OTHER orders — not available to this one
     const rmap = new Map<string, number>()
     if (codes.length) {
@@ -90,7 +90,7 @@ export default function WmsPickPage() {
 
   // Available stock for an item, best-first: SL bins, then earliest expiry, then walking order.
   const availFor = useCallback((itemCode: string) => {
-    return stock.filter(s => s.item_code === itemCode && availQty(s) > 0 && locMeta.get(s.location_id)?.location_type !== 'STAGE').slice().sort((a, b) => {
+    return stock.filter(s => s.item_code === itemCode && availQty(s) > 0 && locMeta.get(s.location_id)?.location_type !== 'STAGE' && locMeta.get(s.location_id)?.pickable !== false).slice().sort((a, b) => {
       const la = locMeta.get(a.location_id), lb = locMeta.get(b.location_id)
       const slA = la?.location_type === 'SL' ? 0 : 1, slB = lb?.location_type === 'SL' ? 0 : 1
       if (slA !== slB) return slA - slB
@@ -198,6 +198,21 @@ export default function WmsPickPage() {
     if (error) { setErr(/wms_start_picking|function/i.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-pickers.sql in the Supabase SQL editor.' : error.message); return }
     setMsg('Picking started.'); load()
   }
+  // Explicit stop — end time; duration = stop − start.
+  async function stopPicking() {
+    if (!canEdit) return
+    setBusy('stop'); setErr('')
+    const { error } = await supabase.rpc('wms_stop_picking', { p_order_id: id })
+    setBusy('')
+    if (error) { setErr(/wms_stop_picking|function/i.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-pickable-stop.sql in the Supabase SQL editor.' : error.message); return }
+    setMsg('Picking stopped.'); load()
+  }
+  const pickTaken = () => {
+    if (!order?.pick_started_at) return ''
+    const end = order.pick_completed_at ? new Date(order.pick_completed_at).getTime() : Date.now()
+    const m = Math.max(0, Math.round((end - new Date(order.pick_started_at).getTime()) / 60000))
+    return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`
+  }
 
   function startPick(l: Line, s: Stock, qty: number) {
     if (!canEdit || !(qty > 0)) return
@@ -258,6 +273,8 @@ export default function WmsPickPage() {
           {order.pick_started_at
             ? <span>· started {new Date(order.pick_started_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
             : canEdit && ['Reserved', 'Released', 'Picking'].includes(order.status) && <button onClick={startPicking} disabled={busy === 'start'} className="border border-emerald-600 text-emerald-700 rounded px-2 py-0.5 hover:bg-emerald-50 font-medium">▶ Start picking</button>}
+          {order.pick_started_at && !order.pick_completed_at && canEdit && <button onClick={stopPicking} disabled={busy === 'stop'} className="border border-red-500 text-red-600 rounded px-2 py-0.5 hover:bg-red-50 font-medium">■ Stop picking</button>}
+          {order.pick_started_at && order.pick_completed_at && <span className="text-gray-500">· ⏱ took {pickTaken()}</span>}
         </div>
 
         {!canEdit && <p className="text-sm bg-amber-50 text-amber-700 border border-amber-200 rounded-lg p-3 mb-4">You have view-only warehouse access, so you can’t book picks.</p>}
