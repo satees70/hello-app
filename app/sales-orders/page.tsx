@@ -505,6 +505,19 @@ export default function SalesOrdersPage() {
     setReqReason('')
     setError('')
   }
+  const balanceOf = (l: SalesLine) => Math.max(0, Number(l.outstanding_qty ?? l.quantity ?? 0) - Number(l.delivered_qty || 0))
+  // Request Head Office to cancel a delivered line's leftover balance (closes it + frees not-started production).
+  async function requestBalanceCancel(line: SalesLine) {
+    if (!can(profile, 'sales', 'edit', line.factory_code)) { setError('You have view-only access for this factory.'); return }
+    const bal = balanceOf(line)
+    const reason = window.prompt(`Request to cancel the leftover balance of ${bal} for ${line.item_code} (SO ${line.so_number || '—'})?\n\nHead Office must approve. On approval it closes the balance and frees any not-started production for this order.\n\nReason (optional):`, '')
+    if (reason === null) return
+    setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('request_so_balance_cancel', { p_line_id: line.id, p_reason: reason || null })
+    if (e) { setError(/request_so_balance_cancel|so_balance_cancel_requests/.test(e.message) && /does not exist|schema cache|could not find/i.test(e.message) ? 'This needs a database update — run db/2026-07-so-balance-cancel.sql in the Supabase SQL editor.' : e.message); return }
+    setSuccess(`Balance cancel requested for ${line.item_code} — waiting for Head Office approval.`)
+    if (linesFor) viewLines(linesFor)
+  }
 
   // ---- bulk select + bulk change request ----
   const toggleSel = (id: string) => setSelectedIds(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
@@ -807,7 +820,7 @@ export default function SalesOrdersPage() {
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        <h1 className="text-2xl font-bold mb-1">Sales Orders</h1>
+        <h1 className="text-2xl font-bold mb-1">Outstanding Sales Order</h1>
         <p className="text-gray-500 text-sm mb-6">Upload a sales order PDF. It is read automatically. To correct a line, raise a change request for Head Office to approve.</p>
 
         <form onSubmit={handleUpload} className="bg-white rounded-xl shadow-sm border p-6 mb-8">
@@ -1163,6 +1176,7 @@ export default function SalesOrdersPage() {
                               : <>
                                 <button onClick={() => openRequest(line)} className="text-emerald-600 hover:underline">{isFactoryConfirmed(line.factory_code || '') ? 'Request change' : 'Edit'}</button>
                                 <button onClick={() => openDelete(line)} className="text-red-600 hover:underline ml-3">{isFactoryConfirmed(line.factory_code || '') ? 'Request delete' : 'Delete'}</button>
+                                {Number(line.delivered_qty || 0) > 0 && balanceOf(line) > 0 && <button onClick={() => requestBalanceCancel(line)} className="block text-orange-600 hover:underline mt-1" title={`Cancel the undelivered balance of ${balanceOf(line)} (Head Office approval)`}>Cancel balance ({balanceOf(line)})</button>}
                               </>}
                         </td>
                       </tr>

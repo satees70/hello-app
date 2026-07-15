@@ -110,11 +110,11 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   }
 
   // Every kind of approval that lands in Pending Changes
-  const APPROVAL_TABLES = ['change_requests', 'correction_requests', 'do_change_requests', 'split_requests', 'stock_adjustments', 'run_mode_requests', 'mr_cancel_requests', 'mr_cancel_item_requests', 'label_override_requests', 'doc_delete_requests', 'return_edit_requests', 'item_change_requests', 'so_change_requests', 'mr_qty_move_requests', 'factory_change_requests', 'food_loss_alerts', 'wms_check_qty_requests'] as const
+  const APPROVAL_TABLES = ['change_requests', 'correction_requests', 'do_change_requests', 'split_requests', 'stock_adjustments', 'run_mode_requests', 'mr_cancel_requests', 'mr_cancel_item_requests', 'label_override_requests', 'so_balance_cancel_requests', 'doc_delete_requests', 'return_edit_requests', 'item_change_requests', 'so_change_requests', 'mr_qty_move_requests', 'factory_change_requests', 'food_loss_alerts', 'wms_check_qty_requests'] as const
   const TABLE_LABEL: Record<string, string> = {
     change_requests: 'change', correction_requests: 'timer cancellation', do_change_requests: 'Goods Received change',
     split_requests: 'batch split / un-combine', stock_adjustments: 'stock adjustment', run_mode_requests: 'run-mode change',
-    mr_cancel_requests: 'material request cancellation', mr_cancel_item_requests: 'material request line cancellation', label_override_requests: 'label received override', doc_delete_requests: 'document delete', return_edit_requests: 'material return edit', item_change_requests: 'item change', so_change_requests: 'SO number change', mr_qty_move_requests: 'received-qty move', factory_change_requests: 'factory change', food_loss_alerts: 'food-loss alert', wms_check_qty_requests: 'pick check quantity correction',
+    mr_cancel_requests: 'material request cancellation', mr_cancel_item_requests: 'material request line cancellation', label_override_requests: 'label received override', so_balance_cancel_requests: 'order balance cancel', doc_delete_requests: 'document delete', return_edit_requests: 'material return edit', item_change_requests: 'item change', so_change_requests: 'SO number change', mr_qty_move_requests: 'received-qty move', factory_change_requests: 'factory change', food_loss_alerts: 'food-loss alert', wms_check_qty_requests: 'pick check quantity correction',
   }
 
   // Head Office: total pending approvals across ALL approval types
@@ -227,7 +227,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/discussion', label: 'Discussion' },
     ] },
     { header: 'Sales', items: [
-      { href: '/sales-orders', label: 'Sales Orders', module: 'sales' },
+      { href: '/sales-orders', label: 'Outstanding Sales Order', module: 'sales' },
       { href: '/pending-summary', label: 'Pending Summary', module: 'sales' },
       { href: '/repacking', label: 'Repacking', module: 'sales' },
       { href: '/delivery-schedule', label: 'Delivery Schedule' },
@@ -235,6 +235,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/dispatch/dashboard', label: 'Delivery Status', module: 'dispatch' as ModuleKey },
       { href: '/transport', label: 'Lorry Internal Transfer', module: 'dispatch' as ModuleKey },
       { href: '/supplier', label: 'Supplier (to order)', module: 'sales' },
+      { href: '/cancel-notes', label: 'Cancel Notes', module: 'sales' },
     ] },
     { header: 'Receiving', items: [
       { href: '/material-requests', label: 'Material Requests', module: 'material_requests' },
@@ -297,7 +298,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const warehouseGroups: { header?: string; items: Item[] }[] = [
     // Ordered by the process: demand → pick for the factory → receive → dispatch.
     { header: 'Production', items: [
-      { href: '/sales-orders', label: 'Sales Orders', module: 'sales' },
+      { href: '/sales-orders', label: 'Outstanding Sales Order', module: 'sales' },
       { href: '/material-requests', label: 'Pick Runs', module: 'material_requests' },
       { href: '/warehouse/pick-production', label: 'Pick for Production', module: 'material_requests' },
       { href: '/incoming', label: 'Goods Received', module: 'goods_received' },

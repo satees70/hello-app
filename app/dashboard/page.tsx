@@ -23,7 +23,7 @@ export default function DashboardPage() {
       { href: '/sales-orders/changes', label: isHO ? 'Pending Changes' : 'My Change Requests', desc: isHO ? 'Approve or reject line change requests' : 'Track change requests you raised', module: 'changes' },
     ] },
     { header: 'Sales', items: [
-      { href: '/sales-orders', label: 'Sales Orders', desc: 'Upload and track sales order PDFs', module: 'sales' },
+      { href: '/sales-orders', label: 'Outstanding Sales Order', desc: 'Upload and track sales order PDFs', module: 'sales' },
     ] },
     { header: 'Receiving', items: [
       { href: '/material-requests', label: 'Material Requests', desc: 'Material shortfalls requested from the warehouse', module: 'material_requests' },

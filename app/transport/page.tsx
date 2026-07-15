@@ -17,6 +17,7 @@ interface DOrder {
   id: string; do_number: string | null; factory_code: string; created_at: string; created_by_name: string | null
   vehicle: string | null; lorry_requested_at: string | null
   driver_name: string | null; driver_requested_at: string | null
+  sent_at?: string | null; sent_by_name?: string | null
   dispatch_order_lines?: { item_code: string; description: string | null; quantity: number }[]
   material_returns?: { item_code: string; description: string | null; quantity: number }[]
 }
@@ -33,6 +34,7 @@ export default function TransportPage() {
   const [search, setSearch] = useState('')
   const [facF, setFacF] = useState<Set<string>>(new Set())
   const [pendingOnly, setPendingOnly] = useState(true)
+  const [showSent, setShowSent] = useState(false)
   const [showParking, setShowParking] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())   // DO ids showing their item list
   const [busy, setBusy] = useState('')
@@ -44,7 +46,7 @@ export default function TransportPage() {
       supabase.from('factories').select('code, name').order('code'),
       supabase.from('delivery_resources').select('id, kind, name, parked_at, lorry_type').eq('active', true).eq('approved', true).order('name'),
       supabase.from('dispatch_orders')
-        .select('id, do_number, factory_code, created_at, created_by_name, vehicle, lorry_requested_at, driver_name, driver_requested_at, dispatch_order_lines(item_code, description, quantity), material_returns(item_code, description, quantity)')
+        .select('id, do_number, factory_code, created_at, created_by_name, vehicle, lorry_requested_at, driver_name, driver_requested_at, sent_at, sent_by_name, dispatch_order_lines(item_code, description, quantity), material_returns(item_code, description, quantity)')
         .gte('created_at', TRANSPORT_SINCE).order('created_at', { ascending: false }).limit(100),
       supabase.from('lorry_requests').select('id, factory_code, kind, lorry_type, note, destination, requested_by_name, requested_at').eq('status', 'open').order('requested_at', { ascending: false }),
     ])
@@ -112,14 +114,25 @@ export default function TransportPage() {
     if (e) { setError(e.message); return }
     load()
   }
+  // Mark a DO as "Sent" (or undo) — a declutter marker that drops it off the active list.
+  async function markSent(o: DOrder, sent: boolean) {
+    if (!canEditFac(o.factory_code)) { setError('You have view-only access at this factory.'); return }
+    setBusy(o.id + 'sent'); setError('')
+    const { error: e } = await supabase.rpc('mark_do_sent', { p_do_id: o.id, p_sent: sent })
+    setBusy('')
+    if (e) { setError(/mark_do_sent|sent_at/.test(e.message) && /does not exist|schema cache|could not find/i.test(e.message) ? 'This needs a database update — run db/2026-07-do-mark-sent.sql in the Supabase SQL editor.' : e.message); return }
+    load()
+  }
 
   const q = search.trim().toLowerCase()
   const shown = useMemo(() => orders.filter(o => {
+    if (!showSent && o.sent_at) return false
     if (pendingOnly && o.vehicle && o.driver_name) return false
     if (facF.size && !facF.has(factoryName(o.factory_code))) return false
     if (q && !`${o.do_number} ${o.vehicle} ${o.driver_name}`.toLowerCase().includes(q)) return false
     return true
-  }), [orders, pendingOnly, facF, q]) // eslint-disable-line react-hooks/exhaustive-deps
+  }), [orders, pendingOnly, showSent, facF, q]) // eslint-disable-line react-hooks/exhaustive-deps
+  const sentCount = orders.filter(o => o.sent_at).length
 
   if (loading) return <div className="flex min-h-screen items-center justify-center">Loading…</div>
   if (profileError) return <div className="flex min-h-screen items-center justify-center text-red-500">{profileError}</div>
@@ -140,6 +153,7 @@ export default function TransportPage() {
         <div className="flex flex-wrap items-center gap-3 mb-3 text-sm">
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Search DO, lorry or driver…" className="border rounded-lg px-3 py-2 w-full sm:w-72" />
           <label className="flex items-center gap-1.5"><input type="checkbox" checked={pendingOnly} onChange={e => setPendingOnly(e.target.checked)} />Needs a lorry or driver</label>
+          <label className="flex items-center gap-1.5"><input type="checkbox" checked={showSent} onChange={e => setShowSent(e.target.checked)} />Show sent{sentCount ? ` (${sentCount})` : ''}</label>
           {isHO && <div className="w-48"><span className="text-xs text-gray-500">Factory</span><MultiFilter values={[...new Set(orders.map(o => factoryName(o.factory_code)))].sort()} selected={facF} onChange={setFacF} /></div>}
           <span className="text-amber-700 text-xs">🚚 {needLorry} need a lorry · 👤 {needDriver} need a driver</span>
           <button onClick={() => setShowParking(v => !v)} className="text-xs text-emerald-600 hover:underline">🅿 Lorry parking</button>
@@ -301,7 +315,19 @@ export default function TransportPage() {
                     </td>
 
                     <td className="px-3 py-2 whitespace-nowrap text-gray-400">{fmt(o.created_at)}{o.created_by_name && <span className="block text-[11px]">by {o.created_by_name}</span>}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{o.vehicle && o.driver_name && <span className="text-green-600 text-xs">✓ ready</span>}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {o.sent_at ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="text-gray-500 text-xs" title={`sent ${fmt(o.sent_at)}${o.sent_by_name ? ' by ' + o.sent_by_name : ''}`}>✓ sent</span>
+                          {editable && <button onClick={() => markSent(o, false)} disabled={busy === o.id + 'sent'} className="text-[11px] text-gray-400 hover:text-emerald-700">undo</button>}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-2">
+                          {o.vehicle && o.driver_name && <span className="text-green-600 text-xs">✓ ready</span>}
+                          {editable && <button onClick={() => markSent(o, true)} disabled={busy === o.id + 'sent'} className="text-xs border border-gray-300 text-gray-600 rounded px-2 py-1 hover:bg-gray-50 disabled:opacity-50" title="Mark sent — clears it from this list">Sent</button>}
+                        </span>
+                      )}
+                    </td>
                   </tr>
                   {expanded.has(o.id) && (
                     <tr className="border-b last:border-0 bg-gray-50">
