@@ -52,6 +52,7 @@ export default function PickForProductionPage() {
   const [open, setOpen] = useState<string>('')
   const [q, setQ] = useState('')
   const [confirmRun, setConfirmRun] = useState<Run | null>(null)   // run whose conversion is being confirmed
+  const [amendOrderId, setAmendOrderId] = useState<string | null>(null)   // set when amending an existing order
   const [lines, setLines] = useState<Line[]>([])
 
   const canCreate = !!profile && (can(profile, 'warehouse', 'edit') || profile.factory_code === 'HEAD_OFFICE' || profile.role === 'admin')
@@ -168,7 +169,19 @@ export default function PickForProductionPage() {
     return out
   }
 
-  function openConfirm(run: Run) { if (!canCreate) return; setError(null); setSuccess(null); setLines(buildLines(run)); setConfirmRun(run) }
+  function openConfirm(run: Run) { if (!canCreate) return; setError(null); setSuccess(null); setAmendOrderId(null); setLines(buildLines(run)); setConfirmRun(run) }
+  // Amend an already-created order: seed the dialog from its current lines (editable).
+  async function openAmend(run: Run) {
+    if (!canCreate) return
+    const ord = orderFor(run.runNo, run.factory); if (!ord) return
+    setError(null); setSuccess(null)
+    const { data } = await supabase.from('wms_order_lines').select('item_code, description, quantity, uom').eq('order_id', ord.id).order('line_no')
+    const built: Line[] = ((data as { item_code: string; description: string | null; quantity: number; uom: string | null }[]) || []).map(ol => ({
+      mat: ol.item_code, description: ol.description || '', needed: Number(ol.quantity), unit: ol.uom || '', neededKg: null, cands: [],
+      bagCode: ol.item_code, kgpb: 1, qty: String(ol.quantity), uom: ol.uom || 'BAG',
+    }))
+    setAmendOrderId(ord.id); setLines(built); setConfirmRun(run)
+  }
   function setLine(i: number, patch: Partial<Line>) { setLines(ls => ls.map((l, j) => j === i ? { ...l, ...patch } : l)) }
   // The office can type/pick any item code to send. Recompute kg-per-bag and the suggested
   // quantity from the new code (bag SKUs convert against the kg need; unit items stay 1:1).
@@ -207,11 +220,15 @@ export default function PickForProductionPage() {
       item_code: l.bagCode, description: l.description, quantity: Number(l.qty), uom: l.uom, item_id: itemByCode.get(l.bagCode.toUpperCase())?.id || null,
     }))
     if (!payload.length) { setBusy(false); setError('Nothing to order.'); return }
-    const { error: e } = await supabase.rpc('create_production_order', { p_pick_run: confirmRun.runNo, p_factory: confirmRun.factory, p_lines: payload })
+    const { error: e } = amendOrderId
+      ? await supabase.rpc('wms_amend_production_order', { p_order_id: amendOrderId, p_lines: payload })
+      : await supabase.rpc('create_production_order', { p_pick_run: confirmRun.runNo, p_factory: confirmRun.factory, p_lines: payload })
     setBusy(false)
-    if (e) { setError(needsDbMsg(e.message)); return }
-    setSuccess(`Production order created for ${confirmRun.runNo}. Pick it in Orders to Pick (WMS).`)
-    setConfirmRun(null); load()
+    if (e) { setError(/wms_amend_production_order/.test(e.message) && /does not exist|schema cache|could not find/i.test(e.message) ? 'This needs a database update — run db/2026-07-wms-amend-production.sql in the Supabase SQL editor.' : needsDbMsg(e.message)); return }
+    setSuccess(amendOrderId
+      ? `Order amended for ${confirmRun.runNo}. Re-release it in Orders to Pick to pick the corrected items.`
+      : `Production order created for ${confirmRun.runNo}. Pick it in Orders to Pick (WMS).`)
+    setConfirmRun(null); setAmendOrderId(null); load()
   }
 
   const visible = useMemo(() => {
@@ -258,7 +275,13 @@ export default function PickForProductionPage() {
                       <span className="text-xs text-gray-400 whitespace-nowrap">{matList.length} material(s) · {run.reqCount} request(s)</span>
                     </button>
                     {ord ? (
-                      <a href="/wms/orders" className="text-xs px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 font-medium hover:bg-emerald-100 whitespace-nowrap">✓ Order created · {ord.status} → pick</a>
+                      <div className="flex items-center gap-1.5">
+                        <a href="/wms/orders" className="text-xs px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 font-medium hover:bg-emerald-100 whitespace-nowrap">✓ Order created · {ord.status} → pick</a>
+                        {canCreate && !['Dispatched', 'Partially Dispatched', 'Cancelled'].includes(ord.status) && (
+                          <button onClick={() => openAmend(run)}
+                            className="text-xs px-2.5 py-1.5 rounded-lg border border-emerald-200 text-emerald-700 font-medium hover:bg-emerald-50 whitespace-nowrap" title="Fix a wrong item/quantity (only before picking starts)">Amend</button>
+                        )}
+                      </div>
                     ) : (
                       <button onClick={() => openConfirm(run)} disabled={!canCreate}
                         className="text-xs px-3 py-1.5 rounded-lg bg-emerald-700 text-white font-medium hover:bg-emerald-800 disabled:opacity-40 whitespace-nowrap">
@@ -297,8 +320,10 @@ export default function PickForProductionPage() {
         <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/40 p-3 overflow-y-auto" onClick={() => !busy && setConfirmRun(null)}>
           <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl my-6" onClick={e => e.stopPropagation()}>
             <div className="px-5 py-3 border-b">
-              <h2 className="font-bold text-lg">Confirm bag conversion — {confirmRun.runNo}</h2>
-              <p className="text-sm text-gray-500">Check each material converts to the right item/bag and quantity — you can change the code or qty — then create the order. {facName(confirmRun.factory)}.</p>
+              <h2 className="font-bold text-lg">{amendOrderId ? 'Amend production order' : 'Confirm bag conversion'} — {confirmRun.runNo}</h2>
+              <p className="text-sm text-gray-500">{amendOrderId
+                ? 'Fix the item code or quantity that was processed wrongly, then save. This works only while nothing has been picked — the order goes back to Review to be re-released.'
+                : 'Check each material converts to the right item/bag and quantity — you can change the code or qty — then create the order.'} {facName(confirmRun.factory)}.</p>
             </div>
             <div className="px-5 py-3 max-h-[60vh] overflow-y-auto">
               <table className="w-full text-sm">
@@ -378,7 +403,7 @@ export default function PickForProductionPage() {
             <div className="px-5 py-3 border-t flex items-center gap-3">
               <button onClick={confirmCreate} disabled={busy || lines.length === 0}
                 className="bg-emerald-700 text-white px-5 py-2 rounded-lg hover:bg-emerald-800 disabled:opacity-40 text-sm font-medium">
-                {busy ? 'Creating…' : 'Confirm & create order'}
+                {busy ? (amendOrderId ? 'Saving…' : 'Creating…') : (amendOrderId ? 'Save amended order' : 'Confirm & create order')}
               </button>
               <button onClick={() => !busy && setConfirmRun(null)} className="border px-5 py-2 rounded-lg hover:bg-gray-50 text-sm">Cancel</button>
             </div>
