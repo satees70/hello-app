@@ -188,6 +188,24 @@ export default function WmsPickPage() {
     setMsg(`${l.item_code} marked as no stock (short ${fmtQty(rem)}).`); load()
   }
 
+  // Undo a pick already made (wrong bag / wrong batch / over-picked) — returns the stock to its
+  // bin and re-opens the line. Only before the order is checked/dispatched.
+  async function undoPick(l: Line) {
+    if (!canEdit) return
+    const picked = Number(l.qty_picked || 0)
+    if (picked <= 0) return
+    const ans = window.prompt(`Undo pick for ${l.item_code}?\n\n${fmtQty(picked)} ${l.uom || ''} was picked. How many to put back to its bin?\n(the stock is returned and the line re-opens for picking)`, String(picked))
+    if (ans === null) return
+    const qty = Number(String(ans).replace(/[^0-9.]/g, ''))
+    if (!(qty > 0)) { setErr('Enter a quantity greater than zero to undo.'); return }
+    if (qty > picked) { setErr(`Only ${fmtQty(picked)} was picked — you can’t undo more than that.`); return }
+    setBusy(l.id); setErr(''); setMsg('')
+    const { error } = await supabase.rpc('wms_unpick', { p_line_id: l.id, p_qty: qty })
+    setBusy('')
+    if (error) { setErr(/wms_unpick|function/i.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-unpick.sql in the Supabase SQL editor.' : error.message); return }
+    setMsg(`Undid ${fmtQty(qty)} of ${l.item_code} — stock returned to its bin.`); load()
+  }
+
   // Optional explicit start (so the timer can include walk time). Otherwise it auto-starts
   // on the first pick.
   async function startPicking() {
@@ -316,9 +334,15 @@ export default function WmsPickPage() {
                       <div className="text-[11px] text-gray-400 mt-0.5">From SQL Account: {l.source_hint || '—'}{l.remarks ? ` · note “${l.remarks}”` : ''}</div>
                     )}
                   </div>
-                  {l.no_stock
-                    ? <span className="text-amber-600 text-sm font-medium whitespace-nowrap" title={l.no_stock_by_name ? `by ${l.no_stock_by_name}` : ''}>⚠ No stock{l.no_stock_qty ? ` · short ${fmtQty(l.no_stock_qty)}` : ''}</span>
-                    : done && <span className="text-emerald-700 text-sm font-medium">✓ Picked</span>}
+                  <div className="flex flex-col items-end gap-1.5">
+                    {l.no_stock
+                      ? <span className="text-amber-600 text-sm font-medium whitespace-nowrap" title={l.no_stock_by_name ? `by ${l.no_stock_by_name}` : ''}>⚠ No stock{l.no_stock_qty ? ` · short ${fmtQty(l.no_stock_qty)}` : ''}</span>
+                      : done && <span className="text-emerald-700 text-sm font-medium">✓ Picked</span>}
+                    {canEdit && Number(l.qty_picked) > 0 && ['Picking', 'Picked', 'Reserved'].includes(order.status) && (
+                      <button onClick={() => undoPick(l)} disabled={busy === l.id}
+                        className="text-xs border border-gray-300 text-gray-600 rounded px-2 py-1 hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap" title="Put picked stock back to its bin (wrong bag / batch / over-picked)">↩ Undo pick</button>
+                    )}
+                  </div>
                 </div>
 
                 {!done && canEdit && (
