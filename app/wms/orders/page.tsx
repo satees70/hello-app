@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { apiFetch } from '@/lib/api'
@@ -53,6 +53,9 @@ export default function WmsOrdersPage() {
   const [linesFor, setLinesFor] = useState<Order | null>(null)
   const [lines, setLines] = useState<Line[]>([])
   const [statusFilter, setStatusFilter] = useState('')
+  const [expandedId, setExpandedId] = useState('')   // order whose lines are shown inline
+  const [expLines, setExpLines] = useState<Line[]>([])
+  const [doByOrder, setDoByOrder] = useState<Record<string, string[]>>({})   // order_id -> DO number(s) once dispatched
 
   useEffect(() => { const s = new URLSearchParams(window.location.search).get('status'); if (s) setStatusFilter(s) }, [])
   useEffect(() => { if (profile) load() }, [profile])
@@ -63,6 +66,18 @@ export default function WmsOrdersPage() {
     setOrders((data as Order[]) || [])
     const { data: pk } = await supabase.rpc('wms_pickers')
     setPickers((pk as Picker[]) || [])
+    // DO number(s) for orders that have been dispatched.
+    const { data: dsp } = await supabase.from('wms_dispatches').select('order_id, do_number')
+    const dm: Record<string, string[]> = {}
+    ;(dsp as { order_id: string | null; do_number: string | null }[] || []).forEach(x => { if (x.order_id && x.do_number) (dm[x.order_id] = dm[x.order_id] || []).push(x.do_number) })
+    setDoByOrder(dm)
+  }
+  // Toggle showing an order's item lines right in the table (no download).
+  async function toggleLines(o: Order) {
+    if (expandedId === o.id) { setExpandedId(''); return }
+    setExpandedId(o.id)
+    const { data } = await supabase.from('wms_order_lines').select('*').eq('order_id', o.id).order('line_no')
+    setExpLines((data as Line[]) || [])
   }
 
   const needsPickerDb = (m: string) => /wms_assign_order|wms_pickers|wms_set_picker|wms_users_for_picker|warehouse_picker|assigned_to|function|column/i.test(m) && /does not exist|schema cache|could not find/i.test(m)
@@ -209,9 +224,10 @@ export default function WmsOrdersPage() {
             <tbody>
               {(statusFilter ? orders.filter(o => o.status === statusFilter) : orders).length === 0 && <tr><td colSpan={9} className="text-center py-10 text-gray-400">No orders{statusFilter ? ` with status “${statusFilter}”` : ' yet — upload a PDF to start'}.</td></tr>}
               {(statusFilter ? orders.filter(o => o.status === statusFilter) : orders).map(o => (
-                <tr key={o.id} className="border-b last:border-0 hover:bg-gray-50">
+                <Fragment key={o.id}>
+                <tr className="border-b last:border-0 hover:bg-gray-50">
                   <td className="px-4 py-2.5 max-w-[200px] truncate" title={o.file_name || ''}>{o.file_name}</td>
-                  <td className="px-4 py-2.5 font-mono">{o.order_no || <span className="text-gray-300">—</span>}</td>
+                  <td className="px-4 py-2.5 font-mono">{o.order_no || <span className="text-gray-300">—</span>}{doByOrder[o.id]?.length ? <span className="block text-[10px] text-emerald-700 font-medium" title="Dispatched on this DO">DO {doByOrder[o.id].join(', ')}</span> : null}</td>
                   <td className="px-4 py-2.5">{o.customer_name || <span className="text-gray-300">—</span>}</td>
                   <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">{o.delivery_date || <span className="text-gray-300">—</span>}</td>
                   <td className="px-4 py-2.5 tabular-nums">{o.wms_order_lines?.[0]?.count ?? 0}</td>
@@ -234,7 +250,7 @@ export default function WmsOrdersPage() {
                         <Link href={`/wms/pick/${o.id}`} className="text-emerald-700 font-medium hover:underline">Pick →</Link>}
                       {o.status === 'Picked' && <Link href={`/wms/pick/${o.id}`} className="text-teal-700 font-medium hover:underline">Check →</Link>}
                       {['Checked', 'Partially Dispatched'].includes(o.status) && <Link href={`/wms/dispatch/${o.id}`} className="text-emerald-700 font-medium hover:underline">Dispatch →</Link>}
-                      <button onClick={() => viewLines(o)} className="text-emerald-700 hover:underline">View lines</button>
+                      <button onClick={() => toggleLines(o)} className="text-emerald-700 hover:underline">{expandedId === o.id ? 'Hide lines' : 'View lines'}</button>
                       {o.file_path && <button onClick={() => viewPdf(o)} className="text-gray-500 hover:underline">PDF</button>}
                       {canEdit && ['Reserved', 'Released', 'Picking'].includes(o.status) && <button onClick={() => cancelOrder(o)} className="text-amber-600 hover:underline">Cancel</button>}
                       {canEdit && o.file_path && <button onClick={() => reRead(o)} className="text-gray-500 hover:underline">Re-read</button>}
@@ -242,6 +258,24 @@ export default function WmsOrdersPage() {
                     </div>
                   </td>
                 </tr>
+                {expandedId === o.id && (
+                  <tr className="bg-gray-50 border-b">
+                    <td colSpan={9} className="px-6 py-3">
+                      <div className="text-xs font-medium text-gray-500 mb-1">Items in {o.order_no || o.file_name}</div>
+                      {expLines.length === 0 ? <div className="text-xs text-gray-400">No lines.</div> : (
+                        <table className="w-full text-sm max-w-3xl">
+                          <thead className="text-xs text-gray-500"><tr><th className="text-left py-1 font-medium">Item</th><th className="text-left py-1 font-medium">Description</th><th className="text-right py-1 font-medium">Qty</th></tr></thead>
+                          <tbody>
+                            {expLines.map(l => (
+                              <tr key={l.id} className="border-t"><td className="py-1 font-mono whitespace-nowrap">{l.item_code}</td><td className="py-1 text-gray-500">{l.description}</td><td className="py-1 text-right tabular-nums whitespace-nowrap">{l.quantity}{l.uom ? ' ' + l.uom : ''}</td></tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>
