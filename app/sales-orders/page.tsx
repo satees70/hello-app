@@ -807,7 +807,7 @@ export default function SalesOrdersPage() {
     <div className="min-h-screen bg-gray-50">
       <Navbar factoryCode={profile.factory_code} fullName={profile.full_name} role={profile.role} />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        <h1 className="text-2xl font-bold mb-1">Sales Orders</h1>
+        <h1 className="text-2xl font-bold mb-1">Outstanding Sales Order</h1>
         <p className="text-gray-500 text-sm mb-6">Upload a sales order PDF. It is read automatically. To correct a line, raise a change request for Head Office to approve.</p>
 
         <form onSubmit={handleUpload} className="bg-white rounded-xl shadow-sm border p-6 mb-8">

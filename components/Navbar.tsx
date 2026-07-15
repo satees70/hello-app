@@ -227,7 +227,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/discussion', label: 'Discussion' },
     ] },
     { header: 'Sales', items: [
-      { href: '/sales-orders', label: 'Sales Orders', module: 'sales' },
+      { href: '/sales-orders', label: 'Outstanding Sales Order', module: 'sales' },
       { href: '/pending-summary', label: 'Pending Summary', module: 'sales' },
       { href: '/repacking', label: 'Repacking', module: 'sales' },
       { href: '/delivery-schedule', label: 'Delivery Schedule' },
@@ -297,7 +297,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const warehouseGroups: { header?: string; items: Item[] }[] = [
     // Ordered by the process: demand → pick for the factory → receive → dispatch.
     { header: 'Production', items: [
-      { href: '/sales-orders', label: 'Sales Orders', module: 'sales' },
+      { href: '/sales-orders', label: 'Outstanding Sales Order', module: 'sales' },
       { href: '/material-requests', label: 'Pick Runs', module: 'material_requests' },
       { href: '/warehouse/pick-production', label: 'Pick for Production', module: 'material_requests' },
       { href: '/incoming', label: 'Goods Received', module: 'goods_received' },
