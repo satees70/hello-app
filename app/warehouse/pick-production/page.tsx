@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
@@ -27,6 +27,7 @@ interface ItemRow { id: string; code: string; description: string | null; unit: 
 interface Mat { code: string; description: string; unit: string; remaining: number }
 interface Run { runId: string; runNo: string; factory: string; released_at: string; mats: Record<string, Mat>; reqCount: number; urgent: boolean }
 interface Cand { code: string; kgpb: number | null; onhand: number }
+interface StockRow { location_code: string; batch_no: string; quantity: number; uom: string | null; exp_date: string | null }
 interface Line { mat: string; description: string; needed: number; unit: string; neededKg: number | null; cands: Cand[]; bagCode: string; kgpb: number; qty: string; uom: string }
 
 const ACTIVE = ['Open', 'Partially Received']
@@ -39,7 +40,10 @@ export default function PickForProductionPage() {
   const [orders, setOrders] = useState<ProdOrder[]>([])
   const [items, setItems] = useState<ItemRow[]>([])
   const [onhand, setOnhand] = useState<Record<string, number>>({})
+  const [stockByCode, setStockByCode] = useState<Record<string, StockRow[]>>({})
   const [lastUsed, setLastUsed] = useState<Record<string, string>>({})
+  const [searchFor, setSearchFor] = useState<number | null>(null)   // which line's item search is open
+  const [searchQ, setSearchQ] = useState('')
   const [facs, setFacs] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -61,9 +65,16 @@ export default function PickForProductionPage() {
         supabase.from('wms_orders').select('id, pick_run, factory_code, status').eq('source', 'production').neq('status', 'Cancelled'),
         fetchAll<ItemRow>('items', 'id, code, description, unit, stock_code, kg_per_bag, supplied_by_factory', 'code'),
       ])
-      const st = await fetchAll<{ item_code: string; quantity: number }>('wms_stock', 'item_code, quantity', 'item_code')
+      const st = await fetchAll<{ item_code: string; quantity: number; location_code: string; batch_no: string; exp_date: string | null; uom: string | null }>('wms_stock', 'item_code, quantity, location_code, batch_no, exp_date, uom', 'item_code')
       const oh: Record<string, number> = {}
-      for (const s of st) oh[s.item_code.toUpperCase()] = (oh[s.item_code.toUpperCase()] || 0) + Number(s.quantity || 0)
+      const sbc: Record<string, StockRow[]> = {}
+      for (const s of st) {
+        if (Number(s.quantity) <= 0) continue
+        const k = s.item_code.toUpperCase()
+        oh[k] = (oh[k] || 0) + Number(s.quantity || 0)
+        ;(sbc[k] = sbc[k] || []).push({ location_code: s.location_code, batch_no: s.batch_no, quantity: Number(s.quantity), uom: s.uom, exp_date: s.exp_date })
+      }
+      for (const k of Object.keys(sbc)) sbc[k].sort((a, b) => b.quantity - a.quantity)
       // Last-used bag SKU per loose material (most recent production order line).
       const ids = ((po.data as ProdOrder[]) || []).map(o => o.id)
       const lu: Record<string, string> = {}
@@ -78,7 +89,7 @@ export default function PickForProductionPage() {
         .not('released_at', 'is', null).in('status', ACTIVE).order('created_at', { ascending: true })
       if (me) throw me
       setFacs(Object.fromEntries(((f.data as { code: string; name: string }[]) || []).map(x => [x.code, x.name])))
-      setOrders((po.data as ProdOrder[]) || []); setItems(it); setOnhand(oh); setLastUsed(lu)
+      setOrders((po.data as ProdOrder[]) || []); setItems(it); setOnhand(oh); setStockByCode(sbc); setLastUsed(lu)
       setRequests((mr as unknown as MR[]) || [])
     } catch (e) { setError(needsDbMsg(e instanceof Error ? e.message : String(e))) }
     setLoading(false)
@@ -171,6 +182,21 @@ export default function PickForProductionPage() {
       setLine(i, { bagCode: code, kgpb: 1, qty: String(ceil(l.needed)), uom: item?.unit || l.unit, description: item?.description ?? l.description })
     }
   }
+  // Search ALL items by code OR name (some codes are hard to read), with stock shown.
+  function matchItems(qs: string) {
+    const n = qs.trim().toLowerCase()
+    const out = items
+      .filter(it => !n || it.code.toLowerCase().includes(n) || (it.description || '').toLowerCase().includes(n))
+      .map(it => { const rows = stockByCode[it.code.toUpperCase()] || []; return { code: it.code, description: it.description || '', total: rows.reduce((s, r) => s + r.quantity, 0), rows } })
+    out.sort((a, b) => (b.total > 0 ? 1 : 0) - (a.total > 0 ? 1 : 0) || a.code.localeCompare(b.code))
+    return out.slice(0, 50)
+  }
+  const stockText = (code: string) => {
+    const rows = stockByCode[code.toUpperCase()] || []
+    if (!rows.length) return ''
+    return rows.slice(0, 3).map(r => `${r.location_code}${r.batch_no ? ' b:' + r.batch_no : ''} ×${round(r.quantity)}`).join('  ·  ') + (rows.length > 3 ? '  …' : '')
+  }
+
   const lineKg = (l: Line) => Number(l.qty || 0) * (l.kgpb || 1)
   const lineShort = (l: Line) => l.neededKg != null ? lineKg(l) + 0.001 < l.neededKg : Number(l.qty || 0) + 0.001 < l.needed
 
@@ -275,7 +301,6 @@ export default function PickForProductionPage() {
               <p className="text-sm text-gray-500">Check each material converts to the right item/bag and quantity — you can change the code or qty — then create the order. {facName(confirmRun.factory)}.</p>
             </div>
             <div className="px-5 py-3 max-h-[60vh] overflow-y-auto">
-              <datalist id="pp-item-codes">{items.slice(0, 5000).map(it => <option key={it.code} value={it.code}>{it.description || ''}</option>)}</datalist>
               <table className="w-full text-sm">
                 <thead className="text-xs text-gray-500 border-b"><tr>
                   <th className="text-left py-1.5 font-medium">Material · needed</th>
@@ -287,20 +312,26 @@ export default function PickForProductionPage() {
                   {lines.map((l, i) => {
                     const short = lineShort(l)
                     return (
-                      <tr key={l.mat} className="border-b last:border-0 align-top">
+                      <Fragment key={l.mat}>
+                      <tr className={`align-top ${searchFor === i ? '' : 'border-b last:border-0'}`}>
                         <td className="py-2 pr-2">
                           <div className="font-mono font-medium">{l.mat}</div>
                           <div className="text-xs text-gray-500">{l.description}</div>
                           <div className="text-xs text-gray-400">need {round(l.needed)} {l.unit}</div>
                         </td>
                         <td className="py-2 pr-2">
-                          <input list="pp-item-codes" value={l.bagCode} onChange={e => setSendCode(i, e.target.value.toUpperCase())}
-                            className="border rounded px-2 py-1 text-xs font-mono w-full max-w-[200px]" />
+                          <div className="flex items-center gap-1">
+                            <input value={l.bagCode} onChange={e => setSendCode(i, e.target.value.toUpperCase())}
+                              className="border rounded px-2 py-1 text-xs font-mono w-full max-w-[170px]" />
+                            <button type="button" onClick={() => { setSearchFor(searchFor === i ? null : i); setSearchQ('') }}
+                              className="text-xs border rounded px-1.5 py-1 hover:bg-emerald-50 shrink-0" title="Search items &amp; stock">🔍</button>
+                          </div>
                           <div className="text-[10px] text-gray-400">
                             {l.neededKg != null ? (isBagCode(l.bagCode) ? `${l.kgpb}kg/bag` : 'loose kg') : (l.uom)}
-                            {(() => { const oh = onhand[l.bagCode.toUpperCase()]; return oh ? ` · ${round(oh)} on hand` : '' })()}
+                            {(() => { const oh = onhand[l.bagCode.toUpperCase()]; return oh ? ` · ${round(oh)} on hand` : (l.bagCode ? ' · no stock' : '') })()}
                             {!itemByCode.get(l.bagCode.toUpperCase()) && l.bagCode ? ' · ⚠ not in items' : ''}
                           </div>
+                          {stockText(l.bagCode) && <div className="text-[10px] text-gray-400 mt-0.5">📍 {stockText(l.bagCode)}</div>}
                         </td>
                         <td className="py-2 pr-2 text-right">
                           <input value={l.qty} onChange={e => setLine(i, { qty: e.target.value.replace(/[^0-9.]/g, '') })} inputMode="decimal"
@@ -314,6 +345,28 @@ export default function PickForProductionPage() {
                           {short && <div className="text-[10px] text-red-600">under the {round(l.needed)} {l.unit} needed</div>}
                         </td>
                       </tr>
+                      {searchFor === i && (
+                        <tr className="border-b"><td colSpan={4} className="pb-3">
+                          <div className="border rounded-lg bg-gray-50 p-2">
+                            <input autoFocus value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search any item by name or code…" className="border rounded px-2 py-1.5 text-sm w-full mb-1.5" />
+                            <div className="max-h-56 overflow-auto divide-y bg-white rounded border">
+                              {matchItems(searchQ).map(m => (
+                                <button key={m.code} type="button" onClick={() => { setSendCode(i, m.code); setSearchFor(null); setSearchQ('') }}
+                                  className="w-full text-left px-2.5 py-1.5 hover:bg-emerald-50">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono text-xs font-medium">{m.code}</span>
+                                    <span className="text-xs text-gray-500 truncate">{m.description}</span>
+                                    <span className={`ml-auto text-xs whitespace-nowrap ${m.total > 0 ? 'text-emerald-700' : 'text-gray-300'}`}>{m.total > 0 ? `${round(m.total)} on hand` : 'no stock'}</span>
+                                  </div>
+                                  {m.rows.length > 0 && <div className="text-[10px] text-gray-400 truncate">{m.rows.slice(0, 3).map(r => `📍${r.location_code}${r.batch_no ? ' b:' + r.batch_no : ''} ×${round(r.quantity)}${r.uom ? ' ' + r.uom : ''}`).join('   ')}{m.rows.length > 3 ? '  …' : ''}</div>}
+                                </button>
+                              ))}
+                              {matchItems(searchQ).length === 0 && <p className="text-xs text-gray-400 px-2 py-3">{searchQ ? 'No item matches.' : 'Type a name or code…'}</p>}
+                            </div>
+                          </div>
+                        </td></tr>
+                      )}
+                      </Fragment>
                     )
                   })}
                   {lines.length === 0 && <tr><td colSpan={4} className="py-6 text-center text-gray-400">Nothing to order (all items are factory-supplied).</td></tr>}
