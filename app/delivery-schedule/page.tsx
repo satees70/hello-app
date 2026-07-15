@@ -103,6 +103,7 @@ export default function DeliverySchedulePage() {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [raised, setRaised] = useState<Set<string>>(new Set())   // SO numbers a validity query has been raised for (this session)
 
   useEffect(() => { if (profile) { load(); loadUploads(); loadResources() } }, [profile])
   // Head Office (and admins) manage the master lists directly; factory users' new
@@ -360,6 +361,23 @@ export default function DeliverySchedulePage() {
   // The day BEFORE the planning date — only a 1-day-old schedule counts as a green carry-over.
   const carryDate = useMemo(() => { const d = new Date((date || tomorrowISO()) + 'T00:00:00'); d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }, [date])
   const isCarry = (so: string) => (schedDatesBySO.get(so) || new Set<string>()).has(carryDate)
+  // Raise a query on an un-scheduled order: post to the SO's discussion thread, which notifies
+  // Head Office (and the order's factory) + pushes to phones. They reply valid, or go cancel it.
+  async function raiseQuery(m: { so: string; customer: string }) {
+    if (!m.so) { setError('This row has no SO number to query.'); return }
+    setBusy('ask' + m.so); setError(''); setSuccess('')
+    const fac = soFactory[m.so]
+    const facs = ['HEAD_OFFICE', ...(fac && fac !== 'HEAD_OFFICE' ? [fac] : [])]
+    const { error: e } = await supabase.from('discussions').insert({
+      channel: 'warehouse', author_id: profile?.id, author_name: profile?.full_name || null, so_number: m.so,
+      body: `⚠ ${m.so}${m.customer ? ' (' + m.customer + ')' : ''} is not on any delivery schedule. Is this order still valid, or should we raise a cancel note?`,
+      mention_factories: facs,
+    })
+    setBusy('')
+    if (e) { setError(e.message); return }
+    setRaised(prev => new Set(prev).add(m.so))
+    setSuccess(`Query raised for ${m.so} — Head Office${fac && fac !== 'HEAD_OFFICE' ? ' and ' + fac : ''} notified. Track replies in Discussion.`)
+  }
   // Which day(s) an SO is already scheduled on (shown on the green tag).
   const schedWhere = (so: string) => [...(schedDatesBySO.get(so) || new Set<string>())].sort().map(d => { const m = d.match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}/${m[2]}` : d }).join(', ')
   const mapped = useMemo(() => rows.map((r, idx) => {
@@ -507,10 +525,11 @@ export default function DeliverySchedulePage() {
                     <tr>
                       <th className="px-3 py-2"><input type="checkbox" checked={allSel} onChange={toggleAll} className="h-4 w-4" /></th>
                       {headers.map((h, i) => <th key={i} className="px-3 py-2 font-medium">{h || `Column ${i + 1}`}</th>)}
+                      <th className="px-3 py-2 font-medium">Ask</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {mapped.length === 0 && <tr><td colSpan={headers.length + 1} className="px-3 py-4 text-gray-400 text-center">Nothing left to assign — pick the SO column above, or all rows are assigned.</td></tr>}
+                    {mapped.length === 0 && <tr><td colSpan={headers.length + 2} className="px-3 py-4 text-gray-400 text-center">Nothing left to assign — pick the SO column above, or all rows are assigned.</td></tr>}
                     {mapped.map(m => {
                       const dueT = !!podelKey && m.data[podelKey] === nextDeliveryISO()
                       const hold = !!holdKey && isHold(m.data[holdKey])
@@ -520,6 +539,12 @@ export default function DeliverySchedulePage() {
                       <tr key={m.i} className={`border-t ${sel.has(m.i) ? 'bg-emerald-100' : hold ? 'bg-red-100' : carry ? 'bg-green-100' : dueT ? 'bg-yellow-100' : 'hover:bg-gray-50'}`}>
                         <td className="px-3 py-1.5 whitespace-nowrap"><input type="checkbox" checked={sel.has(m.i)} onChange={() => toggleRow(m.i)} className="h-4 w-4" />{schedSome && <span className={`ml-1 text-[10px] font-semibold ${carry ? 'text-green-700' : 'text-gray-400'}`} title="Already on the schedule for another day">on {schedWhere(m.so)}</span>}</td>
                         {headers.map((h, i) => { const key = h || `Column ${i + 1}`; return <td key={i} className="px-3 py-1.5 text-gray-700">{cellView(m.data[key])}</td> })}
+                        <td className="px-3 py-1.5 whitespace-nowrap">
+                          {schedSome ? <span className="text-[11px] text-gray-300">scheduled</span>
+                            : raised.has(m.so) ? <span className="text-[11px] text-amber-600">✓ query raised</span>
+                            : m.so ? <button onClick={() => raiseQuery(m)} disabled={busy === 'ask' + m.so} className="text-xs border border-amber-300 text-amber-700 rounded px-2 py-1 hover:bg-amber-50 disabled:opacity-50" title="Ask Head Office / factory if this order is still valid or should be cancelled">{busy === 'ask' + m.so ? '…' : 'Still valid?'}</button>
+                            : <span className="text-[11px] text-gray-300">—</span>}
+                        </td>
                       </tr>
                       )
                     })}
