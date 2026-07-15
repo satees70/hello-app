@@ -242,6 +242,11 @@ export default function WmsPickPage() {
     done: lines.filter(l => remainingOf(l) <= 0).length,
     remaining: clean(lines.reduce((s, l) => s + Math.max(remainingOf(l), 0), 0)),
   }), [lines])
+  // A no-stock-only order got flipped to "Picked" even though nothing was actually picked —
+  // show it as "Pending — No stock" and don't offer the check step (there's nothing to check).
+  const anyPicked = useMemo(() => lines.some(l => Number(l.qty_picked) > 0), [lines])
+  const noStockOnly = useMemo(() => lines.length > 0 && !anyPicked && lines.some(l => l.no_stock), [lines, anyPicked])
+  const displayStatus = order && order.status === 'Picked' && noStockOnly ? 'Pending — No stock' : order?.status || ''
 
   // Checker sign-off — a second person approves the picked order before dispatch.
   // A clean check signs off directly; a quantity change is sent to HO for approval
@@ -283,7 +288,7 @@ export default function WmsPickPage() {
         <Link href="/wms/orders" className="text-sm text-emerald-700 hover:underline">← Orders to Pick</Link>
         <div className="flex flex-wrap items-center gap-3 mt-2 mb-1">
           <h1 className="text-2xl font-bold">Pick {order.order_no || '(no number)'}</h1>
-          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CHIP[order.status] || 'bg-gray-100 text-gray-600'}`}>{order.status}</span>
+          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${noStockOnly && order.status === 'Picked' ? 'bg-amber-100 text-amber-700' : STATUS_CHIP[order.status] || 'bg-gray-100 text-gray-600'}`}>{displayStatus}</span>
         </div>
         <p className="text-gray-500 text-sm mb-1">{order.customer_name || 'Customer ?'}{order.delivery_date ? ` · deliver ${order.delivery_date}` : ''} · {totals.done}/{totals.lines} lines done · {fmtQty(totals.remaining)} still to pick</p>
         <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400 mb-6">
@@ -392,8 +397,13 @@ export default function WmsPickPage() {
           {lines.length === 0 && <div className="bg-white rounded-xl border p-8 text-center text-gray-400 text-sm">This order has no lines.</div>}
         </div>
 
-        {/* Checker sign-off — appears once everything is picked. */}
-        {lines.length > 0 && totals.remaining <= 0 && (
+        {noStockOnly && (
+          <div className="mt-6 bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+            ⚠ No stock could be picked for this order — it stays <b>Pending — No stock</b>. There is nothing to check or dispatch until stock arrives.
+          </div>
+        )}
+        {/* Checker sign-off — appears once everything is picked (not for a no-stock-only order). */}
+        {lines.length > 0 && totals.remaining <= 0 && anyPicked && (
           <div className="mt-6 bg-white rounded-xl border shadow-sm p-4">
             {order.status === 'Checked' || order.pick_checked_at ? (
               <div className="flex flex-wrap items-center gap-2">
