@@ -35,10 +35,16 @@ export default function CancelNotesPage() {
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
 
   useEffect(() => { if (profile) load() }, [profile]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Re-query the candidate list from the DB as you type, so any order can be found even beyond
+  // the un-searched cap (the list is capped for speed; search hits the whole database).
+  useEffect(() => { if (!profile) return; const t = setTimeout(() => loadCands(candQ), 300); return () => clearTimeout(t) }, [candQ, profile]) // eslint-disable-line react-hooks/exhaustive-deps
   async function load() {
     const { data } = await supabase.from('so_balance_cancel_requests').select('*').order('created_at', { ascending: false })
     setNotes((data as Note[]) || [])
-    const { data: c } = await supabase.rpc('so_lines_unscheduled')
+    loadCands(candQ)
+  }
+  async function loadCands(search: string) {
+    const { data: c } = await supabase.rpc('so_lines_unscheduled', { p_search: search || null })
     setCands((c as Cand[]) || [])
   }
   // Group the candidate lines by SO so a whole order can be cancelled in one tick.
@@ -53,11 +59,7 @@ export default function CancelNotesPage() {
       items: lines.map(l => ({ lineId: l.line_id, code: l.item_code || '', name: l.description || '', balance: Number(l.balance || 0) })),
     }))
   }, [cands])
-  const groups = useMemo(() => {
-    const n = candQ.trim().toLowerCase()
-    if (!n) return allGroups
-    return allGroups.filter(g => `${g.so} ${g.customer} ${g.factories} ${g.deliveryDate} ${g.items.map(i => i.code + ' ' + i.name).join(' ')}`.toLowerCase().includes(n))
-  }, [allGroups, candQ])
+  const groups = allGroups   // search is done in the DB (loadCands), so no extra client filter
   const groupChecked = (ids: string[]) => ids.length > 0 && ids.every(id => selCand.has(id))
   const groupSome = (ids: string[]) => ids.some(id => selCand.has(id)) && !groupChecked(ids)
   const toggleGroup = (ids: string[]) => setSelCand(p => { const n = new Set(p); const all = ids.every(id => n.has(id)); ids.forEach(id => all ? n.delete(id) : n.add(id)); return n })
@@ -148,7 +150,7 @@ export default function CancelNotesPage() {
               </tbody>
             </table>
           </div>
-          {groups.length > 0 && <p className="px-4 py-2 text-xs text-gray-400">{groups.length} order(s) · {cands.length} line(s) not scheduled{isHO ? '' : ' · your cancel goes to Head Office for approval'}.</p>}
+          {groups.length > 0 && <p className="px-4 py-2 text-xs text-gray-400">{groups.length} order(s) · {cands.length} line(s){cands.length >= 800 ? ' — showing the first 800; search to find a specific order' : ' not scheduled'}{isHO ? '' : ' · your cancel goes to Head Office for approval'}.</p>}
         </div>
 
         <h2 className="font-semibold mb-2">Cancel Note history</h2>
