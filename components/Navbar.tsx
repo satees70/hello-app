@@ -110,11 +110,11 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   }
 
   // Every kind of approval that lands in Pending Changes
-  const APPROVAL_TABLES = ['change_requests', 'correction_requests', 'do_change_requests', 'split_requests', 'stock_adjustments', 'run_mode_requests', 'mr_cancel_requests', 'mr_cancel_item_requests', 'doc_delete_requests', 'return_edit_requests', 'item_change_requests', 'so_change_requests', 'mr_qty_move_requests', 'factory_change_requests', 'food_loss_alerts', 'wms_check_qty_requests'] as const
+  const APPROVAL_TABLES = ['change_requests', 'correction_requests', 'do_change_requests', 'split_requests', 'stock_adjustments', 'run_mode_requests', 'mr_cancel_requests', 'mr_cancel_item_requests', 'label_override_requests', 'doc_delete_requests', 'return_edit_requests', 'item_change_requests', 'so_change_requests', 'mr_qty_move_requests', 'factory_change_requests', 'food_loss_alerts', 'wms_check_qty_requests'] as const
   const TABLE_LABEL: Record<string, string> = {
     change_requests: 'change', correction_requests: 'timer cancellation', do_change_requests: 'Goods Received change',
     split_requests: 'batch split / un-combine', stock_adjustments: 'stock adjustment', run_mode_requests: 'run-mode change',
-    mr_cancel_requests: 'material request cancellation', mr_cancel_item_requests: 'material request line cancellation', doc_delete_requests: 'document delete', return_edit_requests: 'material return edit', item_change_requests: 'item change', so_change_requests: 'SO number change', mr_qty_move_requests: 'received-qty move', factory_change_requests: 'factory change', food_loss_alerts: 'food-loss alert', wms_check_qty_requests: 'pick check quantity correction',
+    mr_cancel_requests: 'material request cancellation', mr_cancel_item_requests: 'material request line cancellation', label_override_requests: 'label received override', doc_delete_requests: 'document delete', return_edit_requests: 'material return edit', item_change_requests: 'item change', so_change_requests: 'SO number change', mr_qty_move_requests: 'received-qty move', factory_change_requests: 'factory change', food_loss_alerts: 'food-loss alert', wms_check_qty_requests: 'pick check quantity correction',
   }
 
   // Head Office: total pending approvals across ALL approval types
