@@ -81,6 +81,11 @@ interface SoBalanceCancelReq {
   requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
 }
 
+interface GrnBypassReq {
+  id: string; item_code: string | null; description: string | null; reason: string | null; status: string
+  requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
+}
+
 interface DocDelReq {
   id: string; file_name: string | null; file_path: string | null; factory_code: string | null; reason: string | null; status: string
   requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
@@ -174,6 +179,7 @@ export default function PendingChangesPage() {
   const [mrCancelItems, setMrCancelItems] = useState<MrCancelItemReq[]>([])
   const [labelOverrides, setLabelOverrides] = useState<LabelOverrideReq[]>([])
   const [soBalCancels, setSoBalCancels] = useState<SoBalanceCancelReq[]>([])
+  const [grnBypasses, setGrnBypasses] = useState<GrnBypassReq[]>([])
   const [selMC, setSelMC] = useState<Set<string>>(new Set())
   const [mcFilters, setMcFilters] = useState<Record<string, Set<string>>>({})
   const [docDels, setDocDels] = useState<DocDelReq[]>([])
@@ -197,7 +203,7 @@ export default function PendingChangesPage() {
 
   useEffect(() => {
     if (!profile) return
-    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadMrCancelItems(); loadLabelOverrides(); loadSoBalCancels(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadFoodLoss(); loadWmsChecks()
+    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadMrCancelItems(); loadLabelOverrides(); loadSoBalCancels(); loadGrnBypasses(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadFoodLoss(); loadWmsChecks()
     // Live refresh on any change-request activity, with a poll fallback
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) supabase.realtime.setAuth(data.session.access_token)
@@ -215,6 +221,7 @@ export default function PendingChangesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mr_cancel_item_requests' }, () => loadMrCancelItems())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'label_override_requests' }, () => loadLabelOverrides())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'so_balance_cancel_requests' }, () => loadSoBalCancels())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'grn_bypass_requests' }, () => loadGrnBypasses())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'doc_delete_requests' }, () => loadDocDels())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'return_edit_requests' }, () => loadRetEdits())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'dispatch_line_edit_requests' }, () => loadFgEdits())
@@ -223,7 +230,7 @@ export default function PendingChangesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mr_qty_move_requests' }, () => loadQtyMoves())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'food_loss_alerts' }, () => loadFoodLoss())
       .subscribe()
-    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadMrCancelItems(); loadLabelOverrides(); loadSoBalCancels(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadWmsChecks() }, 20000)
+    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadMrCancelItems(); loadLabelOverrides(); loadSoBalCancels(); loadGrnBypasses(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadWmsChecks() }, 20000)
     return () => { supabase.removeChannel(channel); clearInterval(timer) }
   }, [profile])
 
@@ -379,6 +386,23 @@ export default function PendingChangesPage() {
     const { error: e } = await supabase.rpc('reject_so_balance_cancel', { p_id: id })
     if (e) { setError(e.message); setBusyId(''); return }
     setSuccess('Balance cancel rejected.'); setBusyId(''); loadSoBalCancels()
+  }
+  async function loadGrnBypasses() {
+    const { data } = await supabase.from('grn_bypass_requests').select('*').order('created_at', { ascending: false })
+    setGrnBypasses((data as GrnBypassReq[]) || [])
+  }
+  async function approveGB(id: string) {
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('approve_grn_bypass', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Photo bypass approved — the line can be received without photos.'); setBusyId(''); loadGrnBypasses()
+  }
+  async function rejectGB(id: string) {
+    if (!confirm('Reject this photo bypass? Staff will still need the photos.')) return
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('reject_grn_bypass', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Photo bypass rejected.'); setBusyId(''); loadGrnBypasses()
   }
   async function loadDocDels() {
     const { data } = await supabase.from('doc_delete_requests').select('*').order('created_at', { ascending: false })
@@ -657,6 +681,7 @@ export default function PendingChangesPage() {
     ...mrCancelItems.filter(a => a.status === 'Pending').map(a => P(a.id, 'Cancel request line(s)', `${a.request_no || '—'} · ${a.item_codes || ''}`, a.requested_by_name, a.created_at, () => approveMCI(a.id), () => rejectMCI(a.id))),
     ...labelOverrides.filter(a => a.status === 'Pending').map(a => P(a.id, 'Label received override', `${a.item_code || '—'}${a.qty != null ? ' · ' + a.qty : ''}${a.reason ? ' · ' + a.reason : ''}`, a.requested_by_name, a.created_at, () => approveLO(a.id), () => rejectLO(a.id))),
     ...soBalCancels.filter(a => a.status === 'Pending').map(a => P(a.id, 'Cancel order balance', `${a.so_number || '—'} · ${a.item_code || ''}${a.cancel_qty != null ? ' · bal ' + a.cancel_qty : ''}${a.reason ? ' · ' + a.reason : ''}`, a.requested_by_name, a.created_at, () => approveSBC(a.id), () => rejectSBC(a.id))),
+    ...grnBypasses.filter(a => a.status === 'Pending').map(a => P(a.id, 'Receiving photo bypass', `${a.item_code || '—'}${a.description ? ' · ' + a.description : ''}${a.reason ? ' · ' + a.reason : ''}`, a.requested_by_name, a.created_at, () => approveGB(a.id), () => rejectGB(a.id))),
     ...docDels.filter(a => a.status === 'Pending').map(a => P(a.id, 'Document delete', a.file_name || '—', a.requested_by_name, a.created_at, () => approveDD(a), () => rejectDD(a.id))),
     ...retEdits.filter(a => a.status === 'Pending').map(a => P(a.id, 'Return edit', `${a.item_code || '—'} qty ${a.old_qty} → ${a.new_qty}`, a.requested_by_name, a.created_at, () => approveRE(a.id), () => rejectRE(a.id))),
     ...fgEdits.filter(a => a.status === 'Pending').map(a => P(a.id, 'Delivery line edit', `DO ${a.do_number || '—'} · ${a.new_item_code || a.old_item_code} qty ${a.old_qty} → ${a.new_qty}`, a.requested_by_name, a.created_at, () => approveFge(a.id), () => rejectFge(a.id))),
