@@ -71,6 +71,11 @@ interface MrCancelItemReq {
   requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
 }
 
+interface LabelOverrideReq {
+  id: string; item_code: string | null; factory_code: string | null; qty: number | null; reason: string | null; status: string
+  requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
+}
+
 interface DocDelReq {
   id: string; file_name: string | null; file_path: string | null; factory_code: string | null; reason: string | null; status: string
   requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
@@ -162,6 +167,7 @@ export default function PendingChangesPage() {
   const [rmFilters, setRmFilters] = useState<Record<string, Set<string>>>({})
   const [mrCancels, setMrCancels] = useState<MrCancelReq[]>([])
   const [mrCancelItems, setMrCancelItems] = useState<MrCancelItemReq[]>([])
+  const [labelOverrides, setLabelOverrides] = useState<LabelOverrideReq[]>([])
   const [selMC, setSelMC] = useState<Set<string>>(new Set())
   const [mcFilters, setMcFilters] = useState<Record<string, Set<string>>>({})
   const [docDels, setDocDels] = useState<DocDelReq[]>([])
@@ -185,7 +191,7 @@ export default function PendingChangesPage() {
 
   useEffect(() => {
     if (!profile) return
-    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadMrCancelItems(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadFoodLoss(); loadWmsChecks()
+    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadMrCancelItems(); loadLabelOverrides(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadFoodLoss(); loadWmsChecks()
     // Live refresh on any change-request activity, with a poll fallback
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) supabase.realtime.setAuth(data.session.access_token)
@@ -201,6 +207,7 @@ export default function PendingChangesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'run_mode_requests' }, () => loadRunModes())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mr_cancel_requests' }, () => loadMrCancels())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mr_cancel_item_requests' }, () => loadMrCancelItems())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'label_override_requests' }, () => loadLabelOverrides())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'doc_delete_requests' }, () => loadDocDels())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'return_edit_requests' }, () => loadRetEdits())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'dispatch_line_edit_requests' }, () => loadFgEdits())
@@ -209,7 +216,7 @@ export default function PendingChangesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mr_qty_move_requests' }, () => loadQtyMoves())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'food_loss_alerts' }, () => loadFoodLoss())
       .subscribe()
-    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadMrCancelItems(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadWmsChecks() }, 20000)
+    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadMrCancelItems(); loadLabelOverrides(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadWmsChecks() }, 20000)
     return () => { supabase.removeChannel(channel); clearInterval(timer) }
   }, [profile])
 
@@ -331,6 +338,23 @@ export default function PendingChangesPage() {
     const { error: e } = await supabase.rpc('reject_mr_cancel_items', { p_id: id })
     if (e) { setError(e.message); setBusyId(''); return }
     setSuccess('Line cancellation rejected.'); setBusyId(''); loadMrCancelItems()
+  }
+  async function loadLabelOverrides() {
+    const { data } = await supabase.from('label_override_requests').select('*').order('created_at', { ascending: false })
+    setLabelOverrides((data as LabelOverrideReq[]) || [])
+  }
+  async function approveLO(id: string) {
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('approve_label_override', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Label marked received — it now counts as in stock.'); setBusyId(''); loadLabelOverrides()
+  }
+  async function rejectLO(id: string) {
+    if (!confirm('Reject this label override? The label stays "not ready".')) return
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('reject_label_override', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Label override rejected.'); setBusyId(''); loadLabelOverrides()
   }
   async function loadDocDels() {
     const { data } = await supabase.from('doc_delete_requests').select('*').order('created_at', { ascending: false })
@@ -607,6 +631,7 @@ export default function PendingChangesPage() {
     ...runModes.filter(a => a.status === 'Pending').map(a => P(a.id, 'Run mode', `${a.batch_no || a.item_code || '—'}: ${a.from_mode ?? '—'} → ${a.to_mode ?? '—'}`, a.requested_by_name, a.created_at, () => approveRM(a.id), () => rejectRM(a.id))),
     ...mrCancels.filter(a => a.status === 'Pending').map(a => P(a.id, 'Pick run cancel', a.request_no || '—', a.requested_by_name, a.created_at, () => approveMC(a.id), () => rejectMC(a.id))),
     ...mrCancelItems.filter(a => a.status === 'Pending').map(a => P(a.id, 'Cancel request line(s)', `${a.request_no || '—'} · ${a.item_codes || ''}`, a.requested_by_name, a.created_at, () => approveMCI(a.id), () => rejectMCI(a.id))),
+    ...labelOverrides.filter(a => a.status === 'Pending').map(a => P(a.id, 'Label received override', `${a.item_code || '—'}${a.qty != null ? ' · ' + a.qty : ''}${a.reason ? ' · ' + a.reason : ''}`, a.requested_by_name, a.created_at, () => approveLO(a.id), () => rejectLO(a.id))),
     ...docDels.filter(a => a.status === 'Pending').map(a => P(a.id, 'Document delete', a.file_name || '—', a.requested_by_name, a.created_at, () => approveDD(a), () => rejectDD(a.id))),
     ...retEdits.filter(a => a.status === 'Pending').map(a => P(a.id, 'Return edit', `${a.item_code || '—'} qty ${a.old_qty} → ${a.new_qty}`, a.requested_by_name, a.created_at, () => approveRE(a.id), () => rejectRE(a.id))),
     ...fgEdits.filter(a => a.status === 'Pending').map(a => P(a.id, 'Delivery line edit', `DO ${a.do_number || '—'} · ${a.new_item_code || a.old_item_code} qty ${a.old_qty} → ${a.new_qty}`, a.requested_by_name, a.created_at, () => approveFge(a.id), () => rejectFge(a.id))),

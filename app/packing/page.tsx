@@ -6,6 +6,7 @@ import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can, hasCap } from '@/lib/permissions'
 import { fetchTomorrowDeliverySOs } from '@/lib/delivery'
+import ItemPicker from '@/components/ItemPicker'
 
 interface PBItem { customer_name: string; quantity: number; so_number?: string | null }
 interface Batch {
@@ -58,6 +59,10 @@ export default function PackingPage() {
   const [savingId, setSavingId] = useState('')
   const [stockEdit, setStockEdit] = useState<Record<string, string>>({})   // itemId|factory -> typed on-hand
   const [savingStock, setSavingStock] = useState('')
+  const [overrides, setOverrides] = useState<Record<string, { newItemId: string; newCode: string }>>({})   // batchId|origItemId -> substitute
+  const [matEditKey, setMatEditKey] = useState('')   // which material row's item-picker is open (batchId|origItemId)
+  const [labelPending, setLabelPending] = useState<Set<string>>(new Set())   // batchId|itemId with a pending override request
+  const [busyKey, setBusyKey] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [tomorrowSOs, setTomorrowSOs] = useState<Set<string>>(new Set())
@@ -95,6 +100,13 @@ export default function PackingPage() {
       const { data: mri } = await supabase.from('material_request_items').select('id, request_id').in('request_id', reqIds)
       const mm: Record<string, string> = {}; (mri || []).forEach(x => { mm[x.id] = x.request_id }); setMriReq(mm)
     }
+    // Per-batch material substitutions + any pending label overrides (both best-effort — the
+    // tables may not exist yet until their SQL is run).
+    const { data: ov } = await supabase.from('production_batch_material_overrides').select('batch_id, orig_item_id, new_item_id, new_item_code')
+    const om: Record<string, { newItemId: string; newCode: string }> = {}
+    ;(ov || []).forEach(o => { om[`${o.batch_id}|${o.orig_item_id}`] = { newItemId: o.new_item_id, newCode: o.new_item_code || '' } }); setOverrides(om)
+    const { data: lo } = await supabase.from('label_override_requests').select('batch_id, item_id, status').eq('status', 'Pending')
+    setLabelPending(new Set((lo || []).map(x => `${x.batch_id}|${x.item_id}`)))
   }
   async function loadFactories() {
     const { data } = await supabase.from('factories').select('code, name').order('code')
@@ -111,7 +123,7 @@ export default function PackingPage() {
   const n = (x: number) => Number(Number(x).toFixed(3))
   const itemOf = (id: string) => items.find(i => i.id === id)
   // How many units we can make from current system stock, plus the per-material breakdown.
-  type Comp = { itemId: string; code: string; description: string; unit: string; required: number; avail: number; shortfall: number }
+  type Comp = { origItemId: string; itemId: string; code: string; origCode: string; description: string; unit: string; required: number; avail: number; shortfall: number }
   const availability = (b: Batch): { hasBom: boolean; units: number; comps: Comp[]; labels: Comp[]; labelsReady: boolean } => {
     const parent = items.find(i => i.code === b.item_code)
     if (!parent) return { hasBom: false, units: 0, comps: [], labels: [], labelsReady: true }
@@ -120,11 +132,14 @@ export default function PackingPage() {
     const all = boms.filter(c => c.parent_item_id === parent.id && ((c.use_mode || 'any') === 'any' || (c.use_mode || 'any') === mode))
     if (all.length === 0) return { hasBom: false, units: 0, comps: [], labels: [], labelsReady: true }
     const rowOf = (c: typeof all[number]): Comp => {
-      const ci = itemOf(c.component_item_id)
-      const avail = stock[`${c.component_item_id}|${b.factory_code}`] ?? 0
+      const origId = c.component_item_id
+      const ov = overrides[`${b.id}|${origId}`]
+      const effId = ov ? ov.newItemId : origId
+      const orig = itemOf(origId); const eff = itemOf(effId)
+      const avail = stock[`${effId}|${b.factory_code}`] ?? 0
       const per = Number(c.quantity) || 0
       const required = per * b.total_quantity
-      return { itemId: c.component_item_id, code: ci?.code || '—', description: ci?.description || '', unit: ci?.unit || '', required, avail, shortfall: Math.max(required - avail, 0) }
+      return { origItemId: origId, itemId: effId, code: eff?.code || ov?.newCode || '—', origCode: orig?.code || '—', description: eff?.description || '', unit: eff?.unit || orig?.unit || '', required, avail, shortfall: Math.max(required - avail, 0) }
     }
     // Warehouse materials drive "units"; labels are printed at the factory and tracked separately.
     let units = Infinity
@@ -167,7 +182,23 @@ export default function PackingPage() {
               const cl = [...(lots[`${c.code}|${b.factory_code}`] || [])].sort((x, y) => (isAlloc(y) ? 1 : 0) - (isAlloc(x) ? 1 : 0))
               return (
               <tr key={c.code} className={`border-b last:border-0 ${c.shortfall > 0 ? '' : 'bg-green-50/40'}`}>
-                <td className="px-3 py-1.5 font-mono font-medium whitespace-nowrap align-top">{c.code}</td>
+                <td className="px-3 py-1.5 font-mono font-medium whitespace-nowrap align-top">
+                  {matEditKey === `${b.id}|${c.origItemId}` ? (
+                    <div className="w-52">
+                      <ItemPicker items={items} value="" onPick={it => saveMaterial(b, c.origItemId, it.code)} placeholder="Swap to item…" />
+                      <div className="flex gap-2 mt-0.5">
+                        <button onClick={() => setMatEditKey('')} className="text-[10px] text-gray-400 hover:text-gray-600">cancel</button>
+                        {c.code !== c.origCode && <button onClick={() => saveMaterial(b, c.origItemId, '')} className="text-[10px] text-red-500 hover:text-red-700">reset to {c.origCode}</button>}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <span>{c.code}</span>
+                      {c.code !== c.origCode && <span className="text-[9px] text-indigo-600" title={`swapped from ${c.origCode}`}>↔</span>}
+                      {canEditFac(b.factory_code) && <button onClick={() => setMatEditKey(`${b.id}|${c.origItemId}`)} className="text-[10px] text-gray-300 hover:text-emerald-700" title="Change material for this batch">✎</button>}
+                    </div>
+                  )}
+                </td>
                 <td className="px-3 py-1.5 text-gray-600 align-top">{c.description}</td>
                 <td className="px-3 py-1.5 text-gray-500 align-top">{c.unit}</td>
                 <td className="px-3 py-1.5 text-right align-top">{n(c.required)}</td>
@@ -210,6 +241,12 @@ export default function PackingPage() {
                   <span className="font-mono">{l.code}</span><span className="text-gray-500">{l.description}</span>
                   <span className="text-gray-500">· need {n(l.required)}, have {n(l.avail)}</span>
                   {l.shortfall > 0 ? <span className="text-red-600 font-medium">✗ not ready</span> : <span className="text-green-600 font-medium">✓ in stock</span>}
+                  {l.shortfall > 0 && canEditFac(b.factory_code) && (
+                    labelPending.has(`${b.id}|${l.itemId}`)
+                      ? <span className="text-amber-600 font-medium">⏳ override pending HO approval</span>
+                      : <button onClick={() => requestLabelOverride(b, l)} disabled={busyKey === `lbl|${b.id}|${l.itemId}`}
+                          className="text-indigo-600 underline hover:text-indigo-800 disabled:opacity-50">Override as received (approval)</button>
+                  )}
                 </div>
               ))}
             </div>
@@ -233,6 +270,35 @@ export default function PackingPage() {
     setStock(s => ({ ...s, [key]: qty }))
     setStockEdit(prev => { const n = { ...prev }; delete n[key]; return n })
     setSuccess(`Stock updated to ${n(qty)}.`)
+  }
+
+  // Swap a recipe material for a different item on THIS batch only (or reset with an empty code).
+  async function saveMaterial(b: Batch, origItemId: string, code: string) {
+    if (!canEditFac(b.factory_code)) { setError('You have view-only access at this factory.'); return }
+    setBusyKey(`mat|${b.id}|${origItemId}`); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('set_batch_material_override', { p_batch_id: b.id, p_orig_item_id: origItemId, p_new_item_code: code || null, p_note: null })
+    setBusyKey('')
+    if (e) { setError(/set_batch_material_override|production_batch_material_overrides/.test(e.message) && /does not exist|schema cache|could not find/i.test(e.message) ? 'This needs a database update — run db/2026-07-batch-material-override.sql in the Supabase SQL editor.' : e.message); return }
+    setMatEditKey('')
+    setSuccess(code ? `Material changed to ${code} for this batch.` : 'Material reset to the recipe default.')
+    load()
+  }
+
+  // Request Head Office approval to mark a "not ready" label as received (books its required qty).
+  async function requestLabelOverride(b: Batch, l: Comp) {
+    if (!canEditFac(b.factory_code)) { setError('You have view-only access at this factory.'); return }
+    const key = `${b.id}|${l.itemId}`
+    const reason = window.prompt(`Request to override label ${l.code} as received?\n\nIt will book the ${n(l.required)} needed once Head Office approves. Reason (optional):`, '')
+    if (reason === null) return
+    setBusyKey(`lbl|${key}`); setError(''); setSuccess('')
+    const { error: e } = await supabase.from('label_override_requests').insert({
+      batch_id: b.id, item_id: l.itemId, item_code: l.code, factory_code: b.factory_code, qty: l.required,
+      reason: reason || null, requested_by: profile?.id, requested_by_name: profile?.full_name || null,
+    })
+    setBusyKey('')
+    if (e) { setError(/label_override_requests/.test(e.message) && /does not exist|schema cache|could not find/i.test(e.message) ? 'This needs a database update — run db/2026-07-label-override.sql in the Supabase SQL editor.' : e.message); return }
+    setLabelPending(p => new Set(p).add(key))
+    setSuccess(`Override request sent for label ${l.code} — waiting for Head Office approval.`)
   }
 
   async function savePack(b: Batch) {
