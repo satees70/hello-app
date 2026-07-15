@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
@@ -40,7 +40,21 @@ export default function CancelNotesPage() {
     const { data: c } = await supabase.rpc('so_lines_unscheduled')
     setCands((c as Cand[]) || [])
   }
-  const toggleCand = (id: string) => setSelCand(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
+  // Group the candidate lines by SO so a whole order can be cancelled in one tick.
+  const groups = useMemo(() => {
+    const m = new Map<string, Cand[]>()
+    cands.forEach(c => { const k = c.so_number || '—'; const a = m.get(k) || []; a.push(c); m.set(k, a) })
+    return [...m.entries()].map(([so, lines]) => ({
+      so, lines, ids: lines.map(l => l.line_id),
+      customer: lines[0]?.customer_name || '',
+      factories: [...new Set(lines.map(l => l.factory_code).filter(Boolean))].join(', '),
+      items: lines.map(l => l.item_code).filter(Boolean) as string[],
+      balance: lines.reduce((s, l) => s + Number(l.balance || 0), 0),
+    }))
+  }, [cands])
+  const groupChecked = (ids: string[]) => ids.length > 0 && ids.every(id => selCand.has(id))
+  const toggleGroup = (ids: string[]) => setSelCand(p => { const n = new Set(p); const all = ids.every(id => n.has(id)); ids.forEach(id => all ? n.delete(id) : n.add(id)); return n })
+  const selSoCount = groups.filter(g => groupChecked(g.ids)).length
   // HO cancels the ticked balances outright (writes Cancel Notes); factory raises them for approval.
   async function proceedCancel() {
     const ids = [...selCand]
@@ -90,7 +104,7 @@ export default function CancelNotesPage() {
               <div className="ml-auto flex flex-wrap items-center gap-2">
                 <input value={candReason} onChange={e => setCandReason(e.target.value)} placeholder="Reason (optional)" className="border rounded-lg px-3 py-1.5 text-sm w-56" />
                 <button onClick={proceedCancel} disabled={busy} className="bg-orange-600 text-white px-4 py-1.5 rounded-lg hover:bg-orange-700 disabled:opacity-50 text-sm font-medium">
-                  {busy ? 'Working…' : isHO ? `Cancel ${selCand.size} selected` : `Request cancel (${selCand.size})`}
+                  {busy ? 'Working…' : isHO ? `Cancel ${selSoCount} order(s)` : `Request cancel (${selSoCount})`}
                 </button>
               </div>
             )}
@@ -99,26 +113,27 @@ export default function CancelNotesPage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b sticky top-0"><tr>
                 <th className="px-3 py-2"><input type="checkbox" checked={cands.length > 0 && selCand.size === cands.length} onChange={e => setSelCand(e.target.checked ? new Set(cands.map(c => c.line_id)) : new Set())} className="h-4 w-4" /></th>
-                {['SO', 'Customer', 'Item', 'Factory', 'Ordered', 'Delivered', 'Balance'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}
+                {['SO', 'Customer', 'Items', 'Factory', 'Balance'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}
               </tr></thead>
               <tbody>
-                {cands.length === 0 && <tr><td colSpan={8} className="text-center py-6 text-gray-400">Nothing outstanding is off the schedule. 🎉</td></tr>}
-                {cands.map(c => (
-                  <tr key={c.line_id} className={`border-b last:border-0 ${selCand.has(c.line_id) ? 'bg-orange-50' : 'hover:bg-gray-50'}`}>
-                    <td className="px-3 py-2"><input type="checkbox" checked={selCand.has(c.line_id)} onChange={() => toggleCand(c.line_id)} className="h-4 w-4" /></td>
-                    <td className="px-3 py-2 font-mono whitespace-nowrap">{c.so_number || '—'}</td>
-                    <td className="px-3 py-2 min-w-[140px]">{c.customer_name || '—'}</td>
-                    <td className="px-3 py-2"><span className="font-medium">{c.item_code}</span>{c.description ? <span className="block text-xs text-gray-500">{c.description}</span> : null}</td>
-                    <td className="px-3 py-2 whitespace-nowrap text-gray-600">{c.factory_code || '—'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{c.ordered_qty ?? '—'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{c.delivered_qty ?? '—'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-orange-600">{c.balance ?? '—'}</td>
+                {groups.length === 0 && <tr><td colSpan={6} className="text-center py-6 text-gray-400">Nothing outstanding is off the schedule. 🎉</td></tr>}
+                {groups.map(g => (
+                  <tr key={g.so} className={`border-b last:border-0 ${groupChecked(g.ids) ? 'bg-orange-50' : 'hover:bg-gray-50'}`}>
+                    <td className="px-3 py-2 align-top"><input type="checkbox" checked={groupChecked(g.ids)} onChange={() => toggleGroup(g.ids)} className="h-4 w-4" /></td>
+                    <td className="px-3 py-2 font-mono whitespace-nowrap align-top">{g.so}</td>
+                    <td className="px-3 py-2 min-w-[140px] align-top">{g.customer || '—'}</td>
+                    <td className="px-3 py-2 align-top">
+                      <span className="text-gray-700">{g.items.length} item{g.items.length === 1 ? '' : 's'}</span>
+                      <span className="block text-xs text-gray-500">{g.items.slice(0, 3).join(', ')}{g.items.length > 3 ? ` +${g.items.length - 3} more` : ''}</span>
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap text-gray-600 align-top">{g.factories || '—'}</td>
+                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-orange-600 align-top">{Number(g.balance.toFixed(3))}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          {cands.length > 0 && <p className="px-4 py-2 text-xs text-gray-400">{cands.length} order line(s) not scheduled{isHO ? '' : ' · your cancel goes to Head Office for approval'}.</p>}
+          {groups.length > 0 && <p className="px-4 py-2 text-xs text-gray-400">{groups.length} order(s) · {cands.length} line(s) not scheduled{isHO ? '' : ' · your cancel goes to Head Office for approval'}.</p>}
         </div>
 
         <h2 className="font-semibold mb-2">Cancel Note history</h2>
