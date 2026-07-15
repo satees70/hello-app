@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
+import WarehouseTabs, { passWh, WhFilter } from '@/components/WarehouseTabs'
 import { can } from '@/lib/permissions'
 
 interface Move {
@@ -26,6 +27,7 @@ export default function WmsMovementsPage() {
   const { profile, loading } = useProfile()
   const [rows, setRows] = useState<Move[]>([])
   const [q, setQ] = useState('')
+  const [wh, setWh] = useState<WhFilter>('all')
   const [typeFilter, setTypeFilter] = useState('')
 
   useEffect(() => { if (profile) load() }, [profile])
@@ -40,9 +42,10 @@ export default function WmsMovementsPage() {
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase()
     return rows
+      .filter(r => passWh(wh, r.description))
       .filter(r => (typeFilter ? r.move_type === typeFilter : true))
       .filter(r => !needle || [r.item_code, r.description, r.from_location_code, r.to_location_code, r.batch_no, r.reference].some(v => (v || '').toLowerCase().includes(needle)))
-  }, [rows, q, typeFilter])
+  }, [rows, q, wh, typeFilter])
 
   if (loading) return <div className="p-8 text-sm text-gray-500">Loading…</div>
   const canView = !!profile && can(profile, 'warehouse', 'view')
@@ -57,6 +60,7 @@ export default function WmsMovementsPage() {
         <div className="flex flex-wrap gap-2 mb-4">
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search item / bin / batch / reference…"
             className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[200px]" />
+          <WarehouseTabs value={wh} onChange={setWh} />
           <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
             <option value="">All types</option>
             <option value="putaway">Putaway</option>
