@@ -8,8 +8,8 @@ import { can } from '@/lib/permissions'
 import ScanGate from '@/components/ScanGate'
 import { matchBin, matchItem } from '@/lib/qr'
 
-interface Order { id: string; order_no: string | null; customer_name: string | null; status: string; delivery_date: string | null; source: string | null; pick_checked_by_name: string | null; pick_checked_at: string | null; pick_check_note: string | null }
-interface Line { id: string; line_no: number | null; item_id: string | null; item_code: string; description: string | null; quantity: number; qty_picked: number; uom: string | null; source_hint: string | null; remarks: string | null }
+interface Order { id: string; order_no: string | null; customer_name: string | null; status: string; delivery_date: string | null; source: string | null; pick_checked_by_name: string | null; pick_checked_at: string | null; pick_check_note: string | null; assigned_to_name: string | null; pick_started_at: string | null }
+interface Line { id: string; line_no: number | null; item_id: string | null; item_code: string; description: string | null; quantity: number; qty_picked: number; uom: string | null; source_hint: string | null; remarks: string | null; no_stock?: boolean; no_stock_qty?: number | null; no_stock_by_name?: string | null }
 interface Stock { id: string; item_code: string; location_id: string; location_code: string; batch_no: string; exp_date: string | null; quantity: number; created_at: string }
 interface Loc { id: string; location_type: string; pick_sequence: number | null }
 
@@ -59,7 +59,7 @@ export default function WmsPickPage() {
   const setMode = (m: 'manual' | 'scan') => { setPickMode(m); try { localStorage.setItem('wmsPickMode', m) } catch { /* ignore */ } }
 
   const load = useCallback(async () => {
-    const { data: o } = await supabase.from('wms_orders').select('id, order_no, customer_name, status, delivery_date, source, pick_checked_by_name, pick_checked_at, pick_check_note').eq('id', id).single()
+    const { data: o } = await supabase.from('wms_orders').select('id, order_no, customer_name, status, delivery_date, source, pick_checked_by_name, pick_checked_at, pick_check_note, assigned_to_name, pick_started_at').eq('id', id).single()
     const { data: ls } = await supabase.from('wms_order_lines').select('*').eq('order_id', id).order('line_no')
     const lineList = (ls as Line[]) || []
     const codes = [...new Set(lineList.map(l => l.item_code))]
@@ -175,6 +175,19 @@ export default function WmsPickPage() {
     load()
   }
 
+  // Picker confirms there's no stock for the remaining qty — records the shortfall and lets
+  // the order move on (ships only what's picked). Works for partial (pick what's there first).
+  async function confirmNoStock(l: Line) {
+    if (!canEdit) return
+    const rem = remainingOf(l)
+    if (!confirm(`Confirm there is NO stock for ${l.item_code}?\n\nThe remaining ${fmtQty(rem)} ${l.uom || ''} will be marked short, and the order can move on with only what's picked.`)) return
+    setBusy(l.id); setErr(''); setMsg('')
+    const { error } = await supabase.rpc('wms_confirm_no_stock', { p_line_id: l.id, p_note: null })
+    setBusy('')
+    if (error) { setErr(/wms_confirm_no_stock|no_stock|function|column/i.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-no-stock.sql in the Supabase SQL editor.' : error.message); return }
+    setMsg(`${l.item_code} marked as no stock (short ${fmtQty(rem)}).`); load()
+  }
+
   function startPick(l: Line, s: Stock, qty: number) {
     if (!canEdit || !(qty > 0)) return
     setErr(''); setScanFor({ line: l, stock: s, qty })
@@ -228,7 +241,11 @@ export default function WmsPickPage() {
           <h1 className="text-2xl font-bold">Pick {order.order_no || '(no number)'}</h1>
           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CHIP[order.status] || 'bg-gray-100 text-gray-600'}`}>{order.status}</span>
         </div>
-        <p className="text-gray-500 text-sm mb-6">{order.customer_name || 'Customer ?'}{order.delivery_date ? ` · deliver ${order.delivery_date}` : ''} · {totals.done}/{totals.lines} lines done · {fmtQty(totals.remaining)} still to pick</p>
+        <p className="text-gray-500 text-sm mb-1">{order.customer_name || 'Customer ?'}{order.delivery_date ? ` · deliver ${order.delivery_date}` : ''} · {totals.done}/{totals.lines} lines done · {fmtQty(totals.remaining)} still to pick</p>
+        <p className="text-gray-400 text-xs mb-6">
+          {order.assigned_to_name ? `👤 Picker: ${order.assigned_to_name}` : '👤 Unassigned'}
+          {order.pick_started_at ? ` · started ${new Date(order.pick_started_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}
+        </p>
 
         {!canEdit && <p className="text-sm bg-amber-50 text-amber-700 border border-amber-200 rounded-lg p-3 mb-4">You have view-only warehouse access, so you can’t book picks.</p>}
         {err && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg mb-4">{err}</p>}
@@ -269,13 +286,19 @@ export default function WmsPickPage() {
                       <div className="text-[11px] text-gray-400 mt-0.5">From SQL Account: {l.source_hint || '—'}{l.remarks ? ` · note “${l.remarks}”` : ''}</div>
                     )}
                   </div>
-                  {done && <span className="text-emerald-700 text-sm font-medium">✓ Picked</span>}
+                  {l.no_stock
+                    ? <span className="text-amber-600 text-sm font-medium whitespace-nowrap" title={l.no_stock_by_name ? `by ${l.no_stock_by_name}` : ''}>⚠ No stock{l.no_stock_qty ? ` · short ${fmtQty(l.no_stock_qty)}` : ''}</span>
+                    : done && <span className="text-emerald-700 text-sm font-medium">✓ Picked</span>}
                 </div>
 
                 {!done && canEdit && (
                   <div className="mt-3 border-t pt-3">
                     {avail.length === 0
-                      ? <div className="text-xs text-red-600">No stock in the warehouse for this item.</div>
+                      ? <div className="flex flex-wrap items-center gap-3">
+                          <span className="text-xs text-red-600">No stock in the warehouse for this item.</span>
+                          <button onClick={() => confirmNoStock(l)} disabled={busy === l.id}
+                            className="text-xs border border-amber-500 text-amber-700 rounded px-3 py-1.5 hover:bg-amber-50 font-medium disabled:opacity-50">{busy === l.id ? '…' : 'Confirm no stock'}</button>
+                        </div>
                       : (
                         <div className="flex flex-wrap items-end gap-2">
                           <div className="flex-1 min-w-[240px]">
@@ -301,7 +324,12 @@ export default function WmsPickPage() {
                           </button>
                         </div>
                       )}
-                    {avail.length > 0 && totalAvail < rem && <div className="text-xs text-amber-600 mt-1.5">⚠ Only {fmtQty(totalAvail)} in the warehouse across all bins — short by {fmtQty(rem - totalAvail)}.</div>}
+                    {avail.length > 0 && totalAvail < rem && (
+                      <div className="text-xs text-amber-600 mt-1.5 flex flex-wrap items-center gap-2">
+                        <span>⚠ Only {fmtQty(totalAvail)} in the warehouse across all bins — short by {fmtQty(rem - totalAvail)}.</span>
+                        <button onClick={() => confirmNoStock(l)} disabled={busy === l.id} className="underline text-amber-700 hover:text-amber-800">Confirm short (no more stock)</button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
