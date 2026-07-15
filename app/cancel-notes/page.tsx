@@ -50,8 +50,7 @@ export default function CancelNotesPage() {
       customer: lines[0]?.customer_name || '',
       factories: [...new Set(lines.map(l => l.factory_code).filter(Boolean))].join(', '),
       deliveryDate: lines.map(l => l.delivery_date).filter(Boolean).sort()[0] || '',
-      items: lines.map(l => ({ code: l.item_code || '', name: l.description || '' })),
-      balance: lines.reduce((s, l) => s + Number(l.balance || 0), 0),
+      items: lines.map(l => ({ code: l.item_code || '', name: l.description || '', balance: Number(l.balance || 0) })),
     }))
   }, [cands])
   const groups = useMemo(() => {
@@ -121,22 +120,25 @@ export default function CancelNotesPage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b sticky top-0"><tr>
                 <th className="px-3 py-2"><input type="checkbox" checked={cands.length > 0 && selCand.size === cands.length} onChange={e => setSelCand(e.target.checked ? new Set(cands.map(c => c.line_id)) : new Set())} className="h-4 w-4" /></th>
-                {['SO', 'Customer', 'Items', 'Delivery', 'Factory', 'Balance'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}
+                {['SO', 'Customer', 'Items (balance per item)', 'Delivery', 'Factory'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}
               </tr></thead>
               <tbody>
-                {groups.length === 0 && <tr><td colSpan={7} className="text-center py-6 text-gray-400">{candQ ? 'No match.' : 'Nothing outstanding is off the schedule. 🎉'}</td></tr>}
+                {groups.length === 0 && <tr><td colSpan={6} className="text-center py-6 text-gray-400">{candQ ? 'No match.' : 'Nothing outstanding is off the schedule. 🎉'}</td></tr>}
                 {groups.map(g => (
                   <tr key={g.so} className={`border-b last:border-0 ${groupChecked(g.ids) ? 'bg-orange-50' : 'hover:bg-gray-50'}`}>
                     <td className="px-3 py-2 align-top"><input type="checkbox" checked={groupChecked(g.ids)} onChange={() => toggleGroup(g.ids)} className="h-4 w-4" /></td>
                     <td className="px-3 py-2 font-mono whitespace-nowrap align-top">{g.so}</td>
                     <td className="px-3 py-2 min-w-[140px] align-top">{g.customer || '—'}</td>
-                    <td className="px-3 py-2 align-top min-w-[220px]">
-                      {g.items.slice(0, 4).map((it, i) => <div key={i} className="text-xs"><span className="font-mono text-gray-700">{it.code}</span>{it.name ? <span className="text-gray-500"> — {it.name}</span> : null}</div>)}
-                      {g.items.length > 4 && <div className="text-[11px] text-gray-400">+{g.items.length - 4} more</div>}
+                    <td className="px-3 py-2 align-top min-w-[260px]">
+                      {g.items.map((it, i) => (
+                        <div key={i} className="text-xs flex justify-between gap-3">
+                          <span><span className="font-mono text-gray-700">{it.code}</span>{it.name ? <span className="text-gray-500"> — {it.name}</span> : null}</span>
+                          <span className="tabular-nums font-semibold text-orange-600 whitespace-nowrap">{Number(it.balance.toFixed(3))}</span>
+                        </div>
+                      ))}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap text-gray-600 align-top">{g.deliveryDate ? g.deliveryDate.split('-').reverse().join('/') : '—'}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-gray-600 align-top">{g.factories || '—'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-orange-600 align-top">{Number(g.balance.toFixed(3))}</td>
                   </tr>
                 ))}
               </tbody>
