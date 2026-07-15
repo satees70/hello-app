@@ -9,7 +9,7 @@ import ItemPicker from '@/components/ItemPicker'
 import QrScanner from '@/components/QrScanner'
 import { parseQr } from '@/lib/qr'
 
-interface Task { id: string; count_no: string | null; name: string | null; scope_type: string; blind: boolean; status: string; created_by_name: string | null; applied_by_name: string | null; applied_at: string | null }
+interface Task { id: string; count_no: string | null; name: string | null; scope_type: string; blind: boolean; status: string; created_by_name: string | null; applied_by_name: string | null; applied_at: string | null; completed_at?: string | null }
 interface CLine { id: string; location_id: string | null; location_code: string; item_id: string | null; item_code: string; description: string | null; batch_no: string; exp_date: string | null; expected_qty: number; counted_qty: number | null; is_unexpected: boolean; skip: boolean; counted_by_name: string | null }
 interface Item { code: string; description: string; unit: string }
 interface Loc { id: string; code: string }
@@ -31,6 +31,7 @@ export default function WmsCountPage() {
   const { id } = useParams<{ id: string }>()
   const { profile, loading } = useProfile()
   const canEdit = !!profile && can(profile, 'warehouse', 'edit')
+  const isHOD = !!profile && (profile.role === 'admin' || profile.factory_code === 'HEAD_OFFICE')   // manager who approves the adjustments
 
   const [task, setTask] = useState<Task | null>(null)
   const [lines, setLines] = useState<CLine[]>([])
@@ -147,6 +148,31 @@ export default function WmsCountPage() {
     load()
   }
 
+  async function stopCount() {
+    if (!canEdit) return
+    if (!confirm('Mark counting finished? It moves to Review, waiting for a manager to apply the adjustments.')) return
+    setBusy(true); setErr(''); setMsg('')
+    const { error } = await supabase.rpc('wms_stop_count', { p_task_id: id })
+    setBusy(false)
+    if (error) { setErr(/wms_stop_count/.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-count-approve-stop.sql in the Supabase SQL editor.' : error.message); return }
+    setMsg('Counting stopped — waiting for a manager to apply the adjustments.'); load()
+  }
+
+  async function printReport() {
+    const { default: jsPDF } = await import('jspdf')
+    const { default: autoTable } = await import('jspdf-autotable')
+    const doc = new jsPDF()
+    doc.setFontSize(14); doc.text(`Stock Count ${task?.count_no || ''}${task?.name ? ' · ' + task.name : ''}`, 14, 18)
+    doc.setFontSize(9)
+    doc.text(`${counted}/${lines.length} lines counted · ${discreps.length} discrepancies · status ${task?.status || ''}${task?.applied_by_name ? ' · applied by ' + task.applied_by_name : ''}`, 14, 25)
+    autoTable(doc, {
+      startY: 30, styles: { fontSize: 8 }, headStyles: { fillColor: [16, 122, 87] },
+      head: [['Bin', 'Item', 'Description', 'Batch', 'System', 'Counted', 'Diff', 'Type']],
+      body: discreps.map(l => { const diff = clean((l.counted_qty ?? 0) - l.expected_qty); return [l.location_code, l.item_code, l.description || '', l.batch_no || '', fmtQty(l.expected_qty), fmtQty(l.counted_qty), (diff > 0 ? '+' : '') + fmtQty(diff), discrepancy(l)?.type || ''] }),
+    })
+    doc.save(`Count_${task?.count_no || 'report'}.pdf`)
+  }
+
   function onScan(raw: string) {
     const p = parseQr(raw)
     if (p.kind !== 'bin') { setErr('That’s not a bin QR.'); return }
@@ -164,9 +190,11 @@ export default function WmsCountPage() {
         <div className="flex flex-wrap items-center gap-3 mt-2 mb-1">
           <h1 className="text-2xl font-bold">{task.count_no}{task.name ? ` · ${task.name}` : ''}</h1>
           {task.blind && <span className="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium">Blind</span>}
-          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${applied ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-100 text-emerald-700'}`}>{task.status}</span>
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${task.status === 'Review' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{task.status}</span>
+          {task.status === 'Counting' && canEdit && <button onClick={stopCount} disabled={busy} className="text-xs border border-red-500 text-red-600 rounded px-2.5 py-1 hover:bg-red-50 font-medium disabled:opacity-50">■ Stop counting</button>}
+          <button onClick={printReport} className="text-xs border border-gray-300 text-gray-600 rounded px-2.5 py-1 hover:bg-gray-50 font-medium">🖨 Print report</button>
         </div>
-        <p className="text-gray-500 text-sm mb-5">{counted}/{lines.length} lines counted · {discreps.length} discrepanc{discreps.length === 1 ? 'y' : 'ies'}{applied ? ` · applied by ${task.applied_by_name}` : ''}</p>
+        <p className="text-gray-500 text-sm mb-5">{counted}/{lines.length} lines counted · {discreps.length} discrepanc{discreps.length === 1 ? 'y' : 'ies'}{applied ? ` · applied by ${task.applied_by_name}` : ''}{task.completed_at && !applied ? ` · counting done ${new Date(task.completed_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</p>
 
         {err && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg mb-4">{err}</p>}
         {msg && <p className="text-emerald-700 text-sm bg-emerald-50 border border-emerald-200 p-3 rounded-lg mb-4">✓ {msg}</p>}
@@ -252,9 +280,11 @@ export default function WmsCountPage() {
               </tbody>
             </table>
             {!applied && discreps.length > 0 && canEdit && (
-              <div className="p-4 border-t flex items-center gap-3">
-                <button onClick={apply} disabled={busy} className="bg-emerald-700 text-white px-6 py-2 rounded-lg hover:bg-emerald-800 disabled:opacity-50 font-medium">{busy ? 'Applying…' : `Apply ${discreps.filter(l => !l.skip).length} correction(s)`}</button>
-                <span className="text-xs text-gray-500">Untick a row to skip it (e.g. recount needed). Uncounted lines are never changed.</span>
+              <div className="p-4 border-t flex items-center gap-3 flex-wrap">
+                {isHOD
+                  ? <><button onClick={apply} disabled={busy} className="bg-emerald-700 text-white px-6 py-2 rounded-lg hover:bg-emerald-800 disabled:opacity-50 font-medium">{busy ? 'Applying…' : `Apply ${discreps.filter(l => !l.skip).length} correction(s)`}</button>
+                      <span className="text-xs text-gray-500">Untick a row to skip it. Uncounted lines are never changed.</span></>
+                  : <span className="text-xs text-amber-600">{task.status === 'Review' ? 'Counting done — waiting for a manager (Head Office) to apply the adjustments.' : 'Press ■ Stop counting when done; a manager then applies the adjustments.'}</span>}
               </div>
             )}
           </div>
