@@ -56,6 +56,8 @@ export default function PackingPage() {
   const [openMat, setOpenMat] = useState<Set<string>>(new Set())
   const toggleMat = (id: string) => setOpenMat(p => { const x = new Set(p); x.has(id) ? x.delete(id) : x.add(id); return x })
   const [savingId, setSavingId] = useState('')
+  const [stockEdit, setStockEdit] = useState<Record<string, string>>({})   // itemId|factory -> typed on-hand
+  const [savingStock, setSavingStock] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [tomorrowSOs, setTomorrowSOs] = useState<Set<string>>(new Set())
@@ -109,7 +111,7 @@ export default function PackingPage() {
   const n = (x: number) => Number(Number(x).toFixed(3))
   const itemOf = (id: string) => items.find(i => i.id === id)
   // How many units we can make from current system stock, plus the per-material breakdown.
-  type Comp = { code: string; description: string; unit: string; required: number; avail: number; shortfall: number }
+  type Comp = { itemId: string; code: string; description: string; unit: string; required: number; avail: number; shortfall: number }
   const availability = (b: Batch): { hasBom: boolean; units: number; comps: Comp[]; labels: Comp[]; labelsReady: boolean } => {
     const parent = items.find(i => i.code === b.item_code)
     if (!parent) return { hasBom: false, units: 0, comps: [], labels: [], labelsReady: true }
@@ -122,7 +124,7 @@ export default function PackingPage() {
       const avail = stock[`${c.component_item_id}|${b.factory_code}`] ?? 0
       const per = Number(c.quantity) || 0
       const required = per * b.total_quantity
-      return { code: ci?.code || '—', description: ci?.description || '', unit: ci?.unit || '', required, avail, shortfall: Math.max(required - avail, 0) }
+      return { itemId: c.component_item_id, code: ci?.code || '—', description: ci?.description || '', unit: ci?.unit || '', required, avail, shortfall: Math.max(required - avail, 0) }
     }
     // Warehouse materials drive "units"; labels are printed at the factory and tracked separately.
     let units = Infinity
@@ -176,7 +178,23 @@ export default function PackingPage() {
                     </div>
                   )}
                 </td>
-                <td className="px-3 py-1.5 text-right font-medium align-top">{n(c.avail)}</td>
+                <td className="px-3 py-1.5 text-right font-medium align-top">
+                  {canEditFac(b.factory_code) ? (() => {
+                    const key = `${c.itemId}|${b.factory_code}`
+                    const val = stockEdit[key] ?? String(n(c.avail))
+                    const changed = Number(val) !== n(c.avail) && val.trim() !== '' && val.trim() !== '-' && !isNaN(Number(val))
+                    return (
+                      <div className="flex items-center justify-end gap-1">
+                        <input value={val} inputMode="decimal"
+                          onChange={e => setStockEdit(p => ({ ...p, [key]: e.target.value.replace(/[^0-9.\-]/g, '') }))}
+                          onKeyDown={e => { if (e.key === 'Enter' && changed) saveStock(c.itemId, b.factory_code, val) }}
+                          className="w-16 border rounded px-1.5 py-1 text-xs text-right tabular-nums" title="Correct the system on-hand (negative allowed)" />
+                        {changed && <button onClick={() => saveStock(c.itemId, b.factory_code, val)} disabled={savingStock === key}
+                          className="text-[10px] bg-emerald-700 text-white rounded px-1.5 py-1 hover:bg-emerald-800 disabled:opacity-50">{savingStock === key ? '…' : 'Save'}</button>}
+                      </div>
+                    )
+                  })() : n(c.avail)}
+                </td>
                 <td className={`px-3 py-1.5 text-right font-semibold align-top ${c.shortfall > 0 ? 'text-red-600' : 'text-green-600'}`}>{n(c.shortfall)}</td>
               </tr>
             ) })}
@@ -200,6 +218,21 @@ export default function PackingPage() {
         )}
       </div>
     )
+  }
+
+  // Correct the live system on-hand for a material at a factory (negative allowed on purpose).
+  async function saveStock(itemId: string, factory: string, raw: string) {
+    if (!canEditFac(factory)) { setError('You have view-only access at this factory.'); return }
+    const key = `${itemId}|${factory}`
+    if (raw.trim() === '' || raw.trim() === '-' || isNaN(Number(raw))) { setError('Enter a stock quantity (a number).'); return }
+    const qty = Number(raw)
+    setSavingStock(key); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('set_item_stock', { p_item_id: itemId, p_factory: factory, p_qty: qty })
+    setSavingStock('')
+    if (e) { setError(/set_item_stock|function/i.test(e.message) && /does not exist|schema cache|could not find/i.test(e.message) ? 'This needs a database update — run db/2026-07-set-item-stock.sql in the Supabase SQL editor.' : e.message); return }
+    setStock(s => ({ ...s, [key]: qty }))
+    setStockEdit(prev => { const n = { ...prev }; delete n[key]; return n })
+    setSuccess(`Stock updated to ${n(qty)}.`)
   }
 
   async function savePack(b: Batch) {
@@ -369,7 +402,7 @@ export default function PackingPage() {
               </div>
               <div className="mt-1"><span className="font-medium">{b.item_code}</span> <span className="text-gray-500 text-sm">×{b.total_quantity}</span><span className="block text-gray-500 text-xs">{b.description}</span></div>
               <button onClick={() => toggleMat(b.id)} className="text-emerald-600 hover:underline text-xs mt-1">{openMat.has(b.id) ? '▾ hide materials' : '▸ show materials'}</button>
-              {openMat.has(b.id) && <div className="mt-2"><MaterialTable b={b} /></div>}
+              {openMat.has(b.id) && <div className="mt-2">{MaterialTable({ b })}</div>}
               <div className="mt-3 pt-2 border-t">{canEditFac(b.factory_code) ? <PackForm b={b} /> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${partial(b) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{partial(b) ? `Enough for ${availability(b).units}` : 'Materials ready'}</span>}</div>
             </div>
           ))}
@@ -397,7 +430,7 @@ export default function PackingPage() {
                   {openMat.has(b.id) && (
                     <tr className="bg-gray-50/60 border-b"><td colSpan={multiFac ? 6 : 5} className="px-3 py-3">
                       <div className="text-gray-500 text-xs mb-1">To make <strong>{b.total_quantity}</strong> of {b.item_code} at {factoryName(b.factory_code)} — stock is the live system on-hand.</div>
-                      <MaterialTable b={b} />
+                      {MaterialTable({ b })}
                     </td></tr>
                   )}
                 </Fragment>
@@ -430,7 +463,7 @@ export default function PackingPage() {
                   {openMat.has(b.id) && (
                     <tr className="bg-gray-50/60 border-b"><td colSpan={multiFac ? 6 : 5} className="px-3 py-3">
                       <div className="text-gray-500 text-xs mb-1">To make <strong>{b.total_quantity}</strong> of {b.item_code} at {factoryName(b.factory_code)} — stock is the live system on-hand.</div>
-                      <MaterialTable b={b} />
+                      {MaterialTable({ b })}
                     </td></tr>
                   )}
                 </Fragment>
