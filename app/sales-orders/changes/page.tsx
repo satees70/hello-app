@@ -66,6 +66,11 @@ interface MrCancelReq {
   requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
 }
 
+interface MrCancelItemReq {
+  id: string; request_no: string | null; factory_code: string | null; item_codes: string | null; reason: string | null; status: string
+  requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
+}
+
 interface DocDelReq {
   id: string; file_name: string | null; file_path: string | null; factory_code: string | null; reason: string | null; status: string
   requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
@@ -156,6 +161,7 @@ export default function PendingChangesPage() {
   const [selRM, setSelRM] = useState<Set<string>>(new Set())
   const [rmFilters, setRmFilters] = useState<Record<string, Set<string>>>({})
   const [mrCancels, setMrCancels] = useState<MrCancelReq[]>([])
+  const [mrCancelItems, setMrCancelItems] = useState<MrCancelItemReq[]>([])
   const [selMC, setSelMC] = useState<Set<string>>(new Set())
   const [mcFilters, setMcFilters] = useState<Record<string, Set<string>>>({})
   const [docDels, setDocDels] = useState<DocDelReq[]>([])
@@ -179,7 +185,7 @@ export default function PendingChangesPage() {
 
   useEffect(() => {
     if (!profile) return
-    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadFoodLoss(); loadWmsChecks()
+    loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadMrCancelItems(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadFoodLoss(); loadWmsChecks()
     // Live refresh on any change-request activity, with a poll fallback
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) supabase.realtime.setAuth(data.session.access_token)
@@ -194,6 +200,7 @@ export default function PendingChangesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'wms_check_qty_requests' }, () => loadWmsChecks())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'run_mode_requests' }, () => loadRunModes())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mr_cancel_requests' }, () => loadMrCancels())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mr_cancel_item_requests' }, () => loadMrCancelItems())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'doc_delete_requests' }, () => loadDocDels())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'return_edit_requests' }, () => loadRetEdits())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'dispatch_line_edit_requests' }, () => loadFgEdits())
@@ -202,7 +209,7 @@ export default function PendingChangesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mr_qty_move_requests' }, () => loadQtyMoves())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'food_loss_alerts' }, () => loadFoodLoss())
       .subscribe()
-    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadWmsChecks() }, 20000)
+    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadMrCancelItems(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadWmsChecks() }, 20000)
     return () => { supabase.removeChannel(channel); clearInterval(timer) }
   }, [profile])
 
@@ -307,6 +314,23 @@ export default function PendingChangesPage() {
     const { error: e } = await supabase.rpc('reject_mr_cancel', { p_id: id })
     if (e) { setError(e.message); setBusyId(''); return }
     setSuccess('Cancellation rejected.'); setBusyId(''); loadMrCancels()
+  }
+  async function loadMrCancelItems() {
+    const { data } = await supabase.from('mr_cancel_item_requests').select('*').order('created_at', { ascending: false })
+    setMrCancelItems((data as MrCancelItemReq[]) || [])
+  }
+  async function approveMCI(id: string) {
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('approve_mr_cancel_items', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Line(s) cancelled — the rest of the request is unchanged.'); setBusyId(''); loadMrCancelItems()
+  }
+  async function rejectMCI(id: string) {
+    if (!confirm('Reject this line cancellation? The lines stay on the request.')) return
+    setBusyId(id); setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc('reject_mr_cancel_items', { p_id: id })
+    if (e) { setError(e.message); setBusyId(''); return }
+    setSuccess('Line cancellation rejected.'); setBusyId(''); loadMrCancelItems()
   }
   async function loadDocDels() {
     const { data } = await supabase.from('doc_delete_requests').select('*').order('created_at', { ascending: false })
@@ -582,6 +606,7 @@ export default function PendingChangesPage() {
     ...wmsChecks.filter(w => w.status === 'Pending').map(w => P(w.id, 'Pick check qty correction', `${w.order_no || 'order'} · ${(w.corrections || []).map(c => `${c.item_code} ${c.picked_qty}→${c.checked_qty}`).join(', ')}`, w.requested_by_name, w.created_at, () => approveWC(w.id), () => rejectWC(w.id))),
     ...runModes.filter(a => a.status === 'Pending').map(a => P(a.id, 'Run mode', `${a.batch_no || a.item_code || '—'}: ${a.from_mode ?? '—'} → ${a.to_mode ?? '—'}`, a.requested_by_name, a.created_at, () => approveRM(a.id), () => rejectRM(a.id))),
     ...mrCancels.filter(a => a.status === 'Pending').map(a => P(a.id, 'Pick run cancel', a.request_no || '—', a.requested_by_name, a.created_at, () => approveMC(a.id), () => rejectMC(a.id))),
+    ...mrCancelItems.filter(a => a.status === 'Pending').map(a => P(a.id, 'Cancel request line(s)', `${a.request_no || '—'} · ${a.item_codes || ''}`, a.requested_by_name, a.created_at, () => approveMCI(a.id), () => rejectMCI(a.id))),
     ...docDels.filter(a => a.status === 'Pending').map(a => P(a.id, 'Document delete', a.file_name || '—', a.requested_by_name, a.created_at, () => approveDD(a), () => rejectDD(a.id))),
     ...retEdits.filter(a => a.status === 'Pending').map(a => P(a.id, 'Return edit', `${a.item_code || '—'} qty ${a.old_qty} → ${a.new_qty}`, a.requested_by_name, a.created_at, () => approveRE(a.id), () => rejectRE(a.id))),
     ...fgEdits.filter(a => a.status === 'Pending').map(a => P(a.id, 'Delivery line edit', `DO ${a.do_number || '—'} · ${a.new_item_code || a.old_item_code} qty ${a.old_qty} → ${a.new_qty}`, a.requested_by_name, a.created_at, () => approveFge(a.id), () => rejectFge(a.id))),

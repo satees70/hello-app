@@ -84,6 +84,10 @@ export default function MaterialRequestsPage() {
   const [movePending, setMovePending] = useState<Set<string>>(new Set())
   const [labelEdits, setLabelEdits] = useState<Record<string, { batch: string; exp: string; qty: string }>>({}) // item id -> label batch/exp/print-qty being typed
   const [selLabels, setSelLabels] = useState<Set<string>>(new Set())   // labels ticked to send
+  const [cancelSel, setCancelSel] = useState<Record<string, Set<string>>>({})   // run no -> material codes ticked to cancel
+  const toggleCancel = (runNo: string, code: string) => setCancelSel(prev => {
+    const s = new Set(prev[runNo] || []); s.has(code) ? s.delete(code) : s.add(code); return { ...prev, [runNo]: s }
+  })
   // Manual request (raise an item by hand while the system is new)
   const [itemsMaster, setItemsMaster] = useState<{ code: string; description: string; unit: string }[]>([])
   const [showManual, setShowManual] = useState(false)
@@ -357,6 +361,41 @@ export default function MaterialRequestsPage() {
     setSuccess(`Cancel request sent for ${run.runNo} — waiting for Head Office approval.`)
   }
 
+  // Request to cancel only the TICKED lines of a released run (e.g. a wrong item added by
+  // mistake) — Head Office approves; the rest of the run keeps being picked as normal.
+  async function requestLineCancel(run: { runNo: string; factory: string; released_at: string; mats: MatMap; reqs: MaterialRequest[] }) {
+    if (!canEditFac(run.factory)) { setError("You have view-only access at this factory."); return }
+    const codes = [...(cancelSel[run.runNo] || [])]
+    if (!codes.length) { setError('Tick at least one material to cancel.'); return }
+    const itemReq = new Map<string, MaterialRequest>()
+    run.reqs.forEach(r => (r.material_request_items || []).forEach(it => itemReq.set(it.id, r)))
+    const { warehouse } = splitBySource(run.mats)
+    const picked: { id: string; code: string; r: MaterialRequest }[] = []
+    for (const code of codes) {
+      const g = warehouse[code]; if (!g) continue
+      g.items.filter(li => Number(li.received_qty) <= 0).forEach(li => { const r = itemReq.get(li.id); if (r) picked.push({ id: li.id, code, r }) })
+    }
+    if (!picked.length) { setError('Those lines already have material received — they can’t be cancelled here.'); return }
+    const reason = window.prompt(`Request to cancel these line(s) from ${run.runNo}?\n\n${codes.join(', ')}\n\nHead Office must approve. The rest of the run is unaffected.\n\nReason (optional):`, '')
+    if (reason === null) return
+    setBusy(`linecancel|${run.runNo}`); setError(''); setSuccess('')
+    const byReq = new Map<string, { r: MaterialRequest; ids: string[]; codes: string[] }>()
+    picked.forEach(p => { const e = byReq.get(p.r.id) || { r: p.r, ids: [], codes: [] }; e.ids.push(p.id); if (!e.codes.includes(p.code)) e.codes.push(p.code); byReq.set(p.r.id, e) })
+    const rows = [...byReq.values()].map(e => ({
+      material_request_id: e.r.id, request_no: e.r.request_no, factory_code: e.r.factory_code,
+      item_ids: e.ids, item_codes: e.codes.join(', '), reason: reason || null,
+      requested_by: profile?.id, requested_by_name: profile?.full_name || null,
+    }))
+    const { error: e } = await supabase.from('mr_cancel_item_requests').insert(rows)
+    setBusy('')
+    if (e) {
+      const missing = /mr_cancel_item_requests/.test(e.message) && /does not exist|schema cache|relation|could not find/i.test(e.message)
+      setError(missing ? 'This needs a database update — run db/2026-07-mr-cancel-lines.sql in the Supabase SQL editor.' : e.message); return
+    }
+    setSuccess(`Cancel request sent for ${codes.length} line(s) in ${run.runNo} — waiting for Head Office approval.`)
+    setCancelSel(prev => ({ ...prev, [run.runNo]: new Set() }))
+  }
+
   // Warehouse records the SO number against a released pick run (saved on all its requests).
   // Once set it's locked — changing it later needs Head Office approval.
   async function saveSo(run: { runNo: string; reqs: MaterialRequest[] }) {
@@ -530,7 +569,7 @@ export default function MaterialRequestsPage() {
     : [...visibleRuns].sort((a, b) => RUN_BUCKETS.indexOf(runBucket(a)) - RUN_BUCKETS.indexOf(runBucket(b)) || b.released_at.localeCompare(a.released_at))
 
   // One material table; editable=true adds the Received/Remaining columns + receiving (released runs only)
-  const renderMatTable = (mats: MatMap, prefix: string, editable: boolean) => {
+  const renderMatTable = (mats: MatMap, prefix: string, editable: boolean, sel?: { has: (code: string) => boolean; toggle: (code: string) => void } | null) => {
     const list = Object.values(mats).sort((a, b) => a.code.localeCompare(b.code))
     const heads = ['Material', 'Description', 'Unit', 'To pick', ...(editable ? ['Received', 'Remaining'] : [])]
     const r = (n: number) => Number(Number(n).toFixed(3))
@@ -543,7 +582,7 @@ export default function MaterialRequestsPage() {
           const toPick = per ? Math.ceil(g.requested / per) : r(g.requested)
           return (
             <div key={`m|${prefix}|${g.code}`} className={`border rounded-lg p-2.5 ${editable && g.received >= g.requested ? 'bg-green-50/40' : ''}`}>
-              <div className="flex items-baseline justify-between gap-2"><span className="font-mono font-medium text-sm">{g.code}</span><span className="text-emerald-700 font-semibold text-sm">{toPick} {per ? 'roll' : g.unit}</span></div>
+              <div className="flex items-baseline justify-between gap-2"><span className="font-mono font-medium text-sm flex items-center gap-1.5">{sel && g.received <= 0 && <input type="checkbox" className="h-4 w-4 self-center" checked={sel.has(g.code)} onChange={() => sel.toggle(g.code)} />}{g.code}</span><span className="text-emerald-700 font-semibold text-sm">{toPick} {per ? 'roll' : g.unit}</span></div>
               <div className="text-gray-600 text-xs">{g.description}</div>
               {editable && <div className="text-xs text-gray-500 mt-1">Received <strong className="text-gray-700">{per ? r(g.received / per) : r(g.received)}</strong> · Remaining <strong className={remaining > 0 ? 'text-red-600' : 'text-green-600'}>{per ? r(remaining / per) : r(remaining)}</strong></div>}
             </div>
@@ -554,7 +593,7 @@ export default function MaterialRequestsPage() {
       <div className="hidden md:block overflow-x-auto border rounded-lg">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b">
-            <tr>{heads.map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr>
+            <tr>{sel && <th className="px-3 py-2 w-8" />}{heads.map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr>
           </thead>
           <tbody>
             {list.map(g => {
@@ -568,6 +607,7 @@ export default function MaterialRequestsPage() {
               const rem = per ? r(remaining / per) : r(remaining)
               return (
                 <tr key={key} className={`border-b last:border-0 ${editable && done ? 'bg-green-50/40' : ''}`}>
+                  {sel && <td className="px-3 py-2">{g.received <= 0 ? <input type="checkbox" className="h-4 w-4" checked={sel.has(g.code)} onChange={() => sel.toggle(g.code)} /> : null}</td>}
                   <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{g.code}</td>
                   <td className="px-3 py-2 text-gray-600">{g.description}</td>
                   <td className="px-3 py-2 text-gray-500">{per ? 'roll' : g.unit}</td>
@@ -801,10 +841,16 @@ export default function MaterialRequestsPage() {
                             <div className="mb-5">
                               <div className="flex items-center gap-2 mb-2">
                                 <span className="text-sm font-semibold text-gray-700">📦 From warehouse</span>
+                                {!isWarehouse && hasCap(profile, 'request_mr_cancel') && (cancelSel[run.runNo]?.size || 0) > 0 && (
+                                  <button onClick={() => requestLineCancel(run)} disabled={busy === `linecancel|${run.runNo}`}
+                                    className="border border-red-300 text-red-600 px-2.5 py-1 rounded-lg hover:bg-red-50 text-xs font-medium disabled:opacity-50">
+                                    {busy === `linecancel|${run.runNo}` ? 'Sending…' : `✕ Request to cancel ${cancelSel[run.runNo].size} line(s) (HQ approval)`}</button>
+                                )}
                                 <button onClick={() => downloadPickRunPdf(run.runNo, run.factory, run.released_at, warehouse, 'Warehouse')}
                                   className="ml-auto border border-emerald-600 text-emerald-600 px-3 py-1 rounded-lg hover:bg-emerald-50 text-xs font-medium">⬇ Warehouse PDF</button>
                               </div>
-                              {renderMatTable(warehouse, `${rkey}|wh`, true)}
+                              {renderMatTable(warehouse, `${rkey}|wh`, true, !isWarehouse && hasCap(profile, 'request_mr_cancel') ? { has: c => !!cancelSel[run.runNo]?.has(c), toggle: c => toggleCancel(run.runNo, c) } : null)}
+                              {!isWarehouse && hasCap(profile, 'request_mr_cancel') && (cancelSel[run.runNo]?.size || 0) === 0 && <p className="text-[11px] text-gray-400 mt-1">Tick a material to request cancelling just that line (e.g. an item added by mistake). Head Office approves; the rest of the run is picked as normal.</p>}
                             </div>
                           )}
                           {filter === 'Labels' && facReqs.length > 0 && (() => {
