@@ -13,7 +13,8 @@ interface Order {
   assigned_to: string | null; assigned_to_name: string | null; pick_started_at: string | null; pick_completed_at: string | null
   wms_order_lines?: { count: number }[]
 }
-interface User { id: string; full_name: string | null }
+interface Picker { id: string; full_name: string | null }
+interface PickerUser { id: string; full_name: string | null; is_picker: boolean }
 
 // Pick duration for KPI: mins between start and finish, else "picking…" while in progress.
 const pickDur = (o: Order) => {
@@ -40,7 +41,10 @@ export default function WmsOrdersPage() {
   const canEdit = !!profile && can(profile, 'warehouse', 'edit')
 
   const [orders, setOrders] = useState<Order[]>([])
-  const [users, setUsers] = useState<User[]>([])
+  const [pickers, setPickers] = useState<Picker[]>([])
+  const [showPickers, setShowPickers] = useState(false)
+  const [manageUsers, setManageUsers] = useState<PickerUser[]>([])
+  const [manageQ, setManageQ] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
@@ -57,15 +61,29 @@ export default function WmsOrdersPage() {
     const { data } = await supabase.from('wms_orders')
       .select('*, wms_order_lines(count)').order('created_at', { ascending: false }).limit(100)
     setOrders((data as Order[]) || [])
-    const { data: us } = await supabase.from('profiles').select('id, full_name').order('full_name')
-    setUsers((us as User[]) || [])
+    const { data: pk } = await supabase.rpc('wms_pickers')
+    setPickers((pk as Picker[]) || [])
   }
 
+  const needsPickerDb = (m: string) => /wms_assign_order|wms_pickers|wms_set_picker|wms_users_for_picker|warehouse_picker|assigned_to|function|column/i.test(m) && /does not exist|schema cache|could not find/i.test(m)
+    ? 'This needs a database update — run db/2026-07-wms-pickers.sql in the Supabase SQL editor.' : m
   async function assign(o: Order, userId: string) {
     if (!canEdit) return
     setErr(''); setMsg('')
     const { error } = await supabase.rpc('wms_assign_order', { p_order_id: o.id, p_user_id: userId || null })
-    if (error) { setErr(/wms_assign_order|assigned_to|function|column/i.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-picker-kpi.sql in Supabase.' : error.message); return }
+    if (error) { setErr(needsPickerDb(error.message)); return }
+    load()
+  }
+  async function openManage() {
+    setShowPickers(true); setManageQ(''); setErr('')
+    const { data, error } = await supabase.rpc('wms_users_for_picker')
+    if (error) { setErr(needsPickerDb(error.message)); return }
+    setManageUsers((data as PickerUser[]) || [])
+  }
+  async function togglePicker(u: PickerUser) {
+    const { error } = await supabase.rpc('wms_set_picker', { p_user_id: u.id, p_on: !u.is_picker })
+    if (error) { setErr(needsPickerDb(error.message)); return }
+    setManageUsers(us => us.map(x => x.id === u.id ? { ...x, is_picker: !x.is_picker } : x))
     load()
   }
 
@@ -153,7 +171,10 @@ export default function WmsOrdersPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-        <h1 className="text-2xl font-bold">Orders to Pick</h1>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h1 className="text-2xl font-bold">Orders to Pick</h1>
+          {canEdit && <button onClick={openManage} className="text-sm border rounded-lg px-3 py-1.5 hover:bg-gray-50 font-medium">👤 Manage pickers</button>}
+        </div>
         <p className="text-gray-500 text-sm mt-1 mb-6">Upload a customer order PDF — the app reads the lines, you review, then it becomes a pick job. (Later these same orders can arrive straight from SQL Account.)</p>
 
         {canEdit && (
@@ -197,9 +218,10 @@ export default function WmsOrdersPage() {
                   <td className="px-4 py-2.5"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CHIP[o.status] || 'bg-gray-100'}`}>{o.status}</span></td>
                   <td className="px-4 py-2.5 whitespace-nowrap">
                     {canEdit
-                      ? <select value={o.assigned_to || ''} onChange={e => assign(o, e.target.value)} className="border rounded px-1.5 py-1 text-xs max-w-[130px]">
+                      ? <select value={o.assigned_to || ''} onChange={e => assign(o, e.target.value)} className="border rounded px-1.5 py-1 text-xs max-w-[140px]">
                           <option value="">— unassigned —</option>
-                          {users.map(u => <option key={u.id} value={u.id}>{u.full_name || u.id.slice(0, 6)}</option>)}
+                          {o.assigned_to && !pickers.some(p => p.id === o.assigned_to) && <option value={o.assigned_to}>{o.assigned_to_name || 'assigned'}</option>}
+                          {pickers.map(p => <option key={p.id} value={p.id}>{p.full_name || p.id.slice(0, 6)}</option>)}
                         </select>
                       : <span className="text-xs text-gray-600">{o.assigned_to_name || '—'}</span>}
                     {pickDur(o) && <div className="text-[10px] text-gray-400 mt-0.5">{pickDur(o)}</div>}
@@ -225,6 +247,27 @@ export default function WmsOrdersPage() {
           </table>
         </div>
       </div>
+
+      {showPickers && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowPickers(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-5" onClick={e => e.stopPropagation()}>
+            <h2 className="font-bold text-lg mb-1">Pickers</h2>
+            <p className="text-sm text-gray-500 mb-3">Tick the staff who pick — only ticked people appear in the “assign picker” dropdown.</p>
+            <input value={manageQ} onChange={e => setManageQ(e.target.value)} placeholder="Search staff…" className="border rounded-lg px-3 py-2 text-sm w-full mb-2" />
+            <div className="max-h-72 overflow-auto divide-y border rounded-lg">
+              {manageUsers.length === 0 && <p className="text-sm text-gray-400 px-3 py-4 text-center">No staff found.</p>}
+              {manageUsers.filter(u => { const n = manageQ.trim().toLowerCase(); return !n || (u.full_name || '').toLowerCase().includes(n) }).map(u => (
+                <label key={u.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-gray-50">
+                  <input type="checkbox" checked={u.is_picker} onChange={() => togglePicker(u)} className="w-4 h-4" />
+                  <span className="text-sm">{u.full_name || u.id.slice(0, 8)}</span>
+                  {u.is_picker && <span className="ml-auto text-[10px] text-emerald-700 bg-emerald-50 rounded px-1.5 py-0.5">picker</span>}
+                </label>
+              ))}
+            </div>
+            <div className="mt-4 text-right"><button onClick={() => setShowPickers(false)} className="border px-5 py-2 rounded-lg hover:bg-gray-50 text-sm">Done</button></div>
+          </div>
+        </div>
+      )}
 
       {linesFor && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setLinesFor(null)}>

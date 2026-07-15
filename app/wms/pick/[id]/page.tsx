@@ -188,6 +188,17 @@ export default function WmsPickPage() {
     setMsg(`${l.item_code} marked as no stock (short ${fmtQty(rem)}).`); load()
   }
 
+  // Optional explicit start (so the timer can include walk time). Otherwise it auto-starts
+  // on the first pick.
+  async function startPicking() {
+    if (!canEdit) return
+    setBusy('start'); setErr('')
+    const { error } = await supabase.rpc('wms_start_picking', { p_order_id: id })
+    setBusy('')
+    if (error) { setErr(/wms_start_picking|function/i.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-pickers.sql in the Supabase SQL editor.' : error.message); return }
+    setMsg('Picking started.'); load()
+  }
+
   function startPick(l: Line, s: Stock, qty: number) {
     if (!canEdit || !(qty > 0)) return
     setErr(''); setScanFor({ line: l, stock: s, qty })
@@ -242,10 +253,12 @@ export default function WmsPickPage() {
           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CHIP[order.status] || 'bg-gray-100 text-gray-600'}`}>{order.status}</span>
         </div>
         <p className="text-gray-500 text-sm mb-1">{order.customer_name || 'Customer ?'}{order.delivery_date ? ` · deliver ${order.delivery_date}` : ''} · {totals.done}/{totals.lines} lines done · {fmtQty(totals.remaining)} still to pick</p>
-        <p className="text-gray-400 text-xs mb-6">
-          {order.assigned_to_name ? `👤 Picker: ${order.assigned_to_name}` : '👤 Unassigned'}
-          {order.pick_started_at ? ` · started ${new Date(order.pick_started_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}
-        </p>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400 mb-6">
+          <span>{order.assigned_to_name ? `👤 Picker: ${order.assigned_to_name}` : '👤 Unassigned'}</span>
+          {order.pick_started_at
+            ? <span>· started {new Date(order.pick_started_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+            : canEdit && ['Reserved', 'Released', 'Picking'].includes(order.status) && <button onClick={startPicking} disabled={busy === 'start'} className="border border-emerald-600 text-emerald-700 rounded px-2 py-0.5 hover:bg-emerald-50 font-medium">▶ Start picking</button>}
+        </div>
 
         {!canEdit && <p className="text-sm bg-amber-50 text-amber-700 border border-amber-200 rounded-lg p-3 mb-4">You have view-only warehouse access, so you can’t book picks.</p>}
         {err && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg mb-4">{err}</p>}
