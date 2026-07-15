@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { supabase } from '@/lib/supabase'
+import WarehouseTabs, { passWh, WhFilter } from '@/components/WarehouseTabs'
 
 // Warehouse receiving: production sends a delivery order (finished goods and/or
 // raw-material returns); once its lorry is out, the warehouse confirms EACH item
@@ -54,6 +55,7 @@ export default function WarehouseReceivingPage() {
   const [grnEdits, setGrnEdits] = useState<Record<string, string>>({})
   const [showDone, setShowDone] = useState(false)
   const [q, setQ] = useState('')
+  const [wh, setWh] = useState<WhFilter>('all')
 
   const canReceive = !!profile && (!!profile.warehouse_user || profile.factory_code === 'HEAD_OFFICE' || profile.role === 'admin')
   const facName = (c: string) => facs[c] || c
@@ -116,6 +118,7 @@ export default function WarehouseReceivingPage() {
   const rq = q.trim().toLowerCase()
   const visible = orders
     .filter(o => showDone || !o.received_at)
+    .filter(o => passWh(wh, itemsOf(o).map(l => l.description)))
     .filter(o => !rq || `${o.do_number || ''} ${facName(o.factory_code)} ${o.vehicle || ''} ${o.warehouse_grn || ''} ${itemsOf(o).map(l => `${l.item_code} ${l.description || ''}`).join(' ')}`.toLowerCase().includes(rq))
 
   return (
@@ -131,6 +134,7 @@ export default function WarehouseReceivingPage() {
 
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 DO no., item, GRN…" className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[12rem]" />
+          <WarehouseTabs value={wh} onChange={setWh} />
           <label className="flex items-center gap-1.5 text-sm text-gray-600"><input type="checkbox" checked={showDone} onChange={e => setShowDone(e.target.checked)} /> Show received</label>
         </div>
 

@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
+import WarehouseTabs, { passWh, WhFilter } from '@/components/WarehouseTabs'
 import { can } from '@/lib/permissions'
 import ItemPicker from '@/components/ItemPicker'
 
@@ -41,6 +42,7 @@ export default function WmsStockPage() {
 
   // filters
   const [q, setQ] = useState('')
+  const [wh, setWh] = useState<WhFilter>('all')
   const [sortBy, setSortBy] = useState<'item' | 'bin'>('item')
 
   // add / edit
@@ -80,12 +82,12 @@ export default function WmsStockPage() {
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase()
-    const out = rows.filter(r => !needle || [r.item_code, r.description, r.location_code, r.batch_no].some(v => (v || '').toLowerCase().includes(needle)))
+    const out = rows.filter(r => passWh(wh, r.description) && (!needle || [r.item_code, r.description, r.location_code, r.batch_no].some(v => (v || '').toLowerCase().includes(needle))))
     out.sort((a, b) => sortBy === 'bin'
       ? a.location_code.localeCompare(b.location_code) || a.item_code.localeCompare(b.item_code)
       : a.item_code.localeCompare(b.item_code) || a.location_code.localeCompare(b.location_code))
     return out
-  }, [rows, q, sortBy])
+  }, [rows, q, wh, sortBy])
 
   const stats = useMemo(() => ({
     lines: rows.length,
@@ -223,6 +225,7 @@ export default function WmsStockPage() {
             <option value="item">Sort by item</option>
             <option value="bin">Sort by bin</option>
           </select>
+          <WarehouseTabs value={wh} onChange={setWh} />
         </div>
 
         {showForm && (
