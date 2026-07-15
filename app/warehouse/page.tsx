@@ -52,12 +52,17 @@ export default function WarehouseReceivingPage() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [busyLine, setBusyLine] = useState('')
+  const [busyDo, setBusyDo] = useState('')
   const [grnEdits, setGrnEdits] = useState<Record<string, string>>({})
   const [showDone, setShowDone] = useState(false)
   const [q, setQ] = useState('')
   const [wh, setWh] = useState<WhFilter>('all')
 
   const canReceive = !!profile && (!!profile.warehouse_user || profile.factory_code === 'HEAD_OFFICE' || profile.role === 'admin')
+  // Only a manager (Head Office / admin) can confirm WITHOUT a photo — used to clear the
+  // old backlog that was checked on paper before the system existed. Regular warehouse
+  // staff still must take a photo for every item, so the rule holds for new deliveries.
+  const isManager = !!profile && (profile.factory_code === 'HEAD_OFFICE' || profile.role === 'admin')
   const facName = (c: string) => facs[c] || c
   const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
 
@@ -90,6 +95,37 @@ export default function WarehouseReceivingPage() {
       await load()
     } catch (err) { setError(needsDbMsg(err instanceof Error ? err.message : String(err))) }
     setBusyLine('')
+  }
+  // Confirm an item that was received on PAPER (no photo). Manager-only. Reuses the same
+  // RPC — it already accepts an empty photo path.
+  async function confirmPaper(item: Item) {
+    setBusyLine(item.id); setError(null); setSuccess(null)
+    try {
+      const { error: e } = item.kind === 'return'
+        ? await supabase.rpc('confirm_do_return', { p_return_id: item.id, p_photo_path: null })
+        : await supabase.rpc('confirm_do_line', { p_line_id: item.id, p_photo_path: null })
+      if (e) throw e
+      await load()
+    } catch (err) { setError(needsDbMsg(err instanceof Error ? err.message : String(err))) }
+    setBusyLine('')
+  }
+  // Clear a whole old DO in one go — confirm every still-pending item on paper.
+  async function confirmDoPaper(o: DO) {
+    const pending = itemsOf(o).filter(l => !l.received_at)
+    if (pending.length === 0) return
+    if (!window.confirm(`Mark all ${pending.length} remaining item(s) on ${o.do_number || 'this DO'} as received on paper (no photos)?\n\nUse this only for old deliveries already checked before the system.`)) return
+    setBusyDo(o.id); setError(null); setSuccess(null)
+    try {
+      for (const l of pending) {
+        const { error: e } = l.kind === 'return'
+          ? await supabase.rpc('confirm_do_return', { p_return_id: l.id, p_photo_path: null })
+          : await supabase.rpc('confirm_do_line', { p_line_id: l.id, p_photo_path: null })
+        if (e) throw e
+      }
+      setSuccess(`${o.do_number || 'DO'} confirmed on paper (${pending.length} item${pending.length > 1 ? 's' : ''}).`)
+      await load()
+    } catch (err) { setError(needsDbMsg(err instanceof Error ? err.message : String(err))) }
+    setBusyDo('')
   }
   async function undoItem(item: Item) {
     setError(null); setSuccess(null)
@@ -155,6 +191,13 @@ export default function WarehouseReceivingPage() {
                       <span className={`ml-auto text-xs font-medium ${o.received_at ? 'text-green-700' : 'text-amber-700'}`}>
                         {o.received_at ? `✅ Received ${fmt(o.received_at)}` : `${done}/${items.length} items confirmed`}
                       </span>
+                      {isManager && !o.received_at && done < items.length && items.length > 0 && (
+                        <button onClick={() => confirmDoPaper(o)} disabled={busyDo === o.id}
+                          title="For old deliveries already checked on paper before the system — confirm every remaining item without photos."
+                          className="text-xs px-2.5 py-1 rounded-lg border border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 whitespace-nowrap">
+                          {busyDo === o.id ? 'Confirming…' : '🗒 Received on paper (no photos)'}
+                        </button>
+                      )}
                     </div>
 
                     <div className="px-4 py-2 border-b flex flex-wrap items-center gap-2 text-sm bg-gray-50/60">
@@ -178,11 +221,16 @@ export default function WarehouseReceivingPage() {
                             {l.photo_path && <button onClick={() => viewPhoto(l.photo_path!)} className="text-emerald-600 hover:underline text-xs">📷 photo</button>}
                             {canReceive && (l.received_at
                               ? <button onClick={() => undoItem(l)} className="text-gray-400 hover:underline text-xs">undo</button>
-                              : <label className={`cursor-pointer text-xs px-3 py-1.5 rounded-lg font-medium ${busyLine === l.id ? 'bg-gray-200 text-gray-500' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>
-                                  {busyLine === l.id ? 'Saving…' : '📷 Photo + confirm'}
-                                  <input type="file" accept="image/*" capture="environment" className="hidden" disabled={busyLine === l.id}
-                                    onChange={e => { const f = e.target.files?.[0]; if (f) takePhoto(l, o.id, f); e.target.value = '' }} />
-                                </label>)}
+                              : <>
+                                  <label className={`cursor-pointer text-xs px-3 py-1.5 rounded-lg font-medium ${busyLine === l.id ? 'bg-gray-200 text-gray-500' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>
+                                    {busyLine === l.id ? 'Saving…' : '📷 Photo + confirm'}
+                                    <input type="file" accept="image/*" capture="environment" className="hidden" disabled={busyLine === l.id}
+                                      onChange={e => { const f = e.target.files?.[0]; if (f) takePhoto(l, o.id, f); e.target.value = '' }} />
+                                  </label>
+                                  {isManager && <button onClick={() => confirmPaper(l)} disabled={busyLine === l.id}
+                                    title="Received on paper — confirm this item without a photo (old deliveries only)."
+                                    className="text-amber-700 hover:underline text-xs disabled:opacity-50">on paper</button>}
+                                </>)}
                           </div>
                         </div>
                       ))}
