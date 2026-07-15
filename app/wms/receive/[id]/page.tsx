@@ -10,7 +10,7 @@ import { LABEL_SIZES, downloadLabels } from '@/lib/wmsLabel'
 
 interface PO { id: string; po_number: string | null; supplier_name: string | null; status: string; expected_date: string | null }
 interface Line { id: string; line_no: number | null; item_id: string | null; item_code: string; description: string | null; quantity: number; qty_received: number; uom: string | null }
-interface Draft { qty: string; batch: string; exp: string; qc: 'pass' | 'fail'; note: string; photo: Blob | null; preview: string }
+interface Draft { qty: string; batch: string; exp: string; qc: 'pass' | 'fail'; note: string; photo: Blob | null; preview: string; bagPhoto: Blob | null; bagPreview: string; weight: string }
 
 const clean = (n: number) => Number(n.toPrecision(12))
 const fmtQty = (n: number) => clean(n).toLocaleString(undefined, { maximumFractionDigits: 4 })
@@ -90,12 +90,16 @@ export default function WmsReceivePage() {
   // All lines in this receiving session default to today's YYMMDD/NN, so each delivery
   // gets a distinct batch (a 2nd delivery of the same item today becomes /NN+1).
   const defaultBatch = useMemo(() => `${TODAY}/${runNo}`, [runNo])
-  const newDraft = useCallback((): Draft => ({ qty: '', batch: defaultBatch, exp: '', qc: 'pass', note: '', photo: null, preview: '' }), [defaultBatch])
+  const newDraft = useCallback((): Draft => ({ qty: '', batch: defaultBatch, exp: '', qc: 'pass', note: '', photo: null, preview: '', bagPhoto: null, bagPreview: '', weight: '' }), [defaultBatch])
   const draftOf = (l: Line) => drafts[l.id] ?? newDraft()
   const setDraft = (lineId: string, patch: Partial<Draft>) => setDrafts(d => ({ ...d, [lineId]: { ...(d[lineId] ?? newDraft()), ...patch } }))
 
   async function onPhoto(l: Line, file: File) {
     try { const blob = await compressImage(file); setDraft(l.id, { photo: blob, preview: URL.createObjectURL(blob) }) }
+    catch { setErr('Could not read that photo.') }
+  }
+  async function onBagPhoto(l: Line, file: File) {
+    try { const blob = await compressImage(file); setDraft(l.id, { bagPhoto: blob, bagPreview: URL.createObjectURL(blob) }) }
     catch { setErr('Could not read that photo.') }
   }
 
@@ -110,15 +114,21 @@ export default function WmsReceivePage() {
     if (!canEdit) return
     const d = draftOf(l); const qty = Number(d.qty)
     if (!(qty > 0)) { setErr('Enter the received quantity.'); return }
-    if (!d.photo) { setErr('A photo is required to receive a line.'); return }
+    if (!d.photo) { setErr('A product photo is required to receive a line.'); return }
+    if (!d.bagPhoto) { setErr('A bag photo is required to receive a line.'); return }
+    if (!(Number(d.weight) > 0)) { setErr('The product weight is required to receive a line.'); return }
     setBusy(l.id); setErr(''); setMsg('')
     const gid = await ensureGrn(); if (!gid) { setBusy(''); return }
     const path = `photos/${gid}/${l.id}-${Date.now()}.jpg`
     const up = await supabase.storage.from('wms-grn').upload(path, d.photo, { contentType: 'image/jpeg' })
-    if (up.error) { setErr(`Photo upload failed: ${up.error.message}`); setBusy(''); return }
+    if (up.error) { setErr(`Product photo upload failed: ${up.error.message}`); setBusy(''); return }
+    const bagPath = `photos/${gid}/${l.id}-bag-${Date.now()}.jpg`
+    const upBag = await supabase.storage.from('wms-grn').upload(bagPath, d.bagPhoto, { contentType: 'image/jpeg' })
+    if (upBag.error) { setErr(`Bag photo upload failed: ${upBag.error.message}`); setBusy(''); return }
     const { error } = await supabase.rpc('wms_receive_line', {
       p_grn_id: gid, p_po_line_id: l.id, p_item_code: l.item_code, p_qty: qty,
       p_batch: d.batch.trim(), p_exp_date: d.exp || null, p_qc: d.qc, p_qc_note: d.note.trim() || null, p_photo_path: path,
+      p_bag_photo_path: bagPath, p_weight: Number(d.weight),
     })
     setBusy('')
     if (error) { setErr(error.message); return }
@@ -163,8 +173,9 @@ export default function WmsReceivePage() {
                 </div>
 
                 {canEdit && (
-                  <div className="mt-3 border-t pt-3 grid grid-cols-2 sm:grid-cols-6 gap-2 items-end">
+                  <div className="mt-3 border-t pt-3 grid grid-cols-2 sm:grid-cols-8 gap-2 items-end">
                     <div className="col-span-1"><label className="block text-xs text-gray-500 mb-1">Qty {done ? '(more)' : ''}</label><input value={d.qty} onChange={e => setDraft(l.id, { qty: e.target.value.replace(/[^0-9.]/g, '') })} placeholder={out > 0 ? String(clean(out)) : '0'} className="w-full border rounded-lg px-2 py-1.5 text-sm text-right tabular-nums" inputMode="decimal" /></div>
+                    <div className="col-span-1"><label className="block text-xs text-gray-500 mb-1">Weight *</label><input value={d.weight} onChange={e => setDraft(l.id, { weight: e.target.value.replace(/[^0-9.]/g, '') })} placeholder="kg" className={`w-full border rounded-lg px-2 py-1.5 text-sm text-right tabular-nums ${Number(d.weight) > 0 ? '' : 'border-amber-300'}`} inputMode="decimal" /></div>
                     <div className="col-span-1"><label className="block text-xs text-gray-500 mb-1">Batch</label><input value={d.batch} onChange={e => setDraft(l.id, { batch: e.target.value })} className="w-full border rounded-lg px-2 py-1.5 text-sm font-mono" /></div>
                     <div className="col-span-1"><label className="block text-xs text-gray-500 mb-1">Expiry</label><input type="date" value={d.exp} onChange={e => setDraft(l.id, { exp: e.target.value })} className="w-full border rounded-lg px-2 py-1.5 text-sm" /></div>
                     <div className="col-span-1"><label className="block text-xs text-gray-500 mb-1">QC</label>
@@ -174,19 +185,28 @@ export default function WmsReceivePage() {
                       </div>
                     </div>
                     <div className="col-span-1">
-                      <label className="block text-xs text-gray-500 mb-1">Photo *</label>
-                      <label className={`block text-center border rounded-lg py-1.5 text-xs cursor-pointer ${d.photo ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'hover:bg-gray-50'}`}>
+                      <label className="block text-xs text-gray-500 mb-1">Product photo *</label>
+                      <label className={`block text-center border rounded-lg py-1.5 text-xs cursor-pointer ${d.photo ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-amber-300 hover:bg-gray-50'}`}>
                         {d.photo ? '✓ photo' : '📷 add'}
                         <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) onPhoto(l, f) }} />
                       </label>
                     </div>
                     <div className="col-span-1">
-                      <button onClick={() => receive(l)} disabled={busy === l.id || !(Number(d.qty) > 0) || !d.photo} className="w-full bg-emerald-700 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium">{busy === l.id ? '…' : 'Receive'}</button>
+                      <label className="block text-xs text-gray-500 mb-1">Bag photo *</label>
+                      <label className={`block text-center border rounded-lg py-1.5 text-xs cursor-pointer ${d.bagPhoto ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-amber-300 hover:bg-gray-50'}`}>
+                        {d.bagPhoto ? '✓ bag' : '📷 bag'}
+                        <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) onBagPhoto(l, f) }} />
+                      </label>
                     </div>
-                    {d.qc === 'fail' && <div className="col-span-2 sm:col-span-6"><input value={d.note} onChange={e => setDraft(l.id, { note: e.target.value })} placeholder="QC fail reason…" className="w-full border rounded-lg px-2 py-1.5 text-sm" /></div>}
-                    <div className="col-span-2 sm:col-span-6 flex items-center gap-3">
-                      {d.preview && <img src={d.preview} alt="" className="h-14 rounded border" />}
-                      <button type="button" onClick={() => printLabel(l)} className="text-xs text-emerald-700 hover:underline">🏷 Print {labelCopies(l)} label{labelCopies(l) > 1 ? 's' : ''}</button>
+                    <div className="col-span-1">
+                      <button onClick={() => receive(l)} disabled={busy === l.id || !(Number(d.qty) > 0) || !d.photo || !d.bagPhoto || !(Number(d.weight) > 0)} className="w-full bg-emerald-700 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium">{busy === l.id ? '…' : 'Receive'}</button>
+                    </div>
+                    {d.qc === 'fail' && <div className="col-span-2 sm:col-span-8"><input value={d.note} onChange={e => setDraft(l.id, { note: e.target.value })} placeholder="QC fail reason…" className="w-full border rounded-lg px-2 py-1.5 text-sm" /></div>}
+                    <div className="col-span-2 sm:col-span-8 flex items-center gap-3">
+                      {d.preview && <img src={d.preview} alt="product" className="h-14 rounded border" title="Product photo" />}
+                      {d.bagPreview && <img src={d.bagPreview} alt="bag" className="h-14 rounded border" title="Bag photo" />}
+                      {(!d.photo || !d.bagPhoto || !(Number(d.weight) > 0)) && <span className="text-[11px] text-amber-600">Product photo, bag photo &amp; weight are required.</span>}
+                      <button type="button" onClick={() => printLabel(l)} className="text-xs text-emerald-700 hover:underline ml-auto">🏷 Print {labelCopies(l)} label{labelCopies(l) > 1 ? 's' : ''}</button>
                     </div>
                   </div>
                 )}
