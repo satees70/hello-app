@@ -109,6 +109,8 @@ export default function DispatchPage() {
   const [dQty, setDQty] = useState('')
   const [dBatch, setDBatch] = useState('')
   const [dExp, setDExp] = useState('')
+  const [sentCart, setSentCart] = useState<{ lineId: string; so: string; itemCode: string; description: string; qty: number; batchNo: string; expDate: string; factory: string; factoryName: string }[]>([])   // items already sent outside the system (no DO)
+  const [priorList, setPriorList] = useState<{ id: string; so_number: string | null; customer_name: string | null; item_code: string | null; description: string | null; factory_code: string | null; quantity: number | null; batch_no: string | null; created_by_name: string | null; created_at: string }[]>([])
   // Edit-a-return modal (needs HO approval)
   const [editRet, setEditRet] = useState<MReturn | null>(null)
   const [editQty, setEditQty] = useState('')
@@ -159,6 +161,10 @@ export default function DispatchPage() {
       .select('id, do_number, factory_code, status, created_by_name, created_at, vehicle, driver_name, departed_at, received_at, received_by_name, warehouse_grn, receipt_photo_path, dispatch_order_lines(id, item_code, description, quantity, batch_no, exp_date, batch_id), material_returns(id, item_code, description, quantity, batch_no, exp_date, reason)')
       .order('created_at', { ascending: false }).limit(50)
     setOrders((o as DOrder[]) || [])
+    const { data: pd } = await supabase.from('prior_deliveries')
+      .select('id, so_number, customer_name, item_code, description, factory_code, quantity, batch_no, created_by_name, created_at')
+      .order('created_at', { ascending: false }).limit(100)
+    setPriorList((pd as typeof priorList) || [])
     // Open lorry requests (raised before a DO exists).
     const { data: lr } = await supabase.from('lorry_requests')
       .select('id, factory_code, kind, lorry_type, note, destination, status, fulfilled_lorry, requested_by_name, requested_at').in('status', ['open', 'fulfilled'])
@@ -265,7 +271,7 @@ export default function DispatchPage() {
 
   // ---- Direct delivery from a sales order (bypass production) ----
   const remainingOf = (l: SLine) => Math.max(0, Number(l.outstanding_qty ?? l.quantity ?? 0) - Number(l.delivered_qty || 0))
-  const cartLineIds = new Set(directCart.map(c => c.lineId))   // already added → drop from the picker
+  const cartLineIds = new Set([...directCart, ...sentCart].map(c => c.lineId))   // already added → drop from the picker
   const availLine = (l: SLine) => remainingOf(l) > 0 && !cartLineIds.has(l.id)
   const openSOs = [...new Set(salesLines.filter(availLine).map(l => l.so_number))].sort()
   const linesForSO = salesLines.filter(l => l.so_number === dSo && availLine(l))
@@ -336,6 +342,31 @@ export default function DispatchPage() {
     }
     setSuccess(`Direct delivery created — ${dos.join(', ')}.`)
     setDirectCart([]); setBusy(false); load()
+  }
+  // Items already sent to the customer OUTSIDE the system (no DO) — a bypass that marks the line
+  // delivered but is kept separate from real delivery orders and does not touch stock.
+  function addSent() {
+    setError(''); setSuccess('')
+    const line = salesLines.find(l => l.id === dLineId)
+    if (!line) { setError('Pick a sales-order item line.'); return }
+    if (!line.factory_code) { setError('This line has no factory/location set — set it on the Sales Orders page first.'); return }
+    const n = Number(dQty)
+    if (!(n > 0)) { setError('Enter a quantity greater than zero.'); return }
+    const left = remainingOf(line) - sentCart.filter(c => c.lineId === line.id).reduce((s, c) => s + c.qty, 0)
+    if (n > left) { setError(`Only ${left} left on this line.`); return }
+    setSentCart(c => [...c, { lineId: line.id, so: line.so_number, itemCode: line.item_code, description: line.description || '', qty: n, batchNo: dBatch.trim(), expDate: dExp, factory: line.factory_code, factoryName: factoryName(line.factory_code) }])
+    setDLineId(''); setDQty(''); setDBatch(''); setDExp('')
+  }
+  async function createSent() {
+    if (sentCart.length === 0) return
+    if (!confirm(`Mark ${sentCart.length} item(s) as already sent (no DO, kept separate from delivery orders)?`)) return
+    setBusy(true); setError(''); setSuccess('')
+    const lines = sentCart.map(c => ({ line_id: c.lineId, qty: c.qty, batch_no: c.batchNo || null, exp_date: c.expDate || null }))
+    const { error: e } = await supabase.rpc('record_prior_delivery', { p_lines: lines })
+    setBusy(false)
+    if (e) { setError(/record_prior_delivery|prior_deliveries/.test(e.message) && /does not exist|schema cache|could not find/i.test(e.message) ? 'This needs a database update — run db/2026-07-prior-delivery.sql in the Supabase SQL editor.' : e.message); return }
+    setSuccess(`${sentCart.length} item(s) recorded as sent previously.`)
+    setSentCart([]); load()
   }
 
   // Add a lorry to the approved list. Head Office / admin additions are approved at
@@ -838,6 +869,7 @@ export default function DispatchPage() {
                 <div className="flex flex-col gap-1 w-36"><span className="text-xs font-medium text-gray-600">Expiry <span className="text-gray-400 font-normal">or batch</span></span>
                   <input type="date" value={dExp} onChange={e => setDExp(e.target.value)} className="border rounded px-2 py-1.5 text-sm" /></div>
                 <button className="bg-orange-600 text-white px-5 py-2 rounded-lg hover:bg-orange-700 text-sm font-medium">Add</button>
+                <button type="button" onClick={addSent} className="border border-orange-400 text-orange-700 px-4 py-2 rounded-lg hover:bg-orange-50 text-sm font-medium" title="Item already sent to the customer with no DO in the system — kept separate from delivery orders">Sent previously</button>
               </div>
             </form>
             {directCart.length > 0 && (
@@ -852,6 +884,20 @@ export default function DispatchPage() {
                   ))}
                 </ul>
                 <button onClick={createDirect} disabled={busy} className="bg-gray-800 text-white px-5 py-2 rounded-lg hover:bg-gray-900 text-sm font-medium disabled:opacity-50">Create direct delivery order</button>
+              </div>
+            )}
+            {sentCart.length > 0 && (
+              <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-8">
+                <div className="font-medium mb-2">Already sent (no DO) — {sentCart.length} item(s)</div>
+                <ul className="space-y-1 mb-3">
+                  {sentCart.map((c, i) => (
+                    <li key={i} className="flex items-center justify-between gap-2 text-sm border-b border-indigo-100 py-1">
+                      <span><span className="font-mono">{c.itemCode}</span> {c.description && <span className="text-gray-500">{c.description}</span>} · {c.qty} · {c.so} · {c.factoryName}{c.batchNo && <span className="text-gray-500"> · batch {c.batchNo}</span>}</span>
+                      <button onClick={() => setSentCart(cart => cart.filter((_, j) => j !== i))} className="text-red-500 hover:text-red-700 text-xs shrink-0">Remove</button>
+                    </li>
+                  ))}
+                </ul>
+                <button onClick={createSent} disabled={busy} className="bg-indigo-700 text-white px-5 py-2 rounded-lg hover:bg-indigo-800 text-sm font-medium disabled:opacity-50">Record as sent previously</button>
               </div>
             )}
           </>
@@ -907,6 +953,31 @@ export default function DispatchPage() {
                 </div>
               )
             })}
+          </div>
+        )}
+
+        {/* ---- Sent previously (no DO) — kept separate from real delivery orders ---- */}
+        {priorList.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-lg font-semibold mb-2">Sent previously <span className="text-gray-400 font-normal text-sm">· no DO — recorded as already delivered</span></h2>
+            <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b"><tr>{['SO', 'Customer', 'Item', 'Qty', 'Factory', 'By', 'When'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
+                <tbody>
+                  {priorList.map(p => (
+                    <tr key={p.id} className="border-b last:border-0 hover:bg-gray-50 align-top">
+                      <td className="px-3 py-2 font-mono whitespace-nowrap">{p.so_number || '—'}</td>
+                      <td className="px-3 py-2 min-w-[120px]">{p.customer_name || '—'}</td>
+                      <td className="px-3 py-2"><span className="font-mono">{p.item_code}</span>{p.description ? <span className="block text-xs text-gray-500">{p.description}</span> : null}{p.batch_no ? <span className="block text-[11px] text-gray-400">batch {p.batch_no}</span> : null}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{p.quantity ?? '—'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-gray-600">{factoryName(p.factory_code || '')}</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-gray-500 text-xs">{p.created_by_name || '—'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-gray-400 text-xs">{fmt(p.created_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
