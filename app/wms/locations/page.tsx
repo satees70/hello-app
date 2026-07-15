@@ -16,6 +16,7 @@ interface Loc {
   label: string | null
   pick_sequence: number | null
   active: boolean
+  pickable?: boolean          // false = return/quarantine bin, never offered for picking
   notes: string | null
 }
 
@@ -129,6 +130,12 @@ export default function WmsLocationsPage() {
   async function toggleActive(r: Loc) {
     if (!canEdit) return
     await supabase.from('wms_locations').update({ active: !r.active }).eq('id', r.id)
+    load()
+  }
+  async function togglePickable(r: Loc) {
+    if (!canEdit) return
+    const { error } = await supabase.from('wms_locations').update({ pickable: r.pickable === false }).eq('id', r.id)
+    if (error) { alert(/pickable|column/i.test(error.message) ? 'Run db/2026-07-wms-pickable-stop.sql in Supabase first.' : error.message); return }
     load()
   }
 
@@ -296,6 +303,7 @@ export default function WmsLocationsPage() {
                     {canEdit ? (
                       <div className="flex gap-3">
                         <button onClick={() => openEdit(r)} className="text-emerald-700 hover:underline text-xs">Edit</button>
+                        <button onClick={() => togglePickable(r)} className={`hover:underline text-xs ${r.pickable === false ? 'text-purple-700 font-medium' : 'text-gray-500'}`} title={r.pickable === false ? 'Not picked for orders (return/quarantine)' : 'Available for picking'}>{r.pickable === false ? '🚫 No-pick' : 'Pickable'}</button>
                         <button onClick={() => toggleActive(r)} className="text-gray-500 hover:underline text-xs">{r.active ? 'Deactivate' : 'Activate'}</button>
                         {canDelete && <button onClick={() => remove(r)} className="text-red-500 hover:underline text-xs">Delete</button>}
                       </div>
