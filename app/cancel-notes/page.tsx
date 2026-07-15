@@ -50,7 +50,7 @@ export default function CancelNotesPage() {
       customer: lines[0]?.customer_name || '',
       factories: [...new Set(lines.map(l => l.factory_code).filter(Boolean))].join(', '),
       deliveryDate: lines.map(l => l.delivery_date).filter(Boolean).sort()[0] || '',
-      items: lines.map(l => ({ code: l.item_code || '', name: l.description || '', balance: Number(l.balance || 0) })),
+      items: lines.map(l => ({ lineId: l.line_id, code: l.item_code || '', name: l.description || '', balance: Number(l.balance || 0) })),
     }))
   }, [cands])
   const groups = useMemo(() => {
@@ -59,8 +59,9 @@ export default function CancelNotesPage() {
     return allGroups.filter(g => `${g.so} ${g.customer} ${g.factories} ${g.deliveryDate} ${g.items.map(i => i.code + ' ' + i.name).join(' ')}`.toLowerCase().includes(n))
   }, [allGroups, candQ])
   const groupChecked = (ids: string[]) => ids.length > 0 && ids.every(id => selCand.has(id))
+  const groupSome = (ids: string[]) => ids.some(id => selCand.has(id)) && !groupChecked(ids)
   const toggleGroup = (ids: string[]) => setSelCand(p => { const n = new Set(p); const all = ids.every(id => n.has(id)); ids.forEach(id => all ? n.delete(id) : n.add(id)); return n })
-  const selSoCount = groups.filter(g => groupChecked(g.ids)).length
+  const toggleCand = (id: string) => setSelCand(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
   // HO cancels the ticked balances outright (writes Cancel Notes); factory raises them for approval.
   async function proceedCancel() {
     const ids = [...selCand]
@@ -104,13 +105,13 @@ export default function CancelNotesPage() {
           <div className="px-4 py-3 border-b flex flex-wrap items-center gap-3">
             <div>
               <h2 className="font-semibold">Not on any delivery schedule</h2>
-              <p className="text-xs text-gray-500">Outstanding orders that were never placed on a delivery line. Tick the ones to cancel, add a reason, then proceed.</p>
+              <p className="text-xs text-gray-500">Outstanding orders never placed on a delivery line. Tick a whole order (left box) or just the items you want to cancel, add a reason, then proceed. Items cancelled from the same order share one Cancel Note number.</p>
             </div>
             {selCand.size > 0 && (
               <div className="ml-auto flex flex-wrap items-center gap-2">
                 <input value={candReason} onChange={e => setCandReason(e.target.value)} placeholder="Reason (optional)" className="border rounded-lg px-3 py-1.5 text-sm w-56" />
                 <button onClick={proceedCancel} disabled={busy} className="bg-orange-600 text-white px-4 py-1.5 rounded-lg hover:bg-orange-700 disabled:opacity-50 text-sm font-medium">
-                  {busy ? 'Working…' : isHO ? `Cancel ${selSoCount} order(s)` : `Request cancel (${selSoCount})`}
+                  {busy ? 'Working…' : isHO ? `Cancel ${selCand.size} item(s)` : `Request cancel (${selCand.size})`}
                 </button>
               </div>
             )}
@@ -125,16 +126,19 @@ export default function CancelNotesPage() {
               <tbody>
                 {groups.length === 0 && <tr><td colSpan={6} className="text-center py-6 text-gray-400">{candQ ? 'No match.' : 'Nothing outstanding is off the schedule. 🎉'}</td></tr>}
                 {groups.map(g => (
-                  <tr key={g.so} className={`border-b last:border-0 ${groupChecked(g.ids) ? 'bg-orange-50' : 'hover:bg-gray-50'}`}>
-                    <td className="px-3 py-2 align-top"><input type="checkbox" checked={groupChecked(g.ids)} onChange={() => toggleGroup(g.ids)} className="h-4 w-4" /></td>
+                  <tr key={g.so} className={`border-b last:border-0 ${groupChecked(g.ids) || groupSome(g.ids) ? 'bg-orange-50' : 'hover:bg-gray-50'}`}>
+                    <td className="px-3 py-2 align-top"><input type="checkbox" checked={groupChecked(g.ids)} ref={el => { if (el) el.indeterminate = groupSome(g.ids) }} onChange={() => toggleGroup(g.ids)} className="h-4 w-4" title="Tick the whole order" /></td>
                     <td className="px-3 py-2 font-mono whitespace-nowrap align-top">{g.so}</td>
                     <td className="px-3 py-2 min-w-[140px] align-top">{g.customer || '—'}</td>
-                    <td className="px-3 py-2 align-top min-w-[260px]">
-                      {g.items.map((it, i) => (
-                        <div key={i} className="text-xs flex justify-between gap-3">
-                          <span><span className="font-mono text-gray-700">{it.code}</span>{it.name ? <span className="text-gray-500"> — {it.name}</span> : null}</span>
+                    <td className="px-3 py-2 align-top min-w-[280px]">
+                      {g.items.map(it => (
+                        <label key={it.lineId} className="text-xs flex items-center justify-between gap-3 cursor-pointer hover:bg-orange-100/60 rounded px-1 -mx-1 py-0.5">
+                          <span className="flex items-start gap-1.5">
+                            <input type="checkbox" checked={selCand.has(it.lineId)} onChange={() => toggleCand(it.lineId)} className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                            <span><span className="font-mono text-gray-700">{it.code}</span>{it.name ? <span className="text-gray-500"> — {it.name}</span> : null}</span>
+                          </span>
                           <span className="tabular-nums font-semibold text-orange-600 whitespace-nowrap">{Number(it.balance.toFixed(3))}</span>
-                        </div>
+                        </label>
                       ))}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap text-gray-600 align-top">{g.deliveryDate ? g.deliveryDate.split('-').reverse().join('/') : '—'}</td>
