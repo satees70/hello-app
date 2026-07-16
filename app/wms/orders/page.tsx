@@ -58,6 +58,7 @@ export default function WmsOrdersPage() {
   const [q, setQ] = useState('')   // search by SO / order no, customer, or item name
   const [descsByOrder, setDescsByOrder] = useState<Record<string, (string | null)[]>>({})
   const [itemText, setItemText] = useState<Record<string, string>>({})
+  const [outstandingOrders, setOutstandingOrders] = useState<Set<string>>(new Set())   // orders with a no-stock balance to re-pick
   const [expandedId, setExpandedId] = useState('')   // order whose lines are shown inline
   const [expLines, setExpLines] = useState<Line[]>([])
   const [doByOrder, setDoByOrder] = useState<Record<string, string[]>>({})   // order_id -> DO number(s) once dispatched
@@ -74,15 +75,17 @@ export default function WmsOrdersPage() {
     // plus a searchable text blob (item codes + descriptions) so the search box finds by item.
     const ids = list.map(o => o.id)
     if (ids.length) {
-      const { data: ol } = await supabase.from('wms_order_lines').select('order_id, item_code, description').in('order_id', ids)
+      const { data: ol } = await supabase.from('wms_order_lines').select('order_id, item_code, description, no_stock, no_stock_qty').in('order_id', ids)
       const m: Record<string, (string | null)[]> = {}
       const t: Record<string, string> = {}
-      ;(ol as { order_id: string; item_code: string | null; description: string | null }[] || []).forEach(l => {
+      const outstanding = new Set<string>()
+      ;(ol as { order_id: string; item_code: string | null; description: string | null; no_stock: boolean | null; no_stock_qty: number | null }[] || []).forEach(l => {
         (m[l.order_id] ||= []).push(l.description)
         t[l.order_id] = `${t[l.order_id] || ''} ${l.item_code || ''} ${l.description || ''}`.toLowerCase()
+        if (l.no_stock && Number(l.no_stock_qty) > 0) outstanding.add(l.order_id)
       })
-      setDescsByOrder(m); setItemText(t)
-    } else { setDescsByOrder({}); setItemText({}) }
+      setDescsByOrder(m); setItemText(t); setOutstandingOrders(outstanding)
+    } else { setDescsByOrder({}); setItemText({}); setOutstandingOrders(new Set()) }
     const { data: pk } = await supabase.rpc('wms_pickers')
     setPickers((pk as Picker[]) || [])
     // DO number(s) for orders that have been dispatched.
@@ -275,6 +278,7 @@ export default function WmsOrdersPage() {
                         <Link href={`/wms/pick/${o.id}`} className="text-emerald-700 font-medium hover:underline">Pick →</Link>}
                       {o.status === 'Picked' && <Link href={`/wms/pick/${o.id}`} className="text-teal-700 font-medium hover:underline">Check →</Link>}
                       {['Checked', 'Partially Dispatched'].includes(o.status) && <Link href={`/wms/dispatch/${o.id}`} className="text-emerald-700 font-medium hover:underline">Dispatch →</Link>}
+                      {outstandingOrders.has(o.id) && ['Picked', 'Checked', 'Partially Dispatched', 'Dispatched'].includes(o.status) && <Link href={`/wms/pick/${o.id}`} className="text-amber-700 font-medium hover:underline" title="Stock arrived — pick the outstanding balance">Pick outstanding →</Link>}
                       <button onClick={() => toggleLines(o)} className="text-emerald-700 hover:underline">{expandedId === o.id ? 'Hide lines' : 'View lines'}</button>
                       {o.file_path && <button onClick={() => viewPdf(o)} className="text-gray-500 hover:underline">PDF</button>}
                       {canEdit && ['Reserved', 'Released', 'Picking'].includes(o.status) && <button onClick={() => cancelOrder(o)} className="text-amber-600 hover:underline">Cancel</button>}

@@ -150,6 +150,9 @@ export default function WmsPutawayPage() {
                           className="w-28 border rounded-lg px-2 py-1.5 text-sm font-mono" placeholder="bin" />
                         <button onClick={() => startPutaway(row)} disabled={busy === row.id}
                           className="bg-emerald-700 text-white px-4 py-1.5 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium">{busy === row.id ? '…' : '📷 Scan & put away'}</button>
+                        <button onClick={() => putAwayPending(row, bin)} disabled={busy === row.id}
+                          title="Put away without scanning — just confirm the bin."
+                          className="border border-emerald-600 text-emerald-700 px-4 py-1.5 rounded-lg hover:bg-emerald-50 disabled:opacity-50 text-sm font-medium">{busy === row.id ? '…' : '✓ Put away'}</button>
                         {sug && !binEdits[row.id] && <span className="text-[11px] text-emerald-700 basis-full sm:basis-auto">→ {sug.code} ({sug.why})</span>}
                       </>}
                     </div>
