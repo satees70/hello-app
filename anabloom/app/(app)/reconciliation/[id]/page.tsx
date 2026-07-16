@@ -15,6 +15,7 @@ import { canFinishReconciliation, continuityCheck } from "@/lib/reconcile/matchi
 import { prisma } from "@/lib/prisma";
 import { getActiveCompany } from "@/lib/company";
 import { getCashLines } from "@/lib/services/ledger";
+import { listBills } from "@/lib/services/payables";
 
 export const dynamic = "force-dynamic";
 
@@ -36,10 +37,11 @@ export default async function ReconcileWorkspace({ params }: { params: Promise<{
   });
   if (!statement) notFound();
 
-  const [cash, properties, accounts] = await Promise.all([
+  const [cash, properties, accounts, openBills] = await Promise.all([
     getCashLines(company.id, true),
     prisma.property.findMany({ where: { companyId: company.id }, orderBy: { name: "asc" } }),
     prisma.account.findMany({ where: { companyId: company.id, active: true }, orderBy: { code: "asc" } }),
+    listBills(company.id, {}).then((bs) => bs.filter((b) => b.status === "OPEN" || b.status === "PARTIALLY_PAID")),
   ]);
   const cashById = new Map(cash.map((c) => [c.id, c]));
   const incomeAccounts = accounts.filter((a) => a.type === "INCOME");
@@ -162,9 +164,20 @@ export default async function ReconcileWorkspace({ params }: { params: Promise<{
                                 ) : (
                                   <>
                                     <option value="EXPENSE_PAID">Expense paid</option>
+                                    {openBills.length > 0 && <option value="PAY_BILL">Pay a supplier bill</option>}
                                   </>
                                 )}
                               </select>
+                              {!isIn && openBills.length > 0 && (
+                                <select name="billId" className="input py-1 text-xs" defaultValue="">
+                                  <option value="">(if paying a bill) pick bill…</option>
+                                  {openBills.map((b) => (
+                                    <option key={b.id} value={b.id}>
+                                      {b.supplierName}: {b.description} ({b.balance.toFixed(2)})
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
                               <select name="propertyId" className="input py-1 text-xs">
                                 <option value="">Company</option>
                                 {properties.map((p) => (

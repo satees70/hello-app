@@ -6,6 +6,9 @@ const REPORTS = [
   { href: "/reports/profit-loss", title: "Profit & Loss", desc: "Income less expenses over a date range, per property or consolidated." },
   { href: "/reports/balance-sheet", title: "Balance Sheet", desc: "Assets = Liabilities + Equity as of a date." },
   { href: "/reports/aging", title: "AR Aging", desc: "Outstanding rent per tenant, bucketed by age." },
+  { href: "/reports/ap-aging", title: "AP Aging", desc: "Outstanding bills per supplier, bucketed by days overdue." },
+  { href: "/reports/deposits", title: "Deposit Register", desc: "Tenant deposits held (account 2000), per tenant." },
+  { href: "/assets", title: "Fixed Asset Register", desc: "Assets at cost, accumulated depreciation, net book value." },
 ];
 
 export default function ReportsIndex() {

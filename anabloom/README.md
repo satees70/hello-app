@@ -1,12 +1,16 @@
 # Anabloom
 
-Simple **double-entry accounting for property management** (1–10 self-owned
-properties). Records plain-language transactions and auto-posts the debit/credit
-journal lines under the hood. Includes Trial Balance, P&L and Balance Sheet;
-bank reconciliation with PDF/CSV upload and auto-matching; tenants, leases &
-arrears with tenancy-agreement document management and expiry alerts; receipt
-attachments; recurring rent invoicing with accounting-period locking; and fixed
-assets with depreciation.
+**Multi-company, double-entry accounting for property management.** You record
+plain-language transactions; the engine auto-posts balanced debit/credit journal
+lines. Each company keeps a fully separate set of books, with a group-level
+summary across all of them.
+
+Covers: chart of accounts · ledger + manual journals · properties · tenants,
+leases & arrears (tenancy documents, stamping, expiry alerts, renewals) ·
+recurring rent invoicing · receipt attachments · **suppliers, bills & accounts
+payable** · fixed assets & depreciation · bank reconciliation (PDF/CSV upload +
+auto-matching) · accounting-period locks · a full reports suite · and a **group
+overview** with consolidated (management-summary) P&L and Balance Sheet.
 
 - **Stack:** Next.js 14 (App Router, TypeScript) · Prisma · NextAuth (email +
   password) · Tailwind · SQLite (dev) / Postgres on Supabase (prod) · Vercel.
@@ -22,171 +26,177 @@ cd anabloom
 npm install
 cp .env.example .env          # defaults are fine for local dev
 npx prisma db push            # create the SQLite dev.db from the schema
-npm run seed                  # demo user + demo data (optional)
+npm run seed                  # demo user + two companies of demo data (optional)
 npm run dev                   # http://localhost:3000
 ```
 
-**Demo login:** `demo@example.com` / `demo1234`
+**Demo login:** `demo@example.com` / `demo1234` (two companies: *Anabloom
+Properties Sdn Bhd* and *Anabloom Ventures Sdn Bhd*).
 
-Run the tests (posting rules, the three reports, reconciliation engine,
-depreciation, AR aging, recurring-invoicing idempotency, locked-period
-rejection, renewal deposit carry-forward):
+Run the test suite (82 tests — posting rules, all reports, reconciliation
+engine, depreciation, AR/AP aging, recurring idempotency, period locks,
+multi-company isolation, group totals, AP invariant, statement ties):
 
 ```bash
 npm test
 ```
 
-Type-check and production build:
+Type-check + production build:
 
 ```bash
 npx tsc --noEmit
 npm run build
 ```
 
-### What the seed contains
-3 properties, 3 tenants with active leases (one in arrears, one expiring within
-60 days, one unstamped so the alerts fire), opening owner capital, a mortgage,
-tenant deposits held, one fixed asset with several months of depreciation
-posted, ~40 transactions across four months, and a sample July bank statement
-(also provided as an importable CSV at `public/sample-july-2026.csv`) with a
-couple of lines missing from the books and one book entry missing from the
-statement, so the reconciliation workflow can be demonstrated end to end.
+---
+
+## 2. Multi-company concepts
+
+- A **User** (login) owns one or more **Companies**. Currency lives on the
+  company; the chart of accounts, journal entries, properties, tenants, leases,
+  fixed assets, bank statements, suppliers, bills and period locks all belong to
+  exactly one company.
+- Every page operates on the **active company** (switcher in the header, top
+  left). The active company is remembered per session (cookie). Books never mix:
+  a query for one company can never return another's rows (enforced centrally in
+  `lib/company.ts` and covered by a tenant-isolation test).
+- **Group overview** (top nav) aggregates across all your companies: per-company
+  cards, a combined 12-month chart, a tagged Attention list, and **Group P&L** /
+  **Group Balance Sheet** with one column per company plus a combined total.
+  This is a **management summary, not a statutory consolidation** — there are no
+  inter-company eliminations; each company files its own accounts.
+- **Inter-company transfers:** add an "Inter-company …" receivable (1xxx) in the
+  lending company and a matching payable (2xxx) in the borrowing company. The
+  Group Balance Sheet flags these balances and checks they net to zero.
+- **New users** are routed to `/onboarding` to create their first company.
+  Manage companies (add / rename / reg-no / currency), period locks, and
+  delete-company-data in **Settings**.
 
 ---
 
-## 2. Switching SQLite → Supabase (Postgres)
+## 3. Reports
 
-Prisma's `provider` is static, so switch it for production:
+Every report is scoped to the active company, print-friendly, and CSV-exportable.
 
-1. In `prisma/schema.prisma`, change the datasource provider:
-   ```prisma
-   datasource db {
-     provider  = "postgresql"
-     url       = env("DATABASE_URL")   // pooled, port 6543, pgbouncer=true
-     directUrl = env("DIRECT_URL")     // direct, port 5432
-   }
-   ```
-2. Point `DATABASE_URL` / `DIRECT_URL` at the Supabase project (see below).
-3. Generate the initial Postgres migration and apply it:
-   ```bash
-   npx prisma migrate dev --name init      # run once against the Supabase DB
-   # or, without migration history:
-   npx prisma db push
-   ```
-
-> Enums are modelled as `String` columns on purpose so the **same schema** works
-> on SQLite and Postgres. Money is Prisma `Decimal` throughout (never float).
+| Report | Where | Notes |
+|---|---|---|
+| **Journal / Ledger** | Ledger | All entries newest-first, expandable to debit/credit lines; filters + CSV. |
+| **General Ledger** | Reports | Per account: opening, every posting with running balance, closing. Single- or all-accounts, property filter. Trial Balance rows drill in here. |
+| **Trial Balance** | Reports | As-of date; every account with a balance; must balance. |
+| **Profit & Loss** | Reports | Date range, per property or consolidated; Summary or month-by-month columns. |
+| **Balance Sheet** | Reports | As-of date; Assets = Liabilities + Equity, retained earnings computed. |
+| **AR Aging** | Reports | Outstanding rent per tenant, 0–30/31–60/61–90/90+. |
+| **Tenant statement** | Tenants → Statement | Per lease: opening owed, charges, payments, running balance, closing; company header; ties to AR aging. |
+| **AP Aging** | Reports | Outstanding bills per supplier, bucketed by days overdue. |
+| **Supplier statement** | Suppliers → Statement | Per supplier: bills, payments, running balance, closing owed; ties to AP aging. |
+| **Deposit Register** | Reports | Tenant deposits held (account 2000), per tenant. |
+| **Fixed Asset Register** | Reports / Fixed Assets | Cost, accumulated depreciation, net book value. |
+| **Bank reconciliations** | Bank Rec | Past reconciliations with stored reports; reopenable. |
+| **Group P&L / Group Balance Sheet** | Group | Columns per company + combined total (management summary). |
 
 ---
 
-## 3. Production deployment runbook
+## 4. Suppliers & accounts payable
 
-### 3a. Create the Supabase project (dashboard — only you can do this)
-1. Go to https://supabase.com/dashboard → **New project**. Suggested name:
-   **`anabloom`**. Choose a region near Malaysia (e.g. Singapore) and set a
-   strong database password. **Do not reuse an existing project.**
-2. **Project Settings → Database → Connection string:**
-   - **Connection pooling** (Transaction mode) → this is your `DATABASE_URL`.
-     Ensure it ends with port **6543** and add `?pgbouncer=true&connection_limit=1`.
-   - **Direct connection** (port **5432**) → this is your `DIRECT_URL`.
-3. **Project Settings → API:** copy the **Project URL** (`SUPABASE_URL`) and the
-   **service_role** secret (`SUPABASE_SERVICE_ROLE_KEY`) — server-side only.
-4. **Storage → New bucket:** create a **private** bucket named **`receipts`**
-   (used for receipts and tenancy documents; served via short-lived signed URLs).
-5. Apply the schema and (optionally) seed only the demo user:
+- Add **suppliers** with default payment terms. Create **bills** (expense or
+  asset purchased on credit) — the posting engine books Dr expense/asset, Cr
+  2200 Accounts payable, and the bill's due date defaults to bill date +
+  supplier terms. Attach the supplier invoice like any receipt.
+- **Record payments** against one or more open bills (partial allowed; one
+  payment can cover several bills) — Dr 2200, Cr Cash, with per-bill allocations.
+- **Void** an unpaid bill (only if its period is unlocked) to reverse its
+  posting. The bank-rec "Create entry" flow can also settle a bill from a
+  money-out statement line.
+- **Invariant (tested):** the 2200 Accounts payable balance on the Trial Balance
+  always equals the sum of unpaid bill balances.
+
+---
+
+## 5. Migrating an existing (single-company) database → multi-company
+
+If you already deployed the pre-multi-company version and have **real data**,
+run the safe, idempotent migration **after taking a backup** (below). It adds a
+default company per user and backfills every record, asserting nothing is lost.
+
+```bash
+# 1) BACK UP FIRST (see §7). Then, against the target database:
+DATABASE_URL="<pooled>" DIRECT_URL="<direct>" npx tsx scripts/migrate-multicompany.ts
+```
+
+The script: adds a nullable `companyId` everywhere + creates the Company table →
+creates one "My Company" per user (carrying their currency) and backfills all
+rows → enforces `NOT NULL` + per-company indexes → asserts row counts are
+unchanged and there are zero orphans. It is cross-dialect (SQLite/Postgres) and
+safe to re-run (it no-ops if a Company already exists). A fresh database created
+from the current schema needs no migration — just `prisma db push` + `npm run seed`.
+
+---
+
+## 6. SQLite → Supabase (Postgres) switch & deploy
+
+### 6a. Switch the provider
+In `prisma/schema.prisma` change the datasource provider to `postgresql`, then
+set `DATABASE_URL` (pooled, port 6543, `pgbouncer=true`) and `DIRECT_URL`
+(direct, port 5432) to the dedicated Supabase project. Enums are modelled as
+String columns so the same schema targets both engines; money is Prisma Decimal.
+
+### 6b. Supabase (dashboard — only you can do this)
+1. https://supabase.com/dashboard → **New project** (suggested name `anabloom`;
+   region near Malaysia; strong DB password). **Do not reuse another project.**
+2. **Settings → Database → Connection string:** copy the **pooled** (6543,
+   append `?pgbouncer=true&connection_limit=1`) → `DATABASE_URL`, and the
+   **direct** (5432) → `DIRECT_URL`.
+3. **Settings → API:** copy Project URL (`SUPABASE_URL`) and the **service_role**
+   secret (`SUPABASE_SERVICE_ROLE_KEY`).
+4. **Storage → New bucket:** private bucket **`receipts`**.
+5. Apply the schema (fresh) or run the migration (existing data):
    ```bash
    DATABASE_URL="<pooled>" DIRECT_URL="<direct>" npx prisma db push
-   # Production starts empty by default. Only seed if you explicitly want demo data:
-   # DATABASE_URL="<pooled>" DIRECT_URL="<direct>" npm run seed
+   # optional demo user: DATABASE_URL=... DIRECT_URL=... npm run seed
    ```
 
-### 3b. Deploy to Vercel
-1. Import the repo into Vercel. Set the **Root Directory** to `anabloom`.
-2. **Environment variables** (Project → Settings → Environment Variables):
-   | Name | Value |
-   |---|---|
-   | `DATABASE_URL` | Supabase **pooled** string (6543, `pgbouncer=true`) |
-   | `DIRECT_URL` | Supabase **direct** string (5432) |
-   | `SUPABASE_URL` | Supabase Project URL |
-   | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service_role secret |
-   | `SUPABASE_STORAGE_BUCKET` | `receipts` |
-   | `STORAGE_DRIVER` | `supabase` |
-   | `NEXTAUTH_SECRET` | a strong random secret (see below) |
-   | `NEXTAUTH_URL` | `https://anabloom.srrieaswari.com` |
-   | `CRON_SECRET` | a strong random secret (protects the cron endpoint) |
-3. Generate a strong `NEXTAUTH_SECRET`:
-   ```bash
-   openssl rand -base64 32
-   ```
-4. The Vercel **Cron** for monthly rent invoicing is already declared in
-   `vercel.json` (`/api/cron/invoicing`, 01:00 on the 1st). Vercel picks it up
-   automatically on deploy. (Recurring invoices also self-heal via an idempotent
-   catch-up on every dashboard load, so no month is ever skipped or doubled.)
-5. Deploy.
+### 6c. Vercel
+Import the repo, set **Root Directory** to `anabloom`, and add env vars:
+`DATABASE_URL`, `DIRECT_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
+`SUPABASE_STORAGE_BUCKET=receipts`, `STORAGE_DRIVER=supabase`,
+`NEXTAUTH_SECRET` (`openssl rand -base64 32`),
+`NEXTAUTH_URL=https://anabloom.srrieaswari.com`, `CRON_SECRET`. The monthly
+rent-invoicing cron is declared in `vercel.json` (runs per company).
 
-### 3c. Custom domain
-1. Vercel → Project → **Settings → Domains** → add `anabloom.srrieaswari.com`.
-2. Vercel shows a target value. At wherever **`srrieaswari.com`** DNS is managed,
-   create a **CNAME** record:
-   - **Name/Host:** `anabloom`
-   - **Value/Target:** the value Vercel shows (typically `cname.vercel-dns.com`)
-3. Wait for Vercel to verify the domain and issue the TLS certificate; confirm
-   `https://anabloom.srrieaswari.com` loads with a valid certificate.
+### 6d. Custom domain
+Add `anabloom.srrieaswari.com` on the Vercel project, then create a **CNAME**
+`anabloom` → the value Vercel shows (typically `cname.vercel-dns.com`) at your
+DNS host. Wait for verification + HTTPS.
 
-### 3d. Post-deploy check
-1. Register a real account on the live URL.
-2. Record one test transaction (e.g. "Rent received").
-3. Open **Reports → Trial Balance** and confirm it shows **Balanced ✓**.
-4. Delete the test data (Settings → Danger zone → delete all data) if it was a
-   throwaway account.
+### 6e. Post-deploy check
+Register a real account → create your first company → record one transaction →
+confirm **Trial Balance** shows *Balanced ✓* → delete the test data.
 
 ---
 
-## 4. Operations
+## 7. Operations
 
-### Rotate `NEXTAUTH_SECRET`
-1. Generate a new secret: `openssl rand -base64 32`.
-2. Update `NEXTAUTH_SECRET` in Vercel and redeploy. Existing sessions are
-   invalidated (users simply sign in again). Do this if the secret may have
-   leaked.
+**Rotate `NEXTAUTH_SECRET`:** `openssl rand -base64 32`, update it in Vercel,
+redeploy (existing sessions sign out).
 
-### Back up the Supabase database
-- **Automatic:** Supabase takes daily backups (retention depends on your plan) —
-  Dashboard → Database → Backups. Point-in-time recovery is available on paid
-  plans.
-- **Manual dump:**
-  ```bash
-  pg_dump "<DIRECT_URL>" -Fc -f anabloom-$(date +%F).dump
-  # restore:
-  pg_restore --clean --if-exists -d "<DIRECT_URL>" anabloom-YYYY-MM-DD.dump
-  ```
-- Storage bucket contents (receipts/documents) can be exported from the Supabase
-  Storage dashboard or via the storage API.
+**Back up Supabase:** automatic daily backups (Dashboard → Database → Backups;
+PITR on paid plans). Manual dump:
+```bash
+pg_dump "<DIRECT_URL>" -Fc -f anabloom-$(date +%F).dump
+pg_restore --clean --if-exists -d "<DIRECT_URL>" anabloom-YYYY-MM-DD.dump
+```
+Export Storage (receipts/documents) from the Supabase Storage dashboard.
 
 ---
 
-## 5. How the accounting works
+## 8. How the accounting works
 
-- **Chart of accounts** is seeded per user with a fixed code structure (1000s
-  assets … 5000s expenses). Names are editable; accounts with postings can't be
-  deleted.
-- **Simple entry, double-entry underneath.** You pick a transaction type (Rent
-  received, Expense paid, Loan repayment, …) and the server generates balanced
-  debit/credit lines (`lib/posting.ts`). Every entry must satisfy
-  `sum(debits) == sum(credits)` with at least two lines — enforced server-side.
-- **Reports** (`lib/reports.ts`): Trial Balance (must balance), P&L (income −
-  expenses), Balance Sheet (Assets = Liabilities + Equity, with retained
-  earnings = all-time net income to date). AR aging buckets outstanding rent
-  0–30 / 31–60 / 61–90 / 90+.
-- **Period locking** (`lib/services/period.ts`): creating/editing/deleting any
-  entry dated in a locked month is rejected. Unlocking requires typing the month.
-- **Bank reconciliation** (`lib/reconcile/*`): CSV column-mapping + PDF text
-  layout heuristics (Maybank/CIMB/Public Bank/RHB profiles + generic fallback);
-  a deterministic matcher with confidence tiers that never auto-confirms when two
-  identical amounts collide near the same date; a finish step that stamps and
-  locks reconciled cash lines and stores a printable reconciliation report.
-- **Depreciation** (`lib/depreciation.ts`): straight-line, prorated partial first
-  month, stops exactly at salvage value; the "Run depreciation" action posts one
-  journal per asset per month, idempotently.
-
-All money math uses `decimal.js` / Prisma `Decimal`; never floating point.
+- **Simple entry, double-entry underneath.** You pick a transaction type; the
+  server generates balanced lines (`lib/posting.ts`). Every entry must satisfy
+  `sum(debits) == sum(credits)` with ≥2 lines — enforced server-side. The engine
+  is never bypassed: bills, payments, deposits, depreciation and reconciliation
+  all post through it.
+- **Period locking** rejects create/edit/delete of any entry in a locked month
+  (per company). **Reconciled** cash lines can't be edited until the statement
+  is reopened.
+- All money uses `decimal.js` / Prisma `Decimal` — never floating point.

@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import {
   autoMatch,
   confirmMatch,
+  createBillPaymentForLine,
   createEntryForLine,
   finishReconciliation,
   ignoreLine,
@@ -39,13 +40,21 @@ export async function ignoreLineAction(fd: FormData) {
 
 export async function createEntryForLineAction(fd: FormData) {
   const { companyId } = await requireCompany();
-  await createEntryForLine(companyId, s(fd, "statementLineId"), {
-    sourceType: s(fd, "sourceType") as SourceType,
-    propertyId: s(fd, "propertyId") || undefined,
-    accountCode: s(fd, "accountCode") || undefined,
-  });
+  const sourceType = s(fd, "sourceType");
+  if (sourceType === "PAY_BILL") {
+    const billId = s(fd, "billId");
+    if (!billId) throw new Error("Pick a bill to pay.");
+    await createBillPaymentForLine(companyId, s(fd, "statementLineId"), billId);
+  } else {
+    await createEntryForLine(companyId, s(fd, "statementLineId"), {
+      sourceType: sourceType as SourceType,
+      propertyId: s(fd, "propertyId") || undefined,
+      accountCode: s(fd, "accountCode") || undefined,
+    });
+  }
   revalidatePath(`/reconciliation/${s(fd, "statementId")}`);
   revalidatePath("/ledger");
+  revalidatePath("/bills");
 }
 
 export async function finishReconciliationAction(fd: FormData) {

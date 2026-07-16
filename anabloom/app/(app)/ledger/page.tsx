@@ -41,6 +41,7 @@ export default async function LedgerPage({
     where: { companyId: company.id, status: "ACTIVE" },
     include: { tenant: true, property: true },
   });
+  const suppliers = await prisma.supplier.findMany({ where: { companyId: company.id }, orderBy: { name: "asc" } });
 
   const incomeAccounts = accounts.filter((a) => a.type === "INCOME").map((a) => ({ code: a.code, name: a.name }));
   const expenseAccounts = accounts.filter((a) => a.type === "EXPENSE").map((a) => ({ code: a.code, name: a.name }));
@@ -66,6 +67,7 @@ export default async function LedgerPage({
         leases={leases.map((l) => ({ id: l.id, label: `${l.tenant.name} — ${l.property.name}` }))}
         incomeAccounts={incomeAccounts}
         expenseAccounts={expenseAccounts}
+        suppliers={suppliers.map((sp) => ({ id: sp.id, label: sp.name }))}
       />
 
       {/* Filters */}

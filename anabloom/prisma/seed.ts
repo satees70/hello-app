@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { seedChartOfAccounts } from "../lib/services/accountsSeed";
 import { createEntry } from "../lib/services/entries";
 import { runDepreciation } from "../lib/services/depreciation";
+import { createBill, payBills } from "../lib/services/payables";
 
 const prisma = new PrismaClient();
 
@@ -21,6 +22,9 @@ async function main() {
   if (existing) {
     const cos = await prisma.company.findMany({ where: { userId: existing.id }, select: { id: true } });
     const inCo = { companyId: { in: cos.map((c) => c.id) } };
+    await prisma.billPayment.deleteMany({ where: { bill: inCo } });
+    await prisma.bill.deleteMany({ where: inCo });
+    await prisma.supplier.deleteMany({ where: inCo });
     await prisma.journalEntry.deleteMany({ where: inCo }); // cascades lines + attachments
     await prisma.bankStatement.deleteMany({ where: inCo }); // cascades statement lines
     await prisma.leaseDocument.deleteMany({ where: inCo });
@@ -128,6 +132,21 @@ async function main() {
   const assetB = await prisma.fixedAsset.create({ data: { companyId: coB.id, propertyId: b2.id, name: "Forklift", cost: "36000", purchaseDate: d("2026-02-01"), usefulLifeMonths: 60, salvageValue: "6000", assetAccountCode: "1520" } });
   await createEntry({ companyId: coB.id, propertyId: b2.id, fixedAssetId: assetB.id, date: d("2026-02-01"), description: "Asset purchased — Forklift", sourceType: "ASSET_PURCHASED", amount: "36000", assetAccountCode: "1520", fundingAccountCode: "1000" });
   await runDepreciation(coB.id, "2026-06");
+
+  // ---------------- Suppliers & bills (PART C) ----------------
+  // Company A suppliers (terms 14 and 30 days)
+  const supTNB = await prisma.supplier.create({ data: { companyId: coA.id, name: "TNB Berhad", registrationNo: "197101000025", defaultTermsDays: 14, email: "billing@tnb.com.my" } });
+  const supHandy = await prisma.supplier.create({ data: { companyId: coA.id, name: "Handy Maintenance Sdn Bhd", defaultTermsDays: 30, phone: "03-77001234" } });
+  // Company B supplier (terms 60 days)
+  const supGuard = await prisma.supplier.create({ data: { companyId: coB.id, name: "Secure Guards Sdn Bhd", defaultTermsDays: 60, email: "ar@secureguards.my" } });
+
+  // Overdue bill (Handy, due 2026-06-14, unpaid)
+  await createBill({ companyId: coA.id, supplierId: supHandy.id, propertyId: a1.id, billDate: d("2026-05-15"), dueDate: d("2026-06-14"), reference: "HM-1043", description: "Common-area repairs", amount: "800", kind: "expense", accountCode: "5000" });
+  // Partially-paid bill (TNB, due 2026-07-15, pay 120 of 320)
+  const tnbBill = await createBill({ companyId: coA.id, supplierId: supTNB.id, propertyId: a2.id, billDate: d("2026-07-01"), dueDate: d("2026-07-15"), reference: "TNB-0701", description: "Electricity June", amount: "320", kind: "expense", accountCode: "5100" });
+  await payBills({ companyId: coA.id, supplierId: supTNB.id, date: d("2026-07-10"), allocations: [{ billId: tnbBill.id, amount: "120" }] });
+  // Open bill on Company B (Secure Guards)
+  await createBill({ companyId: coB.id, supplierId: supGuard.id, propertyId: b2.id, billDate: d("2026-06-20"), dueDate: d("2026-08-19"), reference: "SG-2201", description: "Security — Q3 retainer", amount: "2700", kind: "expense", accountCode: "5400" });
 
   // ---------------- Inter-company loan: A lends RM 50,000 to B ----------------
   await prisma.account.create({ data: { companyId: coA.id, code: "1200", name: "Inter-company receivable — Ventures", type: "ASSET", isSystem: false } });

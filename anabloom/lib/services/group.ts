@@ -2,6 +2,7 @@ import { balanceSheet, CompanyLedger, LedgerLine, profitAndLoss } from "../repor
 import { prisma } from "../prisma";
 import { getLedgerLines } from "./ledger";
 import { getAgingReport } from "./arrears";
+import { getBillsDue } from "./payables";
 
 export interface CompanyLedgerWithMeta extends CompanyLedger {
   currency: string;
@@ -61,7 +62,7 @@ export async function getGroupMetrics(userId: string, now = new Date()): Promise
 export interface AttentionItem {
   companyId: string;
   companyName: string;
-  kind: "overdue" | "expiring" | "unstamped" | "no_agreement";
+  kind: "overdue" | "expiring" | "unstamped" | "no_agreement" | "bill_due";
   label: string;
   amount?: number;
 }
@@ -87,6 +88,9 @@ export async function getGroupAttention(userId: string, now = new Date()): Promi
       if (!l.stampedDate) items.push({ companyId: c.id, companyName: c.name, kind: "unstamped", label: `Not stamped — ${l.tenant.name} @ ${l.property.name}` });
       if (l.documents.length === 0) items.push({ companyId: c.id, companyName: c.name, kind: "no_agreement", label: `No agreement uploaded — ${l.tenant.name}` });
     }
+    const billsDue = await getBillsDue(c.id, now, 14);
+    for (const b of billsDue)
+      items.push({ companyId: c.id, companyName: c.name, kind: "bill_due", label: `Bill ${b.overdue ? "overdue" : "due"} — ${b.supplierName}`, amount: b.balance });
   }
   return items;
 }

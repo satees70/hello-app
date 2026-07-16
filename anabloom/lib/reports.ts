@@ -640,3 +640,58 @@ export function arAging(
 
   return { rows, totals };
 }
+
+// ---------- AP aging (per supplier, bucketed by days overdue) ----------
+export interface ApBill {
+  supplierId: string;
+  supplierName: string;
+  dueDate: Date;
+  amount: Decimal.Value;
+  paid: Decimal.Value;
+}
+export interface ApAgingRow {
+  supplierId: string;
+  supplierName: string;
+  b0_30: Decimal;
+  b31_60: Decimal;
+  b61_90: Decimal;
+  b90plus: Decimal;
+  total: Decimal;
+}
+export interface ApAgingReport {
+  rows: ApAgingRow[];
+  totals: Omit<ApAgingRow, "supplierId" | "supplierName">;
+}
+
+/** Accounts-payable aging: outstanding per supplier bucketed by days overdue
+ *  (asOf − dueDate). Not-yet-due bills fall in the 0–30 (current) bucket. */
+export function apAging(bills: ApBill[], asOf: Date): ApAgingReport {
+  const bySupplier = new Map<string, ApAgingRow>();
+  const totals = { b0_30: ZERO, b31_60: ZERO, b61_90: ZERO, b90plus: ZERO, total: ZERO };
+
+  for (const b of bills) {
+    const outstanding = round2(sub(b.amount, b.paid));
+    if (outstanding.lessThanOrEqualTo(0)) continue;
+    let row = bySupplier.get(b.supplierId);
+    if (!row) {
+      row = { supplierId: b.supplierId, supplierName: b.supplierName, b0_30: ZERO, b31_60: ZERO, b61_90: ZERO, b90plus: ZERO, total: ZERO };
+      bySupplier.set(b.supplierId, row);
+    }
+    const overdueDays = Math.floor((asOf.getTime() - b.dueDate.getTime()) / DAY_MS);
+    if (overdueDays <= 30) row.b0_30 = add(row.b0_30, outstanding);
+    else if (overdueDays <= 60) row.b31_60 = add(row.b31_60, outstanding);
+    else if (overdueDays <= 90) row.b61_90 = add(row.b61_90, outstanding);
+    else row.b90plus = add(row.b90plus, outstanding);
+    row.total = add(row.total, outstanding);
+  }
+
+  const rows = [...bySupplier.values()];
+  for (const r of rows) {
+    totals.b0_30 = add(totals.b0_30, r.b0_30);
+    totals.b31_60 = add(totals.b31_60, r.b31_60);
+    totals.b61_90 = add(totals.b61_90, r.b61_90);
+    totals.b90plus = add(totals.b90plus, r.b90plus);
+    totals.total = add(totals.total, r.total);
+  }
+  return { rows, totals };
+}

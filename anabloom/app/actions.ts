@@ -11,6 +11,7 @@ import { getStorage } from "@/lib/storage";
 import { SourceType } from "@/lib/enums";
 import { saveEntryAttachments } from "@/lib/services/attachments";
 import { seedChartOfAccounts } from "@/lib/services/accountsSeed";
+import { createBill, payBills, voidBill } from "@/lib/services/payables";
 import { createEntry, deleteEntry } from "@/lib/services/entries";
 import { runDepreciation } from "@/lib/services/depreciation";
 import { endLease, renewLease, DepositDisposition } from "@/lib/services/leases";
@@ -91,13 +92,37 @@ export async function createEntryAction(fd: FormData) {
     cashAccountCode: s(fd, "cashAccountCode") || undefined,
   };
 
+  // "Expense on credit" now requires a supplier and creates a Bill alongside
+  // its journal entry (posting engine unchanged: Dr 5xxx, Cr 2200).
+  if (sourceType === "EXPENSE_ON_CREDIT") {
+    const supplierId = s(fd, "supplierId");
+    if (!supplierId) throw new Error("Choose a supplier — a credit purchase creates a bill.");
+    const bill = await createBill({
+      companyId,
+      supplierId,
+      propertyId,
+      billDate: date,
+      dueDate: optDate(fd, "dueDate"),
+      reference: s(fd, "reference") || null,
+      description: base.description,
+      amount: num(fd, "amount"),
+      kind: "expense",
+      accountCode: s(fd, "expenseAccountCode"),
+    });
+    const files = fd.getAll("attachments").filter((f): f is File => f instanceof File && f.size > 0);
+    if (files.length && bill.journalEntryId) await saveEntryAttachments(companyId, bill.journalEntryId, files);
+    revalidatePath("/bills");
+    revalidatePath("/ledger");
+    revalidatePath("/");
+    return;
+  }
+
   let input: Parameters<typeof createEntry>[0];
   switch (sourceType) {
     case "OTHER_INCOME_RECEIVED":
       input = { ...base, amount: num(fd, "amount"), incomeAccountCode: s(fd, "incomeAccountCode") };
       break;
     case "EXPENSE_PAID":
-    case "EXPENSE_ON_CREDIT":
       input = { ...base, amount: num(fd, "amount"), expenseAccountCode: s(fd, "expenseAccountCode") };
       break;
     case "LOAN_REPAYMENT":
@@ -424,12 +449,96 @@ export async function changePasswordAction(fd: FormData) {
   revalidatePath("/settings");
 }
 
+// ---------------- Suppliers & bills (PART C) ----------------
+export async function createSupplierAction(fd: FormData) {
+  const { companyId } = await requireCompany();
+  await prisma.supplier.create({
+    data: {
+      companyId,
+      name: s(fd, "name"),
+      registrationNo: s(fd, "registrationNo") || null,
+      phone: s(fd, "phone") || null,
+      email: s(fd, "email") || null,
+      defaultTermsDays: Number(s(fd, "defaultTermsDays") || "30"),
+      notes: s(fd, "notes") || null,
+    },
+  });
+  revalidatePath("/suppliers");
+}
+
+export async function updateSupplierAction(fd: FormData) {
+  const { companyId } = await requireCompany();
+  await prisma.supplier.updateMany({
+    where: { id: s(fd, "id"), companyId },
+    data: {
+      name: s(fd, "name"),
+      registrationNo: s(fd, "registrationNo") || null,
+      phone: s(fd, "phone") || null,
+      email: s(fd, "email") || null,
+      defaultTermsDays: Number(s(fd, "defaultTermsDays") || "30"),
+      notes: s(fd, "notes") || null,
+    },
+  });
+  revalidatePath("/suppliers");
+}
+
+export async function createBillAction(fd: FormData) {
+  const { companyId } = await requireCompany();
+  const kind = (s(fd, "kind") as "expense" | "asset") || "expense";
+  const bill = await createBill({
+    companyId,
+    supplierId: s(fd, "supplierId"),
+    propertyId: s(fd, "propertyId") || null,
+    billDate: optDate(fd, "billDate") ?? new Date(),
+    dueDate: optDate(fd, "dueDate"),
+    reference: s(fd, "reference") || null,
+    description: s(fd, "description") || "Bill",
+    amount: num(fd, "amount"),
+    kind,
+    accountCode: s(fd, "accountCode") || (kind === "asset" ? "1520" : "5900"),
+  });
+  const files = fd.getAll("attachments").filter((f): f is File => f instanceof File && f.size > 0);
+  if (files.length && bill.journalEntryId) await saveEntryAttachments(companyId, bill.journalEntryId, files);
+  revalidatePath("/bills");
+  revalidatePath("/suppliers");
+  revalidatePath("/ledger");
+}
+
+export async function payBillsAction(fd: FormData) {
+  const { companyId } = await requireCompany();
+  const billIds = fd.getAll("billId") as string[];
+  const amounts = fd.getAll("payAmount") as string[];
+  const allocations = billIds.map((billId, i) => ({ billId, amount: amounts[i] || "0" }));
+  await payBills({
+    companyId,
+    supplierId: s(fd, "supplierId"),
+    date: optDate(fd, "date") ?? new Date(),
+    cashAccountCode: s(fd, "cashAccountCode") || undefined,
+    allocations,
+  });
+  revalidatePath("/bills");
+  revalidatePath("/suppliers");
+  revalidatePath("/ledger");
+}
+
+export async function voidBillAction(fd: FormData) {
+  const { companyId } = await requireCompany();
+  await voidBill(companyId, s(fd, "id"));
+  revalidatePath("/bills");
+  revalidatePath("/suppliers");
+  revalidatePath("/ledger");
+}
+
 export async function deleteCompanyDataAction(fd: FormData) {
   const { companyId } = await requireCompany();
   const company = await prisma.company.findUnique({ where: { id: companyId } });
   if (!company) throw new Error("Company not found.");
   if (s(fd, "confirm") !== company.name) throw new Error("Type the company name to confirm.");
-  // delete business data but keep the company + its chart of accounts
+  // delete business data but keep the company + its chart of accounts.
+  // Bills/payments reference journal entries, so remove them first.
+  await prisma.billPayment.deleteMany({ where: { bill: { companyId } } });
+  await prisma.bill.deleteMany({ where: { companyId } });
+  await prisma.supplier.deleteMany({ where: { companyId } });
   await prisma.journalEntry.deleteMany({ where: { companyId } });
   await prisma.lease.deleteMany({ where: { companyId } });
   await prisma.tenant.deleteMany({ where: { companyId } });

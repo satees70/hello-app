@@ -12,6 +12,7 @@ import {
 import { ParsedStatement } from "../reconcile/types";
 import { createEntry } from "./entries";
 import { getCashLines } from "./ledger";
+import { payBills } from "./payables";
 
 /** Persist a parsed statement as a DRAFT with its lines, scoped to a company. */
 export async function createStatement(companyId: string, fileName: string, parsed: ParsedStatement) {
@@ -112,6 +113,28 @@ export async function createEntryForLine(
     amount: abs,
     incomeAccountCode: opts.sourceType === "OTHER_INCOME_RECEIVED" ? opts.accountCode : undefined,
     expenseAccountCode: opts.sourceType === "EXPENSE_PAID" || opts.sourceType === "EXPENSE_ON_CREDIT" ? opts.accountCode : undefined,
+  });
+  const cashLine = entry.lines.find((l) => CASH_CODES.includes(l.account.code));
+  await prisma.statementLine.update({
+    where: { id: statementLineId },
+    data: { matchStatus: "ENTRY_CREATED", matchedJournalLineId: cashLine?.id ?? null },
+  });
+  return entry;
+}
+
+/** Create a supplier bill payment from a money-out statement line, then link it. */
+export async function createBillPaymentForLine(companyId: string, statementLineId: string, billId: string) {
+  const line = await prisma.statementLine.findFirst({ where: { id: statementLineId, statement: { companyId } } });
+  if (!line) throw new Error("Line not found.");
+  const bill = await prisma.bill.findFirst({ where: { id: billId, companyId } });
+  if (!bill) throw new Error("Bill not found.");
+  const amount = money(line.amount).abs().toFixed(2);
+
+  const entry = await payBills({
+    companyId,
+    supplierId: bill.supplierId,
+    date: line.date,
+    allocations: [{ billId, amount }],
   });
   const cashLine = entry.lines.find((l) => CASH_CODES.includes(l.account.code));
   await prisma.statementLine.update({

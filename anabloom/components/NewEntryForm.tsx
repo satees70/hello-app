@@ -19,8 +19,7 @@ const TYPES: { value: SourceType; label: string }[] = [
   { value: "RENT_PAYMENT", label: "Rent payment vs receivable" },
   { value: "OTHER_INCOME_RECEIVED", label: "Other income received" },
   { value: "EXPENSE_PAID", label: "Expense paid" },
-  { value: "EXPENSE_ON_CREDIT", label: "Expense on credit (bill)" },
-  { value: "PAY_BILL", label: "Pay a bill" },
+  { value: "EXPENSE_ON_CREDIT", label: "Expense on credit (creates a bill)" },
   { value: "DEPOSIT_RECEIVED", label: "Tenant deposit received" },
   { value: "DEPOSIT_REFUNDED", label: "Tenant deposit refunded" },
   { value: "OWNER_CAPITAL", label: "Owner puts money in" },
@@ -36,11 +35,13 @@ export default function NewEntryForm({
   leases,
   incomeAccounts,
   expenseAccounts,
+  suppliers,
 }: {
   properties: Opt[];
   leases: Opt[];
   incomeAccounts: AccountOpt[];
   expenseAccounts: AccountOpt[];
+  suppliers: Opt[];
 }) {
   const [open, setOpen] = useState(false);
   const [type, setType] = useState<SourceType>("RENT_RECEIVED");
@@ -50,6 +51,7 @@ export default function NewEntryForm({
   const showIncome = type === "OTHER_INCOME_RECEIVED";
   const showExpense = type === "EXPENSE_PAID" || type === "EXPENSE_ON_CREDIT";
   const showLoan = type === "LOAN_REPAYMENT";
+  const showBill = type === "EXPENSE_ON_CREDIT";
   const showAmount = !showLoan;
 
   return (
@@ -131,6 +133,33 @@ export default function NewEntryForm({
                 ))}
               </select>
             </div>
+          )}
+
+          {showBill && (
+            <>
+              <div>
+                <label className="label">Supplier (required — creates a bill)</label>
+                {suppliers.length === 0 ? (
+                  <p className="text-xs text-expense py-2">Add a supplier first (Purchases → Suppliers).</p>
+                ) : (
+                  <select name="supplierId" className="input" required>
+                    {suppliers.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <div>
+                <label className="label">Due date (blank = supplier terms)</label>
+                <input className="input" type="date" name="dueDate" />
+              </div>
+              <div>
+                <label className="label">Reference (supplier invoice no.)</label>
+                <input className="input" name="reference" />
+              </div>
+            </>
           )}
 
           {showAmount && (

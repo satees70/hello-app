@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { balanceSheet, profitAndLoss } from "@/lib/reports";
 import { getAgingReport } from "@/lib/services/arrears";
 import { getLedgerLines } from "@/lib/services/ledger";
+import { getBillsDue } from "@/lib/services/payables";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +56,8 @@ export default async function Overview() {
   const unstamped = leases.filter((l) => !l.stampedDate);
   const noAgreement = leases.filter((l) => l.documents.length === 0);
   const overdue = aging.rows.filter((r) => Number(r.b31_60) + Number(r.b61_90) + Number(r.b90plus) > 0);
-  const attentionCount = overdue.length + expiring.length + unstamped.length + noAgreement.length;
+  const billsDue = await getBillsDue(company.id, now, 14);
+  const attentionCount = overdue.length + expiring.length + unstamped.length + noAgreement.length + billsDue.length;
 
   const cardCls = "card p-4";
   return (
@@ -115,6 +117,14 @@ export default async function Overview() {
                 <li key={"od" + r.leaseId} className="flex justify-between">
                   <span>⚠️ Overdue rent — {r.tenantName}</span>
                   <Money value={r.total.toString()} symbol={sym} className="text-expense" />
+                </li>
+              ))}
+              {billsDue.map((b) => (
+                <li key={"bill" + b.id} className="flex justify-between">
+                  <span>
+                    {b.overdue ? "🔴" : "🧾"} Bill {b.overdue ? "overdue" : "due"} — {b.supplierName} ({b.dueDate.toISOString().slice(0, 10)})
+                  </span>
+                  <Money value={b.balance} symbol={sym} className={b.overdue ? "text-expense" : ""} colorNegative={false} />
                 </li>
               ))}
               {expiring.map((l) => (

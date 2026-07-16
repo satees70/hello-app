@@ -12,6 +12,8 @@ const LINKS = [
   { href: "/properties", label: "Properties" },
   { href: "/tenants", label: "Tenants & Leases" },
   { href: "/reports", label: "Reports" },
+  { href: "/suppliers", label: "Suppliers" },
+  { href: "/bills", label: "Bills" },
   { href: "/assets", label: "Fixed Assets" },
   { href: "/reconciliation", label: "Bank Rec" },
   { href: "/accounts", label: "Accounts" },

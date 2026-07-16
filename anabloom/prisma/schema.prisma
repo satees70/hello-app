@@ -53,6 +53,8 @@ model Company {
   fixedAssets    FixedAsset[]
   lockedPeriods  LockedPeriod[]
   bankStatements BankStatement[]
+  suppliers      Supplier[]
+  bills          Bill[]
 
   @@index([userId])
 }
@@ -86,6 +88,7 @@ model Property {
   leases         Lease[]
   journalEntries JournalEntry[]
   fixedAssets    FixedAsset[]
+  bills          Bill[]
 
   @@index([companyId])
 }
@@ -171,8 +174,10 @@ model JournalEntry {
   property    Property?     @relation(fields: [propertyId], references: [id])
   lease       Lease?        @relation(fields: [leaseId], references: [id])
   fixedAsset  FixedAsset?   @relation(fields: [fixedAssetId], references: [id])
-  lines       JournalLine[]
-  attachments Attachment[]
+  lines        JournalLine[]
+  attachments  Attachment[]
+  bill         Bill?         @relation("BillEntry")
+  billPayments BillPayment[] @relation("PaymentEntry")
 
   @@unique([leaseId, periodKey])
   @@index([companyId])
@@ -301,4 +306,62 @@ model SavedCsvMapping {
 
   @@unique([userId, bankName])
   @@index([userId])
+}
+
+// ---------------- Suppliers & accounts payable (PART C) ----------------
+
+model Supplier {
+  id               String   @id @default(cuid())
+  companyId        String
+  name             String
+  registrationNo   String?
+  phone            String?
+  email            String?
+  defaultTermsDays Int      @default(30)
+  notes            String?
+  createdAt        DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  bills   Bill[]
+
+  @@index([companyId])
+}
+
+model Bill {
+  id             String   @id @default(cuid())
+  companyId      String
+  supplierId     String
+  propertyId     String?
+  billDate       DateTime
+  dueDate        DateTime
+  reference      String? // supplier invoice no.
+  description    String
+  amount         Decimal
+  status         String   @default("OPEN") // OPEN | PARTIALLY_PAID | PAID | VOID
+  journalEntryId String?  @unique // the posting that created it
+  createdAt      DateTime @default(now())
+
+  company  Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  supplier Supplier      @relation(fields: [supplierId], references: [id])
+  property Property?     @relation(fields: [propertyId], references: [id])
+  entry    JournalEntry? @relation("BillEntry", fields: [journalEntryId], references: [id])
+  payments BillPayment[]
+
+  @@index([companyId])
+  @@index([supplierId])
+}
+
+model BillPayment {
+  id             String   @id @default(cuid())
+  billId         String
+  journalEntryId String
+  date           DateTime
+  amount         Decimal
+  createdAt      DateTime @default(now())
+
+  bill  Bill         @relation(fields: [billId], references: [id], onDelete: Cascade)
+  entry JournalEntry @relation("PaymentEntry", fields: [journalEntryId], references: [id])
+
+  @@index([billId])
+  @@index([journalEntryId])
 }

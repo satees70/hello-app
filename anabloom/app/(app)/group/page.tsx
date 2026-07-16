@@ -14,7 +14,7 @@ function monthRange(d: Date) {
   };
 }
 
-const KIND_ICON: Record<string, string> = { overdue: "⚠️", expiring: "📅", unstamped: "🏷️", no_agreement: "📎" };
+const KIND_ICON: Record<string, string> = { overdue: "⚠️", expiring: "📅", unstamped: "🏷️", no_agreement: "📎", bill_due: "🧾" };
 
 export default async function GroupOverview() {
   const user = await getUser();
