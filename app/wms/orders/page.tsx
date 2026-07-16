@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { apiFetch } from '@/lib/api'
 import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
+import WarehouseTabs, { passWh, WhFilter } from '@/components/WarehouseTabs'
 
 interface Order {
   id: string; order_no: string | null; customer_name: string | null; order_date: string | null; delivery_date: string | null
@@ -53,6 +54,8 @@ export default function WmsOrdersPage() {
   const [linesFor, setLinesFor] = useState<Order | null>(null)
   const [lines, setLines] = useState<Line[]>([])
   const [statusFilter, setStatusFilter] = useState('')
+  const [wh, setWh] = useState<WhFilter>('all')
+  const [descsByOrder, setDescsByOrder] = useState<Record<string, (string | null)[]>>({})
   const [expandedId, setExpandedId] = useState('')   // order whose lines are shown inline
   const [expLines, setExpLines] = useState<Line[]>([])
   const [doByOrder, setDoByOrder] = useState<Record<string, string[]>>({})   // order_id -> DO number(s) once dispatched
@@ -63,7 +66,16 @@ export default function WmsOrdersPage() {
   async function load() {
     const { data } = await supabase.from('wms_orders')
       .select('*, wms_order_lines(count)').order('created_at', { ascending: false }).limit(100)
-    setOrders((data as Order[]) || [])
+    const list = (data as Order[]) || []
+    setOrders(list)
+    // Item descriptions per order, so the GCH / Other warehouse filter can match on lines.
+    const ids = list.map(o => o.id)
+    if (ids.length) {
+      const { data: ol } = await supabase.from('wms_order_lines').select('order_id, description').in('order_id', ids)
+      const m: Record<string, (string | null)[]> = {}
+      ;(ol as { order_id: string; description: string | null }[] || []).forEach(l => { (m[l.order_id] ||= []).push(l.description) })
+      setDescsByOrder(m)
+    } else setDescsByOrder({})
     const { data: pk } = await supabase.rpc('wms_pickers')
     setPickers((pk as Picker[]) || [])
     // DO number(s) for orders that have been dispatched.
@@ -182,6 +194,7 @@ export default function WmsOrdersPage() {
   if (loading) return <div className="p-8 text-sm text-gray-500">Loading…</div>
 
   const unmatched = lines.filter(l => !l.item_id).length
+  const shownOrders = (statusFilter ? orders.filter(o => o.status === statusFilter) : orders).filter(o => passWh(wh, descsByOrder[o.id]))
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -212,6 +225,7 @@ export default function WmsOrdersPage() {
             {Array.from(new Set(orders.map(o => o.status))).map(s => <option key={s} value={s}>{s}</option>)}
           </select>
           {statusFilter && <button onClick={() => setStatusFilter('')} className="text-emerald-700 hover:underline text-xs">clear</button>}
+          <div className="ml-auto"><WarehouseTabs value={wh} onChange={setWh} /></div>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
@@ -222,8 +236,8 @@ export default function WmsOrdersPage() {
               ))}</tr>
             </thead>
             <tbody>
-              {(statusFilter ? orders.filter(o => o.status === statusFilter) : orders).length === 0 && <tr><td colSpan={9} className="text-center py-10 text-gray-400">No orders{statusFilter ? ` with status “${statusFilter}”` : ' yet — upload a PDF to start'}.</td></tr>}
-              {(statusFilter ? orders.filter(o => o.status === statusFilter) : orders).map(o => (
+              {shownOrders.length === 0 && <tr><td colSpan={9} className="text-center py-10 text-gray-400">No orders{statusFilter ? ` with status “${statusFilter}”` : ''}{wh !== 'all' ? ' in this warehouse' : (statusFilter ? '' : ' yet — upload a PDF to start')}.</td></tr>}
+              {shownOrders.map(o => (
                 <Fragment key={o.id}>
                 <tr className="border-b last:border-0 hover:bg-gray-50">
                   <td className="px-4 py-2.5 max-w-[200px] truncate" title={o.file_name || ''}>{o.file_name}</td>

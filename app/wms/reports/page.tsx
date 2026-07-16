@@ -6,6 +6,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
 import ItemPicker from '@/components/ItemPicker'
 import { downloadCsv } from '@/lib/csv'
+import WarehouseTabs, { passWh, WhFilter } from '@/components/WarehouseTabs'
 
 interface Stock { item_code: string; description: string | null; location_code: string; batch_no: string; exp_date: string | null; quantity: number; uom: string | null; created_at: string }
 interface Loc { code: string; aisle: string | null; location_type: string }
@@ -33,6 +34,7 @@ export default function StockReportsPage() {
   const [reorder, setReorder] = useState<Map<string, number | null>>(new Map())
   const [view, setView] = useState<View>('item')
   const [q, setQ] = useState('')
+  const [wh, setWh] = useState<WhFilter>('all')
   const [addItem, setAddItem] = useState(''); const [addLevel, setAddLevel] = useState('')
 
   useEffect(() => { if (profile) load() }, [profile])
@@ -49,33 +51,36 @@ export default function StockReportsPage() {
   }, [])
 
   const zoneOf = (code: string) => locs.get(code.toUpperCase())?.aisle || ''
-  const onHandByItem = useMemo(() => { const m = new Map<string, number>(); for (const s of stock) m.set(s.item_code, clean((m.get(s.item_code) || 0) + Number(s.quantity))); return m }, [stock])
-  const onHandUpper = useMemo(() => { const m = new Map<string, number>(); for (const s of stock) { const k = s.item_code.toUpperCase(); m.set(k, clean((m.get(k) || 0) + Number(s.quantity))) } return m }, [stock])
+  // Two-warehouse split: narrow stock to the chosen warehouse (GCH = description starts "GCH").
+  const whStock = useMemo(() => stock.filter(s => passWh(wh, s.description)), [stock, wh])
+  const descByCode = useMemo(() => new Map(items.map(i => [i.code.toUpperCase(), i.description])), [items])
+  const onHandByItem = useMemo(() => { const m = new Map<string, number>(); for (const s of whStock) m.set(s.item_code, clean((m.get(s.item_code) || 0) + Number(s.quantity))); return m }, [whStock])
+  const onHandUpper = useMemo(() => { const m = new Map<string, number>(); for (const s of whStock) { const k = s.item_code.toUpperCase(); m.set(k, clean((m.get(k) || 0) + Number(s.quantity))) } return m }, [whStock])
 
   // Build {headers, rows} for the current view.
   const report = useMemo((): { headers: string[]; rows: (string | number)[][] } => {
     if (view === 'item') {
       const m = new Map<string, { desc: string; qty: number; uom: string; bins: Set<string> }>()
-      for (const s of stock) { const e = m.get(s.item_code) || { desc: s.description || '', qty: 0, uom: s.uom || '', bins: new Set<string>() }; e.qty = clean(e.qty + Number(s.quantity)); e.bins.add(s.location_code); m.set(s.item_code, e) }
+      for (const s of whStock) { const e = m.get(s.item_code) || { desc: s.description || '', qty: 0, uom: s.uom || '', bins: new Set<string>() }; e.qty = clean(e.qty + Number(s.quantity)); e.bins.add(s.location_code); m.set(s.item_code, e) }
       return { headers: ['Item', 'Description', 'On-hand', 'Unit', 'Bins'], rows: [...m.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([k, v]) => [k, v.desc, fmtQty(v.qty), v.uom, v.bins.size]) }
     }
-    if (view === 'bin') return { headers: ['Bin', 'Type', 'Item', 'Batch', 'Expiry', 'Qty'], rows: stock.slice().sort((a, b) => a.location_code.localeCompare(b.location_code) || a.item_code.localeCompare(b.item_code)).map(s => [s.location_code, locs.get(s.location_code.toUpperCase())?.location_type || '', s.item_code, s.batch_no, fmtDate(s.exp_date), fmtQty(s.quantity)]) }
+    if (view === 'bin') return { headers: ['Bin', 'Type', 'Item', 'Batch', 'Expiry', 'Qty'], rows: whStock.slice().sort((a, b) => a.location_code.localeCompare(b.location_code) || a.item_code.localeCompare(b.item_code)).map(s => [s.location_code, locs.get(s.location_code.toUpperCase())?.location_type || '', s.item_code, s.batch_no, fmtDate(s.exp_date), fmtQty(s.quantity)]) }
     if (view === 'zone') {
       const m = new Map<string, { items: Set<string>; qty: number }>()
-      for (const s of stock) { const z = zoneOf(s.location_code) || '(none)'; const e = m.get(z) || { items: new Set<string>(), qty: 0 }; e.items.add(s.item_code); e.qty = clean(e.qty + Number(s.quantity)); m.set(z, e) }
+      for (const s of whStock) { const z = zoneOf(s.location_code) || '(none)'; const e = m.get(z) || { items: new Set<string>(), qty: 0 }; e.items.add(s.item_code); e.qty = clean(e.qty + Number(s.quantity)); m.set(z, e) }
       return { headers: ['Zone', 'Items', 'On-hand'], rows: [...m.entries()].sort().map(([k, v]) => [k, v.items.size, fmtQty(v.qty)]) }
     }
     if (view === 'batch') {
       const m = new Map<string, { desc: string; exp: string | null; qty: number }>()
-      for (const s of stock) { const k = `${s.item_code}|${s.batch_no}`; const e = m.get(k) || { desc: s.description || '', exp: s.exp_date, qty: 0 }; e.qty = clean(e.qty + Number(s.quantity)); m.set(k, e) }
+      for (const s of whStock) { const k = `${s.item_code}|${s.batch_no}`; const e = m.get(k) || { desc: s.description || '', exp: s.exp_date, qty: 0 }; e.qty = clean(e.qty + Number(s.quantity)); m.set(k, e) }
       return { headers: ['Item', 'Batch', 'Expiry', 'On-hand'], rows: [...m.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([k, v]) => [k.split('|')[0], k.split('|')[1] || '—', fmtDate(v.exp), fmtQty(v.qty)]) }
     }
-    if (view === 'aging') return { headers: ['Item', 'Bin', 'Batch', 'Qty', 'Age (days)', 'Bucket'], rows: stock.map(s => ({ s, d: ageDays(s.created_at) })).sort((a, b) => b.d - a.d).map(({ s, d }) => [s.item_code, s.location_code, s.batch_no, fmtQty(s.quantity), d, ageBucket(d)]) }
-    // low stock
+    if (view === 'aging') return { headers: ['Item', 'Bin', 'Batch', 'Qty', 'Age (days)', 'Bucket'], rows: whStock.map(s => ({ s, d: ageDays(s.created_at) })).sort((a, b) => b.d - a.d).map(({ s, d }) => [s.item_code, s.location_code, s.batch_no, fmtQty(s.quantity), d, ageBucket(d)]) }
+    // low stock — filter by the item's warehouse (from the item master description)
     const rows: (string | number)[][] = []
-    for (const [code, lvl] of reorder.entries()) { if (lvl == null) continue; const oh = onHandUpper.get(code) || 0; rows.push([code, fmtQty(oh), fmtQty(lvl), oh <= lvl ? 'LOW' : 'ok']) }
+    for (const [code, lvl] of reorder.entries()) { if (lvl == null) continue; if (!passWh(wh, descByCode.get(code.toUpperCase()))) continue; const oh = onHandUpper.get(code) || 0; rows.push([code, fmtQty(oh), fmtQty(lvl), oh <= lvl ? 'LOW' : 'ok']) }
     return { headers: ['Item', 'On-hand', 'Reorder level', 'Status'], rows: rows.sort((a, b) => (a[3] === 'LOW' ? 0 : 1) - (b[3] === 'LOW' ? 0 : 1) || String(a[0]).localeCompare(String(b[0]))) }
-  }, [view, stock, locs, reorder, onHandUpper])
+  }, [view, whStock, locs, reorder, onHandUpper, wh, descByCode])
 
   const filtered = useMemo(() => { const n = q.trim().toLowerCase(); return n ? report.rows.filter(r => r.some(c => String(c).toLowerCase().includes(n))) : report.rows }, [report, q])
 
@@ -112,7 +117,10 @@ export default function StockReportsPage() {
           </div>
         )}
 
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search…" className="border rounded-lg px-3 py-2 text-sm w-full mb-4" />
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search…" className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[180px]" />
+          <WarehouseTabs value={wh} onChange={setWh} />
+        </div>
 
         <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">

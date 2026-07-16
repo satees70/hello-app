@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api'
 import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
 import ItemPicker from '@/components/ItemPicker'
+import WarehouseTabs, { passWh, WhFilter } from '@/components/WarehouseTabs'
 
 interface PO {
   id: string; po_number: string | null; supplier_name: string | null; order_date: string | null; expected_date: string | null
@@ -47,11 +48,22 @@ export default function WmsPurchaseOrdersPage() {
   const [saving, setSaving] = useState(false)
 
   const [statusFilter, setStatusFilter] = useState('')
+  const [wh, setWh] = useState<WhFilter>('all')
+  const [descsByPo, setDescsByPo] = useState<Record<string, (string | null)[]>>({})
   useEffect(() => { const s = new URLSearchParams(window.location.search).get('status'); if (s) setStatusFilter(s) }, [])
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
     const { data } = await supabase.from('wms_purchase_orders').select('*, wms_po_lines(count)').order('created_at', { ascending: false }).limit(100)
-    setPos((data as PO[]) || [])
+    const list = (data as PO[]) || []
+    setPos(list)
+    // Item descriptions per PO, so the GCH / Other warehouse filter can match on lines.
+    const ids = list.map(o => o.id)
+    if (ids.length) {
+      const { data: pl } = await supabase.from('wms_po_lines').select('po_id, description').in('po_id', ids)
+      const m: Record<string, (string | null)[]> = {}
+      ;(pl as { po_id: string; description: string | null }[] || []).forEach(l => { (m[l.po_id] ||= []).push(l.description) })
+      setDescsByPo(m)
+    } else setDescsByPo({})
     const { data: sup } = await supabase.from('wms_suppliers').select('name, code').eq('active', true).order('name')
     setSuppliers((sup as { name: string; code: string }[]) || [])
     if (!items.length) setItems(await fetchAll<Item>('items', 'code, description, unit', 'code'))
@@ -133,6 +145,8 @@ export default function WmsPurchaseOrdersPage() {
 
   if (loading) return <div className="p-8 text-sm text-gray-500">Loading…</div>
 
+  const shownPos = (statusFilter ? pos.filter(o => o.status === statusFilter) : pos).filter(o => passWh(wh, descsByPo[o.id]))
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
@@ -183,14 +197,15 @@ export default function WmsPurchaseOrdersPage() {
             {Array.from(new Set(pos.map(o => o.status))).map(s => <option key={s} value={s}>{s}</option>)}
           </select>
           {statusFilter && <button onClick={() => setStatusFilter('')} className="text-emerald-700 hover:underline text-xs">clear</button>}
+          <div className="ml-auto"><WarehouseTabs value={wh} onChange={setWh} /></div>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b"><tr>{['PO No', 'Supplier', 'Expected', 'Lines', 'Status', 'Added', 'Actions'].map(h => <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
             <tbody>
-              {(statusFilter ? pos.filter(o => o.status === statusFilter) : pos).length === 0 && <tr><td colSpan={7} className="text-center py-10 text-gray-400">No purchase orders{statusFilter ? ` with status “${statusFilter}”` : ' yet'}.</td></tr>}
-              {(statusFilter ? pos.filter(o => o.status === statusFilter) : pos).map(o => (
+              {shownPos.length === 0 && <tr><td colSpan={7} className="text-center py-10 text-gray-400">No purchase orders{statusFilter ? ` with status “${statusFilter}”` : ''}{wh !== 'all' ? ' in this warehouse' : ' yet'}.</td></tr>}
+              {shownPos.map(o => (
                 <tr key={o.id} className="border-b last:border-0 hover:bg-gray-50">
                   <td className="px-4 py-2.5 font-mono">{o.po_number || <span className="text-gray-300">{o.file_name ? '(reading…)' : '—'}</span>}</td>
                   <td className="px-4 py-2.5">{o.supplier_name || <span className="text-gray-300">—</span>}</td>

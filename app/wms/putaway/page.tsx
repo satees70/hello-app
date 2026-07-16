@@ -6,6 +6,7 @@ import { can } from '@/lib/permissions'
 import ItemPicker from '@/components/ItemPicker'
 import ScanGate from '@/components/ScanGate'
 import { matchBin, matchItem } from '@/lib/qr'
+import WarehouseTabs, { passWh, WhFilter } from '@/components/WarehouseTabs'
 
 interface Item { code: string; description: string; unit: string }
 interface Loc { id: string; code: string; location_type: string; active: boolean; pick_sequence: number | null }
@@ -34,6 +35,7 @@ export default function WmsPutawayPage() {
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState(''); const [ok, setOk] = useState('')
   const [scanFor, setScanFor] = useState<{ row: Stock; bin: string } | null>(null)
+  const [wh, setWh] = useState<WhFilter>('all')
 
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
@@ -52,6 +54,7 @@ export default function WmsPutawayPage() {
   const goodsIn = useMemo(() => locs.find(l => l.code === 'GOODS-IN'), [locs])
   const pending = useMemo(() => stock.filter(s => s.location_code === 'GOODS-IN' && s.quantity > 0)
     .sort((a, b) => a.item_code.localeCompare(b.item_code)), [stock])
+  const pendingShown = useMemo(() => pending.filter(s => passWh(wh, s.description)), [pending, wh])
 
   // Suggest a shelf bin for an item: SL bin already holding it → empty SL → empty XS overflow.
   const suggestBin = useCallback((itemCode: string) => {
@@ -126,11 +129,14 @@ export default function WmsPutawayPage() {
 
         {/* Pending putaway = stock sitting in GOODS-IN */}
         <div className="mb-6">
-          <h2 className="text-sm font-semibold text-gray-600 mb-2">Pending putaway <span className="text-gray-400 font-normal">— just received, in GOODS-IN ({pending.length})</span></h2>
-          {pending.length === 0
-            ? <div className="bg-white rounded-xl border p-6 text-center text-gray-400 text-sm">Nothing waiting. Received goods appear here.</div>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <h2 className="text-sm font-semibold text-gray-600">Pending putaway <span className="text-gray-400 font-normal">— just received, in GOODS-IN ({pendingShown.length})</span></h2>
+            <WarehouseTabs value={wh} onChange={setWh} />
+          </div>
+          {pendingShown.length === 0
+            ? <div className="bg-white rounded-xl border p-6 text-center text-gray-400 text-sm">{pending.length ? 'Nothing in this warehouse.' : 'Nothing waiting. Received goods appear here.'}</div>
             : <div className="space-y-2">
-                {pending.map(row => {
+                {pendingShown.map(row => {
                   const sug = suggestBin(row.item_code)
                   const bin = binEdits[row.id] ?? sug?.code ?? ''
                   return (

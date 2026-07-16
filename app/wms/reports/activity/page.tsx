@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
 import { downloadCsv } from '@/lib/csv'
+import WarehouseTabs, { passWh, WhFilter } from '@/components/WarehouseTabs'
 
 interface Move { id: string; move_type: string; item_code: string; description: string | null; from_location_code: string | null; to_location_code: string | null; batch_no: string; quantity: number; reference: string | null; moved_by_name: string | null; created_at: string }
 interface CLine { id: string; location_code: string; item_code: string; description: string | null; batch_no: string; expected_qty: number; counted_qty: number | null; is_unexpected: boolean; counted_by_name: string | null; wms_count_tasks: { count_no: string | null; created_at: string } | { count_no: string | null; created_at: string }[] | null }
@@ -26,6 +27,7 @@ export default function ActivityReportPage() {
   const [tab, setTab] = useState<'moves' | 'disc'>('moves')
   const [moves, setMoves] = useState<Move[]>([]); const [lines, setLines] = useState<CLine[]>([])
   const [q, setQ] = useState(''); const [type, setType] = useState(''); const [from, setFrom] = useState(''); const [to, setTo] = useState('')
+  const [wh, setWh] = useState<WhFilter>('all')
 
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
@@ -39,19 +41,21 @@ export default function ActivityReportPage() {
   const fMoves = useMemo(() => {
     const n = q.trim().toLowerCase()
     return moves
+      .filter(m => passWh(wh, m.description))
       .filter(m => (type ? m.move_type === type : true))
       .filter(m => (from ? dOnly(m.created_at) >= from : true))
       .filter(m => (to ? dOnly(m.created_at) <= to : true))
       .filter(m => !n || [m.item_code, m.description, m.from_location_code, m.to_location_code, m.batch_no, m.reference, m.moved_by_name].some(v => (v || '').toLowerCase().includes(n)))
-  }, [moves, q, type, from, to])
+  }, [moves, q, type, from, to, wh])
 
   const discRows = useMemo(() => {
     const n = q.trim().toLowerCase()
     return lines.map(l => ({ l, t: disc(l), task: Array.isArray(l.wms_count_tasks) ? l.wms_count_tasks[0] : l.wms_count_tasks })).filter(x => x.t)
+      .filter(x => passWh(wh, x.l.description))
       .filter(x => (from ? (x.task?.created_at || '').slice(0, 10) >= from : true))
       .filter(x => (to ? (x.task?.created_at || '').slice(0, 10) <= to : true))
       .filter(x => !n || [x.l.item_code, x.l.location_code, x.l.batch_no, x.task?.count_no].some(v => (v || '').toLowerCase().includes(n)))
-  }, [lines, q, from, to])
+  }, [lines, q, from, to, wh])
 
   function exportMoves() { downloadCsv('Movements.csv', ['When', 'Type', 'Item', 'From', 'To', 'Batch', 'Qty', 'Reference', 'By'], fMoves.map(m => [fmtTime(m.created_at), m.move_type, m.item_code, m.from_location_code, m.to_location_code, m.batch_no, fmtQty(m.quantity), m.reference, m.moved_by_name])) }
   function exportDisc() { downloadCsv('Count_discrepancies.csv', ['Count', 'Item', 'Bin', 'Batch', 'System', 'Counted', 'Diff', 'Type', 'By'], discRows.map(({ l, t, task }) => [task?.count_no, l.item_code, l.location_code, l.batch_no, fmtQty(l.expected_qty), fmtQty(l.counted_qty), fmtQty(clean((l.counted_qty ?? 0) - l.expected_qty)), t, l.counted_by_name])) }
@@ -72,6 +76,7 @@ export default function ActivityReportPage() {
 
         <div className="flex flex-wrap gap-2 mb-4">
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search item / bin / user / ref…" className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[180px]" />
+          <WarehouseTabs value={wh} onChange={setWh} />
           {tab === 'moves' && <select value={type} onChange={e => setType(e.target.value)} className="border rounded-lg px-3 py-2 text-sm"><option value="">All types</option>{['receipt', 'putaway', 'pick', 'transfer', 'adjust', 'dispatch'].map(t => <option key={t} value={t}>{t}</option>)}</select>}
           <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" title="From" />
           <input type="date" value={to} onChange={e => setTo(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" title="To" />
