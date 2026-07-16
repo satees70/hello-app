@@ -30,6 +30,15 @@ describe("CSV statement parsing", () => {
     expect(m.credit).toBe("Credit");
     expect(m.balance).toBe("Balance");
   });
+
+  it("respects an explicit column mapping with non-standard headers", () => {
+    const csv = "Tarikh,Butiran,Wang Masuk,Wang Keluar\n01/02/2026,Sewa,1500.00,\n03/02/2026,Bil TNB,,320.50\n";
+    const st = parseCsvStatement(csv, { date: "Tarikh", description: "Butiran", credit: "Wang Masuk", debit: "Wang Keluar" });
+    expect(st.lines.length).toBe(2);
+    expect(st.lines[0].amount).toBe("1500.00"); // credit => +
+    expect(st.lines[1].amount).toBe("-320.50"); // debit => -
+    expect(st.lines[0].description).toBe("Sewa");
+  });
 });
 
 describe("PDF text statement parsing", () => {

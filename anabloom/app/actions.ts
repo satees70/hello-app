@@ -4,7 +4,9 @@ import { compare, hash } from "bcryptjs";
 import { revalidatePath } from "next/cache";
 import { requireUserId } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getStorage } from "@/lib/storage";
 import { SourceType } from "@/lib/enums";
+import { saveEntryAttachments } from "@/lib/services/attachments";
 import { createEntry, deleteEntry } from "@/lib/services/entries";
 import { runDepreciation } from "@/lib/services/depreciation";
 import { endLease, renewLease, DepositDisposition } from "@/lib/services/leases";
@@ -79,7 +81,12 @@ export async function createEntryAction(fd: FormData) {
       input = { ...base, amount: num(fd, "amount") };
   }
 
-  await createEntry(input);
+  const entry = await createEntry(input);
+
+  // Optional receipt attachments (multiple files allowed).
+  const files = fd.getAll("attachments").filter((f): f is File => f instanceof File && f.size > 0);
+  if (files.length) await saveEntryAttachments(userId, entry.id, files);
+
   revalidatePath("/ledger");
   revalidatePath("/");
 }
@@ -89,6 +96,17 @@ export async function deleteEntryAction(fd: FormData) {
   await deleteEntry(userId, s(fd, "id"));
   revalidatePath("/ledger");
   revalidatePath("/");
+}
+
+export async function deleteAttachmentAction(fd: FormData) {
+  const userId = await requireUserId();
+  const attId = s(fd, "id");
+  const entryId = s(fd, "entryId");
+  const att = await prisma.attachment.findFirst({ where: { id: attId, entry: { id: entryId, userId } } });
+  if (!att) throw new Error("Attachment not found.");
+  await getStorage().remove(att.storagePath);
+  await prisma.attachment.delete({ where: { id: attId } });
+  revalidatePath(`/ledger/${entryId}`);
 }
 
 // ---------------- Properties ----------------

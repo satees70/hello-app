@@ -1,7 +1,7 @@
 import Link from "next/link";
 import ReportToolbar from "@/components/ReportToolbar";
 import { formatMoney } from "@/lib/money";
-import { profitAndLoss } from "@/lib/reports";
+import { profitAndLoss, profitAndLossByMonth } from "@/lib/reports";
 import { prisma } from "@/lib/prisma";
 import { getUser } from "@/lib/session";
 import { getLedgerLines } from "@/lib/services/ledger";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function ProfitLossPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string; property?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; property?: string; view?: string }>;
 }) {
   const user = await getUser();
   const sym = user.currency;
@@ -20,21 +20,41 @@ export default async function ProfitLossPage({
   const from = new Date((sp.from || `${now.getUTCFullYear()}-01-01`) + "T00:00:00Z");
   const to = new Date((sp.to || now.toISOString().slice(0, 10)) + "T23:59:59Z");
   const propertyId = sp.property || undefined;
+  const monthly = sp.view === "monthly";
 
   const [lines, properties] = await Promise.all([
     getLedgerLines(user.id),
     prisma.property.findMany({ where: { userId: user.id }, orderBy: { name: "asc" } }),
   ]);
   const pl = profitAndLoss(lines, from, to, propertyId);
+  const plm = monthly ? profitAndLossByMonth(lines, from, to, propertyId) : null;
 
-  const csv = [
-    ["Section", "Code", "Account", "Amount"],
-    ...pl.income.map((r) => ["Income", r.code, r.name, r.amount.toFixed(2)]),
-    ["", "", "Total income", pl.totalIncome.toFixed(2)],
-    ...pl.expenses.map((r) => ["Expense", r.code, r.name, r.amount.toFixed(2)]),
-    ["", "", "Total expenses", pl.totalExpense.toFixed(2)],
-    ["", "", "Net profit", pl.net.toFixed(2)],
-  ];
+  const qs = (view: string) => {
+    const p = new URLSearchParams();
+    if (sp.from) p.set("from", sp.from);
+    if (sp.to) p.set("to", sp.to);
+    if (sp.property) p.set("property", sp.property);
+    if (view) p.set("view", view);
+    return p.toString();
+  };
+
+  const csv = plm
+    ? [
+        ["Account", ...plm.months, "Total"],
+        ...plm.income.map((r) => [`${r.code} ${r.name}`, ...r.amounts.map((a) => a.toFixed(2)), r.total.toFixed(2)]),
+        ["Total income", ...plm.incomeTotals.map((a) => a.toFixed(2)), plm.grandIncome.toFixed(2)],
+        ...plm.expenses.map((r) => [`${r.code} ${r.name}`, ...r.amounts.map((a) => a.toFixed(2)), r.total.toFixed(2)]),
+        ["Total expenses", ...plm.expenseTotals.map((a) => a.toFixed(2)), plm.grandExpense.toFixed(2)],
+        ["Net profit", ...plm.netTotals.map((a) => a.toFixed(2)), plm.grandNet.toFixed(2)],
+      ]
+    : [
+        ["Section", "Code", "Account", "Amount"],
+        ...pl.income.map((r) => ["Income", r.code, r.name, r.amount.toFixed(2)]),
+        ["", "", "Total income", pl.totalIncome.toFixed(2)],
+        ...pl.expenses.map((r) => ["Expense", r.code, r.name, r.amount.toFixed(2)]),
+        ["", "", "Total expenses", pl.totalExpense.toFixed(2)],
+        ["", "", "Net profit", pl.net.toFixed(2)],
+      ];
 
   return (
     <div className="space-y-4">
@@ -68,9 +88,103 @@ export default async function ProfitLossPage({
             ))}
           </select>
         </div>
+        <input type="hidden" name="view" value={monthly ? "monthly" : ""} />
         <button className="btn-primary">Update</button>
+        <div className="ml-auto flex gap-1 text-sm">
+          <Link href={`/reports/profit-loss?${qs("")}`} className={`px-3 py-2 rounded ${!monthly ? "bg-primary text-white" : "border border-line"}`}>
+            Summary
+          </Link>
+          <Link href={`/reports/profit-loss?${qs("monthly")}`} className={`px-3 py-2 rounded ${monthly ? "bg-primary text-white" : "border border-line"}`}>
+            Month-by-month
+          </Link>
+        </div>
       </form>
 
+      {plm ? (
+        <div className="card overflow-x-auto">
+          <table className="w-full min-w-[640px]">
+            <thead>
+              <tr>
+                <th className="th">Account</th>
+                {plm.months.map((m) => (
+                  <th key={m} className="th text-right whitespace-nowrap">
+                    {m}
+                  </th>
+                ))}
+                <th className="th text-right">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="bg-income/5">
+                <td className="td font-semibold text-income" colSpan={plm.months.length + 2}>
+                  Income
+                </td>
+              </tr>
+              {plm.income.map((r) => (
+                <tr key={r.code}>
+                  <td className="td">
+                    {r.code} {r.name}
+                  </td>
+                  {r.amounts.map((a, i) => (
+                    <td key={i} className="td text-right num">
+                      {a.isZero() ? "" : formatMoney(a, sym)}
+                    </td>
+                  ))}
+                  <td className="td text-right num font-medium">{formatMoney(r.total, sym)}</td>
+                </tr>
+              ))}
+              <tr className="font-semibold border-t border-line">
+                <td className="td">Total income</td>
+                {plm.incomeTotals.map((a, i) => (
+                  <td key={i} className="td text-right num">
+                    {formatMoney(a, sym)}
+                  </td>
+                ))}
+                <td className="td text-right num">{formatMoney(plm.grandIncome, sym)}</td>
+              </tr>
+
+              <tr className="bg-expense/5">
+                <td className="td font-semibold text-expense" colSpan={plm.months.length + 2}>
+                  Expenses
+                </td>
+              </tr>
+              {plm.expenses.map((r) => (
+                <tr key={r.code}>
+                  <td className="td">
+                    {r.code} {r.name}
+                  </td>
+                  {r.amounts.map((a, i) => (
+                    <td key={i} className="td text-right num">
+                      {a.isZero() ? "" : formatMoney(a, sym)}
+                    </td>
+                  ))}
+                  <td className="td text-right num font-medium">{formatMoney(r.total, sym)}</td>
+                </tr>
+              ))}
+              <tr className="font-semibold border-t border-line">
+                <td className="td">Total expenses</td>
+                {plm.expenseTotals.map((a, i) => (
+                  <td key={i} className="td text-right num">
+                    {formatMoney(a, sym)}
+                  </td>
+                ))}
+                <td className="td text-right num">{formatMoney(plm.grandExpense, sym)}</td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr className="font-bold border-t-2 border-ink">
+                <td className="td">Net profit</td>
+                {plm.netTotals.map((a, i) => (
+                  <td key={i} className={`td text-right num ${a.isNegative() ? "text-expense" : ""}`}>
+                    {formatMoney(a, sym)}
+                  </td>
+                ))}
+                <td className={`td text-right num ${plm.grandNet.isNegative() ? "text-expense" : "text-income"}`}>{formatMoney(plm.grandNet, sym)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      ) : (
       <div className="card p-5 max-w-2xl">
         <h2 className="font-semibold text-income mb-2">Income</h2>
         <Section rows={pl.income} sym={sym} />
@@ -85,6 +199,7 @@ export default async function ProfitLossPage({
           <span className={`num ${pl.net.isNegative() ? "text-expense" : "text-income"}`}>{formatMoney(pl.net, sym)}</span>
         </div>
       </div>
+      )}
     </div>
   );
 }

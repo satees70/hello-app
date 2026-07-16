@@ -152,7 +152,10 @@ export default async function LedgerPage({
                     <td className="td text-right">
                       <Money value={amount} symbol={sym} colorNegative={false} />
                     </td>
-                    <td className="td text-right no-print">
+                    <td className="td text-right no-print whitespace-nowrap">
+                      <Link href={`/ledger/${e.id}`} className="text-primary text-xs hover:underline mr-3">
+                        View
+                      </Link>
                       <ConfirmButton action={deleteEntryAction} id={e.id} message="Delete this entry and its lines?" />
                     </td>
                   </tr>

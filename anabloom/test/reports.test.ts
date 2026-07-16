@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildPosting, PostingInput } from "@/lib/posting";
 import { CHART_OF_ACCOUNTS, accountTypeForCode } from "@/lib/accounts";
-import { balanceSheet, LedgerLine, profitAndLoss, trialBalance } from "@/lib/reports";
+import { balanceSheet, LedgerLine, profitAndLoss, profitAndLossByMonth, trialBalance } from "@/lib/reports";
 
 const NAME = new Map(CHART_OF_ACCOUNTS.map((a) => [a.code, a.name]));
 
@@ -74,6 +74,20 @@ describe("Profit & Loss", () => {
     const pl = profitAndLoss(book, new Date("2026-02-01"), new Date("2026-02-28"));
     expect(pl.totalIncome.toFixed(2)).toBe("3500.00");
     expect(pl.totalExpense.toFixed(2)).toBe("1800.00");
+  });
+});
+
+describe("Profit & Loss — month by month", () => {
+  it("splits totals across months and sums to the period net", () => {
+    const plm = profitAndLossByMonth(book, new Date("2026-02-01"), new Date("2026-03-31"));
+    expect(plm.months).toEqual(["2026-02", "2026-03"]);
+    // Feb: income 3500, expenses 300+500+1000=1800 -> net 1700
+    expect(plm.incomeTotals[0].toFixed(2)).toBe("3500.00");
+    expect(plm.expenseTotals[0].toFixed(2)).toBe("1800.00");
+    expect(plm.netTotals[0].toFixed(2)).toBe("1700.00");
+    // Mar: income 1500 invoiced, expenses 0 -> net 1500
+    expect(plm.netTotals[1].toFixed(2)).toBe("1500.00");
+    expect(plm.grandNet.toFixed(2)).toBe("3200.00");
   });
 });
 

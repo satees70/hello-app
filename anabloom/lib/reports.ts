@@ -140,6 +140,100 @@ export function netIncome(lines: LedgerLine[], from?: Date, to?: Date, propertyI
   return profitAndLoss(lines, from, to, propertyId).net;
 }
 
+// ---------- Profit & Loss, month-by-month columns ----------
+export interface PLMonthlyRow {
+  code: string;
+  name: string;
+  amounts: Decimal[]; // one per month
+  total: Decimal;
+}
+export interface ProfitAndLossMonthly {
+  months: string[]; // "YYYY-MM"
+  income: PLMonthlyRow[];
+  expenses: PLMonthlyRow[];
+  incomeTotals: Decimal[];
+  expenseTotals: Decimal[];
+  netTotals: Decimal[];
+  grandIncome: Decimal;
+  grandExpense: Decimal;
+  grandNet: Decimal;
+}
+
+function monthsBetween(from: Date, to: Date): string[] {
+  const out: string[] = [];
+  let y = from.getUTCFullYear();
+  let m = from.getUTCMonth();
+  const endY = to.getUTCFullYear();
+  const endM = to.getUTCMonth();
+  for (let guard = 0; guard < 600; guard++) {
+    out.push(`${y}-${String(m + 1).padStart(2, "0")}`);
+    if (y === endY && m === endM) break;
+    if (y > endY || (y === endY && m > endM)) break;
+    m++;
+    if (m > 11) {
+      m = 0;
+      y++;
+    }
+  }
+  return out;
+}
+
+export function profitAndLossByMonth(
+  lines: LedgerLine[],
+  from: Date,
+  to: Date,
+  propertyId?: string
+): ProfitAndLossMonthly {
+  const months = monthsBetween(from, to);
+  const incomeMap = new Map<string, PLMonthlyRow>();
+  const expenseMap = new Map<string, PLMonthlyRow>();
+
+  months.forEach((ym, i) => {
+    const [y, mo] = ym.split("-").map(Number);
+    const mFrom = new Date(Date.UTC(y, mo - 1, 1));
+    const mTo = new Date(Date.UTC(y, mo, 0, 23, 59, 59));
+    const pl = profitAndLoss(lines, mFrom, mTo, propertyId);
+    for (const r of pl.income) {
+      let row = incomeMap.get(r.code);
+      if (!row) {
+        row = { code: r.code, name: r.name, amounts: months.map(() => ZERO), total: ZERO };
+        incomeMap.set(r.code, row);
+      }
+      row.amounts[i] = r.amount;
+      row.total = add(row.total, r.amount);
+    }
+    for (const r of pl.expenses) {
+      let row = expenseMap.get(r.code);
+      if (!row) {
+        row = { code: r.code, name: r.name, amounts: months.map(() => ZERO), total: ZERO };
+        expenseMap.set(r.code, row);
+      }
+      row.amounts[i] = r.amount;
+      row.total = add(row.total, r.amount);
+    }
+  });
+
+  const income = [...incomeMap.values()].sort((a, b) => a.code.localeCompare(b.code));
+  const expenses = [...expenseMap.values()].sort((a, b) => a.code.localeCompare(b.code));
+  const incomeTotals = months.map((_, i) => round2(income.reduce((s, r) => add(s, r.amounts[i]), ZERO)));
+  const expenseTotals = months.map((_, i) => round2(expenses.reduce((s, r) => add(s, r.amounts[i]), ZERO)));
+  const netTotals = months.map((_, i) => round2(sub(incomeTotals[i], expenseTotals[i])));
+  const grandIncome = round2(incomeTotals.reduce((s, x) => add(s, x), ZERO));
+  const grandExpense = round2(expenseTotals.reduce((s, x) => add(s, x), ZERO));
+
+  return {
+    months,
+    income,
+    expenses,
+    incomeTotals,
+    expenseTotals,
+    netTotals,
+    grandIncome,
+    grandExpense,
+    grandNet: round2(sub(grandIncome, grandExpense)),
+  };
+}
+
 // ---------- Balance Sheet (as-of date, company-wide) ----------
 export interface BSRow {
   code: string;

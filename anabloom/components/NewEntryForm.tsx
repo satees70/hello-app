@@ -153,6 +153,11 @@ export default function NewEntryForm({
             </>
           )}
 
+          <div className="sm:col-span-2">
+            <label className="label">Receipts (images/PDF, ≤10 MB each — optional)</label>
+            <input className="text-sm" type="file" name="attachments" accept="image/*,application/pdf" multiple />
+          </div>
+
           <div className="sm:col-span-2 flex justify-end">
             <button className="btn-primary" type="submit">
               Save entry

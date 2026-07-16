@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { CASH_CODES } from "../accounts";
 import { buildPosting, PostingInput } from "../posting";
 import { prisma } from "../prisma";
+import { removeEntryFiles } from "./attachments";
 import { assertPeriodUnlocked } from "./period";
 
 export interface CreateEntryInput extends PostingInput {
@@ -60,7 +61,8 @@ export async function createEntry(input: CreateEntryInput, db: Tx = prisma) {
   });
 }
 
-/** Delete an entry. Blocked if its period is locked or any line is reconciled. */
+/** Delete an entry. Blocked if its period is locked or any line is reconciled.
+ *  Also removes the storage files backing its attachments. */
 export async function deleteEntry(userId: string, entryId: string) {
   const entry = await prisma.journalEntry.findFirst({
     where: { id: entryId, userId },
@@ -71,6 +73,7 @@ export async function deleteEntry(userId: string, entryId: string) {
   if (entry.lines.some((l) => l.reconciledAt)) {
     throw new Error("This entry has reconciled bank lines. Un-reconcile the statement first.");
   }
+  await removeEntryFiles(entryId); // delete files from storage; rows cascade
   await prisma.journalEntry.delete({ where: { id: entryId } });
 }
 
