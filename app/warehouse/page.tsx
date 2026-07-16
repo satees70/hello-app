@@ -57,11 +57,12 @@ export default function WarehouseReceivingPage() {
   const [showDone, setShowDone] = useState(false)
   const [q, setQ] = useState('')
   const [wh, setWh] = useState<WhFilter>('all')
+  const [paperPending, setPaperPending] = useState<Set<string>>(new Set())   // dispatch ids with a pending paper-receipt request
 
   const canReceive = !!profile && (!!profile.warehouse_user || profile.factory_code === 'HEAD_OFFICE' || profile.role === 'admin')
-  // Only a manager (Head Office / admin) can confirm WITHOUT a photo — used to clear the
-  // old backlog that was checked on paper before the system existed. Regular warehouse
-  // staff still must take a photo for every item, so the rule holds for new deliveries.
+  // A manager (Head Office / admin) can confirm items WITHOUT a photo right away — used to clear
+  // deliveries checked on paper. Regular warehouse staff can also receive on paper, but they must
+  // REQUEST it and a manager approves (approval confirms the DO's items on paper).
   const isManager = !!profile && (profile.factory_code === 'HEAD_OFFICE' || profile.role === 'admin')
   const facName = (c: string) => facs[c] || c
   const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
@@ -77,6 +78,9 @@ export default function WarehouseReceivingPage() {
     setFacs(Object.fromEntries(((f as { code: string; name: string }[]) || []).map(x => [x.code, x.name])))
     if (e) setError(e.message)
     setOrders((data as unknown as DO[]) || [])
+    // Which DOs have a paper-receipt request still waiting for Head Office.
+    const { data: pr } = await supabase.from('do_paper_receipt_requests').select('dispatch_id, status').eq('status', 'Pending')
+    setPaperPending(new Set(((pr as { dispatch_id: string }[]) || []).map(x => x.dispatch_id)))
     setLoading(false)
   }, [])
   useEffect(() => { load() }, [load])
@@ -126,6 +130,17 @@ export default function WarehouseReceivingPage() {
       await load()
     } catch (err) { setError(needsDbMsg(err instanceof Error ? err.message : String(err))) }
     setBusyDo('')
+  }
+  // Non-manager warehouse staff ask Head Office to accept this DO as received on paper.
+  async function requestPaper(o: DO) {
+    const reason = window.prompt(`Ask Head Office to accept ${o.do_number || 'this delivery order'} as received on paper (no photos)?\n\nReason (optional):`, '')
+    if (reason === null) return
+    setBusyDo(o.id); setError(null); setSuccess(null)
+    const { error: e } = await supabase.rpc('request_do_paper_receipt', { p_dispatch_id: o.id, p_reason: reason || null })
+    setBusyDo('')
+    if (e) { setError(/request_do_paper_receipt|do_paper_receipt_requests/.test(e.message) && /does not exist|schema cache|could not find/i.test(e.message) ? 'This needs a database update — run db/2026-07-do-paper-receipt.sql in the Supabase SQL editor.' : needsDbMsg(e.message)); return }
+    setPaperPending(s => new Set(s).add(o.id))
+    setSuccess(`Paper-receipt request sent for ${o.do_number || 'the DO'} — waiting for Head Office.`)
   }
   async function undoItem(item: Item) {
     setError(null); setSuccess(null)
@@ -191,12 +206,21 @@ export default function WarehouseReceivingPage() {
                       <span className={`ml-auto text-xs font-medium ${o.received_at ? 'text-green-700' : 'text-amber-700'}`}>
                         {o.received_at ? `✅ Received ${fmt(o.received_at)}` : `${done}/${items.length} items confirmed`}
                       </span>
-                      {isManager && !o.received_at && done < items.length && items.length > 0 && (
+                      {canReceive && isManager && !o.received_at && done < items.length && items.length > 0 && (
                         <button onClick={() => confirmDoPaper(o)} disabled={busyDo === o.id}
-                          title="For old deliveries already checked on paper before the system — confirm every remaining item without photos."
+                          title="Confirm every remaining item on this DO without photos (received on paper)."
                           className="text-xs px-2.5 py-1 rounded-lg border border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 whitespace-nowrap">
                           {busyDo === o.id ? 'Confirming…' : '🗒 Received on paper (no photos)'}
                         </button>
+                      )}
+                      {canReceive && !isManager && !o.received_at && done < items.length && items.length > 0 && (
+                        paperPending.has(o.id)
+                          ? <span className="text-xs px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 whitespace-nowrap">⏳ Paper receipt — waiting for Head Office</span>
+                          : <button onClick={() => requestPaper(o)} disabled={busyDo === o.id}
+                              title="Ask Head Office to accept this delivery as received on paper (no photos)."
+                              className="text-xs px-2.5 py-1 rounded-lg border border-indigo-300 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50 whitespace-nowrap">
+                              {busyDo === o.id ? 'Sending…' : '🗒 Request received on paper (HOD approval)'}
+                            </button>
                       )}
                     </div>
 
