@@ -55,7 +55,9 @@ export default function WmsOrdersPage() {
   const [lines, setLines] = useState<Line[]>([])
   const [statusFilter, setStatusFilter] = useState('')
   const [wh, setWh] = useState<WhFilter>('all')
+  const [q, setQ] = useState('')   // search by SO / order no, customer, or item name
   const [descsByOrder, setDescsByOrder] = useState<Record<string, (string | null)[]>>({})
+  const [itemText, setItemText] = useState<Record<string, string>>({})
   const [expandedId, setExpandedId] = useState('')   // order whose lines are shown inline
   const [expLines, setExpLines] = useState<Line[]>([])
   const [doByOrder, setDoByOrder] = useState<Record<string, string[]>>({})   // order_id -> DO number(s) once dispatched
@@ -68,14 +70,19 @@ export default function WmsOrdersPage() {
       .select('*, wms_order_lines(count)').order('created_at', { ascending: false }).limit(100)
     const list = (data as Order[]) || []
     setOrders(list)
-    // Item descriptions per order, so the GCH / Other warehouse filter can match on lines.
+    // Item descriptions per order, so the GCH / Other warehouse filter can match on lines,
+    // plus a searchable text blob (item codes + descriptions) so the search box finds by item.
     const ids = list.map(o => o.id)
     if (ids.length) {
-      const { data: ol } = await supabase.from('wms_order_lines').select('order_id, description').in('order_id', ids)
+      const { data: ol } = await supabase.from('wms_order_lines').select('order_id, item_code, description').in('order_id', ids)
       const m: Record<string, (string | null)[]> = {}
-      ;(ol as { order_id: string; description: string | null }[] || []).forEach(l => { (m[l.order_id] ||= []).push(l.description) })
-      setDescsByOrder(m)
-    } else setDescsByOrder({})
+      const t: Record<string, string> = {}
+      ;(ol as { order_id: string; item_code: string | null; description: string | null }[] || []).forEach(l => {
+        (m[l.order_id] ||= []).push(l.description)
+        t[l.order_id] = `${t[l.order_id] || ''} ${l.item_code || ''} ${l.description || ''}`.toLowerCase()
+      })
+      setDescsByOrder(m); setItemText(t)
+    } else { setDescsByOrder({}); setItemText({}) }
     const { data: pk } = await supabase.rpc('wms_pickers')
     setPickers((pk as Picker[]) || [])
     // DO number(s) for orders that have been dispatched.
@@ -194,7 +201,10 @@ export default function WmsOrdersPage() {
   if (loading) return <div className="p-8 text-sm text-gray-500">Loading…</div>
 
   const unmatched = lines.filter(l => !l.item_id).length
-  const shownOrders = (statusFilter ? orders.filter(o => o.status === statusFilter) : orders).filter(o => passWh(wh, descsByOrder[o.id]))
+  const nq = q.trim().toLowerCase()
+  const shownOrders = (statusFilter ? orders.filter(o => o.status === statusFilter) : orders)
+    .filter(o => passWh(wh, descsByOrder[o.id]))
+    .filter(o => !nq || `${o.order_no || ''} ${o.customer_name || ''} ${o.file_name || ''}`.toLowerCase().includes(nq) || (itemText[o.id] || '').includes(nq))
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -219,6 +229,7 @@ export default function WmsOrdersPage() {
         {msg && <p className="text-emerald-700 text-sm bg-emerald-50 border border-emerald-200 p-3 rounded-lg mb-4">{msg}</p>}
 
         <div className="flex flex-wrap items-center gap-2 mb-3 text-sm">
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 SO no., customer or item…" className="border rounded-lg px-3 py-1.5 flex-1 min-w-[12rem]" />
           <span className="text-gray-500">Status:</span>
           <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="border rounded-lg px-3 py-1.5">
             <option value="">All</option>
