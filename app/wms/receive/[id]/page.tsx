@@ -44,6 +44,9 @@ export default function WmsReceivePage() {
   const { id } = useParams<{ id: string }>()
   const { profile, loading } = useProfile()
   const canEdit = !!profile && can(profile, 'warehouse', 'edit')
+  // A manager (Head Office / admin) can receive an old paper delivery without photos, with no
+  // bypass request. Regular staff still need the three photos or an approved bypass.
+  const isManager = !!profile && (profile.factory_code === 'HEAD_OFFICE' || profile.role === 'admin')
 
   const [po, setPo] = useState<PO | null>(null)
   const [lines, setLines] = useState<Line[]>([])
@@ -128,7 +131,8 @@ export default function WmsReceivePage() {
     const d = draftOf(l); const qty = Number(d.qty)
     if (!(qty > 0)) { setErr('Enter the received quantity.'); return }
     const hasPhotos = !!d.photo && !!d.bagPhoto && !!d.weightPhoto
-    if (!hasPhotos && !bypassApproved.has(l.id)) { setErr('Take the product, bag and weight photos — or request a bypass for a manager to approve.'); return }
+    if (!hasPhotos && !bypassApproved.has(l.id) && !isManager) { setErr('Take the product, bag and weight photos — or request a bypass for a manager to approve.'); return }
+    if (!hasPhotos && !bypassApproved.has(l.id) && isManager && !window.confirm(`Receive ${l.item_code} without photos (old delivery checked on paper)?`)) return
     setBusy(l.id); setErr(''); setMsg('')
     const gid = await ensureGrn(); if (!gid) { setBusy(''); return }
     let path: string | null = null, bagPath: string | null = null, weightPath: string | null = null
@@ -154,7 +158,7 @@ export default function WmsReceivePage() {
     })
     setBusy('')
     if (error) { setErr(error.message); return }
-    setMsg(`Received ${fmtQty(qty)} of ${l.item_code} into GOODS-IN${d.qc === 'fail' ? ' (QC FAIL noted)' : ''}${!hasPhotos ? ' (photo bypass used)' : ''}.`)
+    setMsg(`Received ${fmtQty(qty)} of ${l.item_code} into GOODS-IN${d.qc === 'fail' ? ' (QC FAIL noted)' : ''}${!hasPhotos ? (bypassApproved.has(l.id) ? ' (photo bypass used)' : ' (no photo — received on paper)') : ''}.`)
     setDrafts(dd => { const n = { ...dd }; delete n[l.id]; return n }); load()
   }
   // Photo can't be taken → ask a manager to approve receiving this line without photos.
@@ -238,7 +242,7 @@ export default function WmsReceivePage() {
                       </label>
                     </div>
                     <div className="col-span-1">
-                      <button onClick={() => receive(l)} disabled={busy === l.id || !(Number(d.qty) > 0) || !((d.photo && d.bagPhoto && d.weightPhoto) || bypassApproved.has(l.id))} className="w-full bg-emerald-700 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium">{busy === l.id ? '…' : 'Receive'}</button>
+                      <button onClick={() => receive(l)} disabled={busy === l.id || !(Number(d.qty) > 0) || !((d.photo && d.bagPhoto && d.weightPhoto) || bypassApproved.has(l.id) || isManager)} className="w-full bg-emerald-700 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium">{busy === l.id ? '…' : 'Receive'}</button>
                     </div>
                     {d.qc === 'fail' && <div className="col-span-2 sm:col-span-8"><input value={d.note} onChange={e => setDraft(l.id, { note: e.target.value })} placeholder="QC fail reason…" className="w-full border rounded-lg px-2 py-1.5 text-sm" /></div>}
                     <div className="col-span-2 sm:col-span-8 flex items-center gap-3 flex-wrap">
@@ -248,6 +252,7 @@ export default function WmsReceivePage() {
                       {!(d.photo && d.bagPhoto && d.weightPhoto) && (
                         bypassApproved.has(l.id) ? <span className="text-[11px] text-emerald-700 font-medium">✓ photo bypass approved — you can receive without photos</span>
                         : bypassPending.has(l.id) ? <span className="text-[11px] text-amber-600">⏳ bypass pending manager approval</span>
+                        : isManager ? <span className="text-[11px] text-amber-700">🗒 Photos recommended. As a manager you can still <b>Receive</b> without them (old delivery checked on paper).</span>
                         : <span className="text-[11px] text-amber-600 flex items-center gap-2">Product, bag &amp; weight photos required.
                             <button type="button" onClick={() => requestBypass(l)} disabled={busy === 'bp' + l.id} className="underline text-indigo-600 hover:text-indigo-800">Request bypass (no photo)</button>
                           </span>
