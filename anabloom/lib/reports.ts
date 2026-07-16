@@ -299,6 +299,174 @@ export function balanceSheet(lines: LedgerLine[], asOf?: Date): BalanceSheet {
   };
 }
 
+// ---------- General Ledger detail ----------
+export interface GLInputLine {
+  accountCode: string;
+  accountName: string;
+  accountType: AccountType;
+  date: Date;
+  description: string;
+  propertyId?: string | null;
+  propertyName?: string | null;
+  debit: Decimal.Value;
+  credit: Decimal.Value;
+}
+export interface GLRow {
+  date: string;
+  description: string;
+  propertyName: string;
+  debit: Decimal;
+  credit: Decimal;
+  balance: Decimal; // running balance in the account's natural sense
+}
+export interface GLAccount {
+  code: string;
+  name: string;
+  type: AccountType;
+  opening: Decimal;
+  rows: GLRow[];
+  totalDebit: Decimal;
+  totalCredit: Decimal;
+  closing: Decimal;
+}
+
+// natural movement: debit-normal => debit-credit; credit-normal => credit-debit
+function naturalMovement(type: AccountType, debit: Decimal.Value, credit: Decimal.Value): Decimal {
+  return NORMAL_BALANCE[type] === "DEBIT" ? sub(debit, credit) : sub(credit, debit);
+}
+
+/**
+ * General Ledger: per account (code order), opening balance at range start,
+ * every line in range with a running balance, and closing balance. Opening +
+ * movements === closing for every account (natural sign). Optional property
+ * filter and single-account selection.
+ */
+export function generalLedger(
+  lines: GLInputLine[],
+  opts: { from?: Date; to?: Date; propertyId?: string; accountCode?: string } = {}
+): GLAccount[] {
+  const filtered = lines.filter((l) => {
+    if (opts.accountCode && l.accountCode !== opts.accountCode) return false;
+    if (opts.propertyId && l.propertyId !== opts.propertyId) return false;
+    return true;
+  });
+
+  const byAccount = new Map<string, GLInputLine[]>();
+  const meta = new Map<string, { name: string; type: AccountType }>();
+  for (const l of filtered) {
+    meta.set(l.accountCode, { name: l.accountName, type: l.accountType });
+    const arr = byAccount.get(l.accountCode) ?? [];
+    arr.push(l);
+    byAccount.set(l.accountCode, arr);
+  }
+
+  const accounts: GLAccount[] = [];
+  for (const code of [...byAccount.keys()].sort((a, b) => a.localeCompare(b))) {
+    const info = meta.get(code)!;
+    const accLines = byAccount.get(code)!;
+    let opening = ZERO;
+    const inRangeLines: GLInputLine[] = [];
+    for (const l of accLines) {
+      if (opts.from && l.date < opts.from) opening = add(opening, naturalMovement(info.type, l.debit, l.credit));
+      else if (opts.to && l.date > opts.to) continue;
+      else inRangeLines.push(l);
+    }
+    inRangeLines.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    let running = round2(opening);
+    let totalDebit = ZERO;
+    let totalCredit = ZERO;
+    const rows: GLRow[] = inRangeLines.map((l) => {
+      running = round2(add(running, naturalMovement(info.type, l.debit, l.credit)));
+      totalDebit = add(totalDebit, l.debit);
+      totalCredit = add(totalCredit, l.credit);
+      return {
+        date: l.date.toISOString().slice(0, 10),
+        description: l.description,
+        propertyName: l.propertyName ?? "",
+        debit: round2(l.debit),
+        credit: round2(l.credit),
+        balance: running,
+      };
+    });
+
+    const account: GLAccount = {
+      code,
+      name: info.name,
+      type: info.type,
+      opening: round2(opening),
+      rows,
+      totalDebit: round2(totalDebit),
+      totalCredit: round2(totalCredit),
+      closing: running,
+    };
+    // include accounts with any activity in range or a nonzero opening; always
+    // include an explicitly-selected single account.
+    if (opts.accountCode || rows.length > 0 || !account.opening.isZero()) accounts.push(account);
+  }
+  return accounts;
+}
+
+// ---------- Tenant statement of account (AR movements per lease) ----------
+export interface StatementInputLine {
+  date: Date;
+  description: string;
+  debit: Decimal.Value; // charge (AR debit)
+  credit: Decimal.Value; // payment/credit (AR credit)
+}
+export interface StatementRow {
+  date: string;
+  description: string;
+  charge: Decimal;
+  payment: Decimal;
+  balance: Decimal;
+}
+export interface Statement {
+  opening: Decimal;
+  rows: StatementRow[];
+  totalCharges: Decimal;
+  totalPayments: Decimal;
+  closing: Decimal; // amount owed at range end
+}
+
+/** Tenant/lease statement: opening owed, charges & payments in order with a
+ *  running balance, ending in the amount currently owed. AR is debit-normal so
+ *  balance = Σ(charges − payments). Closing ties to the AR aging figure. */
+export function tenantStatement(lines: StatementInputLine[], from?: Date, to?: Date): Statement {
+  let opening = ZERO;
+  const inRange: StatementInputLine[] = [];
+  for (const l of lines) {
+    if (from && l.date < from) opening = add(opening, sub(l.debit, l.credit));
+    else if (to && l.date > to) continue;
+    else inRange.push(l);
+  }
+  inRange.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+  let running = round2(opening);
+  let totalCharges = ZERO;
+  let totalPayments = ZERO;
+  const rows: StatementRow[] = inRange.map((l) => {
+    running = round2(add(running, sub(l.debit, l.credit)));
+    totalCharges = add(totalCharges, l.debit);
+    totalPayments = add(totalPayments, l.credit);
+    return {
+      date: l.date.toISOString().slice(0, 10),
+      description: l.description,
+      charge: round2(l.debit),
+      payment: round2(l.credit),
+      balance: running,
+    };
+  });
+
+  return {
+    opening: round2(opening),
+    rows,
+    totalCharges: round2(totalCharges),
+    totalPayments: round2(totalPayments),
+    closing: running,
+  };
+}
+
 // ---------- Group (multi-company) reports ----------
 export interface CompanyLedger {
   companyId: string;

@@ -121,13 +121,18 @@ export default async function TenantsPage({ searchParams }: { searchParams: Prom
                       <span className={`badge ${st.cls}`}>{st.label}</span>
                     </td>
                     <td className="td no-print">
-                      <form action={recordRentPaymentAction} className="flex gap-1 items-center">
-                        <input type="hidden" name="leaseId" value={l.id} />
-                        <input type="hidden" name="sourceType" value={ar && Number(ar.total) > 0 ? "RENT_PAYMENT" : "RENT_RECEIVED"} />
-                        <input type="hidden" name="description" value={`Rent — ${l.tenant.name}`} />
-                        <input className="input num w-24 py-1" type="number" step="0.01" name="amount" defaultValue={rent.toFixed(2)} />
-                        <button className="btn-primary py-1">Pay</button>
-                      </form>
+                      <div className="flex gap-1 items-center">
+                        <form action={recordRentPaymentAction} className="flex gap-1 items-center">
+                          <input type="hidden" name="leaseId" value={l.id} />
+                          <input type="hidden" name="sourceType" value={ar && Number(ar.total) > 0 ? "RENT_PAYMENT" : "RENT_RECEIVED"} />
+                          <input type="hidden" name="description" value={`Rent — ${l.tenant.name}`} />
+                          <input className="input num w-24 py-1" type="number" step="0.01" name="amount" defaultValue={rent.toFixed(2)} />
+                          <button className="btn-primary py-1">Pay</button>
+                        </form>
+                        <Link href={`/tenants/${l.id}/statement`} className="btn-ghost py-1">
+                          Statement
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 );

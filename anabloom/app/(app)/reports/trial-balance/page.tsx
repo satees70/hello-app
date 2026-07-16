@@ -53,14 +53,25 @@ export default async function TrialBalancePage({ searchParams }: { searchParams:
             </tr>
           </thead>
           <tbody>
-            {tb.rows.map((r) => (
-              <tr key={r.code}>
-                <td className="td num">{r.code}</td>
-                <td className="td">{r.name}</td>
-                <td className="td text-right num">{r.debit.isZero() ? "" : formatMoney(r.debit, sym)}</td>
-                <td className="td text-right num">{r.credit.isZero() ? "" : formatMoney(r.credit, sym)}</td>
-              </tr>
-            ))}
+            {tb.rows.map((r) => {
+              const glHref = `/reports/general-ledger?account=${r.code}&from=${asOf.getUTCFullYear()}-01-01&to=${asOf.toISOString().slice(0, 10)}`;
+              return (
+                <tr key={r.code} className="hover:bg-canvas">
+                  <td className="td num">
+                    <Link href={glHref} className="text-primary hover:underline" title="Open general ledger">
+                      {r.code}
+                    </Link>
+                  </td>
+                  <td className="td">
+                    <Link href={glHref} className="hover:underline">
+                      {r.name}
+                    </Link>
+                  </td>
+                  <td className="td text-right num">{r.debit.isZero() ? "" : formatMoney(r.debit, sym)}</td>
+                  <td className="td text-right num">{r.credit.isZero() ? "" : formatMoney(r.credit, sym)}</td>
+                </tr>
+              );
+            })}
           </tbody>
           <tfoot>
             <tr className="font-bold border-t-2 border-ink">

@@ -34,9 +34,14 @@ export default async function LeaseDetail({ params }: { params: Promise<{ leaseI
           <h1 className="text-2xl font-bold">{lease.tenant.name}</h1>
           <p className="text-muted text-sm">{lease.property.name}</p>
         </div>
-        <Link href="/tenants" className="btn-ghost no-print">
-          ← All leases
-        </Link>
+        <div className="flex gap-2 no-print">
+          <Link href={`/tenants/${lease.id}/statement`} className="btn-ghost">
+            Statement
+          </Link>
+          <Link href="/tenants" className="btn-ghost">
+            ← All leases
+          </Link>
+        </div>
       </div>
 
       {!lease.stampedDate && lease.status === "ACTIVE" && (

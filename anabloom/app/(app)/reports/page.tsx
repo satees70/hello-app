@@ -2,6 +2,7 @@ import Link from "next/link";
 
 const REPORTS = [
   { href: "/reports/trial-balance", title: "Trial Balance", desc: "Every account's balance as of a date; must balance." },
+  { href: "/reports/general-ledger", title: "General Ledger", desc: "Per-account detail: opening, every posting, running balance, closing." },
   { href: "/reports/profit-loss", title: "Profit & Loss", desc: "Income less expenses over a date range, per property or consolidated." },
   { href: "/reports/balance-sheet", title: "Balance Sheet", desc: "Assets = Liabilities + Equity as of a date." },
   { href: "/reports/aging", title: "AR Aging", desc: "Outstanding rent per tenant, bucketed by age." },

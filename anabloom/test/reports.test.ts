@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildPosting, PostingInput } from "@/lib/posting";
 import { CHART_OF_ACCOUNTS, accountTypeForCode } from "@/lib/accounts";
-import { balanceSheet, groupProfitAndLoss, LedgerLine, profitAndLoss, profitAndLossByMonth, trialBalance } from "@/lib/reports";
+import { balanceSheet, generalLedger, GLInputLine, groupProfitAndLoss, LedgerLine, profitAndLoss, profitAndLossByMonth, tenantStatement, trialBalance } from "@/lib/reports";
+import { sub } from "@/lib/money";
 
 const NAME = new Map(CHART_OF_ACCOUNTS.map((a) => [a.code, a.name]));
 
@@ -88,6 +89,70 @@ describe("Profit & Loss — month by month", () => {
     // Mar: income 1500 invoiced, expenses 0 -> net 1500
     expect(plm.netTotals[1].toFixed(2)).toBe("1500.00");
     expect(plm.grandNet.toFixed(2)).toBe("3200.00");
+  });
+});
+
+describe("General Ledger", () => {
+  const glLines: GLInputLine[] = book.map((l) => ({
+    accountCode: l.accountCode,
+    accountName: l.accountName,
+    accountType: l.accountType,
+    date: l.date,
+    description: "entry",
+    propertyId: l.propertyId,
+    propertyName: l.propertyId ?? null,
+    debit: l.debit,
+    credit: l.credit,
+  }));
+
+  it("opening + movements === closing for every account (natural sign)", () => {
+    const gl = generalLedger(glLines, { from: new Date("2026-02-01"), to: new Date("2026-12-31") });
+    for (const a of gl) {
+      const natural = a.type === "ASSET" || a.type === "EXPENSE" ? sub(a.totalDebit, a.totalCredit) : sub(a.totalCredit, a.totalDebit);
+      expect(a.opening.plus(natural).toFixed(2)).toBe(a.closing.toFixed(2));
+    }
+  });
+
+  it("each account's GL closing equals its Trial Balance figure for the same date", () => {
+    const asOf = new Date("2026-12-31");
+    const tb = trialBalance(book, asOf);
+    const gl = generalLedger(glLines, { to: asOf });
+    for (const a of gl) {
+      const row = tb.rows.find((r) => r.code === a.code);
+      const tbFigure = row ? row.debit.plus(row.credit) : sub(0, 0);
+      expect(a.closing.abs().toFixed(2)).toBe(tbFigure.toFixed(2));
+    }
+  });
+
+  it("single-account selection returns just that account", () => {
+    const gl = generalLedger(glLines, { accountCode: "4000" });
+    expect(gl.length).toBe(1);
+    expect(gl[0].code).toBe("4000");
+  });
+});
+
+describe("Tenant statement", () => {
+  it("running balance ends at the amount owed (charges − payments)", () => {
+    const st = tenantStatement([
+      { date: new Date("2026-03-01"), description: "Rent invoiced", debit: 1500, credit: 0 },
+      { date: new Date("2026-03-15"), description: "Payment", debit: 0, credit: 1000 },
+      { date: new Date("2026-04-01"), description: "Rent invoiced", debit: 1500, credit: 0 },
+    ]);
+    expect(st.opening.toFixed(2)).toBe("0.00");
+    expect(st.totalCharges.toFixed(2)).toBe("3000.00");
+    expect(st.totalPayments.toFixed(2)).toBe("1000.00");
+    expect(st.closing.toFixed(2)).toBe("2000.00");
+    expect(st.rows[st.rows.length - 1].balance.toFixed(2)).toBe("2000.00");
+  });
+
+  it("computes an opening balance from charges before the range start", () => {
+    const lines = [
+      { date: new Date("2026-01-10"), description: "Old charge", debit: 500, credit: 0 },
+      { date: new Date("2026-03-01"), description: "Rent", debit: 1500, credit: 0 },
+    ];
+    const st = tenantStatement(lines, new Date("2026-02-01"), new Date("2026-03-31"));
+    expect(st.opening.toFixed(2)).toBe("500.00");
+    expect(st.closing.toFixed(2)).toBe("2000.00");
   });
 });
 
