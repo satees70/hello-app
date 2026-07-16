@@ -13,7 +13,12 @@ const here = dirname(fileURLToPath(import.meta.url));
 const schemaPath = join(here, "..", "prisma", "schema.prisma");
 
 const url = process.env.DATABASE_URL || "";
-const provider = /^postgres(ql)?:\/\//i.test(url) ? "postgresql" : "sqlite";
+// Vercel is always Postgres. Choose postgresql when the URL says so, OR when
+// building on Vercel (unless the URL is explicitly a local file: SQLite URL) —
+// so a missing/late env var can't leave us with a SQLite client in production.
+const onVercel = !!process.env.VERCEL || !!process.env.VERCEL_ENV;
+const isFileUrl = /^file:/i.test(url);
+const provider = /^postgres(ql)?:\/\//i.test(url) || (onVercel && !isFileUrl) ? "postgresql" : "sqlite";
 
 const schema = readFileSync(schemaPath, "utf8");
 const next = schema.replace(/provider(\s*=\s*)"(?:sqlite|postgresql)"/, `provider$1"${provider}"`);
