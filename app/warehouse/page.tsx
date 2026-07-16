@@ -57,7 +57,8 @@ export default function WarehouseReceivingPage() {
   const [showDone, setShowDone] = useState(false)
   const [q, setQ] = useState('')
   const [wh, setWh] = useState<WhFilter>('all')
-  const [paperPending, setPaperPending] = useState<Set<string>>(new Set())   // dispatch ids with a pending paper-receipt request
+  const [paperPending, setPaperPending] = useState<Set<string>>(new Set())   // dispatch ids with a pending WHOLE-DO paper-receipt request
+  const [paperLinePending, setPaperLinePending] = useState<Set<string>>(new Set())   // line ids with a pending paper-receipt request
 
   const canReceive = !!profile && (!!profile.warehouse_user || profile.factory_code === 'HEAD_OFFICE' || profile.role === 'admin')
   // A manager (Head Office / admin) can confirm items WITHOUT a photo right away — used to clear
@@ -66,6 +67,7 @@ export default function WarehouseReceivingPage() {
   const isManager = !!profile && (profile.factory_code === 'HEAD_OFFICE' || profile.role === 'admin')
   const facName = (c: string) => facs[c] || c
   const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
+  const fmtDate = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -78,9 +80,12 @@ export default function WarehouseReceivingPage() {
     setFacs(Object.fromEntries(((f as { code: string; name: string }[]) || []).map(x => [x.code, x.name])))
     if (e) setError(e.message)
     setOrders((data as unknown as DO[]) || [])
-    // Which DOs have a paper-receipt request still waiting for Head Office.
-    const { data: pr } = await supabase.from('do_paper_receipt_requests').select('dispatch_id, status').eq('status', 'Pending')
-    setPaperPending(new Set(((pr as { dispatch_id: string }[]) || []).map(x => x.dispatch_id)))
+    // Paper-receipt requests still waiting for Head Office — split into whole-DO (no line_id)
+    // and per-line requests.
+    const { data: pr } = await supabase.from('do_paper_receipt_requests').select('dispatch_id, line_id, status').eq('status', 'Pending')
+    const doSet = new Set<string>(); const lineSet = new Set<string>()
+    ;((pr as { dispatch_id: string; line_id: string | null }[]) || []).forEach(x => { if (x.line_id) lineSet.add(x.line_id); else doSet.add(x.dispatch_id) })
+    setPaperPending(doSet); setPaperLinePending(lineSet)
     setLoading(false)
   }, [])
   useEffect(() => { load() }, [load])
@@ -142,6 +147,17 @@ export default function WarehouseReceivingPage() {
     setPaperPending(s => new Set(s).add(o.id))
     setSuccess(`Paper-receipt request sent for ${o.do_number || 'the DO'} — waiting for Head Office.`)
   }
+  // Ask Head Office to accept a SINGLE item line on paper.
+  async function requestLinePaper(item: Item) {
+    const reason = window.prompt(`Ask Head Office to accept ${item.item_code} as received on paper (no photo)?\n\nReason (optional):`, '')
+    if (reason === null) return
+    setBusyLine(item.id); setError(null); setSuccess(null)
+    const { error: e } = await supabase.rpc('request_do_paper_line_receipt', { p_line_id: item.id, p_kind: item.kind === 'return' ? 'return' : 'fg', p_reason: reason || null })
+    setBusyLine('')
+    if (e) { setError(/request_do_paper_line_receipt|line_id/.test(e.message) && /does not exist|schema cache|could not find/i.test(e.message) ? 'This needs a database update — run db/2026-07-do-paper-receipt-line.sql in the Supabase SQL editor.' : needsDbMsg(e.message)); return }
+    setPaperLinePending(s => new Set(s).add(item.id))
+    setSuccess(`Paper-receipt request sent for ${item.item_code} — waiting for Head Office.`)
+  }
   async function undoItem(item: Item) {
     setError(null); setSuccess(null)
     const { error: e } = item.kind === 'return'
@@ -202,6 +218,7 @@ export default function WarehouseReceivingPage() {
                       <span className="font-semibold">{o.do_number || '—'}</span>
                       <span className="text-gray-500 text-sm">· {facName(o.factory_code)}</span>
                       {o.vehicle && <span className="text-gray-500 text-sm">· 🚚 {o.vehicle}</span>}
+                      <span className="text-gray-400 text-xs">· DO date {fmtDate(o.created_at)}</span>
                       <span className="text-gray-400 text-xs">· sent {fmt(o.departed_at)}</span>
                       <span className={`ml-auto text-xs font-medium ${o.received_at ? 'text-green-700' : 'text-amber-700'}`}>
                         {o.received_at ? `✅ Received ${fmt(o.received_at)}` : `${done}/${items.length} items confirmed`}
@@ -251,9 +268,15 @@ export default function WarehouseReceivingPage() {
                                     <input type="file" accept="image/*" capture="environment" className="hidden" disabled={busyLine === l.id}
                                       onChange={e => { const f = e.target.files?.[0]; if (f) takePhoto(l, o.id, f); e.target.value = '' }} />
                                   </label>
-                                  {isManager && <button onClick={() => confirmPaper(l)} disabled={busyLine === l.id}
-                                    title="Received on paper — confirm this item without a photo (old deliveries only)."
-                                    className="text-amber-700 hover:underline text-xs disabled:opacity-50">on paper</button>}
+                                  {isManager
+                                    ? <button onClick={() => confirmPaper(l)} disabled={busyLine === l.id}
+                                        title="Received on paper — confirm this item without a photo."
+                                        className="text-amber-700 hover:underline text-xs disabled:opacity-50">on paper</button>
+                                    : paperLinePending.has(l.id)
+                                      ? <span className="text-[11px] text-amber-600 whitespace-nowrap">⏳ paper — waiting for HOD</span>
+                                      : <button onClick={() => requestLinePaper(l)} disabled={busyLine === l.id}
+                                          title="Ask Head Office to accept this item as received on paper (no photo)."
+                                          className="text-indigo-600 hover:underline text-xs disabled:opacity-50 whitespace-nowrap">request on paper</button>}
                                 </>)}
                           </div>
                         </div>

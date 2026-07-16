@@ -87,7 +87,7 @@ interface GrnBypassReq {
 }
 
 interface PaperReceiptReq {
-  id: string; do_number: string | null; factory_code: string | null; reason: string | null; status: string
+  id: string; do_number: string | null; factory_code: string | null; item_code: string | null; reason: string | null; status: string
   requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null
 }
 
@@ -706,7 +706,7 @@ export default function PendingChangesPage() {
     ...labelOverrides.filter(a => a.status === 'Pending').map(a => P(a.id, 'Label received override', `${a.item_code || '—'}${a.qty != null ? ' · ' + a.qty : ''}${a.reason ? ' · ' + a.reason : ''}`, a.requested_by_name, a.created_at, () => approveLO(a.id), () => rejectLO(a.id))),
     ...soBalCancels.filter(a => a.status === 'Pending').map(a => P(a.id, 'Cancel order balance', `${a.so_number || '—'} · ${a.item_code || ''}${a.cancel_qty != null ? ' · bal ' + a.cancel_qty : ''}${a.reason ? ' · ' + a.reason : ''}`, a.requested_by_name, a.created_at, () => approveSBC(a.id), () => rejectSBC(a.id))),
     ...grnBypasses.filter(a => a.status === 'Pending').map(a => P(a.id, 'Receiving photo bypass', `${a.item_code || '—'}${a.description ? ' · ' + a.description : ''}${a.reason ? ' · ' + a.reason : ''}`, a.requested_by_name, a.created_at, () => approveGB(a.id), () => rejectGB(a.id))),
-    ...paperReceipts.filter(a => a.status === 'Pending').map(a => P(a.id, 'Received on paper', `${a.do_number || 'DO'}${a.factory_code ? ' · ' + a.factory_code : ''}${a.reason ? ' · ' + a.reason : ''}`, a.requested_by_name, a.created_at, () => approvePR(a.id), () => rejectPR(a.id))),
+    ...paperReceipts.filter(a => a.status === 'Pending').map(a => P(a.id, 'Received on paper', `${a.do_number || 'DO'}${a.factory_code ? ' · ' + a.factory_code : ''}${a.item_code ? ' · item ' + a.item_code : ' · whole DO'}${a.reason ? ' · ' + a.reason : ''}`, a.requested_by_name, a.created_at, () => approvePR(a.id), () => rejectPR(a.id))),
     ...docDels.filter(a => a.status === 'Pending').map(a => P(a.id, 'Document delete', a.file_name || '—', a.requested_by_name, a.created_at, () => approveDD(a), () => rejectDD(a.id))),
     ...retEdits.filter(a => a.status === 'Pending').map(a => P(a.id, 'Return edit', `${a.item_code || '—'} qty ${a.old_qty} → ${a.new_qty}`, a.requested_by_name, a.created_at, () => approveRE(a.id), () => rejectRE(a.id))),
     ...fgEdits.filter(a => a.status === 'Pending').map(a => P(a.id, 'Delivery line edit', `DO ${a.do_number || '—'} · ${a.new_item_code || a.old_item_code} qty ${a.old_qty} → ${a.new_qty}`, a.requested_by_name, a.created_at, () => approveFge(a.id), () => rejectFge(a.id))),
