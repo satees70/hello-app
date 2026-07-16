@@ -1,0 +1,262 @@
+// Anabloom — property-management accounting.
+//
+// DEV: SQLite (provider "sqlite" below, DATABASE_URL="file:./dev.db").
+// PROD: switch `provider` to "postgresql" and set DATABASE_URL (pooled 6543,
+//       pgbouncer=true) + DIRECT_URL (direct 5432) to the dedicated Supabase
+//       project. See README "SQLite -> Supabase switch".
+//
+// NOTE: enums are intentionally modelled as String columns so the SAME schema
+// works on both SQLite (dev) and Postgres (prod). Allowed values are validated
+// in TypeScript (see lib/enums.ts). Money is Prisma Decimal (never float).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "sqlite"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  currency     String   @default("RM")
+  createdAt    DateTime @default(now())
+
+  accounts       Account[]
+  properties     Property[]
+  tenants        Tenant[]
+  leases         Lease[]
+  journalEntries JournalEntry[]
+  fixedAssets    FixedAsset[]
+  lockedPeriods  LockedPeriod[]
+  bankStatements BankStatement[]
+}
+
+model Account {
+  id       String  @id @default(cuid())
+  userId   String
+  code     String
+  name     String
+  type     String // ASSET | LIABILITY | EQUITY | INCOME | EXPENSE
+  isSystem Boolean @default(false)
+  active   Boolean @default(true)
+
+  user  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lines JournalLine[]
+
+  @@unique([userId, code])
+  @@index([userId])
+}
+
+model Property {
+  id          String  @id @default(cuid())
+  userId      String
+  name        String
+  address     String?
+  monthlyRent Decimal @default(0)
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leases         Lease[]
+  journalEntries JournalEntry[]
+  fixedAssets    FixedAsset[]
+
+  @@index([userId])
+}
+
+model Tenant {
+  id       String  @id @default(cuid())
+  userId   String
+  name     String
+  phone    String?
+  email    String?
+  idNumber String?
+  notes    String?
+  createdAt DateTime @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leases Lease[]
+
+  @@index([userId])
+}
+
+model Lease {
+  id                String    @id @default(cuid())
+  userId            String
+  propertyId        String
+  tenantId          String
+  startDate         DateTime
+  endDate           DateTime?
+  monthlyRent       Decimal
+  dueDay            Int       @default(1) // 1..28
+  depositAmount     Decimal   @default(0)
+  status            String    @default("ACTIVE") // ACTIVE | ENDED
+  signedDate        DateTime?
+  noticePeriodDays  Int?
+  stampedDate       DateTime? // null => not stamped
+  renewedFromLeaseId String?
+  autoInvoice       Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  property       Property        @relation(fields: [propertyId], references: [id])
+  tenant         Tenant          @relation(fields: [tenantId], references: [id])
+  renewedFrom    Lease?          @relation("Renewal", fields: [renewedFromLeaseId], references: [id])
+  renewals       Lease[]         @relation("Renewal")
+  documents      LeaseDocument[]
+  journalEntries JournalEntry[]
+
+  @@index([userId])
+  @@index([propertyId])
+  @@index([tenantId])
+}
+
+model LeaseDocument {
+  id          String   @id @default(cuid())
+  leaseId     String
+  label       String
+  fileName    String
+  storagePath String
+  mimeType    String
+  sizeBytes   Int
+  uploadedAt  DateTime @default(now())
+
+  lease Lease @relation(fields: [leaseId], references: [id], onDelete: Cascade)
+
+  @@index([leaseId])
+}
+
+model JournalEntry {
+  id          String   @id @default(cuid())
+  userId      String
+  propertyId  String?
+  leaseId     String?
+  date        DateTime
+  description String
+  sourceType  String
+  periodKey   String? // "YYYY-MM" — set only for auto-generated recurring rent invoices
+  createdAt   DateTime @default(now())
+
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  property    Property?     @relation(fields: [propertyId], references: [id])
+  lease       Lease?        @relation(fields: [leaseId], references: [id])
+  lines       JournalLine[]
+  attachments Attachment[]
+
+  @@unique([leaseId, periodKey])
+  @@index([userId])
+  @@index([date])
+  @@index([propertyId])
+  @@index([leaseId])
+}
+
+model JournalLine {
+  id       String  @id @default(cuid())
+  entryId  String
+  accountId String
+  debit    Decimal @default(0)
+  credit   Decimal @default(0)
+
+  // Cash lines (accounts 1000/1010) carry reconciliation state:
+  reconciledAt    DateTime?
+  statementLineId String?
+
+  entry         JournalEntry   @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  account       Account        @relation(fields: [accountId], references: [id])
+  statementLine StatementLine? @relation("LineMatch", fields: [statementLineId], references: [id])
+
+  @@index([entryId])
+  @@index([accountId])
+  @@index([statementLineId])
+}
+
+model Attachment {
+  id             String   @id @default(cuid())
+  journalEntryId String
+  fileName       String
+  storagePath    String
+  mimeType       String
+  sizeBytes      Int
+  uploadedAt     DateTime @default(now())
+
+  entry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+
+  @@index([journalEntryId])
+}
+
+model FixedAsset {
+  id              String    @id @default(cuid())
+  userId          String
+  propertyId      String?
+  name            String
+  cost            Decimal
+  purchaseDate    DateTime
+  method          String    @default("STRAIGHT_LINE")
+  usefulLifeMonths Int
+  salvageValue    Decimal   @default(0)
+  assetAccountCode String   @default("1500") // 1500/1510/1520
+  disposedAt      DateTime?
+  createdAt       DateTime  @default(now())
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  property Property? @relation(fields: [propertyId], references: [id])
+
+  @@index([userId])
+}
+
+model LockedPeriod {
+  id        String   @id @default(cuid())
+  userId    String
+  yearMonth String // "YYYY-MM"
+  lockedAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, yearMonth])
+  @@index([userId])
+}
+
+model BankStatement {
+  id             String   @id @default(cuid())
+  userId         String
+  fileName       String
+  bankName       String?
+  accountLabel   String?
+  periodStart    DateTime
+  periodEnd      DateTime
+  openingBalance Decimal
+  closingBalance Decimal
+  status         String   @default("DRAFT") // DRAFT | REVIEWED | RECONCILED
+  reportJson     String? // stored reconciliation report (JSON)
+  uploadedAt     DateTime @default(now())
+  reconciledAt   DateTime?
+
+  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lines StatementLine[]
+
+  @@index([userId])
+}
+
+model StatementLine {
+  id             String   @id @default(cuid())
+  statementId    String
+  date           DateTime
+  description    String
+  amount         Decimal // signed: + money in, - money out
+  runningBalance Decimal?
+  matchStatus    String   @default("UNMATCHED") // UNMATCHED|AUTO_MATCHED|CONFIRMED|ENTRY_CREATED|IGNORED
+  matchedJournalLineId String?
+  matchConfidence Float?
+  sortOrder      Int      @default(0)
+
+  statement    BankStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  matchedLines JournalLine[] @relation("LineMatch")
+
+  @@index([statementId])
+}
