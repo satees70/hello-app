@@ -1,10 +1,10 @@
 import { AgingInvoice, AgingPayment, arAging } from "../reports";
 import { prisma } from "../prisma";
 
-/** Gather AR invoice/payment data (account 1100) grouped by lease. */
-export async function getAgingReport(userId: string, asOf: Date = new Date()) {
+/** Gather AR invoice/payment data (account 1100) grouped by lease, per company. */
+export async function getAgingReport(companyId: string, asOf: Date = new Date()) {
   const lines = await prisma.journalLine.findMany({
-    where: { account: { userId, code: "1100" }, entry: { leaseId: { not: null } } },
+    where: { account: { companyId, code: "1100" }, entry: { leaseId: { not: null } } },
     include: { entry: { include: { lease: { include: { tenant: true, property: true } } } } },
   });
 

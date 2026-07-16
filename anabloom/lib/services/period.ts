@@ -10,17 +10,17 @@ export class LockedPeriodError extends Error {
   }
 }
 
-export async function assertPeriodUnlocked(userId: string, date: Date): Promise<void> {
+export async function assertPeriodUnlocked(companyId: string, date: Date): Promise<void> {
   const ym = yearMonth(date);
   const lock = await prisma.lockedPeriod.findUnique({
-    where: { userId_yearMonth: { userId, yearMonth: ym } },
+    where: { companyId_yearMonth: { companyId, yearMonth: ym } },
   });
   if (lock) throw new LockedPeriodError(ym);
 }
 
-export async function isPeriodLocked(userId: string, date: Date): Promise<boolean> {
+export async function isPeriodLocked(companyId: string, date: Date): Promise<boolean> {
   const lock = await prisma.lockedPeriod.findUnique({
-    where: { userId_yearMonth: { userId, yearMonth: yearMonth(date) } },
+    where: { companyId_yearMonth: { companyId, yearMonth: yearMonth(date) } },
   });
   return !!lock;
 }

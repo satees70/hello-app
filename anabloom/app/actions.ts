@@ -1,12 +1,16 @@
 "use server";
 
 import { compare, hash } from "bcryptjs";
+import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireUserId } from "@/lib/auth";
+import { ACTIVE_COMPANY_COOKIE, assertCompanyOwnership, requireCompany } from "@/lib/company";
 import { prisma } from "@/lib/prisma";
 import { getStorage } from "@/lib/storage";
 import { SourceType } from "@/lib/enums";
 import { saveEntryAttachments } from "@/lib/services/attachments";
+import { seedChartOfAccounts } from "@/lib/services/accountsSeed";
 import { createEntry, deleteEntry } from "@/lib/services/entries";
 import { runDepreciation } from "@/lib/services/depreciation";
 import { endLease, renewLease, DepositDisposition } from "@/lib/services/leases";
@@ -24,21 +28,61 @@ function optDate(fd: FormData, k: string): Date | null {
   return v ? new Date(v + "T00:00:00Z") : null;
 }
 
+// ---------------- Companies ----------------
+export async function createCompanyAction(fd: FormData) {
+  const userId = await requireUserId();
+  const company = await prisma.company.create({
+    data: {
+      userId,
+      name: s(fd, "name") || "New Company",
+      registrationNo: s(fd, "registrationNo") || null,
+      currency: s(fd, "currency") || "RM",
+    },
+  });
+  await seedChartOfAccounts(company.id);
+  cookies().set(ACTIVE_COMPANY_COOKIE, company.id, { path: "/", httpOnly: true, sameSite: "lax" });
+  redirect("/");
+}
+
+export async function updateCompanyAction(fd: FormData) {
+  const userId = await requireUserId();
+  const id = s(fd, "id");
+  await assertCompanyOwnership(userId, id);
+  await prisma.company.update({
+    where: { id },
+    data: {
+      name: s(fd, "name"),
+      registrationNo: s(fd, "registrationNo") || null,
+      currency: s(fd, "currency") || "RM",
+    },
+  });
+  revalidatePath("/", "layout");
+  revalidatePath("/settings");
+}
+
+export async function setActiveCompanyAction(fd: FormData) {
+  const userId = await requireUserId();
+  const id = s(fd, "id");
+  await assertCompanyOwnership(userId, id);
+  cookies().set(ACTIVE_COMPANY_COOKIE, id, { path: "/", httpOnly: true, sameSite: "lax" });
+  redirect("/");
+}
+
 // ---------------- Entries ----------------
 export async function createEntryAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   const sourceType = s(fd, "sourceType") as SourceType;
   const date = optDate(fd, "date") ?? new Date();
   const leaseId = s(fd, "leaseId") || null;
   let propertyId = s(fd, "propertyId") || null;
 
   if (leaseId) {
-    const lease = await prisma.lease.findFirst({ where: { id: leaseId, userId } });
+    const lease = await prisma.lease.findFirst({ where: { id: leaseId, companyId } });
     if (lease) propertyId = lease.propertyId;
   }
 
   const base = {
-    userId,
+    companyId,
     date,
     description: s(fd, "description") || "Entry",
     propertyId,
@@ -82,27 +126,25 @@ export async function createEntryAction(fd: FormData) {
   }
 
   const entry = await createEntry(input);
-
-  // Optional receipt attachments (multiple files allowed).
   const files = fd.getAll("attachments").filter((f): f is File => f instanceof File && f.size > 0);
-  if (files.length) await saveEntryAttachments(userId, entry.id, files);
+  if (files.length) await saveEntryAttachments(companyId, entry.id, files);
 
   revalidatePath("/ledger");
   revalidatePath("/");
 }
 
 export async function deleteEntryAction(fd: FormData) {
-  const userId = await requireUserId();
-  await deleteEntry(userId, s(fd, "id"));
+  const { companyId } = await requireCompany();
+  await deleteEntry(companyId, s(fd, "id"));
   revalidatePath("/ledger");
   revalidatePath("/");
 }
 
 export async function deleteAttachmentAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   const attId = s(fd, "id");
   const entryId = s(fd, "entryId");
-  const att = await prisma.attachment.findFirst({ where: { id: attId, entry: { id: entryId, userId } } });
+  const att = await prisma.attachment.findFirst({ where: { id: attId, companyId, entry: { id: entryId } } });
   if (!att) throw new Error("Attachment not found.");
   await getStorage().remove(att.storagePath);
   await prisma.attachment.delete({ where: { id: attId } });
@@ -111,10 +153,10 @@ export async function deleteAttachmentAction(fd: FormData) {
 
 // ---------------- Properties ----------------
 export async function createPropertyAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   await prisma.property.create({
     data: {
-      userId,
+      companyId,
       name: s(fd, "name"),
       address: s(fd, "address") || null,
       monthlyRent: num(fd, "monthlyRent"),
@@ -125,10 +167,10 @@ export async function createPropertyAction(fd: FormData) {
 }
 
 export async function updatePropertyAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   const id = s(fd, "id");
   await prisma.property.updateMany({
-    where: { id, userId },
+    where: { id, companyId },
     data: {
       name: s(fd, "name"),
       address: s(fd, "address") || null,
@@ -140,21 +182,21 @@ export async function updatePropertyAction(fd: FormData) {
 }
 
 export async function deletePropertyAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   const id = s(fd, "id");
-  const count = await prisma.journalEntry.count({ where: { userId, propertyId: id } });
+  const count = await prisma.journalEntry.count({ where: { companyId, propertyId: id } });
   if (count > 0) throw new Error("Property has transactions and cannot be deleted.");
-  await prisma.lease.deleteMany({ where: { userId, propertyId: id } });
-  await prisma.property.deleteMany({ where: { id, userId } });
+  await prisma.lease.deleteMany({ where: { companyId, propertyId: id } });
+  await prisma.property.deleteMany({ where: { id, companyId } });
   revalidatePath("/properties");
 }
 
 // ---------------- Tenants & Leases ----------------
 export async function createTenantAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   await prisma.tenant.create({
     data: {
-      userId,
+      companyId,
       name: s(fd, "name"),
       phone: s(fd, "phone") || null,
       email: s(fd, "email") || null,
@@ -166,12 +208,20 @@ export async function createTenantAction(fd: FormData) {
 }
 
 export async function createLeaseAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
+  const propertyId = s(fd, "propertyId");
+  const tenantId = s(fd, "tenantId");
+  // ensure both belong to the company
+  const [prop, ten] = await Promise.all([
+    prisma.property.findFirst({ where: { id: propertyId, companyId } }),
+    prisma.tenant.findFirst({ where: { id: tenantId, companyId } }),
+  ]);
+  if (!prop || !ten) throw new Error("Property or tenant not in this company.");
   await prisma.lease.create({
     data: {
-      userId,
-      propertyId: s(fd, "propertyId"),
-      tenantId: s(fd, "tenantId"),
+      companyId,
+      propertyId,
+      tenantId,
       startDate: optDate(fd, "startDate") ?? new Date(),
       endDate: optDate(fd, "endDate"),
       monthlyRent: num(fd, "monthlyRent"),
@@ -187,21 +237,20 @@ export async function createLeaseAction(fd: FormData) {
 }
 
 export async function toggleAutoInvoiceAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   const id = s(fd, "id");
-  const lease = await prisma.lease.findFirst({ where: { id, userId } });
-  if (lease) await prisma.lease.updateMany({ where: { id, userId }, data: { autoInvoice: !lease.autoInvoice } });
+  const lease = await prisma.lease.findFirst({ where: { id, companyId } });
+  if (lease) await prisma.lease.updateMany({ where: { id, companyId }, data: { autoInvoice: !lease.autoInvoice } });
   revalidatePath("/tenants");
 }
 
 export async function recordRentPaymentAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   const leaseId = s(fd, "leaseId");
-  const lease = await prisma.lease.findFirst({ where: { id: leaseId, userId } });
+  const lease = await prisma.lease.findFirst({ where: { id: leaseId, companyId } });
   if (!lease) throw new Error("Lease not found.");
-  // Pay against receivable if there is outstanding AR for this lease, else plain rent received.
   await createEntry({
-    userId,
+    companyId,
     leaseId,
     propertyId: lease.propertyId,
     date: optDate(fd, "date") ?? new Date(),
@@ -214,18 +263,18 @@ export async function recordRentPaymentAction(fd: FormData) {
 }
 
 export async function setStampedDateAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   await prisma.lease.updateMany({
-    where: { id: s(fd, "id"), userId },
+    where: { id: s(fd, "id"), companyId },
     data: { stampedDate: optDate(fd, "stampedDate") },
   });
   revalidatePath("/tenants");
 }
 
 export async function renewLeaseAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   await renewLease({
-    userId,
+    companyId,
     leaseId: s(fd, "leaseId"),
     startDate: optDate(fd, "startDate") ?? new Date(),
     endDate: optDate(fd, "endDate"),
@@ -238,9 +287,9 @@ export async function renewLeaseAction(fd: FormData) {
 }
 
 export async function endLeaseAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   await endLease({
-    userId,
+    companyId,
     leaseId: s(fd, "leaseId"),
     endDate: optDate(fd, "endDate") ?? new Date(),
     deposit: (s(fd, "deposit") as DepositDisposition) || "none",
@@ -251,10 +300,10 @@ export async function endLeaseAction(fd: FormData) {
 
 // ---------------- Fixed assets ----------------
 export async function createAssetAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   const asset = await prisma.fixedAsset.create({
     data: {
-      userId,
+      companyId,
       name: s(fd, "name"),
       propertyId: s(fd, "propertyId") || null,
       cost: num(fd, "cost"),
@@ -264,10 +313,9 @@ export async function createAssetAction(fd: FormData) {
       assetAccountCode: s(fd, "assetAccountCode") || "1510",
     },
   });
-  // Optionally post the purchase entry
   if (fd.get("postPurchase") === "on") {
     await createEntry({
-      userId,
+      companyId,
       propertyId: asset.propertyId,
       fixedAssetId: asset.id,
       date: asset.purchaseDate,
@@ -283,24 +331,23 @@ export async function createAssetAction(fd: FormData) {
 }
 
 export async function runDepreciationAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   const upTo = s(fd, "upTo") || yearMonth(new Date());
-  await runDepreciation(userId, upTo);
+  await runDepreciation(companyId, upTo);
   revalidatePath("/assets");
   revalidatePath("/ledger");
 }
 
 export async function disposeAssetAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   const id = s(fd, "id");
-  const asset = await prisma.fixedAsset.findFirst({ where: { id, userId } });
+  const asset = await prisma.fixedAsset.findFirst({ where: { id, companyId } });
   if (!asset) throw new Error("Asset not found.");
   const disposalDate = optDate(fd, "date") ?? new Date();
   const proceeds = num(fd, "proceeds");
 
-  // accumulated depreciation posted for this asset (credits to 1590)
   const depEntries = await prisma.journalEntry.findMany({
-    where: { userId, fixedAssetId: id, sourceType: "DEPRECIATION" },
+    where: { companyId, fixedAssetId: id, sourceType: "DEPRECIATION" },
     include: { lines: { include: { account: true } } },
   });
   let accumulated = 0;
@@ -308,7 +355,7 @@ export async function disposeAssetAction(fd: FormData) {
     for (const l of e.lines) if (l.account.code === "1590") accumulated += Number(l.credit);
 
   await createEntry({
-    userId,
+    companyId,
     propertyId: asset.propertyId,
     fixedAssetId: id,
     date: disposalDate,
@@ -324,47 +371,45 @@ export async function disposeAssetAction(fd: FormData) {
 
 // ---------------- Chart of accounts ----------------
 export async function addAccountAction(fd: FormData) {
-  const userId = await requireUserId();
-  const code = s(fd, "code");
-  const type = s(fd, "type");
+  const { companyId } = await requireCompany();
   await prisma.account.create({
-    data: { userId, code, name: s(fd, "name"), type, isSystem: false },
+    data: { companyId, code: s(fd, "code"), name: s(fd, "name"), type: s(fd, "type"), isSystem: false },
   });
   revalidatePath("/accounts");
 }
 
 export async function renameAccountAction(fd: FormData) {
-  const userId = await requireUserId();
-  await prisma.account.updateMany({ where: { id: s(fd, "id"), userId }, data: { name: s(fd, "name") } });
+  const { companyId } = await requireCompany();
+  await prisma.account.updateMany({ where: { id: s(fd, "id"), companyId }, data: { name: s(fd, "name") } });
   revalidatePath("/accounts");
 }
 
 export async function deactivateAccountAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   const id = s(fd, "id");
-  const postings = await prisma.journalLine.count({ where: { accountId: id, account: { userId } } });
+  const postings = await prisma.journalLine.count({ where: { accountId: id, account: { companyId } } });
   if (postings > 0) throw new Error("Account has postings and cannot be deactivated.");
-  await prisma.account.updateMany({ where: { id, userId, isSystem: false }, data: { active: false } });
+  await prisma.account.updateMany({ where: { id, companyId, isSystem: false }, data: { active: false } });
   revalidatePath("/accounts");
 }
 
 // ---------------- Settings ----------------
 export async function lockPeriodAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   const ym = s(fd, "yearMonth");
   await prisma.lockedPeriod.upsert({
-    where: { userId_yearMonth: { userId, yearMonth: ym } },
+    where: { companyId_yearMonth: { companyId, yearMonth: ym } },
     update: {},
-    create: { userId, yearMonth: ym },
+    create: { companyId, yearMonth: ym },
   });
   revalidatePath("/settings");
 }
 
 export async function unlockPeriodAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   const ym = s(fd, "yearMonth");
   if (s(fd, "confirm") !== ym) throw new Error("Type the month to confirm unlocking.");
-  await prisma.lockedPeriod.deleteMany({ where: { userId, yearMonth: ym } });
+  await prisma.lockedPeriod.deleteMany({ where: { companyId, yearMonth: ym } });
   revalidatePath("/settings");
 }
 
@@ -379,21 +424,18 @@ export async function changePasswordAction(fd: FormData) {
   revalidatePath("/settings");
 }
 
-export async function setCurrencyAction(fd: FormData) {
-  const userId = await requireUserId();
-  await prisma.user.update({ where: { id: userId }, data: { currency: s(fd, "currency") || "RM" } });
-  revalidatePath("/settings");
-}
-
-export async function deleteAllDataAction(fd: FormData) {
-  const userId = await requireUserId();
-  if (s(fd, "confirm") !== "DELETE") throw new Error('Type DELETE to confirm.');
-  await prisma.journalEntry.deleteMany({ where: { userId } });
-  await prisma.lease.deleteMany({ where: { userId } });
-  await prisma.tenant.deleteMany({ where: { userId } });
-  await prisma.property.deleteMany({ where: { userId } });
-  await prisma.fixedAsset.deleteMany({ where: { userId } });
-  await prisma.bankStatement.deleteMany({ where: { userId } });
-  await prisma.lockedPeriod.deleteMany({ where: { userId } });
-  revalidatePath("/");
+export async function deleteCompanyDataAction(fd: FormData) {
+  const { companyId } = await requireCompany();
+  const company = await prisma.company.findUnique({ where: { id: companyId } });
+  if (!company) throw new Error("Company not found.");
+  if (s(fd, "confirm") !== company.name) throw new Error("Type the company name to confirm.");
+  // delete business data but keep the company + its chart of accounts
+  await prisma.journalEntry.deleteMany({ where: { companyId } });
+  await prisma.lease.deleteMany({ where: { companyId } });
+  await prisma.tenant.deleteMany({ where: { companyId } });
+  await prisma.property.deleteMany({ where: { companyId } });
+  await prisma.fixedAsset.deleteMany({ where: { companyId } });
+  await prisma.bankStatement.deleteMany({ where: { companyId } });
+  await prisma.lockedPeriod.deleteMany({ where: { companyId } });
+  revalidatePath("/", "layout");
 }

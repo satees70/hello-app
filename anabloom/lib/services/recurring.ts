@@ -7,17 +7,15 @@ function ym(y: number, m0: number): string {
 }
 
 /**
- * Idempotent recurring rent invoicing. For each ACTIVE, auto-invoicing lease,
- * generate a "Rent invoiced" entry (Dr 1100 AR, Cr 4000) for every month from
- * the lease start up to `now` whose due day has passed — unless one already
- * exists (unique constraint on lease + periodKey guarantees no duplicates).
- *
- * Runs from the Vercel Cron endpoint AND on login/dashboard load, so no month
- * is ever skipped or double-invoiced.
+ * Idempotent recurring rent invoicing for one company. For each ACTIVE,
+ * auto-invoicing lease, generate a "Rent invoiced" entry (Dr 1100 AR, Cr 4000)
+ * for every month from the lease start up to `now` whose due day has passed —
+ * unless one already exists (unique constraint on lease + periodKey guarantees
+ * no duplicates). Runs from the Vercel Cron endpoint AND on dashboard load.
  */
-export async function catchUpInvoices(userId: string, now: Date = new Date()): Promise<number> {
+export async function catchUpInvoices(companyId: string, now: Date = new Date()): Promise<number> {
   const leases = await prisma.lease.findMany({
-    where: { userId, status: "ACTIVE", autoInvoice: true },
+    where: { companyId, status: "ACTIVE", autoInvoice: true },
   });
 
   let created = 0;
@@ -34,7 +32,6 @@ export async function catchUpInvoices(userId: string, now: Date = new Date()): P
     const nowY = now.getUTCFullYear();
     const nowM = now.getUTCMonth();
 
-    // walk months from lease start to current month
     for (let guard = 0; guard < 600; guard++) {
       const past = year < nowY || (year === nowY && month <= nowM);
       if (!past) break;
@@ -50,7 +47,7 @@ export async function catchUpInvoices(userId: string, now: Date = new Date()): P
       if (!done.has(key) && !beforeStart && !afterEnd && dueReached) {
         try {
           await createEntry({
-            userId,
+            companyId,
             leaseId: lease.id,
             propertyId: lease.propertyId,
             date: invoiceDate,
@@ -61,7 +58,6 @@ export async function catchUpInvoices(userId: string, now: Date = new Date()): P
           });
           created++;
         } catch (e) {
-          // Skip locked months and races on the unique constraint.
           if (e instanceof LockedPeriodError) {
             /* month locked — skip */
           } else if (typeof e === "object" && e && "code" in e && (e as { code: string }).code === "P2002") {

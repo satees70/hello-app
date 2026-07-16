@@ -13,7 +13,7 @@ import {
 import { formatMoney } from "@/lib/money";
 import { canFinishReconciliation, continuityCheck } from "@/lib/reconcile/matching";
 import { prisma } from "@/lib/prisma";
-import { getUser } from "@/lib/session";
+import { getActiveCompany } from "@/lib/company";
 import { getCashLines } from "@/lib/services/ledger";
 
 export const dynamic = "force-dynamic";
@@ -27,19 +27,19 @@ const MATCH_CLS: Record<string, string> = {
 };
 
 export default async function ReconcileWorkspace({ params }: { params: Promise<{ id: string }> }) {
-  const user = await getUser();
-  const sym = user.currency;
+  const { company } = await getActiveCompany();
+  const sym = company.currency;
   const { id } = await params;
   const statement = await prisma.bankStatement.findFirst({
-    where: { id, userId: user.id },
+    where: { id, companyId: company.id },
     include: { lines: { orderBy: { sortOrder: "asc" } } },
   });
   if (!statement) notFound();
 
   const [cash, properties, accounts] = await Promise.all([
-    getCashLines(user.id, true),
-    prisma.property.findMany({ where: { userId: user.id }, orderBy: { name: "asc" } }),
-    prisma.account.findMany({ where: { userId: user.id, active: true }, orderBy: { code: "asc" } }),
+    getCashLines(company.id, true),
+    prisma.property.findMany({ where: { companyId: company.id }, orderBy: { name: "asc" } }),
+    prisma.account.findMany({ where: { companyId: company.id, active: true }, orderBy: { code: "asc" } }),
   ]);
   const cashById = new Map(cash.map((c) => [c.id, c]));
   const incomeAccounts = accounts.filter((a) => a.type === "INCOME");

@@ -3,17 +3,17 @@ import { Money } from "@/components/Money";
 import { createPropertyAction, deletePropertyAction, recordRentPaymentAction } from "@/app/actions";
 import { prisma } from "@/lib/prisma";
 import { profitAndLoss } from "@/lib/reports";
-import { getUser } from "@/lib/session";
+import { getActiveCompany } from "@/lib/company";
 import { getLedgerLines } from "@/lib/services/ledger";
 
 export const dynamic = "force-dynamic";
 
 export default async function PropertiesPage() {
-  const user = await getUser();
-  const sym = user.currency;
+  const { company } = await getActiveCompany();
+  const sym = company.currency;
   const [properties, lines] = await Promise.all([
-    prisma.property.findMany({ where: { userId: user.id }, orderBy: { name: "asc" }, include: { leases: { where: { status: "ACTIVE" }, include: { tenant: true } } } }),
-    getLedgerLines(user.id),
+    prisma.property.findMany({ where: { companyId: company.id }, orderBy: { name: "asc" }, include: { leases: { where: { status: "ACTIVE" }, include: { tenant: true } } } }),
+    getLedgerLines(company.id),
   ]);
 
   return (

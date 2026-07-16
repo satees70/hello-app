@@ -6,7 +6,7 @@ import { removeEntryFiles } from "./attachments";
 import { assertPeriodUnlocked } from "./period";
 
 export interface CreateEntryInput extends PostingInput {
-  userId: string;
+  companyId: string;
   date: Date;
   description: string;
   propertyId?: string | null;
@@ -17,31 +17,31 @@ export interface CreateEntryInput extends PostingInput {
 
 type Tx = Prisma.TransactionClient | typeof prisma;
 
-async function resolveAccountIds(userId: string, codes: string[], db: Tx): Promise<Map<string, string>> {
+async function resolveAccountIds(companyId: string, codes: string[], db: Tx): Promise<Map<string, string>> {
   const accounts = await db.account.findMany({
-    where: { userId, code: { in: [...new Set(codes)] } },
+    where: { companyId, code: { in: [...new Set(codes)] } },
     select: { id: true, code: true },
   });
   const map = new Map(accounts.map((a) => [a.code, a.id]));
   for (const code of codes) {
-    if (!map.has(code)) throw new Error(`Account ${code} not found for user. Seed the chart of accounts.`);
+    if (!map.has(code)) throw new Error(`Account ${code} not found for company. Seed the chart of accounts.`);
   }
   return map;
 }
 
 /**
- * Create a journal entry from a simple-entry transaction. The posting engine
- * generates balanced lines; period locking + the balance invariant are enforced
- * server-side. Cash lines carry reconciliation columns (initially null).
+ * Create a journal entry from a simple-entry transaction, scoped to a company.
+ * The posting engine generates balanced lines; period locking + the balance
+ * invariant are enforced server-side. Cash lines carry reconciliation columns.
  */
 export async function createEntry(input: CreateEntryInput, db: Tx = prisma) {
-  await assertPeriodUnlocked(input.userId, input.date);
+  await assertPeriodUnlocked(input.companyId, input.date);
   const lines = buildPosting(input); // throws PostingError if invalid/unbalanced
-  const idByCode = await resolveAccountIds(input.userId, lines.map((l) => l.accountCode), db);
+  const idByCode = await resolveAccountIds(input.companyId, lines.map((l) => l.accountCode), db);
 
   return db.journalEntry.create({
     data: {
-      userId: input.userId,
+      companyId: input.companyId,
       propertyId: input.propertyId ?? null,
       leaseId: input.leaseId ?? null,
       date: input.date,
@@ -63,13 +63,13 @@ export async function createEntry(input: CreateEntryInput, db: Tx = prisma) {
 
 /** Delete an entry. Blocked if its period is locked or any line is reconciled.
  *  Also removes the storage files backing its attachments. */
-export async function deleteEntry(userId: string, entryId: string) {
+export async function deleteEntry(companyId: string, entryId: string) {
   const entry = await prisma.journalEntry.findFirst({
-    where: { id: entryId, userId },
+    where: { id: entryId, companyId },
     include: { lines: true },
   });
   if (!entry) throw new Error("Entry not found.");
-  await assertPeriodUnlocked(userId, entry.date);
+  await assertPeriodUnlocked(companyId, entry.date);
   if (entry.lines.some((l) => l.reconciledAt)) {
     throw new Error("This entry has reconciled bank lines. Un-reconcile the statement first.");
   }

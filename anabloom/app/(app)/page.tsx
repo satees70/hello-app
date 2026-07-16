@@ -1,9 +1,9 @@
 import Link from "next/link";
 import NetChart from "@/components/NetChart";
 import { Money } from "@/components/Money";
+import { getActiveCompany } from "@/lib/company";
 import { prisma } from "@/lib/prisma";
 import { balanceSheet, profitAndLoss } from "@/lib/reports";
-import { getUser } from "@/lib/session";
 import { getAgingReport } from "@/lib/services/arrears";
 import { getLedgerLines } from "@/lib/services/ledger";
 
@@ -16,10 +16,10 @@ function monthRange(d: Date) {
 }
 
 export default async function Overview() {
-  const user = await getUser();
-  const sym = user.currency;
+  const { company } = await getActiveCompany();
+  const sym = company.currency;
   const now = new Date();
-  const lines = await getLedgerLines(user.id);
+  const lines = await getLedgerLines(company.id);
 
   const { from, to } = monthRange(now);
   const pl = profitAndLoss(lines, from, to);
@@ -38,17 +38,17 @@ export default async function Overview() {
   }
 
   // Per-property net (all time)
-  const properties = await prisma.property.findMany({ where: { userId: user.id }, orderBy: { name: "asc" } });
+  const properties = await prisma.property.findMany({ where: { companyId: company.id }, orderBy: { name: "asc" } });
   const propNet = properties.map((p) => ({
     name: p.name,
     net: Number(profitAndLoss(lines, undefined, undefined, p.id).net),
   }));
 
   // Attention items
-  const aging = await getAgingReport(user.id, now);
+  const aging = await getAgingReport(company.id, now);
   const in90 = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
   const leases = await prisma.lease.findMany({
-    where: { userId: user.id, status: "ACTIVE" },
+    where: { companyId: company.id, status: "ACTIVE" },
     include: { tenant: true, property: true, documents: true },
   });
   const expiring = leases.filter((l) => l.endDate && l.endDate <= in90);
@@ -61,7 +61,10 @@ export default async function Overview() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Overview</h1>
+        <div>
+          <h1 className="text-2xl font-bold">Overview</h1>
+          <p className="text-sm text-muted">{company.name}</p>
+        </div>
         <Link href="/ledger" className="btn-primary no-print">
           + New entry
         </Link>

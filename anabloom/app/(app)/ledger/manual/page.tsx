@@ -1,14 +1,14 @@
 import Link from "next/link";
 import ManualEntryForm from "@/components/ManualEntryForm";
 import { prisma } from "@/lib/prisma";
-import { getUser } from "@/lib/session";
+import { getActiveCompany } from "@/lib/company";
 
 export const dynamic = "force-dynamic";
 
 export default async function ManualJournalPage() {
-  const user = await getUser();
+  const { company } = await getActiveCompany();
   const accounts = await prisma.account.findMany({
-    where: { userId: user.id, active: true, code: { not: "3900" } }, // retained earnings not directly postable
+    where: { companyId: company.id, active: true, code: { not: "3900" } }, // retained earnings not directly postable
     orderBy: { code: "asc" },
   });
 

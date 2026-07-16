@@ -299,6 +299,89 @@ export function balanceSheet(lines: LedgerLine[], asOf?: Date): BalanceSheet {
   };
 }
 
+// ---------- Group (multi-company) reports ----------
+export interface CompanyLedger {
+  companyId: string;
+  companyName: string;
+  lines: LedgerLine[];
+}
+
+export interface GroupProfitAndLoss {
+  columns: { companyId: string; companyName: string; pl: ProfitAndLoss }[];
+  totalIncome: Decimal;
+  totalExpense: Decimal;
+  net: Decimal;
+}
+
+/** Group P&L: one column per company + combined totals (management summary). */
+export function groupProfitAndLoss(companies: CompanyLedger[], from?: Date, to?: Date): GroupProfitAndLoss {
+  const columns = companies.map((c) => ({
+    companyId: c.companyId,
+    companyName: c.companyName,
+    pl: profitAndLoss(c.lines, from, to),
+  }));
+  const totalIncome = round2(columns.reduce((s, c) => add(s, c.pl.totalIncome), ZERO));
+  const totalExpense = round2(columns.reduce((s, c) => add(s, c.pl.totalExpense), ZERO));
+  return { columns, totalIncome, totalExpense, net: round2(sub(totalIncome, totalExpense)) };
+}
+
+export interface GroupBalanceSheet {
+  columns: { companyId: string; companyName: string; bs: BalanceSheet }[];
+  totalAssets: Decimal;
+  totalLiabilities: Decimal;
+  totalEquity: Decimal;
+  balanced: boolean;
+}
+
+/** Group Balance Sheet: per-company columns + combined total (no eliminations). */
+export function groupBalanceSheet(companies: CompanyLedger[], asOf?: Date): GroupBalanceSheet {
+  const columns = companies.map((c) => ({
+    companyId: c.companyId,
+    companyName: c.companyName,
+    bs: balanceSheet(c.lines, asOf),
+  }));
+  const totalAssets = round2(columns.reduce((s, c) => add(s, c.bs.totalAssets), ZERO));
+  const totalLiabilities = round2(columns.reduce((s, c) => add(s, c.bs.totalLiabilities), ZERO));
+  const totalEquity = round2(columns.reduce((s, c) => add(s, c.bs.totalEquity), ZERO));
+  return {
+    columns,
+    totalAssets,
+    totalLiabilities,
+    totalEquity,
+    balanced: totalAssets.equals(round2(add(totalLiabilities, totalEquity))),
+  };
+}
+
+const INTERCO_RE = /inter[-\s]?company/i;
+
+export interface InterCompanyBalance {
+  companyId: string;
+  companyName: string;
+  code: string;
+  name: string;
+  amount: Decimal; // signed: asset +, liability -
+}
+
+/**
+ * Inter-company account balances across companies. Asset (1xxx) balances are
+ * positive, liability (2xxx) balances negative; when both sides are booked they
+ * should net to ~0. A non-zero net flags a mismatch to investigate.
+ */
+export function interCompanyBalances(companies: CompanyLedger[], asOf?: Date): { rows: InterCompanyBalance[]; net: Decimal } {
+  const rows: InterCompanyBalance[] = [];
+  for (const c of companies) {
+    const bs = balanceSheet(c.lines, asOf);
+    for (const a of bs.assets) {
+      if (INTERCO_RE.test(a.name)) rows.push({ companyId: c.companyId, companyName: c.companyName, code: a.code, name: a.name, amount: a.amount });
+    }
+    for (const l of bs.liabilities) {
+      if (INTERCO_RE.test(l.name)) rows.push({ companyId: c.companyId, companyName: c.companyName, code: l.code, name: l.name, amount: round2(sub(ZERO, l.amount)) });
+    }
+  }
+  const net = round2(rows.reduce((s, r) => add(s, r.amount), ZERO));
+  return { rows, net };
+}
+
 // ---------- AR aging (per lease/tenant, FIFO bucketed) ----------
 export interface AgingInvoice {
   leaseId: string;

@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { currentUserId } from "@/lib/auth";
+import { requireCompany } from "@/lib/company";
 import { parseCsvStatement } from "@/lib/reconcile/csv";
 import { extractPdfText, parseStatementText } from "@/lib/reconcile/pdf";
 import { ParsedStatement } from "@/lib/reconcile/types";
 import { createStatement } from "@/lib/services/reconciliation";
 
 export async function POST(req: Request) {
-  const userId = await currentUserId();
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { companyId } = await requireCompany().catch(() => ({ companyId: "" }));
+  if (!companyId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const fd = await req.formData();
   const file = fd.get("file") as File | null;
@@ -41,6 +41,6 @@ export async function POST(req: Request) {
     return NextResponse.redirect(new URL("/reconciliation?error=" + encodeURIComponent("No transactions found in the file."), req.url), 303);
   }
 
-  const statement = await createStatement(userId, file.name, parsed);
+  const statement = await createStatement(companyId, file.name, parsed);
   return NextResponse.redirect(new URL(`/reconciliation/${statement.id}`, req.url), 303);
 }

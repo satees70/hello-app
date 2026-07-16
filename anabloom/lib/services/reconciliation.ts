@@ -13,8 +13,8 @@ import { ParsedStatement } from "../reconcile/types";
 import { createEntry } from "./entries";
 import { getCashLines } from "./ledger";
 
-/** Persist a parsed statement as a DRAFT with its lines. */
-export async function createStatement(userId: string, fileName: string, parsed: ParsedStatement) {
+/** Persist a parsed statement as a DRAFT with its lines, scoped to a company. */
+export async function createStatement(companyId: string, fileName: string, parsed: ParsedStatement) {
   const lines = parsed.lines;
   const opening = parsed.openingBalance ? money(parsed.openingBalance) : money(0);
   const closing = parsed.closingBalance
@@ -23,7 +23,7 @@ export async function createStatement(userId: string, fileName: string, parsed: 
 
   return prisma.bankStatement.create({
     data: {
-      userId,
+      companyId,
       fileName,
       bankName: parsed.bankName ?? null,
       accountLabel: parsed.accountLabel ?? null,
@@ -46,14 +46,14 @@ export async function createStatement(userId: string, fileName: string, parsed: 
 }
 
 /** Run the deterministic matcher; persist AUTO_MATCHED suggestions + confidence. */
-export async function autoMatch(userId: string, statementId: string) {
+export async function autoMatch(companyId: string, statementId: string) {
   const statement = await prisma.bankStatement.findFirst({
-    where: { id: statementId, userId },
+    where: { id: statementId, companyId },
     include: { lines: { orderBy: { sortOrder: "asc" } } },
   });
   if (!statement) throw new Error("Statement not found.");
 
-  const cash = await getCashLines(userId, true);
+  const cash = await getCashLines(companyId, true);
   const cashInputs: CashLineInput[] = cash.map((c) => ({ id: c.id, date: c.date, description: c.description, amount: c.amount }));
   const stmtInputs: StmtLineInput[] = statement.lines
     .filter((l) => l.matchStatus === "UNMATCHED" || l.matchStatus === "AUTO_MATCHED")
@@ -74,8 +74,8 @@ export async function autoMatch(userId: string, statementId: string) {
   return results;
 }
 
-export async function confirmMatch(userId: string, statementLineId: string, journalLineId: string) {
-  const line = await prisma.statementLine.findFirst({ where: { id: statementLineId, statement: { userId } } });
+export async function confirmMatch(companyId: string, statementLineId: string, journalLineId: string) {
+  const line = await prisma.statementLine.findFirst({ where: { id: statementLineId, statement: { companyId } } });
   if (!line) throw new Error("Line not found.");
   await prisma.statementLine.update({
     where: { id: statementLineId },
@@ -83,8 +83,8 @@ export async function confirmMatch(userId: string, statementLineId: string, jour
   });
 }
 
-export async function ignoreLine(userId: string, statementLineId: string) {
-  const line = await prisma.statementLine.findFirst({ where: { id: statementLineId, statement: { userId } } });
+export async function ignoreLine(companyId: string, statementLineId: string) {
+  const line = await prisma.statementLine.findFirst({ where: { id: statementLineId, statement: { companyId } } });
   if (!line) throw new Error("Line not found.");
   await prisma.statementLine.update({
     where: { id: statementLineId },
@@ -94,18 +94,17 @@ export async function ignoreLine(userId: string, statementLineId: string) {
 
 /** Create a book entry for an unmatched statement line, then link it. */
 export async function createEntryForLine(
-  userId: string,
+  companyId: string,
   statementLineId: string,
-  opts: { sourceType: SourceType; propertyId?: string; accountCode?: string }
+  opts: { sourceType: SourceType; propertyId?: string; accountCode?: string; supplierId?: string; billId?: string }
 ) {
-  const line = await prisma.statementLine.findFirst({ where: { id: statementLineId, statement: { userId } } });
+  const line = await prisma.statementLine.findFirst({ where: { id: statementLineId, statement: { companyId } } });
   if (!line) throw new Error("Line not found.");
   const amount = money(line.amount);
-  const isIn = amount.greaterThan(0);
   const abs = amount.abs().toFixed(2);
 
   const entry = await createEntry({
-    userId,
+    companyId,
     propertyId: opts.propertyId ?? null,
     date: line.date,
     description: line.description,
@@ -114,19 +113,18 @@ export async function createEntryForLine(
     incomeAccountCode: opts.sourceType === "OTHER_INCOME_RECEIVED" ? opts.accountCode : undefined,
     expenseAccountCode: opts.sourceType === "EXPENSE_PAID" || opts.sourceType === "EXPENSE_ON_CREDIT" ? opts.accountCode : undefined,
   });
-  // link the cash line of the new entry
   const cashLine = entry.lines.find((l) => CASH_CODES.includes(l.account.code));
   await prisma.statementLine.update({
     where: { id: statementLineId },
     data: { matchStatus: "ENTRY_CREATED", matchedJournalLineId: cashLine?.id ?? null },
   });
-  void isIn;
+  return entry;
 }
 
 /** Finish: verify, stamp reconciledAt on matched cash lines, store report, lock. */
-export async function finishReconciliation(userId: string, statementId: string) {
+export async function finishReconciliation(companyId: string, statementId: string) {
   const statement = await prisma.bankStatement.findFirst({
-    where: { id: statementId, userId },
+    where: { id: statementId, companyId },
     include: { lines: true },
   });
   if (!statement) throw new Error("Statement not found.");
@@ -142,7 +140,7 @@ export async function finishReconciliation(userId: string, statementId: string) 
   }
 
   const matchedLineIds = statement.lines.map((l) => l.matchedJournalLineId).filter((x): x is string => !!x);
-  const allCash = await getCashLines(userId, false);
+  const allCash = await getCashLines(companyId, false);
   const clearedIds = new Set(matchedLineIds);
   const outstanding = allCash
     .filter((c) => !clearedIds.has(c.id) && !c.reconciledAt)
@@ -172,8 +170,8 @@ export async function finishReconciliation(userId: string, statementId: string) 
 }
 
 /** Reopen a reconciled statement: un-reconcile its cash lines. */
-export async function reopenReconciliation(userId: string, statementId: string) {
-  const statement = await prisma.bankStatement.findFirst({ where: { id: statementId, userId }, include: { lines: true } });
+export async function reopenReconciliation(companyId: string, statementId: string) {
+  const statement = await prisma.bankStatement.findFirst({ where: { id: statementId, companyId }, include: { lines: true } });
   if (!statement) throw new Error("Statement not found.");
   const ids = statement.lines.map((l) => l.matchedJournalLineId).filter((x): x is string => !!x);
   await prisma.$transaction(async (tx) => {

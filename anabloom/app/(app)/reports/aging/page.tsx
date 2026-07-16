@@ -1,17 +1,17 @@
 import Link from "next/link";
 import ReportToolbar from "@/components/ReportToolbar";
 import { formatMoney } from "@/lib/money";
-import { getUser } from "@/lib/session";
+import { getActiveCompany } from "@/lib/company";
 import { getAgingReport } from "@/lib/services/arrears";
 
 export const dynamic = "force-dynamic";
 
 export default async function AgingPage({ searchParams }: { searchParams: Promise<{ asOf?: string }> }) {
-  const user = await getUser();
-  const sym = user.currency;
+  const { company } = await getActiveCompany();
+  const sym = company.currency;
   const sp = await searchParams;
   const asOf = sp.asOf ? new Date(sp.asOf + "T23:59:59Z") : new Date();
-  const report = await getAgingReport(user.id, asOf);
+  const report = await getAgingReport(company.id, asOf);
 
   const csv = [
     ["Tenant", "Property", "0-30", "31-60", "61-90", "90+", "Total"],

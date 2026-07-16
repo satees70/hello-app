@@ -5,7 +5,7 @@ import { Money } from "@/components/Money";
 import { deleteAttachmentAction, deleteEntryAction } from "@/app/actions";
 import { SOURCE_TYPE_LABELS, SourceType } from "@/lib/enums";
 import { prisma } from "@/lib/prisma";
-import { getUser } from "@/lib/session";
+import { getActiveCompany } from "@/lib/company";
 import { getStorage } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
@@ -17,12 +17,12 @@ export default async function EntryDetail({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ error?: string }>;
 }) {
-  const user = await getUser();
-  const sym = user.currency;
+  const { company } = await getActiveCompany();
+  const sym = company.currency;
   const { id } = await params;
   const sp = await searchParams;
   const entry = await prisma.journalEntry.findFirst({
-    where: { id, userId: user.id },
+    where: { id, companyId: company.id },
     include: { lines: { include: { account: true } }, property: true, lease: { include: { tenant: true } }, attachments: { orderBy: { uploadedAt: "asc" } } },
   });
   if (!entry) notFound();

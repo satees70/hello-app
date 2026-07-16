@@ -2,28 +2,28 @@ import Link from "next/link";
 import { Money } from "@/components/Money";
 import { createLeaseAction, createTenantAction, recordRentPaymentAction } from "@/app/actions";
 import { prisma } from "@/lib/prisma";
-import { getUser } from "@/lib/session";
+import { getActiveCompany } from "@/lib/company";
 import { getAgingReport } from "@/lib/services/arrears";
 import { yearMonth } from "@/lib/services/period";
 
 export const dynamic = "force-dynamic";
 
 export default async function TenantsPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
-  const user = await getUser();
-  const sym = user.currency;
+  const { company } = await getActiveCompany();
+  const sym = company.currency;
   const sp = await searchParams;
   const now = new Date();
   const ym = yearMonth(now);
 
   const [tenants, properties, leases, aging] = await Promise.all([
-    prisma.tenant.findMany({ where: { userId: user.id }, orderBy: { name: "asc" } }),
-    prisma.property.findMany({ where: { userId: user.id }, orderBy: { name: "asc" } }),
+    prisma.tenant.findMany({ where: { companyId: company.id }, orderBy: { name: "asc" } }),
+    prisma.property.findMany({ where: { companyId: company.id }, orderBy: { name: "asc" } }),
     prisma.lease.findMany({
-      where: { userId: user.id },
+      where: { companyId: company.id },
       include: { tenant: true, property: true, documents: true },
       orderBy: [{ status: "asc" }, { startDate: "desc" }],
     }),
-    getAgingReport(user.id, now),
+    getAgingReport(company.id, now),
   ]);
 
   const activeLeases = leases.filter((l) => l.status === "ACTIVE");
@@ -33,7 +33,7 @@ export default async function TenantsPage({ searchParams }: { searchParams: Prom
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
   const monthEntries = await prisma.journalEntry.findMany({
-    where: { userId: user.id, leaseId: { not: null }, date: { gte: monthStart, lt: monthEnd } },
+    where: { companyId: company.id, leaseId: { not: null }, date: { gte: monthStart, lt: monthEnd } },
     include: { lines: { include: { account: true } } },
   });
   const receivedByLease = new Map<string, number>();

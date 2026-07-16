@@ -4,12 +4,13 @@ import { createEntry } from "./entries";
 import { LockedPeriodError } from "./period";
 
 /**
- * Post straight-line monthly depreciation for every non-disposed asset up to
- * `upToYearMonth` ("YYYY-MM"). One journal per asset per month (Dr 5700, Cr
- * 1590), idempotent (skips months already posted), stops at salvage value.
+ * Post straight-line monthly depreciation for every non-disposed asset in a
+ * company up to `upToYearMonth` ("YYYY-MM"). One journal per asset per month
+ * (Dr 5700, Cr 1590), idempotent (skips months already posted), stops at
+ * salvage value.
  */
-export async function runDepreciation(userId: string, upToYearMonth: string): Promise<number> {
-  const assets = await prisma.fixedAsset.findMany({ where: { userId, disposedAt: null } });
+export async function runDepreciation(companyId: string, upToYearMonth: string): Promise<number> {
+  const assets = await prisma.fixedAsset.findMany({ where: { companyId, disposedAt: null } });
   let posted = 0;
 
   for (const asset of assets) {
@@ -24,7 +25,7 @@ export async function runDepreciation(userId: string, upToYearMonth: string): Pr
     );
 
     const existing = await prisma.journalEntry.findMany({
-      where: { userId, sourceType: "DEPRECIATION", fixedAssetId: asset.id },
+      where: { companyId, sourceType: "DEPRECIATION", fixedAssetId: asset.id },
       select: { periodKey: true },
     });
     const done = new Set(existing.map((e) => e.periodKey));
@@ -35,7 +36,7 @@ export async function runDepreciation(userId: string, upToYearMonth: string): Pr
       const date = new Date(Date.UTC(y, m - 1, 28)); // post at month end
       try {
         await createEntry({
-          userId,
+          companyId,
           propertyId: asset.propertyId,
           date,
           description: `Depreciation — ${asset.name} (${period.yearMonth})`,

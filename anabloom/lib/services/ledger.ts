@@ -3,10 +3,10 @@ import { money } from "../money";
 import { prisma } from "../prisma";
 import { LedgerLine } from "../reports";
 
-/** All journal lines for a user, flattened + joined with account/entry data. */
-export async function getLedgerLines(userId: string): Promise<LedgerLine[]> {
+/** All journal lines for a company, flattened + joined with account/entry data. */
+export async function getLedgerLines(companyId: string): Promise<LedgerLine[]> {
   const entries = await prisma.journalEntry.findMany({
-    where: { userId },
+    where: { companyId },
     include: { lines: { include: { account: true } } },
   });
   const lines: LedgerLine[] = [];
@@ -34,11 +34,11 @@ export interface CashLineRow {
   reconciledAt: Date | null;
 }
 
-/** Unreconciled cash journal lines (accounts 1000/1010) for matching. */
-export async function getCashLines(userId: string, onlyUnreconciled = true): Promise<CashLineRow[]> {
+/** Unreconciled cash journal lines (accounts 1000/1010) for a company. */
+export async function getCashLines(companyId: string, onlyUnreconciled = true): Promise<CashLineRow[]> {
   const lines = await prisma.journalLine.findMany({
     where: {
-      account: { userId, code: { in: ["1000", "1010"] } },
+      account: { companyId, code: { in: ["1000", "1010"] } },
       ...(onlyUnreconciled ? { reconciledAt: null } : {}),
     },
     include: { entry: true },

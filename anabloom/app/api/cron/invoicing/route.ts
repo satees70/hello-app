@@ -4,6 +4,7 @@ import { catchUpInvoices } from "@/lib/services/recurring";
 
 // Vercel Cron hits this monthly. Also runs idempotently on dashboard load.
 // Protected by CRON_SECRET (Vercel sends "Authorization: Bearer <CRON_SECRET>").
+// Runs per company so recurring rent invoices are scoped correctly.
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
   if (secret) {
@@ -12,8 +13,8 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
   }
-  const users = await prisma.user.findMany({ select: { id: true } });
+  const companies = await prisma.company.findMany({ select: { id: true } });
   let total = 0;
-  for (const u of users) total += await catchUpInvoices(u.id);
-  return NextResponse.json({ ok: true, invoicesCreated: total, users: users.length });
+  for (const c of companies) total += await catchUpInvoices(c.id);
+  return NextResponse.json({ ok: true, invoicesCreated: total, companies: companies.length });
 }

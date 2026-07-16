@@ -3,7 +3,7 @@ import ReportToolbar from "@/components/ReportToolbar";
 import { formatMoney } from "@/lib/money";
 import { profitAndLoss, profitAndLossByMonth } from "@/lib/reports";
 import { prisma } from "@/lib/prisma";
-import { getUser } from "@/lib/session";
+import { getActiveCompany } from "@/lib/company";
 import { getLedgerLines } from "@/lib/services/ledger";
 
 export const dynamic = "force-dynamic";
@@ -13,8 +13,8 @@ export default async function ProfitLossPage({
 }: {
   searchParams: Promise<{ from?: string; to?: string; property?: string; view?: string }>;
 }) {
-  const user = await getUser();
-  const sym = user.currency;
+  const { company } = await getActiveCompany();
+  const sym = company.currency;
   const sp = await searchParams;
   const now = new Date();
   const from = new Date((sp.from || `${now.getUTCFullYear()}-01-01`) + "T00:00:00Z");
@@ -23,8 +23,8 @@ export default async function ProfitLossPage({
   const monthly = sp.view === "monthly";
 
   const [lines, properties] = await Promise.all([
-    getLedgerLines(user.id),
-    prisma.property.findMany({ where: { userId: user.id }, orderBy: { name: "asc" } }),
+    getLedgerLines(company.id),
+    prisma.property.findMany({ where: { companyId: company.id }, orderBy: { name: "asc" } }),
   ]);
   const pl = profitAndLoss(lines, from, to, propertyId);
   const plm = monthly ? profitAndLossByMonth(lines, from, to, propertyId) : null;

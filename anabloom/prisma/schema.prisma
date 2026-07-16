@@ -1,13 +1,17 @@
-// Anabloom — property-management accounting.
+// Anabloom — property-management accounting (multi-company).
 //
-// DEV: SQLite (provider "sqlite" below, DATABASE_URL="file:./dev.db").
+// DEV: SQLite (provider "sqlite", DATABASE_URL="file:./dev.db").
 // PROD: switch `provider` to "postgresql" and set DATABASE_URL (pooled 6543,
 //       pgbouncer=true) + DIRECT_URL (direct 5432) to the dedicated Supabase
-//       project. See README "SQLite -> Supabase switch".
+//       project. See README "SQLite -> Supabase switch" and the multi-company
+//       migration runbook.
 //
-// NOTE: enums are intentionally modelled as String columns so the SAME schema
-// works on both SQLite (dev) and Postgres (prod). Allowed values are validated
-// in TypeScript (see lib/enums.ts). Money is Prisma Decimal (never float).
+// Enums are modelled as String columns so the SAME schema works on both SQLite
+// (dev) and Postgres (prod). Money is Prisma Decimal (never float).
+//
+// MULTI-COMPANY: every business entity carries a required companyId. A Company
+// belongs to a User (owner). All queries are scoped by companyId via
+// lib/company.ts. Books never mix between companies.
 
 generator client {
   provider = "prisma-client-js"
@@ -24,101 +28,103 @@ model User {
   email        String   @unique
   passwordHash String
   name         String?
-  currency     String   @default("RM")
   createdAt    DateTime @default(now())
 
+  companies   Company[]
+  csvMappings SavedCsvMapping[]
+}
+
+model Company {
+  id             String   @id @default(cuid())
+  userId         String
+  name           String
+  registrationNo String?
+  currency       String   @default("RM")
+  createdAt      DateTime @default(now())
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   accounts       Account[]
   properties     Property[]
   tenants        Tenant[]
   leases         Lease[]
+  leaseDocuments LeaseDocument[]
   journalEntries JournalEntry[]
+  attachments    Attachment[]
   fixedAssets    FixedAsset[]
   lockedPeriods  LockedPeriod[]
   bankStatements BankStatement[]
-  csvMappings    SavedCsvMapping[]
-}
 
-model SavedCsvMapping {
-  id          String   @id @default(cuid())
-  userId      String
-  bankName    String
-  mappingJson String
-  createdAt   DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, bankName])
   @@index([userId])
 }
 
 model Account {
-  id       String  @id @default(cuid())
-  userId   String
-  code     String
-  name     String
-  type     String // ASSET | LIABILITY | EQUITY | INCOME | EXPENSE
-  isSystem Boolean @default(false)
-  active   Boolean @default(true)
+  id        String  @id @default(cuid())
+  companyId String
+  code      String
+  name      String
+  type      String // ASSET | LIABILITY | EQUITY | INCOME | EXPENSE
+  isSystem  Boolean @default(false)
+  active    Boolean @default(true)
 
-  user  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  lines JournalLine[]
+  company Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lines   JournalLine[]
 
-  @@unique([userId, code])
-  @@index([userId])
+  @@unique([companyId, code])
+  @@index([companyId])
 }
 
 model Property {
-  id          String  @id @default(cuid())
-  userId      String
+  id          String   @id @default(cuid())
+  companyId   String
   name        String
   address     String?
-  monthlyRent Decimal @default(0)
+  monthlyRent Decimal  @default(0)
   notes       String?
   createdAt   DateTime @default(now())
 
-  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company        Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   leases         Lease[]
   journalEntries JournalEntry[]
   fixedAssets    FixedAsset[]
 
-  @@index([userId])
+  @@index([companyId])
 }
 
 model Tenant {
-  id       String  @id @default(cuid())
-  userId   String
-  name     String
-  phone    String?
-  email    String?
-  idNumber String?
-  notes    String?
+  id        String   @id @default(cuid())
+  companyId String
+  name      String
+  phone     String?
+  email     String?
+  idNumber  String?
+  notes     String?
   createdAt DateTime @default(now())
 
-  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  leases Lease[]
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leases  Lease[]
 
-  @@index([userId])
+  @@index([companyId])
 }
 
 model Lease {
-  id                String    @id @default(cuid())
-  userId            String
-  propertyId        String
-  tenantId          String
-  startDate         DateTime
-  endDate           DateTime?
-  monthlyRent       Decimal
-  dueDay            Int       @default(1) // 1..28
-  depositAmount     Decimal   @default(0)
-  status            String    @default("ACTIVE") // ACTIVE | ENDED
-  signedDate        DateTime?
-  noticePeriodDays  Int?
-  stampedDate       DateTime? // null => not stamped
+  id                 String    @id @default(cuid())
+  companyId          String
+  propertyId         String
+  tenantId           String
+  startDate          DateTime
+  endDate            DateTime?
+  monthlyRent        Decimal
+  dueDay             Int       @default(1) // 1..28
+  depositAmount      Decimal   @default(0)
+  status             String    @default("ACTIVE") // ACTIVE | ENDED
+  signedDate         DateTime?
+  noticePeriodDays   Int?
+  stampedDate        DateTime? // null => not stamped
   renewedFromLeaseId String?
-  autoInvoice       Boolean   @default(true)
-  createdAt         DateTime  @default(now())
+  autoInvoice        Boolean   @default(true)
+  createdAt          DateTime  @default(now())
 
-  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
   property       Property        @relation(fields: [propertyId], references: [id])
   tenant         Tenant          @relation(fields: [tenantId], references: [id])
   renewedFrom    Lease?          @relation("Renewal", fields: [renewedFromLeaseId], references: [id])
@@ -126,13 +132,14 @@ model Lease {
   documents      LeaseDocument[]
   journalEntries JournalEntry[]
 
-  @@index([userId])
+  @@index([companyId])
   @@index([propertyId])
   @@index([tenantId])
 }
 
 model LeaseDocument {
   id          String   @id @default(cuid())
+  companyId   String
   leaseId     String
   label       String
   fileName    String
@@ -141,24 +148,26 @@ model LeaseDocument {
   sizeBytes   Int
   uploadedAt  DateTime @default(now())
 
-  lease Lease @relation(fields: [leaseId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lease   Lease   @relation(fields: [leaseId], references: [id], onDelete: Cascade)
 
+  @@index([companyId])
   @@index([leaseId])
 }
 
 model JournalEntry {
-  id          String   @id @default(cuid())
-  userId      String
-  propertyId  String?
-  leaseId     String?
-  date          DateTime
-  description   String
-  sourceType    String
-  periodKey     String? // "YYYY-MM" — set for auto-generated recurring rent invoices / depreciation
-  fixedAssetId  String? // set for asset purchase / depreciation / disposal entries
-  createdAt     DateTime @default(now())
+  id           String   @id @default(cuid())
+  companyId    String
+  propertyId   String?
+  leaseId      String?
+  fixedAssetId String? // set for asset purchase / depreciation / disposal
+  date         DateTime
+  description  String
+  sourceType   String
+  periodKey    String? // "YYYY-MM" — set for auto-generated recurring rent invoices / depreciation
+  createdAt    DateTime @default(now())
 
-  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company     Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   property    Property?     @relation(fields: [propertyId], references: [id])
   lease       Lease?        @relation(fields: [leaseId], references: [id])
   fixedAsset  FixedAsset?   @relation(fields: [fixedAssetId], references: [id])
@@ -166,18 +175,18 @@ model JournalEntry {
   attachments Attachment[]
 
   @@unique([leaseId, periodKey])
-  @@index([userId])
+  @@index([companyId])
   @@index([date])
   @@index([propertyId])
   @@index([leaseId])
 }
 
 model JournalLine {
-  id       String  @id @default(cuid())
-  entryId  String
+  id        String  @id @default(cuid())
+  entryId   String
   accountId String
-  debit    Decimal @default(0)
-  credit   Decimal @default(0)
+  debit     Decimal @default(0)
+  credit    Decimal @default(0)
 
   // Cash lines (accounts 1000/1010) carry reconciliation state:
   reconciledAt    DateTime?
@@ -194,6 +203,7 @@ model JournalLine {
 
 model Attachment {
   id             String   @id @default(cuid())
+  companyId      String
   journalEntryId String
   fileName       String
   storagePath    String
@@ -201,47 +211,49 @@ model Attachment {
   sizeBytes      Int
   uploadedAt     DateTime @default(now())
 
-  entry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  company Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  entry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
 
+  @@index([companyId])
   @@index([journalEntryId])
 }
 
 model FixedAsset {
-  id              String    @id @default(cuid())
-  userId          String
-  propertyId      String?
-  name            String
-  cost            Decimal
-  purchaseDate    DateTime
-  method          String    @default("STRAIGHT_LINE")
+  id               String    @id @default(cuid())
+  companyId        String
+  propertyId       String?
+  name             String
+  cost             Decimal
+  purchaseDate     DateTime
+  method           String    @default("STRAIGHT_LINE")
   usefulLifeMonths Int
-  salvageValue    Decimal   @default(0)
-  assetAccountCode String   @default("1500") // 1500/1510/1520
-  disposedAt      DateTime?
-  createdAt       DateTime  @default(now())
+  salvageValue     Decimal   @default(0)
+  assetAccountCode String    @default("1500") // 1500/1510/1520
+  disposedAt       DateTime?
+  createdAt        DateTime  @default(now())
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  property Property? @relation(fields: [propertyId], references: [id])
+  company  Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  property Property?      @relation(fields: [propertyId], references: [id])
   entries  JournalEntry[]
 
-  @@index([userId])
+  @@index([companyId])
 }
 
 model LockedPeriod {
   id        String   @id @default(cuid())
-  userId    String
+  companyId String
   yearMonth String // "YYYY-MM"
   lockedAt  DateTime @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, yearMonth])
-  @@index([userId])
+  @@unique([companyId, yearMonth])
+  @@index([companyId])
 }
 
 model BankStatement {
-  id             String   @id @default(cuid())
-  userId         String
+  id             String    @id @default(cuid())
+  companyId      String
   fileName       String
   bankName       String?
   accountLabel   String?
@@ -249,31 +261,44 @@ model BankStatement {
   periodEnd      DateTime
   openingBalance Decimal
   closingBalance Decimal
-  status         String   @default("DRAFT") // DRAFT | REVIEWED | RECONCILED
+  status         String    @default("DRAFT") // DRAFT | REVIEWED | RECONCILED
   reportJson     String? // stored reconciliation report (JSON)
-  uploadedAt     DateTime @default(now())
+  uploadedAt     DateTime  @default(now())
   reconciledAt   DateTime?
 
-  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  lines StatementLine[]
+  company Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lines   StatementLine[]
 
-  @@index([userId])
+  @@index([companyId])
 }
 
 model StatementLine {
-  id             String   @id @default(cuid())
-  statementId    String
-  date           DateTime
-  description    String
-  amount         Decimal // signed: + money in, - money out
-  runningBalance Decimal?
-  matchStatus    String   @default("UNMATCHED") // UNMATCHED|AUTO_MATCHED|CONFIRMED|ENTRY_CREATED|IGNORED
+  id                   String   @id @default(cuid())
+  statementId          String
+  date                 DateTime
+  description          String
+  amount               Decimal // signed: + money in, - money out
+  runningBalance       Decimal?
+  matchStatus          String   @default("UNMATCHED") // UNMATCHED|AUTO_MATCHED|CONFIRMED|ENTRY_CREATED|IGNORED
   matchedJournalLineId String?
-  matchConfidence Float?
-  sortOrder      Int      @default(0)
+  matchConfidence      Float?
+  sortOrder            Int      @default(0)
 
   statement    BankStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
   matchedLines JournalLine[] @relation("LineMatch")
 
   @@index([statementId])
+}
+
+model SavedCsvMapping {
+  id          String   @id @default(cuid())
+  userId      String
+  bankName    String
+  mappingJson String
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, bankName])
+  @@index([userId])
 }

@@ -1,8 +1,8 @@
 import Link from "next/link";
 import CsvImport from "@/components/CsvImport";
 import { CsvMapping } from "@/lib/reconcile/csv";
+import { getActiveCompany } from "@/lib/company";
 import { prisma } from "@/lib/prisma";
-import { getUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -13,11 +13,11 @@ const STATUS_CLS: Record<string, string> = {
 };
 
 export default async function ReconciliationIndex({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
-  const user = await getUser();
+  const { user, company } = await getActiveCompany();
   const sp = await searchParams;
   const [statements, savedRaw] = await Promise.all([
     prisma.bankStatement.findMany({
-      where: { userId: user.id },
+      where: { companyId: company.id },
       include: { _count: { select: { lines: true } } },
       orderBy: { uploadedAt: "desc" },
     }),

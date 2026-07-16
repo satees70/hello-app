@@ -2,17 +2,17 @@ import Link from "next/link";
 import ReportToolbar from "@/components/ReportToolbar";
 import { formatMoney } from "@/lib/money";
 import { balanceSheet } from "@/lib/reports";
-import { getUser } from "@/lib/session";
+import { getActiveCompany } from "@/lib/company";
 import { getLedgerLines } from "@/lib/services/ledger";
 
 export const dynamic = "force-dynamic";
 
 export default async function BalanceSheetPage({ searchParams }: { searchParams: Promise<{ asOf?: string }> }) {
-  const user = await getUser();
-  const sym = user.currency;
+  const { company } = await getActiveCompany();
+  const sym = company.currency;
   const sp = await searchParams;
   const asOf = sp.asOf ? new Date(sp.asOf + "T23:59:59Z") : new Date();
-  const bs = balanceSheet(await getLedgerLines(user.id), asOf);
+  const bs = balanceSheet(await getLedgerLines(company.id), asOf);
 
   const csv = [
     ["Section", "Code", "Account", "Amount"],

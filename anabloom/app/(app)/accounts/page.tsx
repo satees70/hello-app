@@ -2,7 +2,7 @@ import ConfirmButton from "@/components/ConfirmButton";
 import { addAccountAction, deactivateAccountAction, renameAccountAction } from "@/app/actions";
 import { ACCOUNT_TYPES } from "@/lib/enums";
 import { prisma } from "@/lib/prisma";
-import { getUser } from "@/lib/session";
+import { getActiveCompany } from "@/lib/company";
 
 export const dynamic = "force-dynamic";
 
@@ -15,9 +15,9 @@ const SECTIONS: { type: string; title: string }[] = [
 ];
 
 export default async function AccountsPage() {
-  const user = await getUser();
+  const { company } = await getActiveCompany();
   const accounts = await prisma.account.findMany({
-    where: { userId: user.id },
+    where: { companyId: company.id },
     include: { _count: { select: { lines: true } } },
     orderBy: { code: "asc" },
   });

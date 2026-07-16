@@ -19,3 +19,4 @@ prisma/test.db-journal
 .DS_Store
 next-env.d.ts
 coverage
+prisma/_schema.step1.prisma

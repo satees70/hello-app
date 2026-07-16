@@ -2,7 +2,6 @@ import { hash } from "bcryptjs";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { seedChartOfAccounts } from "@/lib/services/accountsSeed";
 
 const schema = z.object({
   email: z.string().email(),
@@ -20,9 +19,9 @@ export async function POST(req: Request) {
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) return NextResponse.json({ error: "An account with that email already exists." }, { status: 409 });
 
-  const user = await prisma.user.create({
+  await prisma.user.create({
     data: { email, passwordHash: await hash(parsed.data.password, 10), name: parsed.data.name || null },
   });
-  await seedChartOfAccounts(user.id);
+  // No company yet — the app routes new users to /onboarding to create their first.
   return NextResponse.json({ ok: true });
 }

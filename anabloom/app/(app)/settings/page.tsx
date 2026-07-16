@@ -1,37 +1,85 @@
-import ConfirmButton from "@/components/ConfirmButton";
 import {
   changePasswordAction,
-  deleteAllDataAction,
+  createCompanyAction,
+  deleteCompanyDataAction,
   lockPeriodAction,
-  setCurrencyAction,
+  setActiveCompanyAction,
   unlockPeriodAction,
+  updateCompanyAction,
 } from "@/app/actions";
+import { getActiveCompany } from "@/lib/company";
 import { prisma } from "@/lib/prisma";
-import { getUser } from "@/lib/session";
 import { yearMonth } from "@/lib/services/period";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const user = await getUser();
-  const locks = await prisma.lockedPeriod.findMany({ where: { userId: user.id }, orderBy: { yearMonth: "desc" } });
+  const { company, companies } = await getActiveCompany();
+  const locks = await prisma.lockedPeriod.findMany({ where: { companyId: company.id }, orderBy: { yearMonth: "desc" } });
   const thisMonth = yearMonth(new Date());
 
   return (
     <div className="space-y-6 max-w-2xl">
       <h1 className="text-2xl font-bold">Settings</h1>
 
-      <div className="card p-4 space-y-3">
-        <h2 className="font-semibold">Currency</h2>
-        <form action={setCurrencyAction} className="flex gap-2 items-end">
-          <div>
-            <label className="label">Currency symbol</label>
-            <input className="input w-24" name="currency" defaultValue={user.currency} maxLength={5} />
-          </div>
-          <button className="btn-primary">Save</button>
-        </form>
+      {/* Companies */}
+      <div className="card p-4 space-y-4">
+        <h2 className="font-semibold">Companies</h2>
+        {companies.map((c) => (
+          <form key={c.id} action={updateCompanyAction} className="border border-line rounded-md p-3 space-y-2">
+            <input type="hidden" name="id" value={c.id} />
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">
+                {c.name}
+                {c.id === company.id && <span className="badge bg-primary/10 text-primary ml-2">active</span>}
+              </span>
+              {c.id !== company.id && (
+                <SwitchButton id={c.id} />
+              )}
+            </div>
+            <div className="grid sm:grid-cols-3 gap-2">
+              <div>
+                <label className="label">Name</label>
+                <input className="input" name="name" defaultValue={c.name} required />
+              </div>
+              <div>
+                <label className="label">Registration no.</label>
+                <input className="input" name="registrationNo" defaultValue={c.registrationNo ?? ""} />
+              </div>
+              <div>
+                <label className="label">Currency</label>
+                <input className="input" name="currency" defaultValue={c.currency} maxLength={5} />
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <button className="btn-primary py-1">Save</button>
+            </div>
+          </form>
+        ))}
+
+        <details>
+          <summary className="cursor-pointer text-primary text-sm font-medium">+ Add another company</summary>
+          <form action={createCompanyAction} className="mt-3 grid sm:grid-cols-3 gap-2">
+            <div>
+              <label className="label">Name</label>
+              <input className="input" name="name" required />
+            </div>
+            <div>
+              <label className="label">Registration no.</label>
+              <input className="input" name="registrationNo" />
+            </div>
+            <div>
+              <label className="label">Currency</label>
+              <input className="input" name="currency" defaultValue="RM" maxLength={5} />
+            </div>
+            <div className="sm:col-span-3 flex justify-end">
+              <button className="btn-primary">Create company &amp; seed accounts</button>
+            </div>
+          </form>
+        </details>
       </div>
 
+      {/* Change password */}
       <div className="card p-4 space-y-3">
         <h2 className="font-semibold">Change password</h2>
         <form action={changePasswordAction} className="grid sm:grid-cols-2 gap-3">
@@ -49,9 +97,10 @@ export default async function SettingsPage() {
         </form>
       </div>
 
+      {/* Period locks (active company) */}
       <div className="card p-4 space-y-3">
-        <h2 className="font-semibold">Accounting period locks</h2>
-        <p className="text-sm text-muted">Locking a month prevents any entry in it from being created, edited, or deleted.</p>
+        <h2 className="font-semibold">Accounting period locks — {company.name}</h2>
+        <p className="text-sm text-muted">Locking a month prevents any entry in it (for this company) from being created, edited, or deleted.</p>
         <form action={lockPeriodAction} className="flex gap-2 items-end">
           <div>
             <label className="label">Lock month</label>
@@ -79,17 +128,30 @@ export default async function SettingsPage() {
         )}
       </div>
 
+      {/* Danger zone */}
       <div className="card p-4 space-y-3 border-expense/40">
-        <h2 className="font-semibold text-expense">Danger zone</h2>
-        <p className="text-sm text-muted">Permanently delete all your accounting data (properties, tenants, entries, assets, statements).</p>
-        <form action={deleteAllDataAction} className="flex gap-2 items-end">
+        <h2 className="font-semibold text-expense">Danger zone — {company.name}</h2>
+        <p className="text-sm text-muted">
+          Permanently delete all accounting data for <strong>{company.name}</strong> (properties, tenants, entries, assets,
+          statements). The company and its chart of accounts remain.
+        </p>
+        <form action={deleteCompanyDataAction} className="flex gap-2 items-end">
           <div>
-            <label className="label">Type DELETE to confirm</label>
-            <input className="input w-40" name="confirm" placeholder="DELETE" />
+            <label className="label">Type the company name to confirm</label>
+            <input className="input w-64" name="confirm" placeholder={company.name} />
           </div>
-          <button className="btn-danger">Delete all data</button>
+          <button className="btn-danger">Delete company data</button>
         </form>
       </div>
     </div>
+  );
+}
+
+function SwitchButton({ id }: { id: string }) {
+  return (
+    <form action={setActiveCompanyAction}>
+      <input type="hidden" name="id" value={id} />
+      <button className="text-primary text-xs hover:underline">Make active</button>
+    </form>
   );
 }

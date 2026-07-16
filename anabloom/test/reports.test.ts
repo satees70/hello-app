@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildPosting, PostingInput } from "@/lib/posting";
 import { CHART_OF_ACCOUNTS, accountTypeForCode } from "@/lib/accounts";
-import { balanceSheet, LedgerLine, profitAndLoss, profitAndLossByMonth, trialBalance } from "@/lib/reports";
+import { balanceSheet, groupProfitAndLoss, LedgerLine, profitAndLoss, profitAndLossByMonth, trialBalance } from "@/lib/reports";
 
 const NAME = new Map(CHART_OF_ACCOUNTS.map((a) => [a.code, a.name]));
 
@@ -88,6 +88,34 @@ describe("Profit & Loss — month by month", () => {
     // Mar: income 1500 invoiced, expenses 0 -> net 1500
     expect(plm.netTotals[1].toFixed(2)).toBe("1500.00");
     expect(plm.grandNet.toFixed(2)).toBe("3200.00");
+  });
+});
+
+describe("Group P&L", () => {
+  const coA = ledgerFrom([
+    { sourceType: "RENT_RECEIVED", amount: 1000, date: "2026-02-01" },
+    { sourceType: "EXPENSE_PAID", amount: 200, expenseAccountCode: "5100", date: "2026-02-10" },
+  ]);
+  const coB = ledgerFrom([
+    { sourceType: "RENT_RECEIVED", amount: 3000, date: "2026-02-01" },
+    { sourceType: "EXPENSE_PAID", amount: 500, expenseAccountCode: "5000", date: "2026-02-15" },
+  ]);
+
+  it("group total equals the sum of the per-company P&Ls", () => {
+    const group = groupProfitAndLoss([
+      { companyId: "A", companyName: "Co A", lines: coA },
+      { companyId: "B", companyName: "Co B", lines: coB },
+    ]);
+    const perCompanySumIncome = group.columns.reduce((s, c) => s + Number(c.pl.totalIncome), 0);
+    const perCompanySumExpense = group.columns.reduce((s, c) => s + Number(c.pl.totalExpense), 0);
+    const perCompanySumNet = group.columns.reduce((s, c) => s + Number(c.pl.net), 0);
+
+    expect(Number(group.totalIncome)).toBe(perCompanySumIncome);
+    expect(Number(group.totalExpense)).toBe(perCompanySumExpense);
+    expect(Number(group.net)).toBe(perCompanySumNet);
+    // sanity: 4000 income - 700 expense = 3300 net
+    expect(group.totalIncome.toFixed(2)).toBe("4000.00");
+    expect(group.net.toFixed(2)).toBe("3300.00");
   });
 });
 

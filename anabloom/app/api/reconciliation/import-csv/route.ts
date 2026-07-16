@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { currentUserId } from "@/lib/auth";
+import { requireCompany } from "@/lib/company";
 import { prisma } from "@/lib/prisma";
 import { CsvMapping, parseCsvStatement } from "@/lib/reconcile/csv";
 import { createStatement } from "@/lib/services/reconciliation";
@@ -21,8 +21,8 @@ const schema = z.object({
 });
 
 export async function POST(req: Request) {
-  const userId = await currentUserId();
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { userId, companyId } = await requireCompany().catch(() => ({ userId: "", companyId: "" }));
+  if (!companyId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const parsed = schema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
@@ -46,6 +46,6 @@ export async function POST(req: Request) {
     });
   }
 
-  const created = await createStatement(userId, fileName, statement);
+  const created = await createStatement(companyId, fileName, statement);
   return NextResponse.json({ id: created.id });
 }

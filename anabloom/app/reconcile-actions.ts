@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireUserId } from "@/lib/auth";
+import { requireCompany } from "@/lib/company";
 import { SourceType } from "@/lib/enums";
 import { prisma } from "@/lib/prisma";
 import {
@@ -19,27 +19,27 @@ function s(fd: FormData, k: string) {
 }
 
 export async function autoMatchAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   const id = s(fd, "statementId");
-  await autoMatch(userId, id);
+  await autoMatch(companyId, id);
   revalidatePath(`/reconciliation/${id}`);
 }
 
 export async function confirmMatchAction(fd: FormData) {
-  const userId = await requireUserId();
-  await confirmMatch(userId, s(fd, "statementLineId"), s(fd, "journalLineId"));
+  const { companyId } = await requireCompany();
+  await confirmMatch(companyId, s(fd, "statementLineId"), s(fd, "journalLineId"));
   revalidatePath(`/reconciliation/${s(fd, "statementId")}`);
 }
 
 export async function ignoreLineAction(fd: FormData) {
-  const userId = await requireUserId();
-  await ignoreLine(userId, s(fd, "statementLineId"));
+  const { companyId } = await requireCompany();
+  await ignoreLine(companyId, s(fd, "statementLineId"));
   revalidatePath(`/reconciliation/${s(fd, "statementId")}`);
 }
 
 export async function createEntryForLineAction(fd: FormData) {
-  const userId = await requireUserId();
-  await createEntryForLine(userId, s(fd, "statementLineId"), {
+  const { companyId } = await requireCompany();
+  await createEntryForLine(companyId, s(fd, "statementLineId"), {
     sourceType: s(fd, "sourceType") as SourceType,
     propertyId: s(fd, "propertyId") || undefined,
     accountCode: s(fd, "accountCode") || undefined,
@@ -49,26 +49,25 @@ export async function createEntryForLineAction(fd: FormData) {
 }
 
 export async function finishReconciliationAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   const id = s(fd, "statementId");
-  await finishReconciliation(userId, id);
+  await finishReconciliation(companyId, id);
   revalidatePath(`/reconciliation/${id}`);
   revalidatePath("/ledger");
 }
 
 export async function reopenReconciliationAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   const id = s(fd, "statementId");
-  await reopenReconciliation(userId, id);
+  await reopenReconciliation(companyId, id);
   revalidatePath(`/reconciliation/${id}`);
 }
 
 export async function deleteStatementAction(fd: FormData) {
-  const userId = await requireUserId();
+  const { companyId } = await requireCompany();
   const id = s(fd, "statementId");
-  const statement = await prisma.bankStatement.findFirst({ where: { id, userId }, include: { lines: true } });
+  const statement = await prisma.bankStatement.findFirst({ where: { id, companyId }, include: { lines: true } });
   if (!statement) throw new Error("Not found");
-  // un-reconcile any linked lines first
   const ids = statement.lines.map((l) => l.matchedJournalLineId).filter((x): x is string => !!x);
   for (const jid of ids) await prisma.journalLine.updateMany({ where: { id: jid }, data: { reconciledAt: null, statementLineId: null } });
   await prisma.bankStatement.delete({ where: { id } });

@@ -3,23 +3,23 @@ import { notFound } from "next/navigation";
 import { Money } from "@/components/Money";
 import { endLeaseAction, renewLeaseAction, setStampedDateAction, toggleAutoInvoiceAction } from "@/app/actions";
 import { prisma } from "@/lib/prisma";
-import { getUser } from "@/lib/session";
+import { getActiveCompany } from "@/lib/company";
 import { getAgingReport } from "@/lib/services/arrears";
 import { getStorage } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 
 export default async function LeaseDetail({ params }: { params: Promise<{ leaseId: string }> }) {
-  const user = await getUser();
-  const sym = user.currency;
+  const { company } = await getActiveCompany();
+  const sym = company.currency;
   const { leaseId } = await params;
   const lease = await prisma.lease.findFirst({
-    where: { id: leaseId, userId: user.id },
+    where: { id: leaseId, companyId: company.id },
     include: { tenant: true, property: true, documents: { orderBy: { uploadedAt: "desc" } }, renewals: true, renewedFrom: true },
   });
   if (!lease) notFound();
 
-  const aging = await getAgingReport(user.id, new Date());
+  const aging = await getAgingReport(company.id, new Date());
   const ar = aging.rows.find((r) => r.leaseId === lease.id);
   const storage = getStorage();
   const docs = await Promise.all(

@@ -2,22 +2,22 @@ import ConfirmButton from "@/components/ConfirmButton";
 import { Money } from "@/components/Money";
 import { createAssetAction, disposeAssetAction, runDepreciationAction } from "@/app/actions";
 import { prisma } from "@/lib/prisma";
-import { getUser } from "@/lib/session";
+import { getActiveCompany } from "@/lib/company";
 import { yearMonth } from "@/lib/services/period";
 
 export const dynamic = "force-dynamic";
 
 export default async function AssetsPage() {
-  const user = await getUser();
-  const sym = user.currency;
+  const { company } = await getActiveCompany();
+  const sym = company.currency;
   const [assets, properties] = await Promise.all([
-    prisma.fixedAsset.findMany({ where: { userId: user.id }, include: { property: true }, orderBy: { purchaseDate: "desc" } }),
-    prisma.property.findMany({ where: { userId: user.id }, orderBy: { name: "asc" } }),
+    prisma.fixedAsset.findMany({ where: { companyId: company.id }, include: { property: true }, orderBy: { purchaseDate: "desc" } }),
+    prisma.property.findMany({ where: { companyId: company.id }, orderBy: { name: "asc" } }),
   ]);
 
   // accumulated depreciation per asset
   const dep = await prisma.journalEntry.findMany({
-    where: { userId: user.id, sourceType: "DEPRECIATION", fixedAssetId: { not: null } },
+    where: { companyId: company.id, sourceType: "DEPRECIATION", fixedAssetId: { not: null } },
     include: { lines: { include: { account: true } } },
   });
   const accByAsset = new Map<string, number>();

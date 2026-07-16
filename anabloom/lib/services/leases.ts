@@ -2,7 +2,7 @@ import { prisma } from "../prisma";
 import { createEntry } from "./entries";
 
 export interface RenewLeaseInput {
-  userId: string;
+  companyId: string;
   leaseId: string;
   startDate: Date;
   endDate?: Date | null;
@@ -19,7 +19,7 @@ export interface RenewLeaseInput {
  * deposit liability (it was already booked on the original lease).
  */
 export async function renewLease(input: RenewLeaseInput) {
-  const old = await prisma.lease.findFirst({ where: { id: input.leaseId, userId: input.userId } });
+  const old = await prisma.lease.findFirst({ where: { id: input.leaseId, companyId: input.companyId } });
   if (!old) throw new Error("Lease not found.");
 
   return prisma.$transaction(async (tx) => {
@@ -30,7 +30,7 @@ export async function renewLease(input: RenewLeaseInput) {
     });
     return tx.lease.create({
       data: {
-        userId: input.userId,
+        companyId: input.companyId,
         propertyId: old.propertyId,
         tenantId: old.tenantId,
         startDate: input.startDate,
@@ -52,7 +52,7 @@ export async function renewLease(input: RenewLeaseInput) {
 export type DepositDisposition = "refund" | "apply" | "forfeit" | "none";
 
 export interface EndLeaseInput {
-  userId: string;
+  companyId: string;
   leaseId: string;
   endDate: Date;
   deposit: DepositDisposition;
@@ -61,7 +61,7 @@ export interface EndLeaseInput {
 
 /** End a lease and settle the deposit (refund / apply to arrears / forfeit). */
 export async function endLease(input: EndLeaseInput) {
-  const lease = await prisma.lease.findFirst({ where: { id: input.leaseId, userId: input.userId } });
+  const lease = await prisma.lease.findFirst({ where: { id: input.leaseId, companyId: input.companyId } });
   if (!lease) throw new Error("Lease not found.");
 
   await prisma.lease.update({
@@ -76,7 +76,7 @@ export async function endLease(input: EndLeaseInput) {
     input.deposit === "refund" ? "DEPOSIT_REFUNDED" : input.deposit === "apply" ? "DEPOSIT_APPLIED" : "DEPOSIT_FORFEIT";
 
   await createEntry({
-    userId: input.userId,
+    companyId: input.companyId,
     leaseId: lease.id,
     propertyId: lease.propertyId,
     date: input.endDate,

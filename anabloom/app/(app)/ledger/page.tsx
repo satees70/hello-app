@@ -6,7 +6,7 @@ import NewEntryForm from "@/components/NewEntryForm";
 import { deleteEntryAction } from "@/app/actions";
 import { SOURCE_TYPE_LABELS, SourceType } from "@/lib/enums";
 import { prisma } from "@/lib/prisma";
-import { getUser } from "@/lib/session";
+import { getActiveCompany } from "@/lib/company";
 
 export const dynamic = "force-dynamic";
 
@@ -15,11 +15,11 @@ export default async function LedgerPage({
 }: {
   searchParams: Promise<{ property?: string; month?: string; type?: string }>;
 }) {
-  const user = await getUser();
-  const sym = user.currency;
+  const { company } = await getActiveCompany();
+  const sym = company.currency;
   const sp = await searchParams;
 
-  const where: Prisma.JournalEntryWhereInput = { userId: user.id };
+  const where: Prisma.JournalEntryWhereInput = { companyId: company.id };
   if (sp.property) where.propertyId = sp.property;
   if (sp.type) where.sourceType = sp.type;
   if (sp.month) {
@@ -34,11 +34,11 @@ export default async function LedgerPage({
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       take: 500,
     }),
-    prisma.property.findMany({ where: { userId: user.id }, orderBy: { name: "asc" } }),
-    prisma.account.findMany({ where: { userId: user.id }, orderBy: { code: "asc" } }),
+    prisma.property.findMany({ where: { companyId: company.id }, orderBy: { name: "asc" } }),
+    prisma.account.findMany({ where: { companyId: company.id }, orderBy: { code: "asc" } }),
   ]);
   const leases = await prisma.lease.findMany({
-    where: { userId: user.id, status: "ACTIVE" },
+    where: { companyId: company.id, status: "ACTIVE" },
     include: { tenant: true, property: true },
   });
 

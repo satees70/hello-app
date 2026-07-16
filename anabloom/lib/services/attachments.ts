@@ -3,17 +3,18 @@ import { getStorage } from "../storage";
 import { validateUpload } from "../upload";
 
 /** Store uploaded files against an entry (validates size/mime, skips empties). */
-export async function saveEntryAttachments(userId: string, entryId: string, files: File[]): Promise<void> {
-  const entry = await prisma.journalEntry.findFirst({ where: { id: entryId, userId } });
+export async function saveEntryAttachments(companyId: string, entryId: string, files: File[]): Promise<void> {
+  const entry = await prisma.journalEntry.findFirst({ where: { id: entryId, companyId } });
   if (!entry) throw new Error("Entry not found.");
   const storage = getStorage();
   for (const file of files) {
     if (!file || typeof file.arrayBuffer !== "function" || file.size === 0) continue;
     const err = validateUpload(file);
     if (err) throw new Error(err);
-    const stored = await storage.put(userId, file.name, file.type, Buffer.from(await file.arrayBuffer()));
+    const stored = await storage.put(companyId, file.name, file.type, Buffer.from(await file.arrayBuffer()));
     await prisma.attachment.create({
       data: {
+        companyId,
         journalEntryId: entryId,
         fileName: stored.fileName,
         storagePath: stored.storagePath,

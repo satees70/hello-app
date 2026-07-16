@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
-import { currentUserId } from "@/lib/auth";
+import { requireCompany } from "@/lib/company";
 import { SOURCE_TYPE_LABELS, SourceType } from "@/lib/enums";
 import { prisma } from "@/lib/prisma";
 
@@ -9,11 +9,11 @@ function csvCell(v: string): string {
 }
 
 export async function GET(req: Request) {
-  const userId = await currentUserId();
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { companyId } = await requireCompany().catch(() => ({ companyId: "" }));
+  if (!companyId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const url = new URL(req.url);
 
-  const where: Prisma.JournalEntryWhereInput = { userId };
+  const where: Prisma.JournalEntryWhereInput = { companyId };
   const property = url.searchParams.get("property");
   const type = url.searchParams.get("type");
   const month = url.searchParams.get("month");
