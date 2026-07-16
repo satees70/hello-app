@@ -82,6 +82,8 @@ export default function WmsNavbar() {
           )
         })}
         <div className="ml-auto flex items-center gap-3 text-sm">
+          <Link href="/production" className="text-emerald-100 hover:text-white hidden sm:inline">🏭 Production ↗</Link>
+          <Link href="/dashboard" className="text-emerald-100 hover:text-white hidden sm:inline">Main portal ↗</Link>
           <Link href="/warehouse" className="text-emerald-100 hover:text-white hidden sm:inline">← Warehouse Receiving</Link>
           {profile && <span className="text-emerald-100 hidden md:inline">{profile.full_name || profile.username}</span>}
           <button onClick={() => supabase.auth.signOut()} className="rounded bg-emerald-800 px-3 py-1.5 hover:bg-emerald-900">Sign out</button>
