@@ -44,13 +44,14 @@ export default function WmsNavbar() {
     let alive = true
     const count = async () => {
       const opts = { count: 'exact' as const, head: true }
-      const [a, b, c, d] = await Promise.all([
+      const [a, b, c, d, e] = await Promise.all([
         supabase.from('grn_bypass_requests').select('id', opts).eq('status', 'Pending'),
         supabase.from('stock_adjustments').select('id', opts).eq('status', 'Pending'),
         supabase.from('wms_check_qty_requests').select('id', opts).eq('status', 'Pending'),
         supabase.from('wms_count_tasks').select('id', opts).eq('status', 'Review'),
+        supabase.from('do_paper_receipt_requests').select('id', opts).eq('status', 'Pending'),
       ])
-      if (alive) setPending((a.count || 0) + (b.count || 0) + (c.count || 0) + (d.count || 0))
+      if (alive) setPending((a.count || 0) + (b.count || 0) + (c.count || 0) + (d.count || 0) + (e.count || 0))
     }
     count()
     const timer = setInterval(count, 30000)
