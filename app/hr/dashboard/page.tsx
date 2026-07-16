@@ -84,6 +84,19 @@ export default function HrDashboardPage() {
       await load()
     } finally { setSaving(false) }
   }
+  // Mark a person OUTSTATION (OS) for today — a one-day trip, so they count as present
+  // off-site (not absent), saving HR from keying it in separately.
+  async function setOutstation(code: string) {
+    setSaving(true); setError(null)
+    try {
+      const res = await apiFetch('/api/attendance/outstation', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ employee_code: code, start_date: today, end_date: today }),
+      })
+      if (!res.ok) { const j = await res.json().catch(() => ({})); setError(j.error || 'Could not mark outstation.'); return }
+      await load()
+    } finally { setSaving(false) }
+  }
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -104,7 +117,7 @@ export default function HrDashboardPage() {
       const weekFromUtc = `${weekStart}T00:00:00+08:00`
       const todayToUtc = `${today}T23:59:59+08:00`
 
-      const [emps, profs, punches, { data: leaves }, { data: hols }, { data: state }] = await Promise.all([
+      const [emps, profs, punches, { data: leaves }, { data: hols }, { data: state }, ostrips] = await Promise.all([
         supabase.from('employees').select('employee_code, name, shift_profile_id, department').eq('active', true),
         supabase.from('shift_profiles').select('id, normal_hours, lunch_rule, lunch_minutes, shift_start, shift_end, week_schedule, attendance_mode'),
         fetchAll<{ employee_code: string; punch_time: string; department_name: string | null }>(
@@ -113,12 +126,14 @@ export default function HrDashboardPage() {
         supabase.from('leave_days').select('employee_code, leave_type').eq('work_date', today),
         supabase.from('public_holidays').select('holiday_date').eq('holiday_date', today),
         supabase.from('sync_state').select('last_synced_at').eq('key', 'zklink').maybeSingle(),
+        supabase.from('outstation_trips').select('employee_code').lte('start_date', today).gte('end_date', today),
       ])
       setLastSync(state?.last_synced_at ?? null)
 
       const empList = (emps.data as Emp[]) || []
       const profById = new Map<string, Prof>(((profs.data as Prof[]) || []).map(p => [p.id, p]))
       const leaveByEmp = new Map<string, string>((leaves || []).map(l => [l.employee_code, l.leave_type]))
+      const osToday = new Set<string>(((ostrips.data as { employee_code: string }[]) || []).map(t => t.employee_code))
       const isHoliday = (hols || []).length > 0
 
       // Punches → per employee, per KL day.
@@ -143,8 +158,6 @@ export default function HrDashboardPage() {
 
         let status: Status = 'unknown'; let late = false; let inTime: string | null = null
         if (leaveType) status = 'leave'
-        else if (isHoliday && !times.length) status = 'holiday'
-        else if (scheduled === false && !times.length) status = 'off'
         else if (times.length > 0) {
           const res = computeDay(times, prof, null, { weekday: wd, isHoliday })
           inTime = klTime([...times].sort((a, b) => a.getTime() - b.getTime())[0])
@@ -152,7 +165,12 @@ export default function HrDashboardPage() {
           // Odd punches = still clocked in → "working" only makes sense for today;
           // on a past day everyone with punches was simply "present".
           status = (res.pairing.needsReview && isToday) ? 'working' : 'present'
-        } else if (scheduled) status = 'absent'
+        }
+        // Outstation trip today (no punches) → present, off-site. Counts as present, not absent.
+        else if (osToday.has(e.employee_code)) { status = 'present'; inTime = 'Outstation' }
+        else if (isHoliday) status = 'holiday'
+        else if (scheduled === false) status = 'off'
+        else if (scheduled) status = 'absent'
         else status = 'unknown'
 
         out.push({ code: e.employee_code, name: e.name || e.employee_code, department: e.department || '—', status, late, inTime, leaveType: leaveType ?? null })
@@ -374,9 +392,10 @@ export default function HrDashboardPage() {
                     <li key={r.code} className="flex items-center gap-2 px-4 py-2 text-sm">
                       <span className="font-medium">{r.name}</span>
                       <span className="text-gray-400 text-xs">{r.code}</span>
-                      <select value="" disabled={saving} onChange={e => e.target.value && setLeave(r.code, e.target.value)} className="ml-auto text-xs border rounded px-1.5 py-1 bg-white text-gray-600">
+                      <select value="" disabled={saving} onChange={e => { const v = e.target.value; if (!v) return; if (v === 'OS') setOutstation(r.code); else setLeave(r.code, v) }} className="ml-auto text-xs border rounded px-1.5 py-1 bg-white text-gray-600">
                         <option value="">Mark leave…</option>
                         {LEAVE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                        <option value="OS">OS (Outstation)</option>
                       </select>
                       <span className="text-gray-500 text-xs w-20 truncate text-right">{r.department}</span>
                     </li>
