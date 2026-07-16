@@ -224,6 +224,18 @@ export default function WmsPickPage() {
     if (error) { setErr(/wms_confirm_no_stock|no_stock|function|column/i.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-no-stock.sql in the Supabase SQL editor.' : error.message); return }
     setMsg(`${l.item_code} marked as no stock (short ${fmtQty(rem)}).`); load()
   }
+  // Stock arrived for a line that was marked no-stock — restore the outstanding qty and re-open
+  // the order for picking, so the balance can be picked and dispatched in a later run.
+  async function reopenLine(l: Line) {
+    if (!canEdit) return
+    const out = Number(l.no_stock_qty ?? 0)
+    if (!confirm(`Stock has arrived for ${l.item_code}?\n\nThis re-opens the outstanding ${fmtQty(out)} ${l.uom || ''} so you can pick it now.`)) return
+    setBusy(l.id); setErr(''); setMsg('')
+    const { error } = await supabase.rpc('wms_reopen_line', { p_line_id: l.id })
+    setBusy('')
+    if (error) { setErr(/wms_reopen_line/.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-repick-outstanding.sql in the Supabase SQL editor.' : error.message); return }
+    setMsg(`${l.item_code} re-opened — pick the outstanding ${fmtQty(out)}.`); load()
+  }
 
   // Undo a pick already made (wrong bag / wrong batch / over-picked) — returns the stock to its
   // bin and re-opens the line. Only before the order is checked/dispatched.
@@ -379,7 +391,12 @@ export default function WmsPickPage() {
                   </div>
                   <div className="flex flex-col items-end gap-1.5">
                     {l.no_stock
-                      ? <span className="text-amber-600 text-sm font-medium whitespace-nowrap" title={l.no_stock_by_name ? `by ${l.no_stock_by_name}` : ''}>⚠ No stock{l.no_stock_qty ? ` · short ${fmtQty(l.no_stock_qty)}` : ''}</span>
+                      ? <>
+                          <span className="text-amber-600 text-sm font-medium whitespace-nowrap" title={l.no_stock_by_name ? `by ${l.no_stock_by_name}` : ''}>⚠ No stock{l.no_stock_qty ? ` · short ${fmtQty(l.no_stock_qty)}` : ''}</span>
+                          {canEdit && Number(l.no_stock_qty) > 0 && <button onClick={() => reopenLine(l)} disabled={busy === l.id}
+                            title="Stock has arrived — re-open the outstanding quantity so you can pick it."
+                            className="text-xs border border-emerald-500 text-emerald-700 rounded px-2 py-1 hover:bg-emerald-50 disabled:opacity-50 whitespace-nowrap">🔄 Stock arrived — pick outstanding</button>}
+                        </>
                       : done && <span className="text-emerald-700 text-sm font-medium">✓ Picked</span>}
                     {canEdit && Number(l.qty_picked) > 0 && ['Picking', 'Picked', 'Reserved'].includes(order.status) && (
                       <button onClick={() => undoPick(l)} disabled={busy === l.id}
