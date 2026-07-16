@@ -116,6 +116,16 @@ export default function WmsPickPage() {
     return { allocs, shortfall: Math.max(clean(left), 0) }
   }, [availFor])
 
+  // Outstanding (no-stock) qty for a line: what still can't be fulfilled. A line confirmed
+  // "no stock" is short by its recorded shortfall (or the whole remaining); otherwise it's
+  // whatever the FEFO allocation can't cover.
+  const shortOf = useCallback((l: Line): number => {
+    const rem = remainingOf(l)
+    if (rem <= 0) return 0
+    if (l.no_stock) return clean(Number(l.no_stock_qty ?? rem))
+    return allocate(l.item_code, rem).shortfall
+  }, [allocate])
+
   async function downloadPickList() {
     const { default: jsPDF } = await import('jspdf')
     const { default: autoTable } = await import('jspdf-autotable')
@@ -158,6 +168,33 @@ export default function WmsPickPage() {
     doc.text('Picked by: ______________  Date: ________', 14, endY)
     doc.text('Checked by: _____________  Date: ________', 150, endY)
     doc.save(`PickList_${(order?.order_no || 'order').replace(/[\/\s]/g, '-')}.pdf`)
+  }
+
+  // Print only the items that have no stock (outstanding / short) — for procurement / production.
+  async function downloadOutstanding() {
+    const short = lines.map(l => ({ l, s: shortOf(l) })).filter(x => x.s > 0)
+    if (short.length === 0) { setMsg('Nothing outstanding — every item has stock.'); return }
+    const { default: jsPDF } = await import('jspdf')
+    const { default: autoTable } = await import('jspdf-autotable')
+    const doc = new jsPDF()
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold')
+    doc.text('SRRI EASWARI MILLS SDN BHD', 14, 15)
+    doc.setFontSize(11); doc.setFont('helvetica', 'normal')
+    doc.text('OUTSTANDING (NO STOCK) LIST', 14, 22)
+    doc.setFontSize(10)
+    doc.text(`Order: ${order?.order_no || '-'}`, 14, 30)
+    doc.text(`Customer: ${order?.customer_name || '-'}`, 14, 36)
+    if (order?.delivery_date) doc.text(`Delivery: ${order.delivery_date}`, 140, 30)
+    doc.text(`Printed: ${new Date().toLocaleString('en-GB')}`, 140, 36)
+    autoTable(doc, {
+      startY: 42,
+      head: [['#', 'Item Code', 'Description', 'Unit', 'Ordered', 'Picked', 'Outstanding']],
+      body: short.map((x, i) => [String(i + 1), x.l.item_code, x.l.description || '', x.l.uom || '', fmtQty(x.l.quantity), fmtQty(x.l.qty_picked), fmtQty(x.s)]),
+      styles: { fontSize: 9, cellPadding: 2 },
+      headStyles: { fillColor: [180, 83, 9] },
+      columnStyles: { 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' } },
+    })
+    doc.save(`Outstanding_${(order?.order_no || 'order').replace(/[\/\s]/g, '-')}.pdf`)
   }
 
   async function pickFromBin(l: Line, s: Stock, qty: number) {
@@ -306,6 +343,7 @@ export default function WmsPickPage() {
 
         <div className="flex flex-wrap items-center gap-2 mb-5">
           <button onClick={downloadPickList} className="border px-4 py-2 rounded-lg hover:bg-gray-50 text-sm font-medium">⬇ Print pick list (PDF)</button>
+          {lines.some(l => shortOf(l) > 0) && <button onClick={downloadOutstanding} className="border border-amber-300 text-amber-800 bg-amber-50 px-4 py-2 rounded-lg hover:bg-amber-100 text-sm font-medium">⬇ Print outstanding (no stock)</button>}
           {canEdit && (
             <div className="inline-flex rounded-lg border bg-white p-1 text-sm ml-auto">
               <span className="px-2 py-1 text-gray-400 text-xs self-center">Pick by:</span>
