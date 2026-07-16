@@ -16,14 +16,15 @@ export const passWh = (f: WhFilter, descs?: string | null | (string | null | und
 }
 
 export default function WarehouseTabs({ value, onChange, className = '' }: { value: WhFilter; onChange: (v: WhFilter) => void; className?: string }) {
-  const tabs: { k: WhFilter; label: string }[] = [
-    { k: 'all', label: 'All' }, { k: 'gch', label: 'GCH warehouse' }, { k: 'other', label: 'Other warehouse' },
+  // Short labels so the control fits a phone; the title spells out the full name.
+  const tabs: { k: WhFilter; label: string; title: string }[] = [
+    { k: 'all', label: 'All', title: 'All warehouses' }, { k: 'gch', label: 'GCH', title: 'GCH warehouse' }, { k: 'other', label: 'Other', title: 'Other warehouse' },
   ]
   return (
     <div className={`inline-flex rounded-lg border overflow-hidden text-sm ${className}`}>
       {tabs.map(t => (
-        <button key={t.k} type="button" onClick={() => onChange(t.k)}
-          className={`px-3 py-1.5 font-medium ${value === t.k ? 'bg-emerald-700 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>{t.label}</button>
+        <button key={t.k} type="button" onClick={() => onChange(t.k)} title={t.title}
+          className={`px-3 py-1.5 font-medium whitespace-nowrap ${value === t.k ? 'bg-emerald-700 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>{t.label}</button>
       ))}
     </div>
   )

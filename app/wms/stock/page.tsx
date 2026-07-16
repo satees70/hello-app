@@ -198,7 +198,7 @@ export default function WmsStockPage() {
             <p className="text-gray-500 text-sm mt-1">On-hand by item, bin and batch in the 8BT warehouse.</p>
           </div>
           {canEdit && (
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button onClick={() => { setShowImport(true); setErr('') }}
                 className="border border-emerald-600 text-emerald-700 px-4 py-2 rounded-lg hover:bg-emerald-50 text-sm font-medium">
                 ⇪ Import stock
