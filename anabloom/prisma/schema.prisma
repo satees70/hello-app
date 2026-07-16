@@ -137,15 +137,17 @@ model JournalEntry {
   userId      String
   propertyId  String?
   leaseId     String?
-  date        DateTime
-  description String
-  sourceType  String
-  periodKey   String? // "YYYY-MM" — set only for auto-generated recurring rent invoices
-  createdAt   DateTime @default(now())
+  date          DateTime
+  description   String
+  sourceType    String
+  periodKey     String? // "YYYY-MM" — set for auto-generated recurring rent invoices / depreciation
+  fixedAssetId  String? // set for asset purchase / depreciation / disposal entries
+  createdAt     DateTime @default(now())
 
   user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   property    Property?     @relation(fields: [propertyId], references: [id])
   lease       Lease?        @relation(fields: [leaseId], references: [id])
+  fixedAsset  FixedAsset?   @relation(fields: [fixedAssetId], references: [id])
   lines       JournalLine[]
   attachments Attachment[]
 
@@ -206,6 +208,7 @@ model FixedAsset {
 
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   property Property? @relation(fields: [propertyId], references: [id])
+  entries  JournalEntry[]
 
   @@index([userId])
 }
