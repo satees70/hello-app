@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
@@ -10,7 +10,12 @@ import { LABEL_SIZES, downloadLabels } from '@/lib/wmsLabel'
 
 interface PO { id: string; po_number: string | null; supplier_name: string | null; status: string; expected_date: string | null }
 interface Line { id: string; line_no: number | null; item_id: string | null; item_code: string; description: string | null; quantity: number; qty_received: number; uom: string | null }
-interface Draft { qty: string; batch: string; exp: string; qc: 'pass' | 'fail'; note: string; photo: Blob | null; preview: string; bagPhoto: Blob | null; bagPreview: string; weightPhoto: Blob | null; weightPreview: string }
+// Photos are uploaded the moment they're taken and only the storage PATH is kept, so a draft
+// survives leaving the page (paths are saved to localStorage; previews are re-signed on return).
+interface Draft { qty: string; batch: string; exp: string; qc: 'pass' | 'fail'; note: string; photoPath: string; preview: string; bagPath: string; bagPreview: string; weightPath: string; weightPreview: string }
+// Fields we persist to localStorage (everything except the transient preview URLs).
+type SavedDraft = Pick<Draft, 'qty' | 'batch' | 'exp' | 'qc' | 'note' | 'photoPath' | 'bagPath' | 'weightPath'>
+const draftKey = (poId: string) => `wmsRecvDraft:${poId}`
 
 const clean = (n: number) => Number(n.toPrecision(12))
 const fmtQty = (n: number) => clean(n).toLocaleString(undefined, { maximumFractionDigits: 4 })
@@ -58,6 +63,8 @@ export default function WmsReceivePage() {
   const [labelSize, setLabelSize] = useState('55x35')
   const [bypassApproved, setBypassApproved] = useState<Set<string>>(new Set())   // po_line ids with an approved unconsumed photo bypass
   const [bypassPending, setBypassPending] = useState<Set<string>>(new Set())
+  const [photoBusy, setPhotoBusy] = useState('')   // `${lineId}-${kind}` currently uploading
+  const restoredRef = useRef(false)
 
   // One label per package: copies default to the qty (received qty if typed, else
   // the outstanding/ordered qty), so staff don't key a count. Capped at 500.
@@ -102,22 +109,69 @@ export default function WmsReceivePage() {
   // All lines in this receiving session default to today's YYMMDD/NN, so each delivery
   // gets a distinct batch (a 2nd delivery of the same item today becomes /NN+1).
   const defaultBatch = useMemo(() => `${TODAY}/${runNo}`, [runNo])
-  const newDraft = useCallback((): Draft => ({ qty: '', batch: defaultBatch, exp: '', qc: 'pass', note: '', photo: null, preview: '', bagPhoto: null, bagPreview: '', weightPhoto: null, weightPreview: '' }), [defaultBatch])
+  const newDraft = useCallback((): Draft => ({ qty: '', batch: defaultBatch, exp: '', qc: 'pass', note: '', photoPath: '', preview: '', bagPath: '', bagPreview: '', weightPath: '', weightPreview: '' }), [defaultBatch])
   const draftOf = (l: Line) => drafts[l.id] ?? newDraft()
   const setDraft = (lineId: string, patch: Partial<Draft>) => setDrafts(d => ({ ...d, [lineId]: { ...(d[lineId] ?? newDraft()), ...patch } }))
 
-  async function onPhoto(l: Line, file: File) {
-    try { const blob = await compressImage(file); setDraft(l.id, { photo: blob, preview: URL.createObjectURL(blob) }) }
-    catch { setErr('Could not read that photo.') }
+  // Restore any half-finished drafts (with their already-uploaded photos) for this PO, so leaving
+  // and coming back doesn't lose the pictures. Runs once per PO; re-signs previews for display.
+  useEffect(() => {
+    if (!id) return
+    try {
+      const raw = localStorage.getItem(draftKey(id))
+      if (raw) {
+        const saved = JSON.parse(raw) as Record<string, SavedDraft>
+        setDrafts(prev => {
+          const next = { ...prev }
+          for (const [lid, s] of Object.entries(saved)) next[lid] = { qty: s.qty || '', batch: s.batch || '', exp: s.exp || '', qc: s.qc || 'pass', note: s.note || '', photoPath: s.photoPath || '', preview: '', bagPath: s.bagPath || '', bagPreview: '', weightPath: s.weightPath || '', weightPreview: '' }
+          return next
+        })
+        const want: { lid: string; key: 'preview' | 'bagPreview' | 'weightPreview'; path: string }[] = []
+        for (const [lid, s] of Object.entries(saved)) {
+          if (s.photoPath) want.push({ lid, key: 'preview', path: s.photoPath })
+          if (s.bagPath) want.push({ lid, key: 'bagPreview', path: s.bagPath })
+          if (s.weightPath) want.push({ lid, key: 'weightPreview', path: s.weightPath })
+        }
+        Promise.all(want.map(async w => ({ ...w, url: (await supabase.storage.from('wms-grn').createSignedUrl(w.path, 3600)).data?.signedUrl || '' })))
+          .then(res => setDrafts(prev => { const next = { ...prev }; for (const r of res) if (r.url && next[r.lid]) next[r.lid] = { ...next[r.lid], [r.key]: r.url }; return next }))
+      }
+    } catch { /* ignore bad cache */ }
+    restoredRef.current = true
+  }, [id])
+
+  // Save drafts (paths + typed fields, not the transient previews) so they survive navigation.
+  useEffect(() => {
+    if (!id || !restoredRef.current) return
+    try {
+      const saved: Record<string, SavedDraft> = {}
+      for (const [lid, d] of Object.entries(drafts)) {
+        if (d.qty || d.photoPath || d.bagPath || d.weightPath || d.note || d.exp || (d.batch && d.batch !== defaultBatch))
+          saved[lid] = { qty: d.qty, batch: d.batch, exp: d.exp, qc: d.qc, note: d.note, photoPath: d.photoPath, bagPath: d.bagPath, weightPath: d.weightPath }
+      }
+      if (Object.keys(saved).length) localStorage.setItem(draftKey(id), JSON.stringify(saved))
+      else localStorage.removeItem(draftKey(id))
+    } catch { /* ignore quota */ }
+  }, [drafts, id, defaultBatch])
+
+  // Upload a photo the moment it's taken (to a stable per-line path, overwriting a retake), so it's
+  // safe even if the tab is closed before Receive. Only the path is kept in the draft.
+  async function uploadPhoto(l: Line, kind: 'product' | 'bag' | 'weight', file: File) {
+    setErr(''); setPhotoBusy(`${l.id}-${kind}`)
+    try {
+      const blob = await compressImage(file)
+      const path = `photos/draft/${id}/${l.id}-${kind}.jpg`
+      const up = await supabase.storage.from('wms-grn').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
+      if (up.error) throw up.error
+      const preview = URL.createObjectURL(blob)
+      if (kind === 'product') setDraft(l.id, { photoPath: path, preview })
+      else if (kind === 'bag') setDraft(l.id, { bagPath: path, bagPreview: preview })
+      else setDraft(l.id, { weightPath: path, weightPreview: preview })
+    } catch (e) { setErr(`Photo upload failed: ${e instanceof Error ? e.message : String(e)}. Please try again.`) }
+    setPhotoBusy('')
   }
-  async function onBagPhoto(l: Line, file: File) {
-    try { const blob = await compressImage(file); setDraft(l.id, { bagPhoto: blob, bagPreview: URL.createObjectURL(blob) }) }
-    catch { setErr('Could not read that photo.') }
-  }
-  async function onWeightPhoto(l: Line, file: File) {
-    try { const blob = await compressImage(file); setDraft(l.id, { weightPhoto: blob, weightPreview: URL.createObjectURL(blob) }) }
-    catch { setErr('Could not read that photo.') }
-  }
+  const onPhoto = (l: Line, file: File) => uploadPhoto(l, 'product', file)
+  const onBagPhoto = (l: Line, file: File) => uploadPhoto(l, 'bag', file)
+  const onWeightPhoto = (l: Line, file: File) => uploadPhoto(l, 'weight', file)
 
   async function ensureGrn(): Promise<string | null> {
     if (grnId) return grnId
@@ -128,33 +182,20 @@ export default function WmsReceivePage() {
 
   async function receive(l: Line) {
     if (!canEdit) return
-    const d = draftOf(l); const qty = Number(d.qty)
+    const d = draftOf(l)
+    // Qty defaults to the outstanding quantity when the box is left blank (it shows as a placeholder).
+    const qty = d.qty.trim() ? Number(d.qty) : outstanding(l)
     if (!(qty > 0)) { setErr('Enter the received quantity.'); return }
-    const hasPhotos = !!d.photo && !!d.bagPhoto && !!d.weightPhoto
+    const hasPhotos = !!d.photoPath && !!d.bagPath && !!d.weightPath
     if (!hasPhotos && !bypassApproved.has(l.id) && !isManager) { setErr('Take the product, bag and weight photos — or request a bypass for a manager to approve.'); return }
     if (!hasPhotos && !bypassApproved.has(l.id) && isManager && !window.confirm(`Receive ${l.item_code} without photos (old delivery checked on paper)?`)) return
     setBusy(l.id); setErr(''); setMsg('')
     const gid = await ensureGrn(); if (!gid) { setBusy(''); return }
-    let path: string | null = null, bagPath: string | null = null, weightPath: string | null = null
-    if (d.photo) {
-      path = `photos/${gid}/${l.id}-${Date.now()}.jpg`
-      const up = await supabase.storage.from('wms-grn').upload(path, d.photo, { contentType: 'image/jpeg' })
-      if (up.error) { setErr(`Product photo upload failed: ${up.error.message}`); setBusy(''); return }
-    }
-    if (d.bagPhoto) {
-      bagPath = `photos/${gid}/${l.id}-bag-${Date.now()}.jpg`
-      const upBag = await supabase.storage.from('wms-grn').upload(bagPath, d.bagPhoto, { contentType: 'image/jpeg' })
-      if (upBag.error) { setErr(`Bag photo upload failed: ${upBag.error.message}`); setBusy(''); return }
-    }
-    if (d.weightPhoto) {
-      weightPath = `photos/${gid}/${l.id}-weight-${Date.now()}.jpg`
-      const upW = await supabase.storage.from('wms-grn').upload(weightPath, d.weightPhoto, { contentType: 'image/jpeg' })
-      if (upW.error) { setErr(`Weight photo upload failed: ${upW.error.message}`); setBusy(''); return }
-    }
+    // Photos are already uploaded (on capture) — just pass their paths.
     const { error } = await supabase.rpc('wms_receive_line', {
       p_grn_id: gid, p_po_line_id: l.id, p_item_code: l.item_code, p_qty: qty,
-      p_batch: d.batch.trim(), p_exp_date: d.exp || null, p_qc: d.qc, p_qc_note: d.note.trim() || null, p_photo_path: path,
-      p_bag_photo_path: bagPath, p_weight_photo_path: weightPath,
+      p_batch: d.batch.trim(), p_exp_date: d.exp || null, p_qc: d.qc, p_qc_note: d.note.trim() || null, p_photo_path: d.photoPath || null,
+      p_bag_photo_path: d.bagPath || null, p_weight_photo_path: d.weightPath || null,
     })
     setBusy('')
     if (error) { setErr(error.message); return }
@@ -214,9 +255,9 @@ export default function WmsReceivePage() {
                   <div className="mt-3 border-t pt-3 grid grid-cols-2 sm:grid-cols-8 gap-2 items-end">
                     <div className="col-span-1"><label className="block text-xs text-gray-500 mb-1">Qty {done ? '(more)' : ''}</label><input value={d.qty} onChange={e => setDraft(l.id, { qty: e.target.value.replace(/[^0-9.]/g, '') })} placeholder={out > 0 ? String(clean(out)) : '0'} className="w-full border rounded-lg px-2 py-1.5 text-sm text-right tabular-nums" inputMode="decimal" /></div>
                     <div className="col-span-1"><label className="block text-xs text-gray-500 mb-1">Weight photo *</label>
-                      <label className={`block text-center border rounded-lg py-1.5 text-xs cursor-pointer ${d.weightPhoto ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-amber-300 hover:bg-gray-50'}`}>
-                        {d.weightPhoto ? '✓ weight' : '⚖ photo'}
-                        <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) onWeightPhoto(l, f) }} />
+                      <label className={`block text-center border rounded-lg py-1.5 text-xs cursor-pointer ${d.weightPath ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-amber-300 hover:bg-gray-50'}`}>
+                        {photoBusy === `${l.id}-weight` ? '⏳ saving…' : d.weightPath ? '✓ weight' : '⚖ photo'}
+                        <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) onWeightPhoto(l, f); e.target.value = '' }} />
                       </label>
                     </div>
                     <div className="col-span-1"><label className="block text-xs text-gray-500 mb-1">Batch</label><input value={d.batch} onChange={e => setDraft(l.id, { batch: e.target.value })} className="w-full border rounded-lg px-2 py-1.5 text-sm font-mono" /></div>
@@ -229,27 +270,27 @@ export default function WmsReceivePage() {
                     </div>
                     <div className="col-span-1">
                       <label className="block text-xs text-gray-500 mb-1">Product photo *</label>
-                      <label className={`block text-center border rounded-lg py-1.5 text-xs cursor-pointer ${d.photo ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-amber-300 hover:bg-gray-50'}`}>
-                        {d.photo ? '✓ photo' : '📷 add'}
-                        <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) onPhoto(l, f) }} />
+                      <label className={`block text-center border rounded-lg py-1.5 text-xs cursor-pointer ${d.photoPath ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-amber-300 hover:bg-gray-50'}`}>
+                        {photoBusy === `${l.id}-product` ? '⏳ saving…' : d.photoPath ? '✓ photo' : '📷 add'}
+                        <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) onPhoto(l, f); e.target.value = '' }} />
                       </label>
                     </div>
                     <div className="col-span-1">
                       <label className="block text-xs text-gray-500 mb-1">Bag photo *</label>
-                      <label className={`block text-center border rounded-lg py-1.5 text-xs cursor-pointer ${d.bagPhoto ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-amber-300 hover:bg-gray-50'}`}>
-                        {d.bagPhoto ? '✓ bag' : '📷 bag'}
-                        <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) onBagPhoto(l, f) }} />
+                      <label className={`block text-center border rounded-lg py-1.5 text-xs cursor-pointer ${d.bagPath ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-amber-300 hover:bg-gray-50'}`}>
+                        {photoBusy === `${l.id}-bag` ? '⏳ saving…' : d.bagPath ? '✓ bag' : '📷 bag'}
+                        <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) onBagPhoto(l, f); e.target.value = '' }} />
                       </label>
                     </div>
                     <div className="col-span-1">
-                      <button onClick={() => receive(l)} disabled={busy === l.id || !(Number(d.qty) > 0) || !((d.photo && d.bagPhoto && d.weightPhoto) || bypassApproved.has(l.id) || isManager)} className="w-full bg-emerald-700 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium">{busy === l.id ? '…' : 'Receive'}</button>
+                      <button onClick={() => receive(l)} disabled={busy === l.id || !!photoBusy || !((d.qty.trim() ? Number(d.qty) : out) > 0) || !((d.photoPath && d.bagPath && d.weightPath) || bypassApproved.has(l.id) || isManager)} className="w-full bg-emerald-700 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium">{busy === l.id ? '…' : 'Receive'}</button>
                     </div>
                     {d.qc === 'fail' && <div className="col-span-2 sm:col-span-8"><input value={d.note} onChange={e => setDraft(l.id, { note: e.target.value })} placeholder="QC fail reason…" className="w-full border rounded-lg px-2 py-1.5 text-sm" /></div>}
                     <div className="col-span-2 sm:col-span-8 flex items-center gap-3 flex-wrap">
                       {d.preview && <img src={d.preview} alt="product" className="h-14 rounded border" title="Product photo" />}
                       {d.bagPreview && <img src={d.bagPreview} alt="bag" className="h-14 rounded border" title="Bag photo" />}
                       {d.weightPreview && <img src={d.weightPreview} alt="weight" className="h-14 rounded border" title="Weight photo" />}
-                      {!(d.photo && d.bagPhoto && d.weightPhoto) && (
+                      {!(d.photoPath && d.bagPath && d.weightPath) && (
                         bypassApproved.has(l.id) ? <span className="text-[11px] text-emerald-700 font-medium">✓ photo bypass approved — you can receive without photos</span>
                         : bypassPending.has(l.id) ? <span className="text-[11px] text-amber-600">⏳ bypass pending manager approval</span>
                         : isManager ? <span className="text-[11px] text-amber-700">🗒 Photos recommended. As a manager you can still <b>Receive</b> without them (old delivery checked on paper).</span>
