@@ -190,14 +190,14 @@ export default function WmsPurchaseOrdersPage() {
         {err && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg mb-4">{err}</p>}
         {msg && <p className="text-emerald-700 text-sm bg-emerald-50 border border-emerald-200 p-3 rounded-lg mb-4">{msg}</p>}
 
-        <div className="flex items-center gap-2 mb-3 text-sm">
+        <div className="flex flex-wrap items-center gap-2 mb-3 text-sm">
           <span className="text-gray-500">Status:</span>
           <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="border rounded-lg px-3 py-1.5">
             <option value="">All</option>
             {Array.from(new Set(pos.map(o => o.status))).map(s => <option key={s} value={s}>{s}</option>)}
           </select>
           {statusFilter && <button onClick={() => setStatusFilter('')} className="text-emerald-700 hover:underline text-xs">clear</button>}
-          <div className="ml-auto"><WarehouseTabs value={wh} onChange={setWh} /></div>
+          <div className="w-full sm:w-auto sm:ml-auto"><WarehouseTabs value={wh} onChange={setWh} /></div>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">

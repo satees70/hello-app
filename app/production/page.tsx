@@ -487,20 +487,20 @@ export default function ProductionPage() {
           <select value={filter} onChange={e => setFilter(e.target.value as Filter)} className="border rounded-lg px-2 py-1 bg-white">
             {FILTERS.map(f => <option key={f} value={f}>{f}{f !== 'All' && counts[f] ? ` (${counts[f]})` : ''}</option>)}
           </select>
-          <span className="text-gray-500 ml-3">Delivery date:</span>
+          <span className="text-gray-500 sm:ml-3">Delivery date:</span>
           <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="border rounded-lg px-2 py-1 bg-white" />
           <span className="text-gray-400">to</span>
           <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="border rounded-lg px-2 py-1 bg-white" />
           {showFacHeaders && (
             <>
-              <span className="text-gray-500 ml-3">Factory:</span>
+              <span className="text-gray-500 sm:ml-3">Factory:</span>
               <select value={factoryFilter} onChange={e => setFactoryFilter(e.target.value)} className="border rounded-lg px-2 py-1 bg-white">
                 <option value="">All factories</option>
                 {(isHO ? factories : factories.filter(f => factoriesInView.includes(f.code))).map(f => <option key={f.code} value={f.code}>{f.name}</option>)}
               </select>
             </>
           )}
-          <span className="text-gray-500 ml-3">Sort:</span>
+          <span className="text-gray-500 sm:ml-3">Sort:</span>
           <select value={sortBy} onChange={e => setSortBy(e.target.value as 'due_asc' | 'due_desc' | 'batch')} className="border rounded-lg px-2 py-1 bg-white">
             <option value="due_asc">Due date (earliest)</option>
             <option value="due_desc">Due date (latest)</option>
@@ -852,7 +852,7 @@ export default function ProductionPage() {
                             ? <span className="text-red-600">Total shortfall across {exploded.rows.filter(r => r.shortfall > 0).length} material(s).</span>
                             : <span className="text-green-600">Enough stock on hand — <strong>no material request needed</strong>. Go to the Packing Schedule to set the pack line &amp; date.</span>}
                     </div>
-                    <div className="flex items-end gap-3">
+                    <div className="flex flex-wrap items-end gap-3">
                       {!grindingMode && !adhoc && !hasRequest && totalShortfall <= 0 && (
                         <a href="/packing" className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 font-medium whitespace-nowrap">Go to Packing Schedule →</a>
                       )}
