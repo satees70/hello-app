@@ -1,0 +1,170 @@
+'use client'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
+import { supabase } from '@/lib/supabase'
+import { useProfile } from '@/hooks/useProfile'
+
+// WMS Approvals — one place for a warehouse HOD (Head Office / admin) to clear every
+// warehouse-side request in one go, the same "Approve all" idea as the production /
+// Sales-Orders Pending Changes page, but scoped to WMS: photo bypass, stock
+// adjustments, pick-check quantity corrections, and stock counts waiting to be applied.
+
+interface GrnBypass { id: string; item_code: string | null; description: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null }
+interface StockAdj { id: string; factory_code: string | null; item_code: string; description: string | null; direction: string; quantity: number; batch_no: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null }
+interface WmsCheck { id: string; order_no: string | null; note: string | null; corrections: { item_code: string; picked_qty: number; checked_qty: number }[] | null; status: string; requested_by_name: string | null; created_at: string }
+interface CountTask { id: string; count_no: string | null; name: string | null; status: string; completed_by_name: string | null; completed_at: string | null; created_by_name: string | null; created_at: string; wms_count_lines?: { count: number }[] }
+
+type Pend = { key: string; id: string; kind: string; summary: string; by: string | null; at: string; approve: () => Promise<void>; reject: (() => Promise<void>) | null; open?: string }
+
+const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+const KIND_CHIP: Record<string, string> = {
+  'Photo bypass': 'bg-indigo-100 text-indigo-700',
+  'Stock adjustment': 'bg-amber-100 text-amber-700',
+  'Pick check correction': 'bg-sky-100 text-sky-700',
+  'Stock count': 'bg-violet-100 text-violet-700',
+}
+
+export default function WmsApprovalsPage() {
+  const { profile, loading } = useProfile()
+  const isHO = !!profile && (profile.factory_code === 'HEAD_OFFICE' || profile.role === 'admin')
+
+  const [bypasses, setBypasses] = useState<GrnBypass[]>([])
+  const [adjs, setAdjs] = useState<StockAdj[]>([])
+  const [checks, setChecks] = useState<WmsCheck[]>([])
+  const [counts, setCounts] = useState<CountTask[]>([])
+  const [busy, setBusy] = useState('')
+  const [allBusy, setAllBusy] = useState(false)
+  const [err, setErr] = useState(''); const [msg, setMsg] = useState('')
+
+  const load = useCallback(async () => {
+    const [{ data: bp }, { data: sa }, { data: wc }, { data: ct }] = await Promise.all([
+      supabase.from('grn_bypass_requests').select('*').eq('status', 'Pending').order('created_at', { ascending: false }),
+      supabase.from('stock_adjustments').select('*').eq('status', 'Pending').order('created_at', { ascending: false }),
+      supabase.from('wms_check_qty_requests').select('id, order_no, note, corrections, status, requested_by_name, created_at').eq('status', 'Pending').order('created_at', { ascending: false }),
+      supabase.from('wms_count_tasks').select('id, count_no, name, status, completed_by_name, completed_at, created_by_name, created_at, wms_count_lines(count)').eq('status', 'Review').order('completed_at', { ascending: false }),
+    ])
+    setBypasses((bp as GrnBypass[]) || [])
+    setAdjs((sa as StockAdj[]) || [])
+    setChecks((wc as WmsCheck[]) || [])
+    setCounts((ct as CountTask[]) || [])
+  }, [])
+
+  useEffect(() => {
+    if (!profile) return
+    load()
+    supabase.auth.getSession().then(({ data }) => { if (data.session) supabase.realtime.setAuth(data.session.access_token) })
+    const ch = supabase.channel('wms-approvals-feed')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'grn_bypass_requests' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_adjustments' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wms_check_qty_requests' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wms_count_tasks' }, () => load())
+      .subscribe()
+    const timer = setInterval(load, 20000)
+    return () => { supabase.removeChannel(ch); clearInterval(timer) }
+  }, [profile, load])
+
+  // RPC wrappers — each refreshes the list and surfaces a friendly message.
+  const run = useCallback(async (id: string, rpc: string, params: Record<string, string>, okMsg: string) => {
+    setBusy(id); setErr(''); setMsg('')
+    const { error } = await supabase.rpc(rpc, params)
+    setBusy('')
+    if (error) { setErr(error.message); return false }
+    setMsg(okMsg); load(); return true
+  }, [load])
+
+  const approveBypass = (id: string) => run(id, 'approve_grn_bypass', { p_id: id }, 'Photo bypass approved.')
+  const rejectBypass = (id: string) => run(id, 'reject_grn_bypass', { p_id: id }, 'Photo bypass rejected.')
+  const approveAdj = (id: string) => run(id, 'approve_stock_adjustment', { p_id: id }, 'Stock adjustment approved — stock updated.')
+  const rejectAdj = (id: string) => run(id, 'reject_stock_adjustment', { p_id: id }, 'Stock adjustment rejected.')
+  const approveCheck = (id: string) => run(id, 'approve_wms_check_correction', { p_id: id }, 'Pick-check correction approved.')
+  const rejectCheck = (id: string) => run(id, 'reject_wms_check_correction', { p_id: id }, 'Pick-check correction rejected.')
+  const applyCount = (id: string) => run(id, 'wms_apply_count', { p_task_id: id }, 'Stock count applied — stock corrected.')
+
+  const allPending = useMemo<Pend[]>(() => [
+    ...bypasses.map(b => ({ key: `bp|${b.id}`, id: b.id, kind: 'Photo bypass', summary: `${b.item_code || '—'}${b.description ? ' · ' + b.description : ''}${b.reason ? ' · ' + b.reason : ''}`, by: b.requested_by_name, at: b.created_at, approve: () => approveBypass(b.id).then(() => {}), reject: () => rejectBypass(b.id).then(() => {}) })),
+    ...adjs.map(a => ({ key: `sa|${a.id}`, id: a.id, kind: 'Stock adjustment', summary: `${a.item_code}${a.description ? ' — ' + a.description : ''} · ${a.direction === 'in' ? 'IN' : 'OUT'} ${a.quantity}${a.batch_no ? ' · ' + a.batch_no : ''}${a.reason ? ' · ' + a.reason : ''}`, by: a.requested_by_name, at: a.created_at, approve: () => approveAdj(a.id).then(() => {}), reject: () => rejectAdj(a.id).then(() => {}) })),
+    ...checks.map(w => ({ key: `wc|${w.id}`, id: w.id, kind: 'Pick check correction', summary: `${w.order_no || 'order'} · ${(w.corrections || []).map(c => `${c.item_code} ${c.picked_qty}→${c.checked_qty}`).join(', ') || w.note || ''}`, by: w.requested_by_name, at: w.created_at, approve: () => approveCheck(w.id).then(() => {}), reject: () => rejectCheck(w.id).then(() => {}) })),
+    ...counts.map(c => ({ key: `ct|${c.id}`, id: c.id, kind: 'Stock count', summary: `${c.count_no || '—'}${c.name ? ' · ' + c.name : ''} · ${c.wms_count_lines?.[0]?.count ?? 0} line(s) counted`, by: c.completed_by_name || c.created_by_name, at: c.completed_at || c.created_at, approve: () => applyCount(c.id).then(() => {}), reject: null, open: `/wms/counts/${c.id}` })),
+  ].sort((a, b) => (a.at || '').localeCompare(b.at || '')), [bypasses, adjs, checks, counts, approveBypass, rejectBypass, approveAdj, rejectAdj, approveCheck, rejectCheck, applyCount])
+
+  async function approveAll() {
+    if (allPending.length === 0) return
+    const nCounts = counts.length
+    if (!confirm(`Approve all ${allPending.length} pending request(s)?${nCounts ? `\n\nThis includes ${nCounts} stock count(s) — approving them applies the counted stock corrections.` : ''}\n\nEach one is applied and logged.`)) return
+    setAllBusy(true); setErr(''); setMsg('')
+    let ok = 0, fail = 0
+    for (const p of allPending) { try { await p.approve(); ok++ } catch { fail++ } }
+    setAllBusy(false)
+    setMsg(`Processed ${ok} request(s)${fail ? ` · ${fail} failed` : ''}.`); load()
+  }
+
+  if (loading) return <div className="p-8 text-sm text-gray-500">Loading…</div>
+
+  const byKind = (k: string) => allPending.filter(p => p.kind === k).length
+  const CARDS = [
+    { kind: 'Photo bypass', n: byKind('Photo bypass') },
+    { kind: 'Stock adjustment', n: byKind('Stock adjustment') },
+    { kind: 'Pick check correction', n: byKind('Pick check correction') },
+    { kind: 'Stock count', n: byKind('Stock count') },
+  ]
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-1">
+          <div>
+            <h1 className="text-2xl font-bold">WMS Approvals</h1>
+            <p className="text-gray-500 text-sm mt-1">Warehouse requests waiting for Head Office — approve them one by one, or all at once.</p>
+          </div>
+          <button onClick={load} className="text-sm text-emerald-700 hover:underline">↻ Refresh</button>
+        </div>
+
+        {!isHO && <p className="text-sm bg-amber-50 text-amber-700 border border-amber-200 rounded-lg p-3 my-4">Only Head Office can approve these. You can see what’s pending, but the buttons are hidden.</p>}
+        {err && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg my-4">{err}</p>}
+        {msg && <p className="text-emerald-700 text-sm bg-emerald-50 border border-emerald-200 p-3 rounded-lg my-4">✓ {msg}</p>}
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 my-5">
+          {CARDS.map(c => (
+            <div key={c.kind} className="bg-white rounded-xl border shadow-sm px-4 py-3">
+              <div className={`text-2xl font-bold tabular-nums ${c.n ? 'text-gray-900' : 'text-gray-300'}`}>{c.n}</div>
+              <div className="text-xs text-gray-500 mt-0.5">{c.kind}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border">
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b bg-gray-50 flex-wrap">
+            <span className="font-semibold">📋 All pending — <span className="text-emerald-700">{allPending.length}</span> request(s)</span>
+            {isHO && allPending.length > 0 && (
+              <button onClick={approveAll} disabled={allBusy} className="bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium">
+                {allBusy ? 'Approving…' : `✓ Approve all (${allPending.length})`}
+              </button>
+            )}
+          </div>
+          <div className="overflow-auto max-h-[32rem]">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{['Type', 'Details', 'Requested by', 'Action'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
+              <tbody>
+                {allPending.length === 0 && <tr><td colSpan={4} className="text-center py-12 text-gray-400">Nothing pending 🎉</td></tr>}
+                {allPending.map(p => (
+                  <tr key={p.key} className="border-b last:border-0 hover:bg-gray-50 align-top">
+                    <td className="px-3 py-2.5 whitespace-nowrap"><span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${KIND_CHIP[p.kind] || 'bg-gray-100 text-gray-700'}`}>{p.kind}</span></td>
+                    <td className="px-3 py-2.5 min-w-[260px]">{p.summary}{p.open && <Link href={p.open} className="ml-2 text-emerald-700 hover:underline text-xs">open →</Link>}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-xs"><span className="block">{p.by || '—'}</span><span className="block text-gray-400">{fmt(p.at)}</span></td>
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      {isHO ? <div className="flex gap-2">
+                        <button onClick={() => p.approve()} disabled={busy === p.id || allBusy} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50 text-xs">{p.kind === 'Stock count' ? 'Apply' : 'Approve'}</button>
+                        {p.reject && <button onClick={() => p.reject!()} disabled={busy === p.id || allBusy} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50 text-xs">Reject</button>}
+                      </div> : <span className="text-gray-400 text-xs">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-gray-400 px-4 py-2 border-t">Photo bypasses, stock adjustments and pick-check corrections all appear here. “Stock count” rows are counts finished and waiting to be applied — approving one applies its stock corrections. The full Sales/production Pending Changes page still lives under Sales Orders.</p>
+        </div>
+      </div>
+    </div>
+  )
+}
