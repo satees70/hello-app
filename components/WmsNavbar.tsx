@@ -36,6 +36,27 @@ export default function WmsNavbar() {
   const [onWarehouse, setOnWarehouse] = useState(false)   // warehouse.srrieaswari.com
   useEffect(() => { if (typeof window !== 'undefined') setOnWarehouse(window.location.host.startsWith('warehouse.')) }, [])
 
+  // Pending-approval badge on the Approvals link (Head Office / admin only).
+  const isHO = !!profile && (profile.factory_code === 'HEAD_OFFICE' || profile.role === 'admin')
+  const [pending, setPending] = useState(0)
+  useEffect(() => {
+    if (!isHO) { setPending(0); return }
+    let alive = true
+    const count = async () => {
+      const opts = { count: 'exact' as const, head: true }
+      const [a, b, c, d] = await Promise.all([
+        supabase.from('grn_bypass_requests').select('id', opts).eq('status', 'Pending'),
+        supabase.from('stock_adjustments').select('id', opts).eq('status', 'Pending'),
+        supabase.from('wms_check_qty_requests').select('id', opts).eq('status', 'Pending'),
+        supabase.from('wms_count_tasks').select('id', opts).eq('status', 'Review'),
+      ])
+      if (alive) setPending((a.count || 0) + (b.count || 0) + (c.count || 0) + (d.count || 0))
+    }
+    count()
+    const timer = setInterval(count, 30000)
+    return () => { alive = false; clearInterval(timer) }
+  }, [isHO, pathname])
+
   // On the warehouse subdomain, show the same single blue warehouse nav as every
   // other warehouse page — no separate green bar, so it reads as one app.
   if (onWarehouse) {
@@ -49,10 +70,12 @@ export default function WmsNavbar() {
         <Link href="/wms" className="font-bold text-lg mr-4">EASWARI <span className="font-normal text-emerald-200">WMS</span></Link>
         {LINKS.map(l => {
           const active = pathname === l.href
+          const badge = l.href === '/wms/approvals' && pending > 0
           return (
             <Link key={l.href} href={l.href}
-              className={`px-3 py-2 rounded text-sm font-medium ${active ? 'bg-emerald-800' : 'hover:bg-emerald-600'}`}>
+              className={`px-3 py-2 rounded text-sm font-medium ${active ? 'bg-emerald-800' : 'hover:bg-emerald-600'} ${badge ? 'inline-flex items-center gap-1.5' : ''}`}>
               {l.label}
+              {badge && <span className="inline-flex items-center justify-center min-w-[1.15rem] h-[1.15rem] px-1 rounded-full bg-red-500 text-white text-[11px] font-bold leading-none">{pending}</span>}
             </Link>
           )
         })}
