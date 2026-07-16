@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { fetchAll } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
 import { downloadCsv } from '@/lib/csv'
+import WarehouseTabs, { passWh, WhFilter } from '@/components/WarehouseTabs'
 
 interface Stock { item_code: string; description: string | null; location_code: string; batch_no: string; exp_date: string | null; quantity: number; uom: string | null }
 interface Loc { code: string; aisle: string | null }
@@ -20,6 +21,7 @@ export default function ExpiryReportPage() {
   const [aisleByCode, setAisleByCode] = useState<Map<string, string>>(new Map())
   const [win, setWin] = useState<[number, number, number]>([30, 60, 90])
   const [q, setQ] = useState(''); const [zone, setZone] = useState(''); const [bucketF, setBucketF] = useState('')
+  const [wh, setWh] = useState<WhFilter>('all')
 
   useEffect(() => {
     try { const s = localStorage.getItem('wmsExpiryWindows'); if (s) setWin(JSON.parse(s)) } catch { /* ignore */ }
@@ -47,10 +49,11 @@ export default function ExpiryReportPage() {
   const filtered = useMemo(() => {
     const n = q.trim().toLowerCase()
     return enriched
+      .filter(r => passWh(wh, r.description))
       .filter(r => (zone ? r.zone === zone : true))
       .filter(r => (bucketF ? r.bucket === bucketF : true))
       .filter(r => !n || [r.item_code, r.description, r.location_code, r.batch_no].some(v => (v || '').toLowerCase().includes(n)))
-  }, [enriched, q, zone, bucketF])
+  }, [enriched, q, zone, bucketF, wh])
 
   const counts = useMemo(() => {
     const c = { Expired: 0, w1: 0, w2: 0, w3: 0 }
@@ -104,6 +107,7 @@ export default function ExpiryReportPage() {
 
         <div className="flex flex-wrap gap-2 mb-4">
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search item / bin / batch…" className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[180px]" />
+          <WarehouseTabs value={wh} onChange={setWh} />
           <select value={zone} onChange={e => setZone(e.target.value)} className="border rounded-lg px-3 py-2 text-sm"><option value="">All zones</option>{zones.map(z => <option key={z} value={z}>Zone {z}</option>)}</select>
           <select value={bucketF} onChange={e => setBucketF(e.target.value)} className="border rounded-lg px-3 py-2 text-sm"><option value="">All</option><option value="Expired">Expired</option><option value={`≤${w1}d`}>≤{w1}d</option><option value={`≤${w2}d`}>≤{w2}d</option><option value={`≤${w3}d`}>≤{w3}d</option><option value="Later">Later</option></select>
         </div>

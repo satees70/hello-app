@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
+import WarehouseTabs, { passWh, WhFilter } from '@/components/WarehouseTabs'
 
 interface DO { id: string; order_id: string | null; do_number: string | null; customer_name: string | null; order_no: string | null; vehicle: string | null; driver: string | null; remark: string | null; dispatched_by_name: string | null; dispatched_at: string; load_checked_at: string | null; load_checked_by_name: string | null }
 interface DLine { item_code: string; description: string | null; batch_no: string; exp_date: string | null; qty: number; uom: string | null }
@@ -19,6 +20,8 @@ export default function WmsDispatchListPage() {
   const { profile, loading } = useProfile()
   const canEdit = !!profile && can(profile, 'warehouse', 'edit')
   const [rows, setRows] = useState<DO[]>([]); const [q, setQ] = useState('')
+  const [wh, setWh] = useState<WhFilter>('all')
+  const [descsByDo, setDescsByDo] = useState<Record<string, (string | null)[]>>({})
   const [ready, setReady] = useState<Ord[]>([]); const [holding, setHolding] = useState(0)
   const [prodOrders, setProdOrders] = useState<Set<string>>(new Set())   // order_ids that are production
   const [loadCheckFor, setLoadCheckFor] = useState<DO | null>(null); const [loadNote, setLoadNote] = useState('')
@@ -33,6 +36,14 @@ export default function WmsDispatchListPage() {
     ])
     const dos = (data as DO[]) || []
     setRows(dos)
+    // Item descriptions per DO, so the GCH / Other warehouse filter can match on lines.
+    const dids = dos.map(d => d.id)
+    if (dids.length) {
+      const { data: dl } = await supabase.from('wms_dispatch_lines').select('dispatch_id, description').in('dispatch_id', dids)
+      const m: Record<string, (string | null)[]> = {}
+      ;(dl as { dispatch_id: string; description: string | null }[] || []).forEach(l => { (m[l.dispatch_id] ||= []).push(l.description) })
+      setDescsByDo(m)
+    } else setDescsByDo({})
     setReady((ord as Ord[]) || [])
     setHolding(clean(((hold as { quantity: number }[]) || []).reduce((s, r) => s + Number(r.quantity || 0), 0)))
     // Which of these DOs belong to production orders (they skip the customer loading check).
@@ -73,7 +84,7 @@ export default function WmsDispatchListPage() {
   }
 
   if (loading) return <div className="p-8 text-sm text-gray-500">Loading…</div>
-  const filtered = rows.filter(d => { const n = q.trim().toLowerCase(); return !n || [d.do_number, d.customer_name, d.order_no].some(v => (v || '').toLowerCase().includes(n)) })
+  const filtered = rows.filter(d => passWh(wh, descsByDo[d.id])).filter(d => { const n = q.trim().toLowerCase(); return !n || [d.do_number, d.customer_name, d.order_no].some(v => (v || '').toLowerCase().includes(n)) })
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -104,7 +115,10 @@ export default function WmsDispatchListPage() {
         )}
 
         <h2 className="text-sm font-semibold text-gray-700 mb-2">Delivery Orders</h2>
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search DO / customer / order…" className="border rounded-lg px-3 py-2 text-sm w-full mb-4" />
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search DO / customer / order…" className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[180px]" />
+          <WarehouseTabs value={wh} onChange={setWh} />
+        </div>
         <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b"><tr>{['DO No', 'Customer', 'Order', 'Vehicle', 'Dispatched', 'By', ''].map(h => <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
