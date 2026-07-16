@@ -5,10 +5,16 @@ build
 *.log
 .env
 .env*.local
+*.db
+*.db-journal
 dev.db
 dev.db-journal
+test.db
+test.db-journal
 prisma/dev.db
 prisma/dev.db-journal
+prisma/test.db
+prisma/test.db-journal
 /uploads
 .DS_Store
 next-env.d.ts
