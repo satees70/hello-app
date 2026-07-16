@@ -18,6 +18,9 @@ interface DO {
   dispatch_order_lines: Line[]; material_returns: Ret[]
 }
 type Item = Line & { kind: 'fg' | 'return'; reason?: string | null }
+// A message in a DO's discussion thread (reuses the shared `discussions` table, channel
+// 'goods_received', topic = the DO number).
+interface Note { id: string; author_name: string | null; body: string; created_at: string; topic: string | null }
 const itemsOf = (o: DO): Item[] => [
   ...(o.dispatch_order_lines || []).map(l => ({ ...l, kind: 'fg' as const })),
   ...(o.material_returns || []).map(r => ({ ...r, kind: 'return' as const })),
@@ -59,6 +62,10 @@ export default function WarehouseReceivingPage() {
   const [wh, setWh] = useState<WhFilter>('all')
   const [paperPending, setPaperPending] = useState<Set<string>>(new Set())   // dispatch ids with a pending WHOLE-DO paper-receipt request
   const [paperLinePending, setPaperLinePending] = useState<Set<string>>(new Set())   // line ids with a pending paper-receipt request
+  const [notes, setNotes] = useState<Record<string, Note[]>>({})   // discussion messages keyed by DO number
+  const [openDisc, setOpenDisc] = useState<Set<string>>(new Set())   // DO ids whose thread is expanded
+  const [replyText, setReplyText] = useState<Record<string, string>>({})
+  const [busyDisc, setBusyDisc] = useState('')
 
   const canReceive = !!profile && (!!profile.warehouse_user || profile.factory_code === 'HEAD_OFFICE' || profile.role === 'admin')
   // A manager (Head Office / admin) can confirm items WITHOUT a photo right away — used to clear
@@ -86,6 +93,14 @@ export default function WarehouseReceivingPage() {
     const doSet = new Set<string>(); const lineSet = new Set<string>()
     ;((pr as { dispatch_id: string; line_id: string | null }[]) || []).forEach(x => { if (x.line_id) lineSet.add(x.line_id); else doSet.add(x.dispatch_id) })
     setPaperPending(doSet); setPaperLinePending(lineSet)
+    // Discussion threads for these DOs (issues raised + replies).
+    const doNums = (((data as unknown as DO[]) || []).map(d => d.do_number).filter(Boolean)) as string[]
+    if (doNums.length) {
+      const { data: dm } = await supabase.from('discussions').select('id, author_name, body, created_at, topic').eq('channel', 'goods_received').in('topic', doNums).order('created_at', { ascending: true })
+      const nm: Record<string, Note[]> = {}
+      ;((dm as Note[]) || []).forEach(x => { if (x.topic) (nm[x.topic] ||= []).push(x) })
+      setNotes(nm)
+    } else setNotes({})
     setLoading(false)
   }, [])
   useEffect(() => { load() }, [load])
@@ -157,6 +172,30 @@ export default function WarehouseReceivingPage() {
     if (e) { setError(/request_do_paper_line_receipt|line_id/.test(e.message) && /does not exist|schema cache|could not find/i.test(e.message) ? 'This needs a database update — run db/2026-07-do-paper-receipt-line.sql in the Supabase SQL editor.' : needsDbMsg(e.message)); return }
     setPaperLinePending(s => new Set(s).add(item.id))
     setSuccess(`Paper-receipt request sent for ${item.item_code} — waiting for Head Office.`)
+  }
+  // Post a message to a DO's discussion thread (channel goods_received, topic = DO number);
+  // mentioning Head Office + the sending factory notifies them.
+  async function postDisc(o: DO, text: string) {
+    if (!text.trim() || !o.do_number) return
+    setBusyDisc(o.id); setError(null)
+    const { data, error: e } = await supabase.from('discussions').insert({
+      channel: 'goods_received', topic: o.do_number, author_id: profile?.id, author_name: profile?.full_name || null,
+      body: text.trim(), mention_factories: ['HEAD_OFFICE', ...(o.factory_code && o.factory_code !== 'HEAD_OFFICE' ? [o.factory_code] : [])],
+    }).select('id, author_name, body, created_at, topic').single()
+    setBusyDisc('')
+    if (e) { setError(e.message); return }
+    setNotes(m => ({ ...m, [o.do_number!]: [...(m[o.do_number!] || []), data as Note] }))
+    setOpenDisc(s => new Set(s).add(o.id))
+    setReplyText(r => ({ ...r, [o.id]: '' }))
+  }
+  // Warehouse raises a discrepancy (qty / batch not tally) → starts / adds to the DO thread.
+  async function raiseIssue(o: DO) {
+    const kind = window.prompt(`Raise an issue for ${o.do_number} — what doesn't tally?\n\nType: qty / batch / other`, 'qty')
+    if (kind === null) return
+    const note = window.prompt(`Describe it (item code, and expected vs actual qty/batch):`, '')
+    if (note === null || !note.trim()) return
+    await postDisc(o, `⚠ ${(kind || 'issue').trim().toUpperCase()} not tally — ${note.trim()}`)
+    setSuccess(`Issue raised on ${o.do_number} — Head Office & the factory notified. Discuss below or in the Discussion page.`)
   }
   async function undoItem(item: Item) {
     setError(null); setSuccess(null)
@@ -239,6 +278,8 @@ export default function WarehouseReceivingPage() {
                               {busyDo === o.id ? 'Sending…' : '🗒 Request received on paper (HOD approval)'}
                             </button>
                       )}
+                      {canReceive && o.do_number && <button onClick={() => raiseIssue(o)} className="text-xs px-2.5 py-1 rounded-lg border border-red-300 text-red-700 bg-red-50 hover:bg-red-100 whitespace-nowrap" title="Qty / batch doesn't tally? Raise an issue and start a discussion.">⚠ Raise issue</button>}
+                      {o.do_number && <button onClick={() => setOpenDisc(s => { const n = new Set(s); n.has(o.id) ? n.delete(o.id) : n.add(o.id); return n })} className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 whitespace-nowrap">💬 {(notes[o.do_number] || []).length ? `Discussion (${(notes[o.do_number] || []).length})` : 'Discussion'}</button>}
                     </div>
 
                     <div className="px-4 py-2 border-b flex flex-wrap items-center gap-2 text-sm bg-gray-50/60">
@@ -283,6 +324,31 @@ export default function WarehouseReceivingPage() {
                       ))}
                       {items.length === 0 && <div className="px-4 py-3 text-gray-400 text-sm">No items on this delivery order.</div>}
                     </div>
+
+                    {openDisc.has(o.id) && o.do_number && (
+                      <div className="px-4 py-3 border-t bg-gray-50/60">
+                        <div className="text-xs font-semibold text-gray-600 mb-2">💬 Discussion — {o.do_number} <span className="text-gray-400 font-normal">(Head Office & the factory see this)</span></div>
+                        <div className="space-y-2 max-h-56 overflow-auto mb-2">
+                          {(notes[o.do_number] || []).length === 0 && <div className="text-xs text-gray-400">No messages yet — raise an issue or type below.</div>}
+                          {(notes[o.do_number] || []).map(n => (
+                            <div key={n.id} className="text-sm">
+                              <span className="font-medium">{n.author_name || 'Someone'}</span>
+                              <span className="text-gray-400 text-xs ml-2">{fmt(n.created_at)}</span>
+                              <div className="text-gray-700 whitespace-pre-wrap">{n.body}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {canReceive && (
+                          <div className="flex gap-2">
+                            <input value={replyText[o.id] || ''} onChange={e => setReplyText(r => ({ ...r, [o.id]: e.target.value }))}
+                              onKeyDown={e => { if (e.key === 'Enter') postDisc(o, replyText[o.id] || '') }}
+                              placeholder="Type a message…" className="flex-1 border rounded-lg px-3 py-1.5 text-sm" />
+                            <button onClick={() => postDisc(o, replyText[o.id] || '')} disabled={busyDisc === o.id || !(replyText[o.id] || '').trim()}
+                              className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-emerald-700 disabled:opacity-50">Send</button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )
               })}
