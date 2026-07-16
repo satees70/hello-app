@@ -96,6 +96,7 @@ export default function DispatchPage() {
   const [returnCart, setReturnCart] = useState<CartReturn[]>([])
   const [vehicleByFac, setVehicleByFac] = useState<Record<string, string>>({})   // vehicle no. keyed by factory, set before creating each DO
   const [lorries, setLorries] = useState<string[]>([])   // APPROVED lorry plates only (no free-typed plates allowed)
+  const [crew, setCrew] = useState<string[]>([])   // drivers / crew names (approved)
   const [recentQ, setRecentQ] = useState('')   // search Recent delivery orders by DO no. / item / location
   const [lorryReqs, setLorryReqs] = useState<{ id: string; factory_code: string; kind: string; lorry_type: string; note: string | null; destination: string | null; status: string; fulfilled_lorry: string | null; requested_by_name: string | null; requested_at: string }[]>([])
   const [lrFactory, setLrFactory] = useState('')     // which factory to request a lorry for
@@ -172,8 +173,9 @@ export default function DispatchPage() {
     setLorryReqs(lr || [])
     // Approved lorries only — the DO vehicle must be picked from this list (no free-typed plates).
     const { data: dr } = await supabase.from('delivery_resources')
-      .select('name').eq('kind', 'lorry').eq('active', true).eq('approved', true).order('name')
-    setLorries([...new Set((dr || []).map(r => r.name).filter(Boolean))] as string[])
+      .select('kind, name').eq('active', true).eq('approved', true).order('name')
+    setLorries([...new Set((dr || []).filter(r => r.kind === 'lorry').map(r => r.name).filter(Boolean))] as string[])
+    setCrew([...new Set((dr || []).filter(r => r.kind !== 'lorry').map(r => r.name).filter(Boolean))] as string[])
     // SO number(s) per dispatched batch, so each delivery line can show its order.
     const batchIds = [...new Set(((o as DOrder[]) || []).flatMap(d => (d.dispatch_order_lines || []).map(l => l.batch_id).filter(Boolean)))] as string[]
     const sob: Record<string, string> = {}
@@ -409,8 +411,17 @@ export default function DispatchPage() {
     setSuccess(`Driver requested for ${factoryName(fac)} — the warehouse has been notified.`)
     load()
   }
+  // Key the lorry / driver straight onto the DO here (for when it wasn't assigned on the
+  // Lorry Internal Transfer page), so the delivery can go "Lorry out" without leaving this page.
+  async function assignTransport(o: DOrder, kind: 'lorry' | 'driver', value: string) {
+    setBusy(true); setError('')
+    const { error: e } = await supabase.rpc('assign_do_transport', { p_do_id: o.id, p_kind: kind, p_value: value || null })
+    setBusy(false)
+    if (e) { setError(e.message); return }
+    setOrders(prev => prev.map(x => x.id === o.id ? { ...x, ...(kind === 'lorry' ? { vehicle: value || null } : { driver_name: value || null }) } : x))
+  }
   async function markLorryOut(o: DOrder, out: boolean) {
-    if (out && !o.vehicle) { setError('Assign a lorry first on Lorry Internal Transfer.'); return }
+    if (out && !o.vehicle) { setError('Choose a lorry first (in the Lorry / Driver column).'); return }
     if (out && !confirm(`Confirm lorry ${o.vehicle} has left production for ${o.do_number}?`)) return
     setBusy(true); setError('')
     const { error: e } = await supabase.rpc('mark_lorry_out', { p_do_id: o.id, p_out: out })
@@ -1000,11 +1011,27 @@ export default function DispatchPage() {
                   <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{o.do_number}</td>
                   {multiFac && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(o.factory_code)}</td>}
                   <td className="px-3 py-2 whitespace-nowrap">
-                    <div className="text-gray-700">🚚 {o.vehicle || <span className="text-gray-300">—</span>}</div>
-                    <div className="text-gray-700">👤 {o.driver_name || <span className="text-gray-300">—</span>}</div>
+                    {/* Lorry: show it if set; otherwise (not departed, own factory) let staff pick one here. */}
+                    <div className="text-gray-700">🚚 {o.vehicle
+                      ? o.vehicle
+                      : (!o.departed_at && canFac(o.factory_code)
+                          ? <select value="" disabled={busy} onChange={e => assignTransport(o, 'lorry', e.target.value)} className="border rounded px-1 py-0.5 text-xs w-36" title="Choose an approved lorry">
+                              <option value="">Choose lorry…</option>
+                              {lorries.map(l => <option key={l} value={l}>{l}</option>)}
+                            </select>
+                          : <span className="text-gray-300">—</span>)}</div>
+                    {/* Driver: same idea — pick one here if none assigned. */}
+                    <div className="text-gray-700 mt-0.5">👤 {o.driver_name
+                      ? o.driver_name
+                      : (!o.departed_at && canFac(o.factory_code)
+                          ? <select value="" disabled={busy} onChange={e => assignTransport(o, 'driver', e.target.value)} className="border rounded px-1 py-0.5 text-xs w-36" title="Choose a driver">
+                              <option value="">Choose driver…</option>
+                              {crew.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                          : <span className="text-gray-300">—</span>)}</div>
                     {o.departed_at
                       ? <div className="mt-1 text-green-600 text-xs">✅ Out {fmt(o.departed_at)}{canFac(o.factory_code) && !o.received_at && <button onClick={() => markLorryOut(o, false)} className="ml-1 text-gray-400 hover:underline">undo</button>}</div>
-                      : canFac(o.factory_code) && <button onClick={() => markLorryOut(o, true)} disabled={busy} className="mt-1 bg-teal-600 text-white px-2 py-1 rounded text-xs hover:bg-teal-700 disabled:opacity-50">🚚 Lorry out</button>}
+                      : canFac(o.factory_code) && <button onClick={() => markLorryOut(o, true)} disabled={busy || !o.vehicle} title={!o.vehicle ? 'Choose a lorry first' : ''} className="mt-1 bg-teal-600 text-white px-2 py-1 rounded text-xs hover:bg-teal-700 disabled:opacity-50">🚚 Lorry out</button>}
                     {/* Warehouse receives per item on the Warehouse page */}
                     {o.departed_at && (o.received_at
                       ? <div className="mt-1 text-xs text-green-700">
