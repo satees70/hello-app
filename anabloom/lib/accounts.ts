@@ -71,7 +71,7 @@ export const CODE = {
 } as const;
 
 // Codes that represent bank cash (reconcilable).
-export const CASH_CODES = [CODE.CASH, CODE.CASH_ON_HAND];
+export const CASH_CODES: string[] = [CODE.CASH, CODE.CASH_ON_HAND];
 
 // Not directly postable through normal entry.
 export const NON_POSTABLE_CODES = [CODE.RETAINED];

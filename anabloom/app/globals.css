@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  background: #f7f6f2;
+  color: #1d2a24;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Tabular monospace numerals for money */
+.num {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
+@layer components {
+  .card {
+    @apply bg-card border border-line rounded-lg;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-1 rounded-md px-3 py-2 text-sm font-medium transition-colors;
+  }
+  .btn-primary {
+    @apply btn bg-primary text-white hover:bg-[#264c40];
+  }
+  .btn-ghost {
+    @apply btn border border-line bg-white text-ink hover:bg-canvas;
+  }
+  .btn-danger {
+    @apply btn bg-expense text-white hover:bg-[#9c3a33];
+  }
+  .input {
+    @apply w-full rounded-md border border-line bg-white px-3 py-2 text-sm outline-none focus:border-primary;
+  }
+  .label {
+    @apply block text-xs font-medium text-muted mb-1;
+  }
+  .th {
+    @apply text-left text-xs font-semibold uppercase tracking-wide text-muted px-3 py-2;
+  }
+  .td {
+    @apply px-3 py-2 text-sm border-t border-line;
+  }
+  .badge {
+    @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
+  }
+}
+
+/* Print styles: hide nav & controls, clean report layout */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: white;
+  }
+  .card {
+    border: none;
+  }
+  main {
+    padding: 0 !important;
+  }
+}
