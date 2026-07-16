@@ -134,11 +134,14 @@ from the current schema needs no migration — just `prisma db push` + `npm run 
 
 ## 6. SQLite → Supabase (Postgres) switch & deploy
 
-### 6a. Switch the provider
-In `prisma/schema.prisma` change the datasource provider to `postgresql`, then
-set `DATABASE_URL` (pooled, port 6543, `pgbouncer=true`) and `DIRECT_URL`
-(direct, port 5432) to the dedicated Supabase project. Enums are modelled as
-String columns so the same schema targets both engines; money is Prisma Decimal.
+### 6a. Provider selection (automatic)
+The Prisma datasource provider is chosen from `DATABASE_URL` at build time by
+`scripts/prepare-schema.mjs` (wired into `npm run build` and `npm run db:push`):
+a `postgres://` URL → `postgresql`, a `file:` URL → `sqlite`. So Vercel builds
+against Postgres and local dev stays on SQLite with **no manual schema edits**.
+Just set `DATABASE_URL` (pooled, port 6543, `pgbouncer=true`) and `DIRECT_URL`
+(direct, port 5432) to the dedicated Supabase project. Enums are String columns
+so the same schema targets both engines; money is Prisma Decimal.
 
 ### 6b. Supabase (dashboard — only you can do this)
 1. https://supabase.com/dashboard → **New project** (suggested name `anabloom`;
