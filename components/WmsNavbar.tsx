@@ -25,6 +25,7 @@ const LINKS = [
   { href: '/wms/counts', label: 'Stock Counts' },
   { href: '/wms/approvals', label: 'Approvals' },
   { href: '/wms/reports/expiry', label: 'Expiry' },
+  { href: '/wms/reports/stock-card', label: 'Stock Card' },
   { href: '/wms/reports', label: 'Reports' },
   { href: '/wms/labels', label: 'Labels' },
   { href: '/wms/movements', label: 'Movements' },

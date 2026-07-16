@@ -101,7 +101,7 @@ export default function StockReportsPage() {
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-          <div><h1 className="text-2xl font-bold">Stock Reports</h1><p className="text-gray-500 text-sm mt-1">On-hand, aging and low-stock. <Link href="/wms/reports/expiry" className="text-emerald-700 underline">Expiry alerts</Link> · <Link href="/wms/reports/activity" className="text-emerald-700 underline">Activity</Link></p></div>
+          <div><h1 className="text-2xl font-bold">Stock Reports</h1><p className="text-gray-500 text-sm mt-1">On-hand, aging and low-stock. <Link href="/wms/reports/stock-card" className="text-emerald-700 underline">Stock card</Link> · <Link href="/wms/reports/expiry" className="text-emerald-700 underline">Expiry alerts</Link> · <Link href="/wms/reports/activity" className="text-emerald-700 underline">Activity</Link></p></div>
           <button onClick={() => downloadCsv(`Stock_${view}.csv`, report.headers, filtered)} className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">⬇ CSV</button>
         </div>
 
