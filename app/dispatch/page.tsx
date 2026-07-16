@@ -97,6 +97,9 @@ export default function DispatchPage() {
   const [vehicleByFac, setVehicleByFac] = useState<Record<string, string>>({})   // vehicle no. keyed by factory, set before creating each DO
   const [lorries, setLorries] = useState<string[]>([])   // APPROVED lorry plates only (no free-typed plates allowed)
   const [crew, setCrew] = useState<string[]>([])   // drivers / crew names (approved)
+  const [editLD, setEditLD] = useState<Set<string>>(new Set())   // `${doId}:lorry|driver` currently being edited
+  const ldKey = (id: string, kind: 'lorry' | 'driver') => `${id}:${kind}`
+  const toggleLD = (id: string, kind: 'lorry' | 'driver') => setEditLD(s => { const n = new Set(s); const k = ldKey(id, kind); n.has(k) ? n.delete(k) : n.add(k); return n })
   const [recentQ, setRecentQ] = useState('')   // search Recent delivery orders by DO no. / item / location
   const [lorryReqs, setLorryReqs] = useState<{ id: string; factory_code: string; kind: string; lorry_type: string; note: string | null; destination: string | null; status: string; fulfilled_lorry: string | null; requested_by_name: string | null; requested_at: string }[]>([])
   const [lrFactory, setLrFactory] = useState('')     // which factory to request a lorry for
@@ -419,6 +422,7 @@ export default function DispatchPage() {
     setBusy(false)
     if (e) { setError(e.message); return }
     setOrders(prev => prev.map(x => x.id === o.id ? { ...x, ...(kind === 'lorry' ? { vehicle: value || null } : { driver_name: value || null }) } : x))
+    setEditLD(s => { const n = new Set(s); n.delete(ldKey(o.id, kind)); return n })
   }
   async function markLorryOut(o: DOrder, out: boolean) {
     if (out && !o.vehicle) { setError('Choose a lorry first (in the Lorry / Driver column).'); return }
@@ -1011,24 +1015,30 @@ export default function DispatchPage() {
                   <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{o.do_number}</td>
                   {multiFac && <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{factoryName(o.factory_code)}</td>}
                   <td className="px-3 py-2 whitespace-nowrap">
-                    {/* Lorry: show it if set; otherwise (not departed, own factory) let staff pick one here. */}
-                    <div className="text-gray-700">🚚 {o.vehicle
-                      ? o.vehicle
-                      : (!o.departed_at && canFac(o.factory_code)
-                          ? <select value="" disabled={busy} onChange={e => assignTransport(o, 'lorry', e.target.value)} className="border rounded px-1 py-0.5 text-xs w-36" title="Choose an approved lorry">
-                              <option value="">Choose lorry…</option>
-                              {lorries.map(l => <option key={l} value={l}>{l}</option>)}
-                            </select>
-                          : <span className="text-gray-300">—</span>)}</div>
-                    {/* Driver: same idea — pick one here if none assigned. */}
-                    <div className="text-gray-700 mt-0.5">👤 {o.driver_name
-                      ? o.driver_name
-                      : (!o.departed_at && canFac(o.factory_code)
-                          ? <select value="" disabled={busy} onChange={e => assignTransport(o, 'driver', e.target.value)} className="border rounded px-1 py-0.5 text-xs w-36" title="Choose a driver">
-                              <option value="">Choose driver…</option>
-                              {crew.map(c => <option key={c} value={c}>{c}</option>)}
-                            </select>
-                          : <span className="text-gray-300">—</span>)}</div>
+                    {/* Lorry: editable (choose / change) until the DO is received. */}
+                    <div className="text-gray-700">🚚 {(() => {
+                      const editable = canFac(o.factory_code) && !o.received_at
+                      const showSelect = editable && (!o.vehicle || editLD.has(ldKey(o.id, 'lorry')))
+                      if (showSelect) return (
+                        <select value={o.vehicle || ''} disabled={busy} onChange={e => assignTransport(o, 'lorry', e.target.value)} className="border rounded px-1 py-0.5 text-xs w-36" title="Choose an approved lorry">
+                          <option value="">Choose lorry…</option>
+                          {lorries.map(l => <option key={l} value={l}>{l}</option>)}
+                          {o.vehicle && !lorries.includes(o.vehicle) && <option value={o.vehicle}>{o.vehicle}</option>}
+                        </select>)
+                      return <>{o.vehicle || <span className="text-gray-300">—</span>}{editable && <button onClick={() => toggleLD(o.id, 'lorry')} className="ml-1 text-gray-400 hover:underline text-[11px]">change</button>}</>
+                    })()}</div>
+                    {/* Driver: same — choose / change until received. */}
+                    <div className="text-gray-700 mt-0.5">👤 {(() => {
+                      const editable = canFac(o.factory_code) && !o.received_at
+                      const showSelect = editable && (!o.driver_name || editLD.has(ldKey(o.id, 'driver')))
+                      if (showSelect) return (
+                        <select value={o.driver_name || ''} disabled={busy} onChange={e => assignTransport(o, 'driver', e.target.value)} className="border rounded px-1 py-0.5 text-xs w-36" title="Choose a driver">
+                          <option value="">Choose driver…</option>
+                          {crew.map(c => <option key={c} value={c}>{c}</option>)}
+                          {o.driver_name && !crew.includes(o.driver_name) && <option value={o.driver_name}>{o.driver_name}</option>}
+                        </select>)
+                      return <>{o.driver_name || <span className="text-gray-300">—</span>}{editable && <button onClick={() => toggleLD(o.id, 'driver')} className="ml-1 text-gray-400 hover:underline text-[11px]">change</button>}</>
+                    })()}</div>
                     {o.departed_at
                       ? <div className="mt-1 text-green-600 text-xs">✅ Out {fmt(o.departed_at)}{canFac(o.factory_code) && !o.received_at && <button onClick={() => markLorryOut(o, false)} className="ml-1 text-gray-400 hover:underline">undo</button>}</div>
                       : canFac(o.factory_code) && <button onClick={() => markLorryOut(o, true)} disabled={busy || !o.vehicle} title={!o.vehicle ? 'Choose a lorry first' : ''} className="mt-1 bg-teal-600 text-white px-2 py-1 rounded text-xs hover:bg-teal-700 disabled:opacity-50">🚚 Lorry out</button>}
