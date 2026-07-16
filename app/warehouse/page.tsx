@@ -210,7 +210,7 @@ export default function WarehouseReceivingPage() {
                         <button onClick={() => confirmDoPaper(o)} disabled={busyDo === o.id}
                           title="Confirm every remaining item on this DO without photos (received on paper)."
                           className="text-xs px-2.5 py-1 rounded-lg border border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 whitespace-nowrap">
-                          {busyDo === o.id ? 'Confirming…' : '🗒 Received on paper (no photos)'}
+                          {busyDo === o.id ? 'Confirming…' : '🗒 Mark received on paper'}
                         </button>
                       )}
                       {canReceive && !isManager && !o.received_at && done < items.length && items.length > 0 && (
