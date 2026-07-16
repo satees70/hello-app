@@ -86,6 +86,15 @@ export default function WmsCountsPage() {
     router.push(`/wms/counts/${data as string}`)
   }
 
+  // Cancel a count that's still Counting or in Review (trial run / duplicate / abandoned).
+  async function cancelCount(t: Task) {
+    if (!canEdit) return
+    if (!confirm(`Cancel ${t.count_no || 'this count'}? It won't change any stock. This can't be undone.`)) return
+    const { error } = await supabase.rpc('wms_cancel_count', { p_task_id: t.id })
+    if (error) { setErr(/wms_cancel_count/.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-cancel-count.sql in the Supabase SQL editor.' : error.message); return }
+    load()
+  }
+
   if (loading) return <div className="p-8 text-sm text-gray-500">Loading…</div>
 
   return (
@@ -95,6 +104,8 @@ export default function WmsCountsPage() {
           <div><h1 className="text-2xl font-bold">Stock Counts</h1><p className="text-gray-500 text-sm mt-1">Count a section (or the whole warehouse) and correct the stock — with your approval.</p></div>
           {canEdit && <button onClick={() => { setShowForm(v => !v); setErr('') }} className="bg-emerald-700 text-white px-4 py-2 rounded-lg hover:bg-emerald-800 text-sm font-medium">{showForm ? 'Close' : '+ New count'}</button>}
         </div>
+
+        {err && !showForm && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-2 rounded mb-4">{err}</p>}
 
         {tasks.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
@@ -155,7 +166,10 @@ export default function WmsCountsPage() {
                   <td className="px-4 py-2.5"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CHIP[t.status] || 'bg-gray-100'}`}>{t.status}</span></td>
                   <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">{fmtTime(t.created_at)}</td>
                   <td className="px-4 py-2.5 text-gray-500 text-xs">{t.created_by_name}</td>
-                  <td className="px-4 py-2.5"><Link href={`/wms/counts/${t.id}`} className="text-emerald-700 font-medium hover:underline text-xs">{t.status === 'Applied' ? 'View' : 'Open →'}</Link></td>
+                  <td className="px-4 py-2.5 whitespace-nowrap">
+                    <Link href={`/wms/counts/${t.id}`} className="text-emerald-700 font-medium hover:underline text-xs">{t.status === 'Applied' ? 'View' : 'Open →'}</Link>
+                    {canEdit && (t.status === 'Counting' || t.status === 'Review') && <button onClick={() => cancelCount(t)} className="ml-3 text-red-500 hover:underline text-xs">Cancel</button>}
+                  </td>
                 </tr>
               ))}
             </tbody>
