@@ -37,17 +37,26 @@ export default function WmsPutawayPage() {
   const [err, setErr] = useState(''); const [ok, setOk] = useState('')
   const [scanFor, setScanFor] = useState<{ row: Stock; bin: string } | null>(null)
   const [wh, setWh] = useState<WhFilter>('all')
+  // Outstanding pick demand per item: orders that ran short (no-stock) still waiting for this item.
+  const [demand, setDemand] = useState<Record<string, { qty: number; lines: string[]; orders: Set<string> }>>({})
 
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
-    const [it, lo, st, mv] = await Promise.all([
+    const [it, lo, st, mv, { data: nos }] = await Promise.all([
       fetchAll<Item>('items', 'code, description, unit', 'code'),
       fetchAll<Loc>('wms_locations', 'id, code, location_type, active, pick_sequence', 'code'),
       fetchAll<Stock>('wms_stock', 'id, item_code, description, location_id, location_code, batch_no, exp_date, quantity'),
       supabase.from('wms_stock_moves').select('id, item_code, description, to_location_code, batch_no, quantity, moved_by_name, created_at')
         .in('move_type', ['putaway', 'receipt']).order('created_at', { ascending: false }).limit(30),
+      supabase.from('wms_order_lines').select('id, item_code, no_stock_qty, order_id').eq('no_stock', true).gt('no_stock_qty', 0),
     ])
     setItems(it); setLocs(lo); setStock(st); setRecent((mv.data as Move[]) || [])
+    const dem: Record<string, { qty: number; lines: string[]; orders: Set<string> }> = {}
+    ;((nos as { id: string; item_code: string; no_stock_qty: number; order_id: string | null }[]) || []).forEach(l => {
+      const d = (dem[l.item_code] ||= { qty: 0, lines: [], orders: new Set() })
+      d.qty = clean(d.qty + Number(l.no_stock_qty || 0)); d.lines.push(l.id); if (l.order_id) d.orders.add(l.order_id)
+    })
+    setDemand(dem)
   }
 
   const locByCode = useMemo(() => new Map(locs.map(l => [l.code.toUpperCase(), l])), [locs])
@@ -101,6 +110,21 @@ export default function WmsPutawayPage() {
     setBinEdits(b => { const n = { ...b }; delete n[row.id]; return n })
     setQtyEdits(m => { const n = { ...m }; delete n[row.id]; return n })
     load()
+  }
+
+  // Stock has arrived for an item that orders were waiting on → re-open those orders for picking
+  // (they reappear in Orders to Pick, so pickers know stock is in).
+  async function releaseToPicking(itemCode: string) {
+    const d = demand[itemCode]; if (!d || !d.lines.length) return
+    if (!confirm(`Stock has arrived for ${itemCode}.\n\nRe-open ${d.orders.size} order(s) waiting on it for picking? Keep the ${fmtQty(d.qty)} they need here (or on a pick bin) so it can be picked.`)) return
+    setBusy('rel' + itemCode); setErr(''); setOk('')
+    let ok = 0
+    for (const id of d.lines) {
+      const { error } = await supabase.rpc('wms_reopen_line', { p_line_id: id })
+      if (error) { setErr(/wms_reopen_line/.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-repick-outstanding.sql in the Supabase SQL editor.' : error.message); setBusy(''); return }
+      ok++
+    }
+    setBusy(''); setOk(`Re-opened ${ok} order line(s) for ${itemCode} — now in Orders to Pick.`); load()
   }
 
   async function submitManual(e: React.FormEvent) {
@@ -165,6 +189,14 @@ export default function WmsPutawayPage() {
                           className="border border-emerald-600 text-emerald-700 px-4 py-1.5 rounded-lg hover:bg-emerald-50 disabled:opacity-50 text-sm font-medium">{busy === row.id ? '…' : '✓ Put away'}</button>
                         {sug && !binEdits[row.id] && <span className="text-[11px] text-emerald-700 basis-full sm:basis-auto">→ {sug.code} ({sug.why})</span>}
                       </>}
+                      {demand[row.item_code] && (
+                        <div className="basis-full flex flex-wrap items-center gap-2 text-xs bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 text-amber-800 mt-1">
+                          <span>⚠ <b>{fmtQty(demand[row.item_code].qty)}</b> needed for <b>{demand[row.item_code].orders.size}</b> outstanding order(s) — keep that much here for picking, don’t shelf it all.</span>
+                          {canEdit && <button onClick={() => releaseToPicking(row.item_code)} disabled={busy === 'rel' + row.item_code}
+                            className="ml-auto border border-amber-400 bg-white text-amber-800 rounded px-2 py-1 hover:bg-amber-100 disabled:opacity-50 font-medium whitespace-nowrap">
+                            {busy === 'rel' + row.item_code ? '…' : '🔄 Stock arrived — send to picking'}</button>}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
