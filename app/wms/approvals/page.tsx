@@ -179,7 +179,8 @@ export default function WmsApprovalsPage() {
               </button>
             )}
           </div>
-          <div className="overflow-auto max-h-[32rem]">
+          {/* Desktop: table */}
+          <div className="hidden sm:block overflow-auto max-h-[32rem]">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{['Type', 'Details', 'Requested by', 'Action'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
               <tbody>
@@ -199,6 +200,27 @@ export default function WmsApprovalsPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* Mobile: one card per pending request */}
+          <div className="sm:hidden p-3 space-y-2">
+            {allPending.length === 0 && <div className="text-center py-8 text-gray-400 text-sm">Nothing pending 🎉</div>}
+            {allPending.map(p => (
+              <div key={p.key} className="bg-white rounded-xl border shadow-sm p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${KIND_CHIP[p.kind] || 'bg-gray-100 text-gray-700'}`}>{p.kind}</span>
+                  <span className="text-xs text-gray-400 text-right shrink-0">{fmt(p.at)}</span>
+                </div>
+                <div className="text-sm mt-2 leading-snug">{p.summary}{p.open && <Link href={p.open} className="ml-2 text-emerald-700 hover:underline text-xs">open →</Link>}</div>
+                <div className="text-xs text-gray-400 mt-1">{p.by || '—'}</div>
+                {isHO && (
+                  <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-2.5 pt-2 border-t text-xs">
+                    <button onClick={() => p.approve()} disabled={busy === p.id || allBusy} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">{p.kind === 'Stock count' ? 'Apply' : 'Approve'}</button>
+                    {p.reject && <button onClick={() => p.reject!()} disabled={busy === p.id || allBusy} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
           <p className="text-xs text-gray-400 px-4 py-2 border-t">Photo bypasses, stock adjustments and pick-check corrections all appear here. “Stock count” rows are counts finished and waiting to be applied — approving one applies its stock corrections. The full Sales/production Pending Changes page still lives under Sales Orders.</p>
         </div>

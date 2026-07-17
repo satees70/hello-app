@@ -70,7 +70,8 @@ export default function WmsMovementsPage() {
           </select>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+        {/* Desktop: table */}
+        <div className="hidden sm:block bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>{['When', 'Type', 'Item', 'From', 'To', 'Batch', 'Qty', 'Reference', 'By'].map(h => (
@@ -94,6 +95,30 @@ export default function WmsMovementsPage() {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile: compact card per movement */}
+        <div className="sm:hidden space-y-2">
+          {filtered.length === 0 && <div className="bg-white rounded-xl border p-6 text-center text-gray-400 text-sm">No movements {rows.length ? 'match the filters' : 'recorded yet'}.</div>}
+          {filtered.map(m => (
+            <div key={m.id} className="bg-white rounded-xl border shadow-sm p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <span className="font-mono font-semibold text-sm">{m.item_code}</span>
+                  {m.description && <div className="text-xs text-gray-500 leading-snug">{m.description}</div>}
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="font-medium tabular-nums text-sm">{fmtQty(m.quantity)}</div>
+                  <span className={`inline-block mt-0.5 px-2 py-0.5 rounded-full text-xs font-medium capitalize ${TYPE_CHIP[m.move_type] || 'bg-gray-100 text-gray-600'}`}>{m.move_type}</span>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs text-gray-600">
+                <span className="font-mono">{m.from_location_code || '—'} → {m.to_location_code || '—'}</span>
+                {m.batch_no && <span>Batch: <span className="font-mono">{m.batch_no}</span></span>}
+              </div>
+              <div className="text-xs text-gray-400 mt-1">{m.reference ? m.reference + ' · ' : ''}{m.moved_by_name ? m.moved_by_name + ' · ' : ''}{fmtTime(m.created_at)}</div>
+            </div>
+          ))}
         </div>
         <p className="text-xs text-gray-400 mt-3">Showing {filtered.length} of {rows.length} recent movements (latest 500).</p>
       </div>

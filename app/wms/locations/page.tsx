@@ -271,8 +271,8 @@ export default function WmsLocationsPage() {
           </form>
         )}
 
-        {/* table */}
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+        {/* Desktop: table */}
+        <div className="hidden sm:block bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>
@@ -313,6 +313,35 @@ export default function WmsLocationsPage() {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile: one card per location */}
+        <div className="sm:hidden space-y-2">
+          {filtered.length === 0 && <div className="bg-white rounded-xl border p-6 text-center text-gray-400 text-sm">No locations {rows.length ? 'match the filters' : 'yet — use “Import from SQL Account” to load them'}.</div>}
+          {filtered.map(r => (
+            <div key={r.id} className={`bg-white rounded-xl border shadow-sm p-3 ${r.active ? '' : 'opacity-50'}`}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-mono font-semibold text-sm">{r.code}{r.code === 'PENDING' && <span className="ml-1.5 inline-block bg-amber-100 text-amber-800 rounded px-1.5 py-0.5 text-[10px] font-sans font-semibold align-middle">📦 staging</span>}</div>
+                  {r.label && <div className="text-xs text-gray-500 leading-snug">{r.label}</div>}
+                </div>
+                <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${typeChip(r.location_type)}`}>{typeLabel(r.location_type)}</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-gray-600">
+                <span>Aisle: {r.aisle || '—'}</span>
+                <span>{r.active ? <span className="text-emerald-700">Active</span> : <span className="text-gray-400">Inactive</span>}</span>
+              </div>
+              <div className="font-mono text-xs text-gray-500 mt-1 break-all">{r.sql_location}</div>
+              {canEdit && (
+                <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-2.5 pt-2 border-t text-xs">
+                  <button onClick={() => openEdit(r)} className="text-emerald-700 hover:underline font-medium">Edit</button>
+                  <button onClick={() => togglePickable(r)} className={`hover:underline font-medium ${r.pickable === false ? 'text-purple-700' : 'text-gray-500'}`} title={r.pickable === false ? 'Not picked for orders (return/quarantine)' : 'Available for picking'}>{r.pickable === false ? '🚫 No-pick' : 'Pickable'}</button>
+                  <button onClick={() => toggleActive(r)} className="text-gray-500 hover:underline font-medium">{r.active ? 'Deactivate' : 'Activate'}</button>
+                  {canDelete && <button onClick={() => remove(r)} className="text-red-500 hover:underline font-medium">Delete</button>}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
         <p className="text-xs text-gray-400 mt-3">Showing {filtered.length} of {counts.total} locations.</p>
       </div>
