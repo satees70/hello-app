@@ -27,6 +27,12 @@ function discrepancy(l: CLine): { type: string; chip: string } | null {
   return { type: 'Over', chip: 'bg-violet-100 text-violet-700' }
 }
 
+// Status for ANY line (not just discrepancies) — used when showing every counted line.
+function lineStatus(l: CLine): { type: string; chip: string } {
+  if (l.counted_qty == null) return { type: 'Not counted', chip: 'bg-gray-100 text-gray-400' }
+  return discrepancy(l) || { type: 'OK', chip: 'bg-emerald-50 text-emerald-600' }
+}
+
 export default function WmsCountPage() {
   const { id } = useParams<{ id: string }>()
   const { profile, loading } = useProfile()
@@ -38,6 +44,7 @@ export default function WmsCountPage() {
   const [items, setItems] = useState<Item[]>([])
   const [locByCode, setLocByCode] = useState<Map<string, Loc>>(new Map())
   const [tab, setTab] = useState<'count' | 'review'>('count')
+  const [reviewAll, setReviewAll] = useState(true)   // Review: show every counted line, not just discrepancies
   const [activeBin, setActiveBin] = useState('')
   const [typeBin, setTypeBin] = useState('')   // manually type any bin (e.g. one the system thinks is empty)
   const [scanOpen, setScanOpen] = useState(false)
@@ -66,6 +73,9 @@ export default function WmsCountPage() {
   const binLines = useMemo(() => lines.filter(l => l.location_code === activeBin), [lines, activeBin])
   const counted = lines.filter(l => l.counted_qty != null).length
   const discreps = useMemo(() => lines.filter(l => discrepancy(l)), [lines])
+  const countedLines = useMemo(() => lines.filter(l => l.counted_qty != null)
+    .sort((a, b) => a.location_code.localeCompare(b.location_code) || a.item_code.localeCompare(b.item_code)), [lines])
+  const reviewRows = reviewAll ? countedLines : discreps
   const applied = task?.status === 'Applied'
 
   async function saveCount(line: CLine, val: string) {
@@ -166,10 +176,16 @@ export default function WmsCountPage() {
     doc.setFontSize(14); doc.text(`Stock Count ${task?.count_no || ''}${task?.name ? ' · ' + task.name : ''}`, 14, 18)
     doc.setFontSize(9)
     doc.text(`${counted}/${lines.length} lines counted · ${discreps.length} discrepancies · status ${task?.status || ''}${task?.applied_by_name ? ' · applied by ' + task.applied_by_name : ''}`, 14, 25)
+    // Every line in the count — not just discrepancies — sorted by bin then item.
+    const reportRows = [...lines].sort((a, b) => a.location_code.localeCompare(b.location_code) || a.item_code.localeCompare(b.item_code))
     autoTable(doc, {
       startY: 30, styles: { fontSize: 8 }, headStyles: { fillColor: [16, 122, 87] },
-      head: [['Bin', 'Item', 'Description', 'Batch', 'System', 'Counted', 'Diff', 'Type']],
-      body: discreps.map(l => { const diff = clean((l.counted_qty ?? 0) - l.expected_qty); return [l.location_code, l.item_code, l.description || '', l.batch_no || '', fmtQty(l.expected_qty), fmtQty(l.counted_qty), (diff > 0 ? '+' : '') + fmtQty(diff), discrepancy(l)?.type || ''] }),
+      head: [['Bin', 'Item', 'Description', 'Batch', 'System', 'Counted', 'Diff', 'Status']],
+      body: reportRows.map(l => {
+        const cq = l.counted_qty
+        const diff = cq == null ? null : clean(cq - l.expected_qty)
+        return [l.location_code, l.item_code, l.description || '', l.batch_no || '', fmtQty(l.expected_qty), fmtQty(cq), diff == null ? '' : (diff > 0 ? '+' : '') + fmtQty(diff), lineStatus(l).type]
+      }),
     })
     doc.save(`Count_${task?.count_no || 'report'}.pdf`)
   }
@@ -272,12 +288,18 @@ export default function WmsCountPage() {
 
         {(tab === 'review' || applied) && (
           <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+            <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 border-b">
+              <span className="text-xs text-gray-500 mr-1">Show:</span>
+              {([['all', `All counted (${countedLines.length})`], ['disc', `Discrepancies (${discreps.length})`]] as const).map(([k, lbl]) => (
+                <button key={k} onClick={() => setReviewAll(k === 'all')} className={`px-3 py-1 rounded-lg text-xs font-medium border ${(reviewAll ? 'all' : 'disc') === k ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white hover:bg-gray-50'}`}>{lbl}</button>
+              ))}
+            </div>
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b"><tr>{['Bin', 'Item', 'Batch', 'System', 'Counted', 'Diff', 'Type', applied ? '' : 'Apply?'].map(h => <th key={h} className="text-left px-3 py-2.5 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
+              <thead className="bg-gray-50 border-b"><tr>{['Bin', 'Item', 'Batch', 'System', 'Counted', 'Diff', 'Status', applied ? '' : 'Apply?'].map(h => <th key={h} className="text-left px-3 py-2.5 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
               <tbody>
-                {discreps.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-gray-400">No discrepancies — everything counted matches the system. 🎉</td></tr>}
-                {discreps.map(l => {
-                  const d = discrepancy(l)!; const diff = clean((l.counted_qty ?? 0) - l.expected_qty)
+                {reviewRows.length === 0 && <tr><td colSpan={8} className="text-center py-10 text-gray-400">{reviewAll ? 'Nothing counted yet.' : 'No discrepancies — everything counted matches the system. 🎉'}</td></tr>}
+                {reviewRows.map(l => {
+                  const st = lineStatus(l); const disc = discrepancy(l); const diff = clean((l.counted_qty ?? 0) - l.expected_qty)
                   return (
                     <tr key={l.id} className={`border-b last:border-0 ${l.skip ? 'opacity-40' : ''}`}>
                       <td className="px-3 py-2 font-mono text-xs">{l.location_code}</td>
@@ -285,9 +307,9 @@ export default function WmsCountPage() {
                       <td className="px-3 py-2 font-mono text-xs">{l.batch_no || '—'}</td>
                       <td className="px-3 py-2 tabular-nums">{fmtQty(l.expected_qty)}</td>
                       <td className="px-3 py-2 tabular-nums font-medium">{fmtQty(l.counted_qty)}</td>
-                      <td className={`px-3 py-2 tabular-nums font-medium ${diff < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{diff > 0 ? '+' : ''}{fmtQty(diff)}</td>
-                      <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${d.chip}`}>{d.type}</span></td>
-                      {!applied && <td className="px-3 py-2"><input type="checkbox" checked={!l.skip} onChange={() => toggleSkip(l)} title="Apply this correction" /></td>}
+                      <td className={`px-3 py-2 tabular-nums font-medium ${diff < 0 ? 'text-red-600' : diff > 0 ? 'text-emerald-700' : 'text-gray-400'}`}>{diff > 0 ? '+' : ''}{fmtQty(diff)}</td>
+                      <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${st.chip}`}>{st.type}</span></td>
+                      {!applied && <td className="px-3 py-2">{disc ? <input type="checkbox" checked={!l.skip} onChange={() => toggleSkip(l)} title="Apply this correction" /> : <span className="text-gray-300 text-xs">—</span>}</td>}
                     </tr>
                   )
                 })}
