@@ -39,7 +39,9 @@ export default function WmsPutawayPage() {
   const [wh, setWh] = useState<WhFilter>('all')
   // Outstanding pick demand per item: orders that ran short (no-stock) still waiting for this item.
   const [demand, setDemand] = useState<Record<string, { qty: number; lines: string[]; orders: Set<string> }>>({})
-  const [flagged, setFlagged] = useState<Set<string>>(new Set())   // stock ids with a batch flag waiting for the office
+  const [flagged, setFlagged] = useState<Set<string>>(new Set())   // stock ids with a flag waiting for the office
+  const [flagFor, setFlagFor] = useState<Stock | null>(null)       // row whose issue is being flagged
+  const [flagForm, setFlagForm] = useState({ item: false, qty: false, batch: false, correctItem: '', correctQty: '', correctBatch: '', note: '' })
 
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
@@ -58,8 +60,8 @@ export default function WmsPutawayPage() {
       d.qty = clean(d.qty + Number(l.no_stock_qty || 0)); d.lines.push(l.id); if (l.order_id) d.orders.add(l.order_id)
     })
     setDemand(dem)
-    // Batch flags still waiting for the office (table may not exist yet — ignore if so).
-    const { data: fl } = await supabase.from('wms_correction_requests').select('stock_id').eq('kind', 'batch_flag').eq('status', 'Pending')
+    // Flags still waiting for the office (table may not exist yet — ignore if so).
+    const { data: fl } = await supabase.from('wms_correction_requests').select('stock_id').in('kind', ['batch_flag', 'stock_flag']).eq('status', 'Pending')
     setFlagged(new Set(((fl as { stock_id: string | null }[]) || []).map(f => f.stock_id).filter(Boolean) as string[]))
   }
 
@@ -139,22 +141,35 @@ export default function WmsPutawayPage() {
     setBusy(''); setOk(`Staged ${fmtQty(q)} of ${row.item_code} to PENDING and re-opened ${d.orders.size} order(s) for picking.`); load()
   }
 
-  // Flag a wrong batch number for the office to check. The flagger can type the correct batch
-  // (office applies it on approval) or leave it blank to just ask the office to look.
-  async function flagBatch(row: Stock) {
+  // Open the flag panel for a row — warehouse marks what looks wrong (item name / quantity /
+  // batch) and, if known, the correct value. It notifies the office under Approvals to revise it.
+  function openFlag(row: Stock) {
     if (!canEdit) return
-    const correct = window.prompt(`Flag the batch for ${row.item_code} — currently "${row.batch_no || '(none)'}".\n\nIf you know the correct batch number, type it. Leave blank to just ask the office to check.`, row.batch_no || '')
-    if (correct === null) return
-    const reason = window.prompt('Anything to tell the office? (what looks wrong)', '') ?? ''
+    setErr('')
+    setFlagForm({ item: false, qty: false, batch: false, correctItem: '', correctQty: '', correctBatch: row.batch_no || '', note: '' })
+    setFlagFor(row)
+  }
+
+  async function submitFlag() {
+    const row = flagFor; if (!row) return
+    const fields = [flagForm.item && 'item', flagForm.qty && 'qty', flagForm.batch && 'batch'].filter(Boolean) as string[]
+    if (!fields.length) { setErr('Tick what looks wrong — item, quantity or batch.'); return }
     setBusy('flag' + row.id); setErr(''); setOk('')
-    const { error } = await supabase.rpc('flag_batch_issue', { p_stock_id: row.id, p_correct_batch: correct.trim() || null, p_reason: reason.trim() || null })
+    const { error } = await supabase.rpc('flag_stock_issue', {
+      p_stock_id: row.id, p_fields: fields.join(','),
+      p_correct_item: flagForm.item ? (flagForm.correctItem.trim() || null) : null,
+      p_correct_qty: flagForm.qty && flagForm.correctQty.trim() !== '' ? Number(flagForm.correctQty) : null,
+      p_correct_batch: flagForm.batch ? (flagForm.correctBatch.trim() || null) : null,
+      p_reason: flagForm.note.trim() || null,
+    })
     setBusy('')
     if (error) {
-      setErr(/flag_batch_issue|wms_correction_requests/.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message)
-        ? 'This needs a database update — run db/2026-07-wms-batch-flag.sql in Supabase.' : error.message)
+      setErr(/flag_stock_issue|wms_correction_requests|flag_fields/.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message)
+        ? 'This needs a database update — run db/2026-07-wms-stock-flag.sql in Supabase.' : error.message)
       return
     }
-    setOk(`Flagged the batch for ${row.item_code} — the office will check it under Approvals.`); load()
+    setFlagFor(null)
+    setOk(`Flagged ${row.item_code} (${fields.join(', ')}) — the office will revise it under Approvals.`); load()
   }
 
   async function submitManual(e: React.FormEvent) {
@@ -206,7 +221,7 @@ export default function WmsPutawayPage() {
                       <div className="flex-1 min-w-[180px]">
                         <div className="font-mono font-medium text-sm">{row.item_code} <span className="text-gray-400">×{fmtQty(row.quantity)}</span></div>
                         <div className="text-xs text-gray-500">{row.description}{row.batch_no ? ` · b:${row.batch_no}` : ''}{row.exp_date ? ` · exp ${fmtDate(row.exp_date)}` : ''}</div>
-                        {flagged.has(row.id) && <div className="text-[11px] text-rose-600 mt-0.5">⚑ Batch flagged — waiting for the office to check.</div>}
+                        {flagged.has(row.id) && <div className="text-[11px] text-rose-600 mt-0.5">⚑ Flagged — waiting for the office to revise.</div>}
                       </div>
                       {canEdit && <>
                         <input value={qtyEdits[row.id] ?? String(clean(row.quantity))} onChange={e => setQtyEdits(m => ({ ...m, [row.id]: e.target.value.replace(/[^0-9.]/g, '') }))}
@@ -218,9 +233,9 @@ export default function WmsPutawayPage() {
                         <button onClick={() => putAwayPending(row, bin)} disabled={busy === row.id}
                           title="Put away without scanning — just confirm the bin."
                           className="border border-emerald-600 text-emerald-700 px-4 py-1.5 rounded-lg hover:bg-emerald-50 disabled:opacity-50 text-sm font-medium">{busy === row.id ? '…' : '✓ Put away'}</button>
-                        <button onClick={() => flagBatch(row)} disabled={busy === 'flag' + row.id || flagged.has(row.id)}
-                          title="Batch number wrong? Flag it for the office to check."
-                          className="border border-rose-300 text-rose-700 px-3 py-1.5 rounded-lg hover:bg-rose-50 disabled:opacity-50 text-sm font-medium">{busy === 'flag' + row.id ? '…' : flagged.has(row.id) ? '⚑ Flagged' : '⚑ Flag batch'}</button>
+                        <button onClick={() => openFlag(row)} disabled={busy === 'flag' + row.id || flagged.has(row.id)}
+                          title="Item name, quantity or batch wrong? Flag it for the office to revise."
+                          className="border border-rose-300 text-rose-700 px-3 py-1.5 rounded-lg hover:bg-rose-50 disabled:opacity-50 text-sm font-medium">{busy === 'flag' + row.id ? '…' : flagged.has(row.id) ? '⚑ Flagged' : '⚑ Flag issue'}</button>
                         {sug && !binEdits[row.id] && <span className="text-[11px] text-emerald-700 basis-full sm:basis-auto">→ {sug.code} ({sug.why})</span>}
                       </>}
                       {demand[row.item_code] && (
@@ -279,6 +294,59 @@ export default function WmsPutawayPage() {
           </table>
         </div>
       </div>
+
+      {flagFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setFlagFor(null)}>
+          <div className="bg-white rounded-xl shadow-lg w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between mb-1">
+              <h2 className="font-semibold text-lg">Flag an issue</h2>
+              <button onClick={() => setFlagFor(null)} className="text-gray-400 hover:text-gray-600">✕</button>
+            </div>
+            <p className="text-xs text-gray-500 mb-3">
+              <span className="font-mono">{flagFor.item_code}</span> · {flagFor.description || '—'} · ×{fmtQty(flagFor.quantity)}{flagFor.batch_no ? ` · b:${flagFor.batch_no}` : ''}
+            </p>
+            <p className="text-sm text-gray-600 mb-3">Tick what looks wrong. Add the correct value if you know it — the office is notified to revise it.</p>
+
+            <div className="space-y-3">
+              {/* Item name */}
+              <div className={`border rounded-lg p-3 ${flagForm.item ? 'border-rose-300 bg-rose-50/40' : ''}`}>
+                <label className="flex items-center gap-2 text-sm font-medium">
+                  <input type="checkbox" checked={flagForm.item} onChange={e => setFlagForm(f => ({ ...f, item: e.target.checked }))} />
+                  Item name / code is wrong
+                </label>
+                {flagForm.item && <input value={flagForm.correctItem} onChange={e => setFlagForm(f => ({ ...f, correctItem: e.target.value }))}
+                  placeholder="What should it be? (optional)" className="w-full border rounded-lg px-3 py-2 text-sm mt-2" />}
+              </div>
+              {/* Quantity */}
+              <div className={`border rounded-lg p-3 ${flagForm.qty ? 'border-rose-300 bg-rose-50/40' : ''}`}>
+                <label className="flex items-center gap-2 text-sm font-medium">
+                  <input type="checkbox" checked={flagForm.qty} onChange={e => setFlagForm(f => ({ ...f, qty: e.target.checked }))} />
+                  Quantity is wrong <span className="text-gray-400 font-normal">(now ×{fmtQty(flagFor.quantity)})</span>
+                </label>
+                {flagForm.qty && <input value={flagForm.correctQty} onChange={e => setFlagForm(f => ({ ...f, correctQty: e.target.value.replace(/[^0-9.]/g, '') }))}
+                  inputMode="decimal" placeholder="Correct quantity (optional)" className="w-full border rounded-lg px-3 py-2 text-sm mt-2" />}
+              </div>
+              {/* Batch */}
+              <div className={`border rounded-lg p-3 ${flagForm.batch ? 'border-rose-300 bg-rose-50/40' : ''}`}>
+                <label className="flex items-center gap-2 text-sm font-medium">
+                  <input type="checkbox" checked={flagForm.batch} onChange={e => setFlagForm(f => ({ ...f, batch: e.target.checked }))} />
+                  Batch number is wrong <span className="text-gray-400 font-normal">(now {flagFor.batch_no || '—'})</span>
+                </label>
+                {flagForm.batch && <input value={flagForm.correctBatch} onChange={e => setFlagForm(f => ({ ...f, correctBatch: e.target.value }))}
+                  placeholder="Correct batch (optional — fixed on approval)" className="w-full border rounded-lg px-3 py-2 text-sm font-mono mt-2" />}
+              </div>
+              <textarea value={flagForm.note} onChange={e => setFlagForm(f => ({ ...f, note: e.target.value }))} rows={2}
+                placeholder="Note for the office (optional)" className="w-full border rounded-lg px-3 py-2 text-sm" />
+            </div>
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setFlagFor(null)} className="px-4 py-2 rounded-lg border text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
+              <button onClick={submitFlag} disabled={busy === 'flag' + flagFor.id}
+                className="bg-rose-600 text-white px-4 py-2 rounded-lg hover:bg-rose-700 disabled:opacity-50 text-sm font-medium">{busy === 'flag' + flagFor.id ? 'Sending…' : '⚑ Send flag to office'}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {scanFor && (
         <ScanGate

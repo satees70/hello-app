@@ -14,11 +14,22 @@ interface StockAdj { id: string; factory_code: string | null; item_code: string;
 interface WmsCheck { id: string; order_no: string | null; note: string | null; corrections: { item_code: string; picked_qty: number; checked_qty: number }[] | null; status: string; requested_by_name: string | null; created_at: string }
 interface CountTask { id: string; count_no: string | null; name: string | null; status: string; completed_by_name: string | null; completed_at: string | null; created_by_name: string | null; created_at: string; wms_count_lines?: { count: number }[] }
 interface PaperReq { id: string; do_number: string | null; factory_code: string | null; item_code: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string }
-interface Correction { id: string; kind: string; old_item_code: string | null; new_item_code: string | null; old_qty: number | null; new_qty: number | null; location_code: string | null; batch_no: string | null; new_batch: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string }
+interface Correction { id: string; kind: string; old_item_code: string | null; old_description: string | null; new_item_code: string | null; new_description: string | null; old_qty: number | null; new_qty: number | null; location_code: string | null; batch_no: string | null; new_batch: string | null; flag_fields: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string }
 
 type Pend = { key: string; id: string; kind: string; summary: string; by: string | null; at: string; approve: () => Promise<void>; reject: (() => Promise<void>) | null; open?: string }
 
 const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+
+// A Putaway flag (item / qty / batch) raised for the office to revise. Shows each flagged field
+// with the suggested correction (or "check" when the warehouse didn't know the right value).
+function flagSummary(c: Correction): string {
+  const fields = c.flag_fields ? c.flag_fields.split(',').map(s => s.trim()) : (c.new_batch != null ? ['batch'] : [])
+  const parts: string[] = []
+  if (fields.includes('item')) parts.push(`item ${c.old_item_code || c.old_description || '?'}${c.new_description ? ' → ' + c.new_description : ' (check)'}`)
+  if (fields.includes('qty')) parts.push(`qty ×${c.old_qty ?? '?'}${c.new_qty != null ? ' → ' + c.new_qty : ' (check)'}`)
+  if (fields.includes('batch')) parts.push(`batch ${c.batch_no || '—'}${c.new_batch ? ' → ' + c.new_batch : ' (check)'}`)
+  return `Flag ${c.old_item_code || '?'}${c.location_code ? ' · ' + c.location_code : ''} — ${parts.join(', ') || 'check'}${c.reason ? ' · ' + c.reason : ''}`
+}
 const KIND_CHIP: Record<string, string> = {
   'Photo bypass': 'bg-indigo-100 text-indigo-700',
   'Stock adjustment': 'bg-amber-100 text-amber-700',
@@ -50,7 +61,7 @@ export default function WmsApprovalsPage() {
       supabase.from('wms_count_tasks').select('id, count_no, name, status, completed_by_name, completed_at, created_by_name, created_at, wms_count_lines(count)').eq('status', 'Review').order('completed_at', { ascending: false }),
       supabase.from('do_paper_receipt_requests').select('id, do_number, factory_code, item_code, reason, status, requested_by_name, created_at').eq('status', 'Pending').order('created_at', { ascending: false }),
     ])
-    const { data: cr } = await supabase.from('wms_correction_requests').select('id, kind, old_item_code, new_item_code, old_qty, new_qty, location_code, batch_no, new_batch, reason, status, requested_by_name, created_at').eq('status', 'Pending').order('created_at', { ascending: false })
+    const { data: cr } = await supabase.from('wms_correction_requests').select('id, kind, old_item_code, old_description, new_item_code, new_description, old_qty, new_qty, location_code, batch_no, new_batch, flag_fields, reason, status, requested_by_name, created_at').eq('status', 'Pending').order('created_at', { ascending: false })
     setBypasses((bp as GrnBypass[]) || [])
     setAdjs((sa as StockAdj[]) || [])
     setChecks((wc as WmsCheck[]) || [])
@@ -104,8 +115,8 @@ export default function WmsApprovalsPage() {
     ...papers.map(p => ({ key: `pr|${p.id}`, id: p.id, kind: 'Paper receipt', summary: `${p.do_number || 'DO'}${p.factory_code ? ' · ' + p.factory_code : ''}${p.item_code ? ' · item ' + p.item_code : ' · whole DO'}${p.reason ? ' · ' + p.reason : ''} — receive on paper (no photos)`, by: p.requested_by_name, at: p.created_at, approve: () => approvePaper(p.id).then(() => {}), reject: () => rejectPaper(p.id).then(() => {}) })),
     ...corrections.map(c => ({ key: `cr|${c.id}`, id: c.id, kind: 'Correction', summary: c.kind === 'stock_recode'
         ? `Re-code stock ${c.old_item_code || '?'} → ${c.new_item_code || '?'}${c.location_code ? ' · ' + c.location_code : ''}${c.batch_no ? ' · b:' + c.batch_no : ''}${c.reason ? ' · ' + c.reason : ''}`
-        : c.kind === 'batch_flag'
-        ? `Batch flag ${c.old_item_code || '?'}${c.location_code ? ' · ' + c.location_code : ''} · b:${c.batch_no || '(none)'}${c.new_batch ? ' → ' + c.new_batch : ' (office to check)'}${c.reason ? ' · ' + c.reason : ''}`
+        : (c.kind === 'batch_flag' || c.kind === 'stock_flag')
+        ? flagSummary(c)
         : `Edit PO line ${c.old_item_code || '?'} → ${c.new_item_code || c.old_item_code || '?'}${c.new_qty != null ? ' · qty ' + c.new_qty : ''}${c.reason ? ' · ' + c.reason : ''}`,
       by: c.requested_by_name, at: c.created_at, approve: () => approveCorr(c.id).then(() => {}), reject: () => rejectCorr(c.id).then(() => {}) })),
   ].sort((a, b) => (a.at || '').localeCompare(b.at || '')), [bypasses, adjs, checks, counts, papers, corrections, approveBypass, rejectBypass, approveAdj, rejectAdj, approveCheck, rejectCheck, applyCount, approvePaper, rejectPaper, approveCorr, rejectCorr])

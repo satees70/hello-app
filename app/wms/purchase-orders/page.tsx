@@ -38,6 +38,8 @@ export default function WmsPurchaseOrdersPage() {
   const [uploading, setUploading] = useState(false)
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+  const replaceRef = useRef<HTMLInputElement>(null)
+  const [replacePo, setReplacePo] = useState<PO | null>(null)   // PO whose PDF is being replaced with an amended one
 
   const [linesFor, setLinesFor] = useState<PO | null>(null)
   const [lines, setLines] = useState<POLine[]>([])
@@ -166,6 +168,43 @@ export default function WmsPurchaseOrdersPage() {
       const res = await apiFetch('/api/wms/extract-po', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ poId: o.id, filePath: o.file_path }) })
       const r = await res.json(); if (!res.ok) setErr(`Reading failed: ${r.error || 'Unknown error'}`); else setMsg(`Re-read ${r.count} line(s).`); load()
     } catch { setErr('Could not reach the reading service.') }
+  }
+
+  // Replace this PO's PDF with an amended one, then re-read it. Re-reading rebuilds the order
+  // lines from scratch, so it's only safe BEFORE any goods have been received against the PO —
+  // once receiving has started, changing the lines would drop the received progress. In that
+  // case correct the received stock via a flag / stock correction instead.
+  function startReplace(o: PO) {
+    if (!canEdit) return
+    if ((recvByPo[o.id]?.length ?? 0) > 0) {
+      setErr('Goods have already been received on this PO, so its lines can’t be rebuilt from a new PDF (that would wipe the received progress). Fix the received stock with a flag / stock correction instead.')
+      return
+    }
+    setErr(''); setReplacePo(o)
+    setTimeout(() => replaceRef.current?.click(), 0)
+  }
+
+  async function onReplaceFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]; const o = replacePo
+    if (replaceRef.current) replaceRef.current.value = ''
+    setReplacePo(null)
+    if (!f || !o) return
+    if (f.type !== 'application/pdf') { setErr('Please choose a PDF file.'); return }
+    if ((recvByPo[o.id]?.length ?? 0) > 0) { setErr('Goods have already been received on this PO — can’t replace its PDF now.'); return }
+    setErr(''); setMsg(`Uploading amended PDF for ${o.po_number || o.file_name}…`)
+    const safe = f.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const path = `po/${Date.now()}-${safe}`
+    const up = await supabase.storage.from('wms-grn').upload(path, f)
+    if (up.error) { setErr(`Upload failed: ${up.error.message}`); setMsg(''); return }
+    const { error: uErr } = await supabase.from('wms_purchase_orders').update({ file_name: f.name, file_path: path, source: 'pdf', status: 'Processing' }).eq('id', o.id)
+    if (uErr) { setErr(`Saving record failed: ${uErr.message}`); setMsg(''); return }
+    load()
+    try {
+      const res = await apiFetch('/api/wms/extract-po', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ poId: o.id, filePath: path }) })
+      const r = await res.json()
+      if (!res.ok) { setErr(`Reading failed: ${r.error || 'Unknown error'}`); setMsg('') }
+      else { setMsg(`Replaced the PDF and re-read ${r.count} line(s). Please review.`); load(); viewLines({ ...o, file_path: path, file_name: f.name } as PO) }
+    } catch { setErr('Could not reach the reading service.'); setMsg('') }
   }
 
   async function saveManual(e: React.FormEvent) {
@@ -320,6 +359,7 @@ export default function WmsPurchaseOrdersPage() {
                       <button onClick={() => viewLines(o)} className="text-emerald-700 hover:underline">View lines</button>
                       {o.file_path && <button onClick={() => viewPdf(o)} className="text-gray-500 hover:underline">PDF</button>}
                       {canEdit && o.file_path && <button onClick={() => reRead(o)} className="text-gray-500 hover:underline">Re-read</button>}
+                      {canEdit && (recvByPo[o.id]?.length ?? 0) === 0 && <button onClick={() => startReplace(o)} title="Upload an amended PDF and re-read the lines" className="text-gray-500 hover:underline">Replace PDF</button>}
                       {canEdit && <button onClick={() => del(o)} className="text-red-500 hover:underline">Delete</button>}
                     </div>
                   </td>
@@ -329,6 +369,8 @@ export default function WmsPurchaseOrdersPage() {
           </table>
         </div>
       </div>
+
+      <input ref={replaceRef} type="file" accept="application/pdf" onChange={onReplaceFile} className="hidden" />
 
       {linesFor && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setLinesFor(null)}>
