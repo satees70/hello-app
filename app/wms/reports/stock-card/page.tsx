@@ -72,8 +72,13 @@ export default function StockCardPage() {
   // In / Out for a move given the location scope.
   const inOut = useCallback((m: Move): { inQ: number; outQ: number } => {
     const q = Number(m.quantity)
+    // Scoped to one bin: In = arrived at that bin, Out = left that bin (internal moves matter here).
     if (L) return { inQ: (m.to_location_code || '').toUpperCase() === L ? q : 0, outQ: (m.from_location_code || '').toUpperCase() === L ? q : 0 }
-    return { inQ: m.to_location_code ? q : 0, outQ: m.from_location_code ? q : 0 }
+    // Whole warehouse: only stock entering from OUTSIDE (no from-location, e.g. a receipt) is In, and
+    // only stock leaving the warehouse (no to-location, e.g. a dispatch) is Out. Internal moves
+    // (putaway, transfer, pick to the DISPATCH bin) have both a from and a to, so they don't change the
+    // on-hand total — they show blank In/Out and leave the running balance unchanged.
+    return { inQ: (!m.from_location_code && m.to_location_code) ? q : 0, outQ: (m.from_location_code && !m.to_location_code) ? q : 0 }
   }, [L])
 
   // Ledger: opening balance (everything before `from`) + the in-range rows with a running balance.
