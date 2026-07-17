@@ -28,6 +28,8 @@ const pickDur = (o: Order) => {
 }
 interface Line { id: string; line_no: number | null; item_id: string | null; item_code: string; description: string | null; quantity: number; uom: string | null; source_hint: string | null; remarks: string | null }
 
+// Statuses where picking is considered finished (used for the "Fully picked" badge & sorting).
+const PICKED_STATUSES = ['Picked', 'Checked', 'Partially Dispatched', 'Dispatched']
 const clean = (n: number) => Number(n.toPrecision(12))
 const fmtQty = (n: number) => clean(n).toLocaleString(undefined, { maximumFractionDigits: 4 })
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -61,6 +63,7 @@ export default function WmsOrdersPage() {
   const [itemText, setItemText] = useState<Record<string, string>>({})
   const [outstandingOrders, setOutstandingOrders] = useState<Set<string>>(new Set())   // orders with a no-stock balance to re-pick
   const [pendingByOrder, setPendingByOrder] = useState<Record<string, number>>({})   // # of lines still short (no stock) per order
+  const [sortBy, setSortBy] = useState<'date' | 'pick'>('date')
   const [expandedId, setExpandedId] = useState('')   // order whose lines are shown inline
   const [expLines, setExpLines] = useState<Line[]>([])
   const [doByOrder, setDoByOrder] = useState<Record<string, string[]>>({})   // order_id -> DO number(s) once dispatched
@@ -206,20 +209,28 @@ export default function WmsOrdersPage() {
 
   if (loading) return <div className="p-8 text-sm text-gray-500">Loading…</div>
 
-  // "6/9 picked · 3 pending" — how many lines were fully picked vs still short on stock.
+  // Pick status badge: RED when lines are still short on stock, GREEN when fully picked.
   const pickProgress = (o: Order) => {
     const pend = pendingByOrder[o.id] || 0
-    if (!pend) return null
     const total = o.wms_order_lines?.[0]?.count ?? 0
-    const picked = Math.max(0, total - pend)
-    return <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 whitespace-nowrap">📦 {picked}/{total} picked · {pend} pending</span>
+    if (pend > 0) {
+      const picked = Math.max(0, total - pend)
+      return <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded px-1.5 py-0.5 whitespace-nowrap">📦 {picked}/{total} picked · {pend} pending</span>
+    }
+    if (PICKED_STATUSES.includes(o.status)) {
+      return <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5 whitespace-nowrap">✓ Fully picked</span>
+    }
+    return null
   }
+  // Sort rank: pending (needs attention) first, then fully picked, then the rest.
+  const pickRank = (o: Order) => (pendingByOrder[o.id] || 0) > 0 ? 0 : PICKED_STATUSES.includes(o.status) ? 1 : 2
 
   const unmatched = lines.filter(l => !l.item_id).length
   const nq = q.trim().toLowerCase()
   const shownOrders = (statusFilter ? orders.filter(o => o.status === statusFilter) : orders)
     .filter(o => passWh(wh, descsByOrder[o.id]))
     .filter(o => !nq || `${o.order_no || ''} ${o.customer_name || ''} ${o.file_name || ''}`.toLowerCase().includes(nq) || (itemText[o.id] || '').includes(nq))
+  if (sortBy === 'pick') shownOrders.sort((a, b) => pickRank(a) - pickRank(b))   // pending first, then fully picked (stable within — keeps newest-first)
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -251,6 +262,11 @@ export default function WmsOrdersPage() {
             {Array.from(new Set(orders.map(o => o.status))).map(s => <option key={s} value={s}>{s}</option>)}
           </select>
           {statusFilter && <button onClick={() => setStatusFilter('')} className="text-emerald-700 hover:underline text-xs">clear</button>}
+          <span className="text-gray-500">Sort:</span>
+          <select value={sortBy} onChange={e => setSortBy(e.target.value as 'date' | 'pick')} className="border rounded-lg px-3 py-1.5">
+            <option value="date">Newest</option>
+            <option value="pick">Pick status (pending first)</option>
+          </select>
           <div className="w-full sm:w-auto sm:ml-auto"><WarehouseTabs value={wh} onChange={setWh} /></div>
         </div>
 
