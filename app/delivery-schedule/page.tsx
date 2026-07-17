@@ -767,7 +767,7 @@ export default function DeliverySchedulePage() {
                     <div className="hidden print:block text-xs text-gray-700">{[trip?.category && `Type: ${trip.category}`, trip?.remark && `For: ${trip.remark}`, trip?.lorry_no && `Lorry: ${trip.lorry_no}`, trip?.driver && `Driver: ${trip.driver}`, trip?.kelindan && `Kelindan: ${trip.kelindan}`].filter(Boolean).join('   ·   ')}</div>
                   </>)}
                 </div>
-                <div className="overflow-auto">
+                <div className="overflow-auto hidden sm:block">
                   <table className="w-full text-sm whitespace-nowrap">
                     <thead className="bg-gray-50 text-gray-500 text-left">
                       <tr>
@@ -841,6 +841,63 @@ export default function DeliverySchedulePage() {
                       })}
                     </tbody>
                   </table>
+                </div>
+
+                {/* Mobile: a card per SO so Pending and the controls never get cut off */}
+                <div className="sm:hidden divide-y">
+                  {g.rows.slice().sort((a, b) => ((custKey && a.data?.[custKey]) || a.customer_name || '').localeCompare((custKey && b.data?.[custKey]) || b.customer_name || '') || a.so_number.localeCompare(b.so_number)).map(s => {
+                    const isTomorrow = s.delivery_date === nextDeliveryISO()
+                    const hold = !!holdKeyS && isHold(s.data?.[holdKeyS])
+                    const its = soItems[s.so_number] || []
+                    const pend = its.filter(i => !i.done)
+                    const open = expanded.has(s.id)
+                    const locText = (() => { const m = soLoc[s.so_number]; if (m && Object.keys(m).length) return Object.entries(m).sort((a, b) => a[0].localeCompare(b[0])).map(([f, c]) => `${f}${c.done >= c.total ? ' ✓' : c.done > 0 ? ` (${c.total - c.done} left)` : ''}`).join(', '); return soFactory[s.so_number] || '—' })()
+                    return (
+                      <div key={s.id} className={`p-3 ${hold ? 'bg-red-100' : isTomorrow ? 'bg-yellow-50' : ''}`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="font-mono font-semibold text-sm">{s.so_number}</div>
+                          <label className="flex items-center gap-1 text-xs text-gray-500 shrink-0">Invoiced<input type="checkbox" checked={s.invoiced} onChange={e => updateSched(s.id, { invoiced: e.target.checked })} className="h-4 w-4" /></label>
+                        </div>
+                        <div className="text-xs text-gray-600 mt-0.5">{(custKey && s.data?.[custKey]) || s.customer_name || '—'}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">📍 {locText}</div>
+                        <div className="mt-1.5">
+                          {!its.length
+                            ? <span className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500">No order lines</span>
+                            : !pend.length
+                            ? <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Completed</span>
+                            : (() => { const byLoc: Record<string, number> = {}; pend.forEach(i => { byLoc[i.factory] = (byLoc[i.factory] || 0) + 1 }); return <button type="button" onClick={() => toggleExpand(s.id)} className="flex flex-wrap items-center gap-1 text-left">{Object.entries(byLoc).sort((a, b) => a[0].localeCompare(b[0])).map(([f, n]) => <span key={f} className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">{f} ({n} pending)</span>)}<span className="text-gray-400 text-[10px]">{open ? '▲' : '▼'}</span></button> })()}
+                        </div>
+                        {open && pend.length > 0 && (
+                          <div className="mt-2 bg-amber-50/50 rounded-lg p-2 space-y-1">
+                            {pend.map((i, k) => (
+                              <div key={k} className="flex items-center justify-between gap-2 text-xs">
+                                <span className="text-gray-700"><span className="text-gray-400 mr-1">{k + 1}.</span>{itemName[i.item] || i.item}{i.qty ? <span className="text-gray-500"> × {i.qty}</span> : ''}{i.factory !== 'No location' && <span className="text-gray-400"> · {i.factory}</span>}</span>
+                                <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${STATUS_CHIP[i.status] || 'bg-gray-100 text-gray-600'}`}>{i.status}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-gray-600">
+                          {orderDateKey && <span>PO date: {cellView(s.data?.[orderDateKey] ?? '') || '—'}</span>}
+                          {podelKeyS && <span>Delivery date: {cellView(s.data?.[podelKeyS] ?? '') || '—'}</span>}
+                          {cancelKey && <span>PO expired: {cellView(s.data?.[cancelKey] ?? '') || '—'}</span>}
+                          {linkKey && s.data?.[linkKey] && <span>Doc: {cellView(s.data[linkKey])}</span>}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 mt-2 text-xs">
+                          <span className="text-gray-500">Scheduled:</span>
+                          <input type="date" value={s.delivery_date || ''} onChange={e => updateSched(s.id, { delivery_date: e.target.value || null })} className="border rounded px-2 py-1 text-xs" />
+                          {isTomorrow && <span className="bg-yellow-200 text-yellow-900 px-1 rounded text-[10px] font-semibold">TOMORROW</span>}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 mt-2">
+                          <select value={s.route || ''} onChange={e => { if (e.target.value) updateSched(s.id, { route: e.target.value }); else removeSched(s.id) }} className="border rounded px-2 py-1 text-xs">
+                            <option value="">— (back to upload list)</option>
+                            {LINES.map(l => <option key={l} value={l}>{lineLabel(l, s.delivery_date)}</option>)}
+                          </select>
+                          <button onClick={() => { if (confirm('Take this order off the schedule? It goes back to the upload list so you can re-assign it.')) removeSched(s.id) }} className="text-amber-600 hover:underline text-xs">Unassign</button>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
               )
