@@ -36,6 +36,7 @@ export default function StockCardPage() {
   const [wh, setWh] = useState<WhFilter>('all')
   const [itemCode, setItemCode] = useState(''); const [itemLabel, setItemLabel] = useState('')
   const [loc, setLoc] = useState(''); const [batch, setBatch] = useState('')
+  const [mode, setMode] = useState<'overall' | 'location' | 'batch'>('overall')   // report type
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')
 
   useEffect(() => { if (profile) init() }, [profile])
@@ -67,19 +68,22 @@ export default function StockCardPage() {
     setItemCode(it.code); setItemLabel(`${it.code} — ${it.description}`); loadMoves(it.code)
   }
 
-  const L = loc.trim().toUpperCase()
-  const B = batch.trim()
-  // In / Out for a move given the location scope.
+  // Each report type scopes to a different dimension: Overall = whole warehouse (all bins/batches),
+  // By location = one bin, By batch = one batch.
+  const L = mode === 'location' ? loc.trim().toUpperCase() : ''
+  const B = mode === 'batch' ? batch.trim() : ''
+  // In / Out for a move, per report type.
   const inOut = useCallback((m: Move): { inQ: number; outQ: number } => {
     const q = Number(m.quantity)
-    // Scoped to one bin: In = arrived at that bin, Out = left that bin (internal moves matter here).
-    if (L) return { inQ: (m.to_location_code || '').toUpperCase() === L ? q : 0, outQ: (m.from_location_code || '').toUpperCase() === L ? q : 0 }
-    // Whole warehouse: only stock entering from OUTSIDE (no from-location, e.g. a receipt) is In, and
-    // only stock leaving the warehouse (no to-location, e.g. a dispatch) is Out. Internal moves
-    // (putaway, transfer, pick to the DISPATCH bin) have both a from and a to, so they don't change the
-    // on-hand total — they show blank In/Out and leave the running balance unchanged.
+    // By location: In = arrived at that bin, Out = left that bin — internal transfers show here.
+    if (mode === 'location') return L ? { inQ: (m.to_location_code || '').toUpperCase() === L ? q : 0, outQ: (m.from_location_code || '').toUpperCase() === L ? q : 0 } : { inQ: 0, outQ: 0 }
+    // By batch: full trace — every movement of the batch (receipt, transfer, pick, dispatch) shows,
+    // so In = arrived somewhere, Out = left somewhere; internal moves net to zero in the balance.
+    if (mode === 'batch') return { inQ: m.to_location_code ? q : 0, outQ: m.from_location_code ? q : 0 }
+    // Overall (whole warehouse): only stock entering from OUTSIDE (receipt/adjustment-in) is In and
+    // only stock leaving the warehouse (dispatch/adjustment-out) is Out; internal moves show blank.
     return { inQ: (!m.from_location_code && m.to_location_code) ? q : 0, outQ: (m.from_location_code && !m.to_location_code) ? q : 0 }
-  }, [L])
+  }, [L, mode])
 
   // Ledger: opening balance (everything before `from`) + the in-range rows with a running balance.
   // The ledger is anchored to the CURRENT on-hand: any stock that isn't explained by recorded
@@ -130,7 +134,8 @@ export default function StockCardPage() {
     doc.setFontSize(11); doc.setFont('helvetica', 'normal'); doc.text('STOCK CARD (QTY)', 14, 22)
     doc.setFontSize(10)
     doc.text(`Item: ${itemLabel || itemCode}`, 14, 30)
-    doc.text([L ? `Location: ${L}` : 'Location: all', B ? `Batch: ${B}` : 'Batch: all', (from || to) ? `Period: ${from || '…'} → ${to || '…'}` : 'Period: all'].join('    '), 14, 36)
+    const scopeText = mode === 'location' ? `By location: ${L || '—'}` : mode === 'batch' ? `By batch: ${B || '—'}` : 'Overall (whole warehouse)'
+    doc.text([scopeText, (from || to) ? `Period: ${from || '…'} → ${to || '…'}` : 'Period: all'].join('    '), 14, 36)
     const body: (string | number)[][] = []
     if (from || card.opening !== 0) body.push(['', 'Opening balance', '', '', '', '', '', '', fmtBal(card.opening)])
     card.rows.forEach(r => body.push([fmtTime(r.created_at), TYPE_LABEL[r.move_type] || r.move_type, r.reference || '', r.from_location_code || '', r.to_location_code || '', r.batch_no || '', fmtQty(r.inQ), fmtQty(r.outQ), fmtBal(r.balance)]))
@@ -162,6 +167,15 @@ export default function StockCardPage() {
           </div>}
         </div>
 
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <span className="text-xs text-gray-500 mr-1">Report type:</span>
+          {([['overall', '🏭 Overall', 'Whole-warehouse on-hand — internal moves don’t change the balance'],
+             ['location', '📍 By location', 'One bin — shows internal transfers in and out of it'],
+             ['batch', '🏷 By batch', 'One batch — every movement of it, transfers included']] as const).map(([k, lbl, tip]) => (
+            <button key={k} onClick={() => setMode(k)} title={tip} className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${mode === k ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white hover:bg-gray-50'}`}>{lbl}</button>
+          ))}
+        </div>
+
         <div className="bg-white rounded-xl shadow-sm border p-4 mb-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Stock group</label>
@@ -175,15 +189,19 @@ export default function StockCardPage() {
             <label className="block text-xs text-gray-500 mb-1">Warehouse</label>
             <WarehouseTabs value={wh} onChange={setWh} className="w-full" />
           </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Location <span className="text-gray-400">(optional)</span></label>
-            <input list="sc-locs" value={loc} onChange={e => setLoc(e.target.value)} placeholder="all bins" className="w-full border rounded-lg px-3 py-2 text-sm font-mono" />
-            <datalist id="sc-locs">{locs.map(l => <option key={l.code} value={l.code} />)}</datalist>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Batch <span className="text-gray-400">(optional)</span></label>
-            <input value={batch} onChange={e => setBatch(e.target.value)} placeholder="all batches" className="w-full border rounded-lg px-3 py-2 text-sm font-mono" />
-          </div>
+          {mode === 'location' && (
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Location <span className="text-gray-400">(bin)</span></label>
+              <input list="sc-locs" value={loc} onChange={e => setLoc(e.target.value)} placeholder="pick a bin…" className="w-full border rounded-lg px-3 py-2 text-sm font-mono" />
+              <datalist id="sc-locs">{locs.map(l => <option key={l.code} value={l.code} />)}</datalist>
+            </div>
+          )}
+          {mode === 'batch' && (
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Batch</label>
+              <input value={batch} onChange={e => setBatch(e.target.value)} placeholder="type a batch…" className="w-full border rounded-lg px-3 py-2 text-sm font-mono" />
+            </div>
+          )}
           <div>
             <label className="block text-xs text-gray-500 mb-1">From</label>
             <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" />
@@ -195,6 +213,8 @@ export default function StockCardPage() {
         </div>
 
         {!itemCode ? <div className="bg-white rounded-xl border p-10 text-center text-gray-400 text-sm">Pick an item to see its stock card.</div>
+          : mode === 'location' && !L ? <div className="bg-white rounded-xl border p-10 text-center text-gray-400 text-sm">Pick a bin above to see its ledger (with internal transfers in and out).</div>
+          : mode === 'batch' && !B ? <div className="bg-white rounded-xl border p-10 text-center text-gray-400 text-sm">Type a batch above to see every movement of it.</div>
           : busy ? <div className="text-gray-400 py-16 text-center">Loading…</div>
           : <>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
