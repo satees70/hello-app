@@ -39,6 +39,7 @@ export default function WmsPutawayPage() {
   const [wh, setWh] = useState<WhFilter>('all')
   // Outstanding pick demand per item: orders that ran short (no-stock) still waiting for this item.
   const [demand, setDemand] = useState<Record<string, { qty: number; lines: string[]; orders: Set<string> }>>({})
+  const [flagged, setFlagged] = useState<Set<string>>(new Set())   // stock ids with a batch flag waiting for the office
 
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
@@ -57,6 +58,9 @@ export default function WmsPutawayPage() {
       d.qty = clean(d.qty + Number(l.no_stock_qty || 0)); d.lines.push(l.id); if (l.order_id) d.orders.add(l.order_id)
     })
     setDemand(dem)
+    // Batch flags still waiting for the office (table may not exist yet — ignore if so).
+    const { data: fl } = await supabase.from('wms_correction_requests').select('stock_id').eq('kind', 'batch_flag').eq('status', 'Pending')
+    setFlagged(new Set(((fl as { stock_id: string | null }[]) || []).map(f => f.stock_id).filter(Boolean) as string[]))
   }
 
   const locByCode = useMemo(() => new Map(locs.map(l => [l.code.toUpperCase(), l])), [locs])
@@ -135,6 +139,24 @@ export default function WmsPutawayPage() {
     setBusy(''); setOk(`Staged ${fmtQty(q)} of ${row.item_code} to PENDING and re-opened ${d.orders.size} order(s) for picking.`); load()
   }
 
+  // Flag a wrong batch number for the office to check. The flagger can type the correct batch
+  // (office applies it on approval) or leave it blank to just ask the office to look.
+  async function flagBatch(row: Stock) {
+    if (!canEdit) return
+    const correct = window.prompt(`Flag the batch for ${row.item_code} — currently "${row.batch_no || '(none)'}".\n\nIf you know the correct batch number, type it. Leave blank to just ask the office to check.`, row.batch_no || '')
+    if (correct === null) return
+    const reason = window.prompt('Anything to tell the office? (what looks wrong)', '') ?? ''
+    setBusy('flag' + row.id); setErr(''); setOk('')
+    const { error } = await supabase.rpc('flag_batch_issue', { p_stock_id: row.id, p_correct_batch: correct.trim() || null, p_reason: reason.trim() || null })
+    setBusy('')
+    if (error) {
+      setErr(/flag_batch_issue|wms_correction_requests/.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message)
+        ? 'This needs a database update — run db/2026-07-wms-batch-flag.sql in Supabase.' : error.message)
+      return
+    }
+    setOk(`Flagged the batch for ${row.item_code} — the office will check it under Approvals.`); load()
+  }
+
   async function submitManual(e: React.FormEvent) {
     e.preventDefault()
     if (!canEdit) return
@@ -184,6 +206,7 @@ export default function WmsPutawayPage() {
                       <div className="flex-1 min-w-[180px]">
                         <div className="font-mono font-medium text-sm">{row.item_code} <span className="text-gray-400">×{fmtQty(row.quantity)}</span></div>
                         <div className="text-xs text-gray-500">{row.description}{row.batch_no ? ` · b:${row.batch_no}` : ''}{row.exp_date ? ` · exp ${fmtDate(row.exp_date)}` : ''}</div>
+                        {flagged.has(row.id) && <div className="text-[11px] text-rose-600 mt-0.5">⚑ Batch flagged — waiting for the office to check.</div>}
                       </div>
                       {canEdit && <>
                         <input value={qtyEdits[row.id] ?? String(clean(row.quantity))} onChange={e => setQtyEdits(m => ({ ...m, [row.id]: e.target.value.replace(/[^0-9.]/g, '') }))}
@@ -195,6 +218,9 @@ export default function WmsPutawayPage() {
                         <button onClick={() => putAwayPending(row, bin)} disabled={busy === row.id}
                           title="Put away without scanning — just confirm the bin."
                           className="border border-emerald-600 text-emerald-700 px-4 py-1.5 rounded-lg hover:bg-emerald-50 disabled:opacity-50 text-sm font-medium">{busy === row.id ? '…' : '✓ Put away'}</button>
+                        <button onClick={() => flagBatch(row)} disabled={busy === 'flag' + row.id || flagged.has(row.id)}
+                          title="Batch number wrong? Flag it for the office to check."
+                          className="border border-rose-300 text-rose-700 px-3 py-1.5 rounded-lg hover:bg-rose-50 disabled:opacity-50 text-sm font-medium">{busy === 'flag' + row.id ? '…' : flagged.has(row.id) ? '⚑ Flagged' : '⚑ Flag batch'}</button>
                         {sug && !binEdits[row.id] && <span className="text-[11px] text-emerald-700 basis-full sm:basis-auto">→ {sug.code} ({sug.why})</span>}
                       </>}
                       {demand[row.item_code] && (
