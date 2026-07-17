@@ -531,14 +531,13 @@ export default function DispatchPage() {
     autoTable(doc, {
       startY: 53, head: [['#', 'SO', 'Code', 'Item name', 'Qty', 'Batch', 'Exp']], body,
       styles: { fontSize: 8.5, cellPadding: 2, valign: 'middle', overflow: 'ellipsize' }, headStyles: { fillColor: [30, 58, 138] },
-      // A4 is wide, so every item stays on ONE line — no wrapping. Columns are
-      // sized to fit codes/names; anything unusually long is trimmed with … rather
-      // than wrapped onto a second line.
+      // Most columns stay on one line (long codes are trimmed with …), but the
+      // Item name and Batch columns wrap onto extra lines so the full text always shows.
       columnStyles: {
         0: { cellWidth: 10 },                         // #
         1: { cellWidth: 22 },                         // SO
         2: { cellWidth: 34 },                         // Code
-        3: { cellWidth: 53 },                         // Item name
+        3: { cellWidth: 53, overflow: 'linebreak' },  // Item name — wraps onto more lines so the full name shows
         4: { halign: 'right', cellWidth: 14 },        // Qty
         5: { cellWidth: 33, overflow: 'linebreak' },  // Batch — wider + wraps so the full batch/expiry always shows
         6: { cellWidth: 18 },                         // Exp
