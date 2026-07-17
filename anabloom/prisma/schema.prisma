@@ -40,6 +40,12 @@ model Company {
   name           String
   registrationNo String?
   currency       String   @default("RM")
+  address        String? // landlord address (tenancy agreement Schedule B)
+  phone          String? // landlord contact / H/P
+  bankName       String? // for the agreement's rental-payment bank block
+  bankAccountNo  String?
+  signatoryName  String? // who signs the agreement for the company (landlord)
+  signatoryNric  String?
   createdAt      DateTime @default(now())
 
   user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)

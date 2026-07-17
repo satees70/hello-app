@@ -51,6 +51,39 @@ export default async function SettingsPage() {
                 <input className="input" name="currency" defaultValue={c.currency} maxLength={5} />
               </div>
             </div>
+            <details>
+              <summary className="cursor-pointer text-primary text-xs font-medium">
+                Landlord details (for tenancy agreements)
+              </summary>
+              <div className="mt-2 space-y-2">
+                <div>
+                  <label className="label">Address</label>
+                  <input className="input" name="address" defaultValue={c.address ?? ""} />
+                </div>
+                <div className="grid sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="label">Phone / H/P</label>
+                    <input className="input" name="phone" defaultValue={c.phone ?? ""} />
+                  </div>
+                  <div>
+                    <label className="label">Signatory name</label>
+                    <input className="input" name="signatoryName" defaultValue={c.signatoryName ?? ""} />
+                  </div>
+                  <div>
+                    <label className="label">Signatory NRIC</label>
+                    <input className="input" name="signatoryNric" defaultValue={c.signatoryNric ?? ""} />
+                  </div>
+                  <div>
+                    <label className="label">Bank name</label>
+                    <input className="input" name="bankName" defaultValue={c.bankName ?? ""} />
+                  </div>
+                  <div>
+                    <label className="label">Bank account no.</label>
+                    <input className="input" name="bankAccountNo" defaultValue={c.bankAccountNo ?? ""} />
+                  </div>
+                </div>
+              </div>
+            </details>
             <div className="flex justify-end">
               <button className="btn-primary py-1">Save</button>
             </div>

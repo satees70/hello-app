@@ -98,13 +98,13 @@ const GENERAL: [string, string][] = [
   ["4.9", "Time wherever mentioned shall be of the essence."],
 ];
 
-function sigBlock(label: string): Paragraph[] {
+function sigBlock(label: string, name?: string | null, nric?: string | null): Paragraph[] {
   return [
     heading(label),
     blank(),
     new Paragraph({ children: [new TextRun("\t\t\t> …………………………………………..")] }),
-    new Paragraph({ children: [new TextRun("\t\t\tName: [______________________________]")] }),
-    new Paragraph({ children: [new TextRun("\t\t\tNRIC: [______________________________]")] }),
+    new Paragraph({ children: [new TextRun(`\t\t\tName: ${name || "[______________________________]"}`)] }),
+    new Paragraph({ children: [new TextRun(`\t\t\tNRIC: ${nric || "[______________________________]"}`)] }),
     blank(),
   ];
 }
@@ -145,7 +145,7 @@ export async function buildTenancyAgreementDocx(input: {
   const B = { style: BorderStyle.SINGLE, size: 1, color: "000000" } as const;
   const scheduleRows: [string, string, string][] = [
     ["A", "This day and year of This Agreement", `On ${fmtDateLong(lease.signedDate)}`],
-    ["B", "Name and address of the Landlord", `${landlordLine}\n[Landlord address]\nH/P: [__________]`],
+    ["B", "Name and address of the Landlord", `${landlordLine}\n${company.address || "[Landlord address]"}\nH/P: ${company.phone || "[__________]"}`],
     ["C", "Name and address of the Tenant", `${tenantLine}\n${tenant.address || "[Tenant address]"}`],
     ["D", "Description of the Demised premises", premises],
     ["E", "Term of Tenancy", term],
@@ -195,12 +195,15 @@ export async function buildTenancyAgreementDocx(input: {
   // Signatures
   children.push(body("IN WITNESS WHEREOF the parties hereto have hereunto set their hands the day and year set out in Schedule A of the Schedule of the Agreement"));
   children.push(blank());
-  for (const label of ["SIGNED BY THE SAID LANDLORD", "IN THE PRESENCE OF :-", "SIGNED BY THE SAID TENANT", "IN THE PRESENCE OF :-"]) {
-    for (const par of sigBlock(label)) children.push(par);
-  }
+  // Individual tenant → prefill their name/IC as signatory; company tenant → left blank (a director signs).
+  const isCompanyTenant = tenantIds.length > 0;
+  for (const par of sigBlock("SIGNED BY THE SAID LANDLORD", company.signatoryName, company.signatoryNric)) children.push(par);
+  for (const par of sigBlock("IN THE PRESENCE OF :-")) children.push(par);
+  for (const par of sigBlock("SIGNED BY THE SAID TENANT", isCompanyTenant ? null : tenant.name, isCompanyTenant ? null : tenant.idNumber)) children.push(par);
+  for (const par of sigBlock("IN THE PRESENCE OF :-")) children.push(par);
   children.push(heading("LANDLORD'S BANK DETAILS (for rental payment):"));
-  children.push(new Paragraph({ children: [new TextRun("BANK NAME\t\t: [__________________________]")] }));
-  children.push(new Paragraph({ children: [new TextRun("BANK ACC NO\t\t: [__________________________]")] }));
+  children.push(new Paragraph({ children: [new TextRun(`BANK NAME\t\t: ${company.bankName || "[__________________________]"}`)] }));
+  children.push(new Paragraph({ children: [new TextRun(`BANK ACC NO\t\t: ${company.bankAccountNo || "[__________________________]"}`)] }));
   children.push(new Paragraph({ children: [new TextRun(`NAME OF AC HOLDER\t: ${company.name}`)] }));
   children.push(new Paragraph({ children: [new PageBreak()] }));
 

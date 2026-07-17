@@ -55,6 +55,12 @@ export async function updateCompanyAction(fd: FormData) {
       name: s(fd, "name"),
       registrationNo: s(fd, "registrationNo") || null,
       currency: s(fd, "currency") || "RM",
+      address: s(fd, "address") || null,
+      phone: s(fd, "phone") || null,
+      bankName: s(fd, "bankName") || null,
+      bankAccountNo: s(fd, "bankAccountNo") || null,
+      signatoryName: s(fd, "signatoryName") || null,
+      signatoryNric: s(fd, "signatoryNric") || null,
     },
   });
   revalidatePath("/", "layout");
