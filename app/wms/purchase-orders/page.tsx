@@ -7,6 +7,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
 import ItemPicker from '@/components/ItemPicker'
 import WarehouseTabs, { passWh, WhFilter } from '@/components/WarehouseTabs'
+import { openWmsDiscussion } from '@/components/WmsDiscussionWidget'
 
 interface PO {
   id: string; po_number: string | null; supplier_name: string | null; order_date: string | null; expected_date: string | null
@@ -357,6 +358,7 @@ export default function WmsPurchaseOrdersPage() {
                     <div className="flex gap-3 text-xs">
                       {['Open', 'Partially Received', 'Fulfilled'].includes(o.status) && <Link href={`/wms/receive/${o.id}`} className="text-emerald-700 font-medium hover:underline">Receive →</Link>}
                       <button onClick={() => viewLines(o)} className="text-emerald-700 hover:underline">View lines</button>
+                      <button onClick={() => openWmsDiscussion(`PO ${o.po_number || o.file_name || o.id.slice(0, 8)}`)} title="Ask a question about this PO" className="text-indigo-600 hover:underline">💬 Discuss</button>
                       {o.file_path && <button onClick={() => viewPdf(o)} className="text-gray-500 hover:underline">PDF</button>}
                       {canEdit && o.file_path && <button onClick={() => reRead(o)} className="text-gray-500 hover:underline">Re-read</button>}
                       {canEdit && (recvByPo[o.id]?.length ?? 0) === 0 && <button onClick={() => startReplace(o)} title="Upload an amended PDF and re-read the lines" className="text-gray-500 hover:underline">Replace PDF</button>}

@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
 import WarehouseTabs, { passWh, WhFilter } from '@/components/WarehouseTabs'
+import { openWmsDiscussion } from '@/components/WmsDiscussionWidget'
 
 interface DO { id: string; order_id: string | null; do_number: string | null; customer_name: string | null; order_no: string | null; vehicle: string | null; driver: string | null; remark: string | null; dispatched_by_name: string | null; dispatched_at: string; load_checked_at: string | null; load_checked_by_name: string | null }
 interface DLine { item_code: string; description: string | null; batch_no: string; exp_date: string | null; qty: number; uom: string | null }
@@ -135,6 +136,7 @@ export default function WmsDispatchListPage() {
                   <td className="px-4 py-2.5 whitespace-nowrap">
                     <div className="flex items-center gap-3">
                       <button onClick={() => reprint(d)} className="text-emerald-700 hover:underline text-xs font-medium">⬇ DO PDF</button>
+                      <button onClick={() => openWmsDiscussion(`DO ${d.do_number || d.id.slice(0, 8)}`)} title="Ask a question about this delivery order" className="text-indigo-600 hover:underline text-xs font-medium">💬 Discuss</button>
                       {!(d.order_id && prodOrders.has(d.order_id)) && (
                         d.load_checked_at
                           ? <span className="text-teal-700 text-xs" title={`Loading checked by ${d.load_checked_by_name || 'staff'}`}>✓ Loaded</span>

@@ -5,6 +5,7 @@ import { useProfile } from '@/hooks/useProfile'
 import WarehouseTabs, { passWh, WhFilter } from '@/components/WarehouseTabs'
 import { can } from '@/lib/permissions'
 import ItemPicker from '@/components/ItemPicker'
+import { openWmsDiscussion } from '@/components/WmsDiscussionWidget'
 
 interface Stock {
   id: string
@@ -363,6 +364,7 @@ export default function WmsStockPage() {
                         <button onClick={() => openEdit(r)} className="text-emerald-700 hover:underline text-xs">Adjust</button>
                         <button onClick={() => requestRecode(r)} title="Received under the wrong item code? Request to re-code it (Head Office approves)." className="text-indigo-600 hover:underline text-xs">Change code</button>
                         <button onClick={() => toggleProd(r)} className={`hover:underline text-xs ${r.production_only ? 'text-purple-700 font-medium' : 'text-purple-500'}`}>{r.production_only ? 'Release to trading' : 'For production'}</button>
+                        <button onClick={() => openWmsDiscussion(`Item ${r.item_code}`)} title="Ask a question about this item" className="text-indigo-600 hover:underline text-xs">💬 Discuss</button>
                         <button onClick={() => remove(r)} className="text-red-500 hover:underline text-xs">Remove</button>
                       </div>
                     ) : <span className="text-gray-300 text-xs">—</span>}
