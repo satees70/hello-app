@@ -44,6 +44,7 @@ export default function WmsStockPage() {
   const [q, setQ] = useState('')
   const [wh, setWh] = useState<WhFilter>('all')
   const [sortBy, setSortBy] = useState<'item' | 'bin'>('item')
+  const [pendingOnly, setPendingOnly] = useState(false)   // show only stock staged in the PENDING area
 
   // add / edit
   const [showForm, setShowForm] = useState(false)
@@ -82,18 +83,19 @@ export default function WmsStockPage() {
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase()
-    const out = rows.filter(r => passWh(wh, r.description) && (!needle || [r.item_code, r.description, r.location_code, r.batch_no].some(v => (v || '').toLowerCase().includes(needle))))
+    const out = rows.filter(r => passWh(wh, r.description) && (!pendingOnly || r.location_code === 'PENDING') && (!needle || [r.item_code, r.description, r.location_code, r.batch_no].some(v => (v || '').toLowerCase().includes(needle))))
     out.sort((a, b) => sortBy === 'bin'
       ? a.location_code.localeCompare(b.location_code) || a.item_code.localeCompare(b.item_code)
       : a.item_code.localeCompare(b.item_code) || a.location_code.localeCompare(b.location_code))
     return out
-  }, [rows, q, wh, sortBy])
+  }, [rows, q, wh, sortBy, pendingOnly])
 
   const stats = useMemo(() => ({
     lines: rows.length,
     items: new Set(rows.map(r => r.item_code)).size,
     bins: new Set(rows.map(r => r.location_code)).size,
     qty: clean(rows.reduce((s, r) => s + Number(r.quantity || 0), 0)),
+    pending: clean(rows.filter(r => r.location_code === 'PENDING').reduce((s, r) => s + Number(r.quantity || 0), 0)),
   }), [rows])
 
   function openCreate() { setEditing(null); setForm(EMPTY); setErr(''); setShowForm(true) }
@@ -211,11 +213,16 @@ export default function WmsStockPage() {
           )}
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3 mb-6">
           <Stat label="Total quantity" value={fmtQty(stats.qty)} accent="text-emerald-700" />
           <Stat label="Distinct items" value={stats.items.toString()} />
           <Stat label="Bins used" value={stats.bins.toString()} />
           <Stat label="Stock lines" value={stats.lines.toString()} accent="text-gray-400" />
+          <button type="button" onClick={() => setPendingOnly(v => !v)} title="Stock staged in the PENDING area, waiting to be picked for outstanding orders"
+            className={`text-left rounded-xl border shadow-sm px-4 py-3 ${pendingOnly ? 'bg-amber-100 border-amber-300' : 'bg-white hover:bg-amber-50'}`}>
+            <div className="text-2xl font-bold tabular-nums text-amber-700">{fmtQty(stats.pending)}</div>
+            <div className="text-xs text-gray-500 mt-0.5">📦 Pending (staged){pendingOnly ? ' · showing' : ''}</div>
+          </button>
         </div>
 
         <div className="flex flex-wrap gap-2 mb-4">
@@ -294,7 +301,9 @@ export default function WmsStockPage() {
                     {r.production_only && <div className="text-[10px] font-sans font-semibold text-purple-700 bg-purple-50 rounded px-1 py-0.5 inline-block mt-0.5">🔒 Production only</div>}
                   </td>
                   <td className="px-4 py-2.5 text-gray-600 max-w-[240px] truncate">{r.description}</td>
-                  <td className="px-4 py-2.5 font-mono">{r.location_code}</td>
+                  <td className="px-4 py-2.5 font-mono">{r.location_code === 'PENDING'
+                    ? <span className="inline-block bg-amber-100 text-amber-800 rounded px-1.5 py-0.5 text-xs font-semibold">📦 PENDING</span>
+                    : r.location_code}</td>
                   <td className="px-4 py-2.5 font-mono text-xs">{r.batch_no || <span className="text-gray-300">—</span>}</td>
                   <td className="px-4 py-2.5 text-xs">{fmtDate(r.exp_date) || <span className="text-gray-300">—</span>}</td>
                   <td className="px-4 py-2.5 font-medium tabular-nums">
