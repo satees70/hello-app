@@ -29,6 +29,7 @@ export default function StockCardPage() {
   const [items, setItems] = useState<Item[]>([])
   const [locs, setLocs] = useState<Loc[]>([])
   const [moves, setMoves] = useState<Move[]>([])
+  const [onhand, setOnhand] = useState<{ location_code: string; batch_no: string; quantity: number }[]>([])   // current on-hand, to anchor the ledger
   const [busy, setBusy] = useState(false)
 
   const [group, setGroup] = useState('')
@@ -52,10 +53,14 @@ export default function StockCardPage() {
 
   async function loadMoves(code: string) {
     setBusy(true)
-    const { data } = await supabase.from('wms_stock_moves')
-      .select('id, move_type, item_code, description, from_location_code, to_location_code, batch_no, exp_date, quantity, reference, moved_by_name, created_at')
-      .eq('item_code', code).order('created_at', { ascending: true }).limit(5000)
-    setMoves((data as Move[]) || [])
+    const [mv, oh] = await Promise.all([
+      supabase.from('wms_stock_moves')
+        .select('id, move_type, item_code, description, from_location_code, to_location_code, batch_no, exp_date, quantity, reference, moved_by_name, created_at')
+        .eq('item_code', code).order('created_at', { ascending: true }).limit(5000),
+      supabase.from('wms_stock').select('location_code, batch_no, quantity').eq('item_code', code),
+    ])
+    setMoves((mv.data as Move[]) || [])
+    setOnhand((oh.data as { location_code: string; batch_no: string; quantity: number }[]) || [])
     setBusy(false)
   }
   function pickItem(it: { code: string; description: string }) {
@@ -72,11 +77,21 @@ export default function StockCardPage() {
   }, [L])
 
   // Ledger: opening balance (everything before `from`) + the in-range rows with a running balance.
+  // The ledger is anchored to the CURRENT on-hand: any stock that isn't explained by recorded
+  // movements (e.g. opening stock loaded via the bulk import, which logs no "in" move) shows up as
+  // a baseline opening balance rather than pushing the closing negative. This keeps the closing
+  // balance equal to the real on-hand.
   const card = useMemo(() => {
     const scoped = moves
       .filter(m => !B || m.batch_no === B)
       .filter(m => !L || (m.from_location_code || '').toUpperCase() === L || (m.to_location_code || '').toUpperCase() === L)
-    let bal = 0, opening = 0
+    const onScoped = onhand
+      .filter(o => !B || o.batch_no === B)
+      .filter(o => !L || (o.location_code || '').toUpperCase() === L)
+    const currentOnHand = clean(onScoped.reduce((s, o) => s + Number(o.quantity || 0), 0))
+    const netAll = clean(scoped.reduce((s, m) => { const { inQ, outQ } = inOut(m); return s + inQ - outQ }, 0))
+    const baseline = clean(currentOnHand - netAll)   // opening stock that predates the recorded movements
+    let bal = baseline, opening = baseline
     const rows: (Move & { inQ: number; outQ: number; balance: number })[] = []
     for (const m of scoped) {
       const { inQ, outQ } = inOut(m)
@@ -89,15 +104,15 @@ export default function StockCardPage() {
     const totIn = clean(rows.reduce((s, r) => s + r.inQ, 0))
     const totOut = clean(rows.reduce((s, r) => s + r.outQ, 0))
     const closing = rows.length ? rows[rows.length - 1].balance : opening
-    return { rows, opening, totIn, totOut, closing }
-  }, [moves, from, to, L, B, inOut])
+    return { rows, opening, totIn, totOut, closing, baseline }
+  }, [moves, onhand, from, to, L, B, inOut])
 
   const unit = useMemo(() => items.find(i => i.code === itemCode)?.unit || '', [items, itemCode])
 
   function exportCsv() {
     const head = ['Date', 'Type', 'Reference', 'From', 'To', 'Batch', 'In', 'Out', 'Balance']
     const body: (string | number)[][] = []
-    if (from) body.push(['', 'Opening balance', '', '', '', '', '', '', fmtBal(card.opening)])
+    if (from || card.opening !== 0) body.push(['', 'Opening balance', '', '', '', '', '', '', fmtBal(card.opening)])
     card.rows.forEach(r => body.push([fmtTime(r.created_at), TYPE_LABEL[r.move_type] || r.move_type, r.reference || '', r.from_location_code || '', r.to_location_code || '', r.batch_no || '', fmtQty(r.inQ), fmtQty(r.outQ), fmtBal(r.balance)]))
     body.push(['', 'Closing balance', '', '', '', '', fmtQty(card.totIn), fmtQty(card.totOut), fmtBal(card.closing)])
     downloadCsv(`StockCard_${itemCode.replace(/[\/\s]/g, '-')}.csv`, head, body)
@@ -112,7 +127,7 @@ export default function StockCardPage() {
     doc.text(`Item: ${itemLabel || itemCode}`, 14, 30)
     doc.text([L ? `Location: ${L}` : 'Location: all', B ? `Batch: ${B}` : 'Batch: all', (from || to) ? `Period: ${from || '…'} → ${to || '…'}` : 'Period: all'].join('    '), 14, 36)
     const body: (string | number)[][] = []
-    if (from) body.push(['', 'Opening balance', '', '', '', '', '', '', fmtBal(card.opening)])
+    if (from || card.opening !== 0) body.push(['', 'Opening balance', '', '', '', '', '', '', fmtBal(card.opening)])
     card.rows.forEach(r => body.push([fmtTime(r.created_at), TYPE_LABEL[r.move_type] || r.move_type, r.reference || '', r.from_location_code || '', r.to_location_code || '', r.batch_no || '', fmtQty(r.inQ), fmtQty(r.outQ), fmtBal(r.balance)]))
     body.push(['', 'Closing balance', '', '', '', '', fmtQty(card.totIn), fmtQty(card.totOut), fmtBal(card.closing)])
     autoTable(doc, {
@@ -188,8 +203,8 @@ export default function StockCardPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b"><tr>{['Date', 'Type', 'Reference', 'From', 'To', 'Batch', 'In', 'Out', 'Balance'].map(h => <th key={h} className={`px-3 py-2.5 font-medium text-gray-600 whitespace-nowrap ${['In', 'Out', 'Balance'].includes(h) ? 'text-right' : 'text-left'}`}>{h}</th>)}</tr></thead>
                   <tbody>
-                    {from && <tr className="border-b bg-gray-50/60"><td className="px-3 py-2 text-gray-500 italic" colSpan={8}>Opening balance{(from ? ` as of ${from}` : '')}</td><td className="px-3 py-2 text-right font-semibold tabular-nums">{fmtBal(card.opening)}</td></tr>}
-                    {card.rows.length === 0 && !from && <tr><td colSpan={9} className="text-center py-10 text-gray-400">No movements for this item{L ? ` in ${L}` : ''}{B ? ` · batch ${B}` : ''}.</td></tr>}
+                    {(from || card.opening !== 0) && <tr className="border-b bg-gray-50/60"><td className="px-3 py-2 text-gray-500 italic" colSpan={8}>Opening balance{from ? ` as of ${from}` : ' (before recorded movements)'}</td><td className="px-3 py-2 text-right font-semibold tabular-nums">{fmtBal(card.opening)}</td></tr>}
+                    {card.rows.length === 0 && !from && card.opening === 0 && <tr><td colSpan={9} className="text-center py-10 text-gray-400">No movements for this item{L ? ` in ${L}` : ''}{B ? ` · batch ${B}` : ''}.</td></tr>}
                     {card.rows.map(r => (
                       <tr key={r.id} className="border-b last:border-0 hover:bg-gray-50">
                         <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">{fmtTime(r.created_at)}</td>
