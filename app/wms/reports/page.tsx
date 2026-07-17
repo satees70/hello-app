@@ -122,7 +122,8 @@ export default function StockReportsPage() {
           <WarehouseTabs value={wh} onChange={setWh} />
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+        {/* Desktop: table */}
+        <div className="hidden sm:block bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b"><tr>{report.headers.map(h => <th key={h} className="text-left px-3 py-2.5 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}{view === 'low' && canEdit && <th className="px-3 py-2.5" />}</tr></thead>
             <tbody>
@@ -137,6 +138,32 @@ export default function StockReportsPage() {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile: one card per row, so long descriptions read on their own line */}
+        <div className="sm:hidden space-y-2">
+          {filtered.length === 0 && <div className="bg-white rounded-xl border p-6 text-center text-gray-400 text-sm">No data.</div>}
+          {filtered.map((r, i) => (
+            <div key={i} className={`bg-white rounded-xl border shadow-sm p-3 ${view === 'low' && r[3] === 'LOW' ? 'border-red-200 bg-red-50/50' : ''}`}>
+              <div className="font-mono font-semibold text-sm mb-1.5">{r[0]}</div>
+              <div className="space-y-1">
+                {r.map((c, j) => j === 0 ? null : (
+                  report.headers[j] === 'Description'
+                    ? <div key={j} className="text-sm text-gray-700 leading-snug">{c}</div>
+                    : <div key={j} className="flex items-center justify-between gap-3 text-sm">
+                        <span className="text-gray-500 text-xs">{report.headers[j]}</span>
+                        <span className={`tabular-nums font-medium text-right ${view === 'low' && j === 3 && c === 'LOW' ? 'text-red-600 font-semibold' : ''}`}>{c}</span>
+                      </div>
+                ))}
+                {view === 'low' && canEdit && (
+                  <div className="flex items-center justify-between gap-3 pt-1.5 mt-1 border-t">
+                    <span className="text-gray-500 text-xs">Reorder level</span>
+                    <input defaultValue={String(r[2] === '—' ? '' : r[2]).replace(/,/g, '')} onBlur={e => saveReorder(String(r[0]), e.target.value.replace(/[^0-9.]/g, ''))} className="w-24 border rounded px-2 py-1 text-xs text-right" placeholder="level" />
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
         <p className="text-xs text-gray-400 mt-3">{filtered.length} rows{view === 'aging' ? ' · age = time since the lot landed in its bin' : ''}.</p>
       </div>
