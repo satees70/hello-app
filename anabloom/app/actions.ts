@@ -226,6 +226,9 @@ export async function createTenantAction(fd: FormData) {
       phone: s(fd, "phone") || null,
       email: s(fd, "email") || null,
       idNumber: s(fd, "idNumber") || null,
+      regNoOld: s(fd, "regNoOld") || null,
+      regNoNew: s(fd, "regNoNew") || null,
+      address: s(fd, "address") || null,
       notes: s(fd, "notes") || null,
     },
   });

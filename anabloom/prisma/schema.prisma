@@ -99,7 +99,10 @@ model Tenant {
   name      String
   phone     String?
   email     String?
-  idNumber  String?
+  idNumber  String? // IC number (individual tenant)
+  regNoOld  String? // company old registration no. (e.g. 773261-M)
+  regNoNew  String? // company new registration no. (e.g. 202501031985)
+  address   String?
   notes     String?
   createdAt DateTime @default(now())
 

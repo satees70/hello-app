@@ -223,8 +223,22 @@ export default async function TenantsPage({ searchParams }: { searchParams: Prom
               </div>
             </div>
             <div>
-              <label className="label">ID number</label>
-              <input className="input" name="idNumber" />
+              <label className="label">IC number (if personal)</label>
+              <input className="input" name="idNumber" placeholder="e.g. 900101-10-1234" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">Company old reg. no.</label>
+                <input className="input" name="regNoOld" placeholder="e.g. 773261-M" />
+              </div>
+              <div>
+                <label className="label">Company new reg. no.</label>
+                <input className="input" name="regNoNew" placeholder="e.g. 202501031985" />
+              </div>
+            </div>
+            <div>
+              <label className="label">Address</label>
+              <input className="input" name="address" />
             </div>
             <button className="btn-primary">Add tenant</button>
           </form>

@@ -131,7 +131,14 @@ export async function buildTenancyAgreementDocx(input: {
   const { company, property, tenant, lease } = input;
   const sym = company.currency || "RM";
   const landlordLine = company.registrationNo ? `${company.name} (${company.registrationNo})` : company.name;
-  const tenantLine = tenant.idNumber ? `${tenant.name} (${tenant.idNumber})` : tenant.name;
+  // Company tenant → show new + old registration numbers; individual → IC number.
+  const tenantIds = [tenant.regNoNew, tenant.regNoOld].filter(Boolean) as string[];
+  const tenantIdStr = tenantIds.length
+    ? tenantIds.map((x) => `(${x})`).join(" ")
+    : tenant.idNumber
+      ? `(${tenant.idNumber})`
+      : "";
+  const tenantLine = tenantIdStr ? `${tenant.name} ${tenantIdStr}` : tenant.name;
   const term = `${fmtDate(lease.startDate)} – ${lease.endDate ? fmtDate(lease.endDate) : "[end date]"}`;
   const premises = property.address ? `${property.name}, ${property.address}` : property.name;
 
@@ -139,7 +146,7 @@ export async function buildTenancyAgreementDocx(input: {
   const scheduleRows: [string, string, string][] = [
     ["A", "This day and year of This Agreement", `On ${fmtDateLong(lease.signedDate)}`],
     ["B", "Name and address of the Landlord", `${landlordLine}\n[Landlord address]\nH/P: [__________]`],
-    ["C", "Name and address of the Tenant", `${tenantLine}\n[Tenant address]`],
+    ["C", "Name and address of the Tenant", `${tenantLine}\n${tenant.address || "[Tenant address]"}`],
     ["D", "Description of the Demised premises", premises],
     ["E", "Term of Tenancy", term],
     ["F", "Rental per month", `${money(lease.monthlyRent, sym)} per month`],
@@ -163,7 +170,7 @@ export async function buildTenancyAgreementDocx(input: {
   children.push(center("AND", true));
   children.push(blank(), blank());
   children.push(center(tenant.name, true));
-  children.push(center(`${tenant.idNumber ? `(${tenant.idNumber})` : ""} …………………. TENANT`, true));
+  children.push(center(`${tenantIdStr} …………………. TENANT`, true));
   children.push(blank(), blank(), blank());
   children.push(center("*".repeat(64)));
   children.push(center("TENANCY  AGREEMENT", true));
