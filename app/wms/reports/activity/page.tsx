@@ -66,7 +66,7 @@ export default function ActivityReportPage() {
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
         <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-          <div><h1 className="text-2xl font-bold">Activity</h1><p className="text-gray-500 text-sm mt-1">Movement history & count discrepancies. <Link href="/wms/reports" className="text-emerald-700 underline">Stock reports</Link></p></div>
+          <div><h1 className="text-2xl font-bold">Activity</h1><p className="text-gray-500 text-sm mt-1">Movement history & count discrepancies. <Link href="/wms/reports" className="text-emerald-700 underline">Stock reports</Link> · <Link href="/wms/reports/adjustments" className="text-emerald-700 underline">Adjustments</Link></p></div>
           <button onClick={tab === 'moves' ? exportMoves : exportDisc} className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">⬇ CSV</button>
         </div>
 
