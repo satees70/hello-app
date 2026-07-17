@@ -150,7 +150,7 @@ export default function AdjustmentsReportPage() {
         <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
           <div>
             <h1 className="text-2xl font-bold">Adjustments Report</h1>
-            <p className="text-gray-500 text-sm mt-1">Total adjusted quantity over time. <Link href="/wms/reports" className="text-emerald-700 underline">Stock Reports</Link> · <Link href="/wms/reports/activity" className="text-emerald-700 underline">Activity</Link> · <Link href="/wms/reports/stock-card" className="text-emerald-700 underline">Stock Card</Link></p>
+            <p className="text-gray-500 text-sm mt-1">Total adjusted quantity over time. <Link href="/wms/reports/counting" className="text-emerald-700 underline">By counter</Link> · <Link href="/wms/reports" className="text-emerald-700 underline">Stock Reports</Link> · <Link href="/wms/reports/activity" className="text-emerald-700 underline">Activity</Link> · <Link href="/wms/reports/stock-card" className="text-emerald-700 underline">Stock Card</Link></p>
           </div>
           <div className="flex gap-2">
             <button onClick={exportCsv} className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">⬇ CSV</button>
