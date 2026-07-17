@@ -60,6 +60,7 @@ export default function WmsOrdersPage() {
   const [descsByOrder, setDescsByOrder] = useState<Record<string, (string | null)[]>>({})
   const [itemText, setItemText] = useState<Record<string, string>>({})
   const [outstandingOrders, setOutstandingOrders] = useState<Set<string>>(new Set())   // orders with a no-stock balance to re-pick
+  const [pendingByOrder, setPendingByOrder] = useState<Record<string, number>>({})   // # of lines still short (no stock) per order
   const [expandedId, setExpandedId] = useState('')   // order whose lines are shown inline
   const [expLines, setExpLines] = useState<Line[]>([])
   const [doByOrder, setDoByOrder] = useState<Record<string, string[]>>({})   // order_id -> DO number(s) once dispatched
@@ -80,13 +81,14 @@ export default function WmsOrdersPage() {
       const m: Record<string, (string | null)[]> = {}
       const t: Record<string, string> = {}
       const outstanding = new Set<string>()
+      const pend: Record<string, number> = {}
       ;(ol as { order_id: string; item_code: string | null; description: string | null; no_stock: boolean | null; no_stock_qty: number | null }[] || []).forEach(l => {
         (m[l.order_id] ||= []).push(l.description)
         t[l.order_id] = `${t[l.order_id] || ''} ${l.item_code || ''} ${l.description || ''}`.toLowerCase()
-        if (l.no_stock && Number(l.no_stock_qty) > 0) outstanding.add(l.order_id)
+        if (l.no_stock && Number(l.no_stock_qty) > 0) { outstanding.add(l.order_id); pend[l.order_id] = (pend[l.order_id] || 0) + 1 }
       })
-      setDescsByOrder(m); setItemText(t); setOutstandingOrders(outstanding)
-    } else { setDescsByOrder({}); setItemText({}); setOutstandingOrders(new Set()) }
+      setDescsByOrder(m); setItemText(t); setOutstandingOrders(outstanding); setPendingByOrder(pend)
+    } else { setDescsByOrder({}); setItemText({}); setOutstandingOrders(new Set()); setPendingByOrder({}) }
     const { data: pk } = await supabase.rpc('wms_pickers')
     setPickers((pk as Picker[]) || [])
     // DO number(s) for orders that have been dispatched.
@@ -204,6 +206,15 @@ export default function WmsOrdersPage() {
 
   if (loading) return <div className="p-8 text-sm text-gray-500">Loading…</div>
 
+  // "6/9 picked · 3 pending" — how many lines were fully picked vs still short on stock.
+  const pickProgress = (o: Order) => {
+    const pend = pendingByOrder[o.id] || 0
+    if (!pend) return null
+    const total = o.wms_order_lines?.[0]?.count ?? 0
+    const picked = Math.max(0, total - pend)
+    return <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 whitespace-nowrap">📦 {picked}/{total} picked · {pend} pending</span>
+  }
+
   const unmatched = lines.filter(l => !l.item_id).length
   const nq = q.trim().toLowerCase()
   const shownOrders = (statusFilter ? orders.filter(o => o.status === statusFilter) : orders)
@@ -260,7 +271,7 @@ export default function WmsOrdersPage() {
                   <td className="px-4 py-2.5">{o.customer_name || <span className="text-gray-300">—</span>}</td>
                   <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">{o.delivery_date || <span className="text-gray-300">—</span>}</td>
                   <td className="px-4 py-2.5 tabular-nums">{o.wms_order_lines?.[0]?.count ?? 0}</td>
-                  <td className="px-4 py-2.5"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CHIP[o.status] || 'bg-gray-100'}`}>{o.status}</span></td>
+                  <td className="px-4 py-2.5"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CHIP[o.status] || 'bg-gray-100'}`}>{o.status}</span>{pickProgress(o) && <div className="mt-1">{pickProgress(o)}</div>}</td>
                   <td className="px-4 py-2.5 whitespace-nowrap">
                     {canEdit
                       ? <select value={o.assigned_to || ''} onChange={e => assign(o, e.target.value)} className="border rounded px-1.5 py-1 text-xs max-w-[140px]">
@@ -323,7 +334,10 @@ export default function WmsOrdersPage() {
                   {doByOrder[o.id]?.length ? <div className="text-[10px] text-emerald-700 font-medium" title="Dispatched on this DO">DO {doByOrder[o.id].join(', ')}</div> : null}
                   <div className="text-xs text-gray-500 leading-snug truncate" title={o.file_name || ''}>{o.file_name}</div>
                 </div>
-                <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CHIP[o.status] || 'bg-gray-100'}`}>{o.status}</span>
+                <div className="shrink-0 flex flex-col items-end gap-1">
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CHIP[o.status] || 'bg-gray-100'}`}>{o.status}</span>
+                  {pickProgress(o)}
+                </div>
               </div>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-gray-600">
                 <span>{o.customer_name || <span className="text-gray-300">—</span>}</span>
