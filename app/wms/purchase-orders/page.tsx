@@ -10,10 +10,11 @@ import WarehouseTabs, { passWh, WhFilter } from '@/components/WarehouseTabs'
 
 interface PO {
   id: string; po_number: string | null; supplier_name: string | null; order_date: string | null; expected_date: string | null
-  file_name: string | null; file_path: string | null; status: string; source: string
+  file_name: string | null; file_path: string | null; status: string; source: string; sql_grn_no: string | null
   error_message: string | null; created_at: string
   wms_po_lines?: { count: number }[]
 }
+type Recv = { item: string; batch: string; qty: number }
 interface POLine { id: string; line_no: number | null; item_id: string | null; item_code: string; description: string | null; quantity: number; qty_received: number; uom: string | null }
 interface Item { code: string; description: string; unit: string }
 interface DraftLine { item_code: string; description: string; quantity: string; uom: string }
@@ -49,24 +50,88 @@ export default function WmsPurchaseOrdersPage() {
 
   const [statusFilter, setStatusFilter] = useState('')
   const [wh, setWh] = useState<WhFilter>('all')
+  const [q, setQ] = useState('')   // search by PO / supplier / item
   const [descsByPo, setDescsByPo] = useState<Record<string, (string | null)[]>>({})
+  const [itemText, setItemText] = useState<Record<string, string>>({})
+  const [recvByPo, setRecvByPo] = useState<Record<string, Recv[]>>({})   // received batches per PO
+  const [putStatus, setPutStatus] = useState<Record<string, 'pending' | 'done'>>({})   // put-away state per PO
+  const [grnEdits, setGrnEdits] = useState<Record<string, string>>({})   // SQL GRN inline edits
   useEffect(() => { const s = new URLSearchParams(window.location.search).get('status'); if (s) setStatusFilter(s) }, [])
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
     const { data } = await supabase.from('wms_purchase_orders').select('*, wms_po_lines(count)').order('created_at', { ascending: false }).limit(100)
     const list = (data as PO[]) || []
     setPos(list)
-    // Item descriptions per PO, so the GCH / Other warehouse filter can match on lines.
+    // Item descriptions per PO (for the GCH filter) + a searchable text blob (codes + descriptions).
     const ids = list.map(o => o.id)
     if (ids.length) {
-      const { data: pl } = await supabase.from('wms_po_lines').select('po_id, description').in('po_id', ids)
-      const m: Record<string, (string | null)[]> = {}
-      ;(pl as { po_id: string; description: string | null }[] || []).forEach(l => { (m[l.po_id] ||= []).push(l.description) })
-      setDescsByPo(m)
-    } else setDescsByPo({})
+      const { data: pl } = await supabase.from('wms_po_lines').select('po_id, item_code, description').in('po_id', ids)
+      const m: Record<string, (string | null)[]> = {}; const t: Record<string, string> = {}
+      ;(pl as { po_id: string; item_code: string | null; description: string | null }[] || []).forEach(l => {
+        (m[l.po_id] ||= []).push(l.description)
+        t[l.po_id] = `${t[l.po_id] || ''} ${l.item_code || ''} ${l.description || ''}`.toLowerCase()
+      })
+      setDescsByPo(m); setItemText(t)
+      // Received batches per PO (via its GRNs) + put-away status (still-in-GOODS-IN = pending).
+      const { data: grns } = await supabase.from('wms_grns').select('id, po_id').in('po_id', ids)
+      const poByGrn: Record<string, string> = {}; const grnIds: string[] = []
+      ;(grns as { id: string; po_id: string | null }[] || []).forEach(g => { if (g.po_id) { poByGrn[g.id] = g.po_id; grnIds.push(g.id) } })
+      const recv: Record<string, Recv[]> = {}
+      if (grnIds.length) {
+        const { data: gl } = await supabase.from('wms_grn_lines').select('grn_id, item_code, batch_no, qty_received').in('grn_id', grnIds)
+        ;(gl as { grn_id: string; item_code: string; batch_no: string | null; qty_received: number }[] || []).forEach(l => {
+          const po = poByGrn[l.grn_id]; if (!po) return
+          ;(recv[po] ||= []).push({ item: l.item_code, batch: l.batch_no || '', qty: Number(l.qty_received || 0) })
+        })
+      }
+      setRecvByPo(recv)
+      const { data: gin } = await supabase.from('wms_stock').select('item_code, batch_no, quantity').eq('location_code', 'GOODS-IN').gt('quantity', 0)
+      const ginSet = new Set(((gin as { item_code: string; batch_no: string | null }[]) || []).map(s => `${s.item_code}|${s.batch_no || ''}`))
+      const ps: Record<string, 'pending' | 'done'> = {}
+      for (const [po, lines] of Object.entries(recv)) ps[po] = lines.some(l => ginSet.has(`${l.item}|${l.batch}`)) ? 'pending' : 'done'
+      setPutStatus(ps)
+    } else { setDescsByPo({}); setItemText({}); setRecvByPo({}); setPutStatus({}) }
     const { data: sup } = await supabase.from('wms_suppliers').select('name, code').eq('active', true).order('name')
     setSuppliers((sup as { name: string; code: string }[]) || [])
     if (!items.length) setItems(await fetchAll<Item>('items', 'code, description, unit', 'code'))
+  }
+
+  async function saveSqlGrn(po: PO) {
+    const grn = (grnEdits[po.id] ?? po.sql_grn_no ?? '').trim()
+    setErr(''); setMsg('')
+    const { error } = await supabase.rpc('set_po_sql_grn', { p_po_id: po.id, p_grn: grn || null })
+    if (error) { setErr(/set_po_sql_grn|sql_grn_no/.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-po-sql-grn.sql in the Supabase SQL editor.' : error.message); return }
+    setPos(prev => prev.map(p => p.id === po.id ? { ...p, sql_grn_no: grn || null } : p))
+    setMsg(`SQL GRN saved for ${po.po_number || 'PO'}.`)
+  }
+
+  // Put-away report: where the received goods ended up — item, batch, bin, qty.
+  async function putawayReport(po: PO) {
+    const recv = recvByPo[po.id] || []
+    if (!recv.length) { setErr('Nothing received on this PO yet.'); return }
+    const codes = [...new Set(recv.map(r => r.item))]
+    const want = new Set(recv.map(r => `${r.item}|${r.batch}`))
+    const { data: st } = await supabase.from('wms_stock').select('item_code, description, batch_no, location_code, quantity').in('item_code', codes).gt('quantity', 0)
+    const rows = ((st as { item_code: string; description: string | null; batch_no: string | null; location_code: string; quantity: number }[]) || [])
+      .filter(s => want.has(`${s.item_code}|${s.batch_no || ''}`))
+      .sort((a, b) => a.item_code.localeCompare(b.item_code) || (a.batch_no || '').localeCompare(b.batch_no || '') || a.location_code.localeCompare(b.location_code))
+    const { default: jsPDF } = await import('jspdf')
+    const { default: autoTable } = await import('jspdf-autotable')
+    const doc = new jsPDF()
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold'); doc.text('SRRI EASWARI MILLS SDN BHD', 14, 15)
+    doc.setFontSize(11); doc.setFont('helvetica', 'normal'); doc.text('PUT-AWAY REPORT', 14, 22)
+    doc.setFontSize(10)
+    doc.text(`PO: ${po.po_number || '-'}`, 14, 30)
+    doc.text(`Supplier: ${po.supplier_name || '-'}`, 14, 36)
+    if (po.sql_grn_no) doc.text(`SQL GRN: ${po.sql_grn_no}`, 140, 30)
+    doc.text(`Printed: ${new Date().toLocaleString('en-GB')}`, 140, 36)
+    autoTable(doc, {
+      startY: 42,
+      head: [['Item', 'Description', 'Batch', 'Bin', 'Qty']],
+      body: rows.map(s => [s.item_code, s.description || '', s.batch_no || '', s.location_code === 'GOODS-IN' ? 'GOODS-IN (not put away)' : s.location_code, fmtQty(s.quantity)]),
+      styles: { fontSize: 9, cellPadding: 2 }, headStyles: { fillColor: [4, 120, 87] }, columnStyles: { 4: { halign: 'right' } },
+    })
+    doc.save(`Putaway_${(po.po_number || 'po').replace(/[\/\s]/g, '-')}.pdf`)
   }
 
   async function handleUpload(e: React.FormEvent) {
@@ -145,7 +210,10 @@ export default function WmsPurchaseOrdersPage() {
 
   if (loading) return <div className="p-8 text-sm text-gray-500">Loading…</div>
 
-  const shownPos = (statusFilter ? pos.filter(o => o.status === statusFilter) : pos).filter(o => passWh(wh, descsByPo[o.id]))
+  const nq = q.trim().toLowerCase()
+  const shownPos = (statusFilter ? pos.filter(o => o.status === statusFilter) : pos)
+    .filter(o => passWh(wh, descsByPo[o.id]))
+    .filter(o => !nq || `${o.po_number || ''} ${o.supplier_name || ''} ${o.sql_grn_no || ''}`.toLowerCase().includes(nq) || (itemText[o.id] || '').includes(nq))
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -191,6 +259,7 @@ export default function WmsPurchaseOrdersPage() {
         {msg && <p className="text-emerald-700 text-sm bg-emerald-50 border border-emerald-200 p-3 rounded-lg mb-4">{msg}</p>}
 
         <div className="flex flex-wrap items-center gap-2 mb-3 text-sm">
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 PO no., supplier or item…" className="border rounded-lg px-3 py-1.5 flex-1 min-w-[12rem]" />
           <span className="text-gray-500">Status:</span>
           <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="border rounded-lg px-3 py-1.5">
             <option value="">All</option>
@@ -202,9 +271,9 @@ export default function WmsPurchaseOrdersPage() {
 
         <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b"><tr>{['PO No', 'Supplier', 'Expected', 'Lines', 'Status', 'Added', 'Actions'].map(h => <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
+            <thead className="bg-gray-50 border-b"><tr>{['PO No', 'Supplier', 'Expected', 'Lines', 'Status', 'Put-away', 'SQL GRN', 'Added', 'Actions'].map(h => <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
             <tbody>
-              {shownPos.length === 0 && <tr><td colSpan={7} className="text-center py-10 text-gray-400">No purchase orders{statusFilter ? ` with status “${statusFilter}”` : ''}{wh !== 'all' ? ' in this warehouse' : ' yet'}.</td></tr>}
+              {shownPos.length === 0 && <tr><td colSpan={9} className="text-center py-10 text-gray-400">No purchase orders{statusFilter ? ` with status “${statusFilter}”` : ''}{wh !== 'all' ? ' in this warehouse' : ' yet'}.</td></tr>}
               {shownPos.map(o => (
                 <tr key={o.id} className="border-b last:border-0 hover:bg-gray-50">
                   <td className="px-4 py-2.5 font-mono">{o.po_number || <span className="text-gray-300">{o.file_name ? '(reading…)' : '—'}</span>}</td>
@@ -212,6 +281,20 @@ export default function WmsPurchaseOrdersPage() {
                   <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">{o.expected_date || <span className="text-gray-300">—</span>}</td>
                   <td className="px-4 py-2.5 tabular-nums">{o.wms_po_lines?.[0]?.count ?? 0}</td>
                   <td className="px-4 py-2.5"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CHIP[o.status] || 'bg-gray-100'}`}>{o.status}</span></td>
+                  <td className="px-4 py-2.5 whitespace-nowrap">
+                    {putStatus[o.id] === 'pending' ? <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">Pending</span>
+                      : putStatus[o.id] === 'done' ? <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Put away ✓</span>
+                      : <span className="text-gray-300 text-xs">—</span>}
+                    {(recvByPo[o.id]?.length ?? 0) > 0 && <button onClick={() => putawayReport(o)} className="ml-2 text-emerald-700 hover:underline text-xs">report</button>}
+                  </td>
+                  <td className="px-4 py-2.5 whitespace-nowrap">
+                    <div className="flex items-center gap-1">
+                      <input value={grnEdits[o.id] ?? o.sql_grn_no ?? ''} disabled={!canEdit} onChange={e => setGrnEdits(m => ({ ...m, [o.id]: e.target.value }))}
+                        placeholder="GRN #" className="border rounded px-2 py-1 text-xs w-24 disabled:bg-gray-100" />
+                      {canEdit && (grnEdits[o.id] ?? o.sql_grn_no ?? '') !== (o.sql_grn_no ?? '') &&
+                        <button onClick={() => saveSqlGrn(o)} className="bg-emerald-600 text-white px-2 py-1 rounded text-xs hover:bg-emerald-700">Save</button>}
+                    </div>
+                  </td>
                   <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">{fmtTime(o.created_at)}</td>
                   <td className="px-4 py-2.5 whitespace-nowrap">
                     <div className="flex gap-3 text-xs">
