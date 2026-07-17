@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
@@ -33,6 +33,7 @@ export default function StockReportsPage() {
   const [items, setItems] = useState<Item[]>([])
   const [reorder, setReorder] = useState<Map<string, number | null>>(new Map())
   const [view, setView] = useState<View>('item')
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())   // item codes expanded to show bins/batches
   const [q, setQ] = useState('')
   const [wh, setWh] = useState<WhFilter>('all')
   const [addItem, setAddItem] = useState(''); const [addLevel, setAddLevel] = useState('')
@@ -53,6 +54,9 @@ export default function StockReportsPage() {
   const zoneOf = (code: string) => locs.get(code.toUpperCase())?.aisle || ''
   // Two-warehouse split: narrow stock to the chosen warehouse (GCH = description starts "GCH").
   const whStock = useMemo(() => stock.filter(s => passWh(wh, s.description)), [stock, wh])
+  const toggleExp = (code: string) => setExpanded(s => { const n = new Set(s); n.has(code) ? n.delete(code) : n.add(code); return n })
+  // The bin/batch lines that make up an item's on-hand (for the expand detail).
+  const itemLines = (code: string) => whStock.filter(s => s.item_code === code).sort((a, b) => a.location_code.localeCompare(b.location_code) || (a.batch_no || '').localeCompare(b.batch_no || ''))
   const descByCode = useMemo(() => new Map(items.map(i => [i.code.toUpperCase(), i.description])), [items])
   const onHandByItem = useMemo(() => { const m = new Map<string, number>(); for (const s of whStock) m.set(s.item_code, clean((m.get(s.item_code) || 0) + Number(s.quantity))); return m }, [whStock])
   const onHandUpper = useMemo(() => { const m = new Map<string, number>(); for (const s of whStock) { const k = s.item_code.toUpperCase(); m.set(k, clean((m.get(k) || 0) + Number(s.quantity))) } return m }, [whStock])
@@ -128,14 +132,37 @@ export default function StockReportsPage() {
             <thead className="bg-gray-50 border-b"><tr>{report.headers.map(h => <th key={h} className="text-left px-3 py-2.5 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}{view === 'low' && canEdit && <th className="px-3 py-2.5" />}</tr></thead>
             <tbody>
               {filtered.length === 0 && <tr><td colSpan={report.headers.length + 1} className="text-center py-10 text-gray-400">No data.</td></tr>}
-              {filtered.map((r, i) => (
-                <tr key={i} className={`border-b last:border-0 hover:bg-gray-50 ${view === 'low' && r[3] === 'LOW' ? 'bg-red-50/40' : ''}`}>
-                  {r.map((c, j) => (
-                    <td key={j} className={`px-3 py-2 ${j === 0 ? 'font-mono font-medium' : 'tabular-nums'} ${view === 'low' && j === 3 && c === 'LOW' ? 'text-red-600 font-semibold' : ''}`}>{c}</td>
-                  ))}
-                  {view === 'low' && canEdit && <td className="px-3 py-2"><input defaultValue={String(r[2] === '—' ? '' : r[2]).replace(/,/g, '')} onBlur={e => saveReorder(String(r[0]), e.target.value.replace(/[^0-9.]/g, ''))} className="w-20 border rounded px-2 py-1 text-xs text-right" placeholder="level" /></td>}
-                </tr>
-              ))}
+              {filtered.map((r, i) => {
+                const code = String(r[0]); const isItem = view === 'item'; const open = isItem && expanded.has(code)
+                return (
+                <Fragment key={i}>
+                  <tr onClick={isItem ? () => toggleExp(code) : undefined} className={`border-b last:border-0 hover:bg-gray-50 ${isItem ? 'cursor-pointer' : ''} ${view === 'low' && r[3] === 'LOW' ? 'bg-red-50/40' : ''}`}>
+                    {r.map((c, j) => (
+                      <td key={j} className={`px-3 py-2 ${j === 0 ? 'font-mono font-medium' : 'tabular-nums'} ${view === 'low' && j === 3 && c === 'LOW' ? 'text-red-600 font-semibold' : ''}`}>
+                        {isItem && j === 0 ? <span className="inline-flex items-center gap-1.5"><span className="text-gray-400 text-xs">{open ? '▾' : '▸'}</span>{c}</span> : c}
+                      </td>
+                    ))}
+                    {view === 'low' && canEdit && <td className="px-3 py-2"><input defaultValue={String(r[2] === '—' ? '' : r[2]).replace(/,/g, '')} onBlur={e => saveReorder(String(r[0]), e.target.value.replace(/[^0-9.]/g, ''))} className="w-20 border rounded px-2 py-1 text-xs text-right" placeholder="level" /></td>}
+                  </tr>
+                  {open && (
+                    <tr className="bg-gray-50/60"><td colSpan={report.headers.length} className="px-6 py-2">
+                      <table className="w-full text-xs">
+                        <thead className="text-gray-500"><tr>{['Bin', 'Batch', 'Expiry', 'Qty'].map(h => <th key={h} className={`font-medium py-1 ${h === 'Qty' ? 'text-right' : 'text-left'}`}>{h}</th>)}</tr></thead>
+                        <tbody>
+                          {itemLines(code).map((s, k) => (
+                            <tr key={k}>
+                              <td className="font-mono py-0.5">{s.location_code === 'PENDING' ? <span className="bg-amber-100 text-amber-800 rounded px-1 font-semibold">📦 PENDING</span> : s.location_code}</td>
+                              <td className="font-mono">{s.batch_no || '—'}</td>
+                              <td>{fmtDate(s.exp_date) || '—'}</td>
+                              <td className="text-right tabular-nums font-medium">{fmtQty(s.quantity)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </td></tr>
+                  )}
+                </Fragment>
+              )})}
             </tbody>
           </table>
         </div>
@@ -162,6 +189,19 @@ export default function StockReportsPage() {
                   </div>
                 )}
               </div>
+              {view === 'item' && (
+                <button onClick={() => toggleExp(String(r[0]))} className="text-xs text-emerald-700 hover:underline mt-2">{expanded.has(String(r[0])) ? '▾ Hide bins & batches' : '▸ Show bins & batches'}</button>
+              )}
+              {view === 'item' && expanded.has(String(r[0])) && (
+                <div className="mt-2 border-t pt-2 space-y-1">
+                  {itemLines(String(r[0])).map((s, k) => (
+                    <div key={k} className="flex items-center justify-between gap-2 text-xs">
+                      <span className="min-w-0 truncate">{s.location_code === 'PENDING' ? <span className="bg-amber-100 text-amber-800 rounded px-1 font-semibold">📦 PENDING</span> : <span className="font-mono">{s.location_code}</span>}<span className="text-gray-400"> · {s.batch_no || '—'}</span>{s.exp_date ? <span className="text-gray-400"> · exp {fmtDate(s.exp_date)}</span> : ''}</span>
+                      <span className="tabular-nums font-medium shrink-0">{fmtQty(s.quantity)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
