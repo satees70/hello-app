@@ -1,12 +1,110 @@
--- Auto-pick when stock arrives for an order that ran short.
--- When goods are RECEIVED (a 'receipt' stock movement — supplier PO receive, or any receiving that
--- books a receipt) for an item that one or more orders are still waiting on (a picker had confirmed
--- "no stock"), the system now automatically, with no button press:
+-- Receiving books stock into the warehouse + auto-pick when stock arrives for a short order.
+--
+-- PART A — Warehouse Receiving now enters stock. Confirming a production / raw-material-return
+-- delivery line (Warehouse Receiving) used to only stamp it "received"; it never added the goods to
+-- warehouse stock. Now confirming a line books that quantity into GOODS-IN (a 'receipt' move), the
+-- same way a supplier PO receipt does — so the goods are real warehouse stock and go through putaway.
+--
+-- PART B — Auto-pick. When goods are RECEIVED (a 'receipt' move — supplier PO, or the production/
+-- return receipt above) for an item one or more orders are still waiting on (a picker had confirmed
+-- "no stock"), the system automatically, with no button press:
 --   1. moves the needed quantity from GOODS-IN into the PENDING staging area (keeping batch),
 --   2. re-opens those orders for picking (restores the outstanding qty, clears the no-stock mark),
---   3. notifies the assigned picker AND Head Office that the stock arrived and is ready to pick.
--- The rest of the received quantity stays in GOODS-IN for normal putaway. Safe to re-run.
--- Run in the Supabase SQL editor.
+--   3. notifies the assigned picker AND Head Office that the stock is ready to pick.
+-- The rest of the received quantity stays in GOODS-IN for normal putaway (keep-location).
+-- Run in the Supabase SQL editor. Safe to re-run.
+
+-- ============================ PART A · receiving books stock ============================
+-- Columns the receipt booking relies on (safe if they already exist).
+alter table public.dispatch_order_lines add column if not exists batch_no text;
+alter table public.dispatch_order_lines add column if not exists exp_date date;
+alter table public.dispatch_order_lines add column if not exists received_at timestamptz;
+alter table public.dispatch_order_lines add column if not exists received_by uuid;
+alter table public.dispatch_order_lines add column if not exists received_by_name text;
+alter table public.dispatch_order_lines add column if not exists photo_path text;
+
+-- Confirm ONE delivery line (with its photo) AND book the goods into GOODS-IN on first confirmation.
+create or replace function public.confirm_do_line(p_line_id uuid, p_photo_path text default null)
+  returns void language plpgsql security definer set search_path = public as $$
+declare v_name text; v_do uuid; v_pending int; v_prev timestamptz; v_line public.dispatch_order_lines;
+  v_item_id uuid; v_desc text; v_uom text; v_stage uuid; v_dono text; v_grn text; v_batch text;
+begin
+  if not (coalesce((select warehouse_user from public.profiles where id = auth.uid()), false) or public.is_ho_or_admin()) then
+    raise exception 'Only warehouse staff or Head Office can confirm a delivery line';
+  end if;
+  select full_name into v_name from public.profiles where id = auth.uid();
+  select * into v_line from public.dispatch_order_lines where id = p_line_id;
+  if not found then raise exception 'Delivery line not found'; end if;
+  v_prev := v_line.received_at; v_do := v_line.dispatch_id;
+  update public.dispatch_order_lines
+     set received_at = coalesce(received_at, now()), received_by = auth.uid(), received_by_name = v_name,
+         photo_path = coalesce(nullif(p_photo_path, ''), photo_path)
+   where id = p_line_id;
+
+  -- Book the goods into warehouse stock (GOODS-IN) — only on the FIRST confirmation.
+  if v_prev is null and coalesce(v_line.quantity, 0) > 0 and nullif(btrim(v_line.item_code), '') is not null then
+    v_batch := coalesce(v_line.batch_no, '');
+    select id, description, unit into v_item_id, v_desc, v_uom from public.items where code = v_line.item_code;
+    select id into v_stage from public.wms_locations where warehouse_code = '8BT' and code = 'GOODS-IN';
+    select do_number, warehouse_grn into v_dono, v_grn from public.dispatch_orders where id = v_do;
+    if v_stage is not null then
+      insert into public.wms_stock (warehouse_code, item_id, item_code, description, location_id, location_code, batch_no, exp_date, quantity, uom)
+      values ('8BT', v_item_id, v_line.item_code, coalesce(v_line.description, v_desc), v_stage, 'GOODS-IN', v_batch, v_line.exp_date, v_line.quantity, v_uom)
+      on conflict (warehouse_code, item_code, location_id, batch_no)
+        do update set quantity = wms_stock.quantity + excluded.quantity, exp_date = coalesce(excluded.exp_date, wms_stock.exp_date), updated_at = now();
+      insert into public.wms_stock_moves (warehouse_code, move_type, item_id, item_code, description,
+        to_location_id, to_location_code, batch_no, exp_date, quantity, reference, moved_by, moved_by_name)
+      values ('8BT', 'receipt', v_item_id, v_line.item_code, coalesce(v_line.description, v_desc), v_stage, 'GOODS-IN', v_batch, v_line.exp_date, v_line.quantity,
+        'DO ' || coalesce(v_dono, '') || case when nullif(v_grn, '') is not null then ' · GRN ' || v_grn else '' end, auth.uid(), v_name);
+    end if;
+  end if;
+
+  select count(*) into v_pending from public.dispatch_order_lines where dispatch_id = v_do and received_at is null;
+  if v_pending = 0 then
+    update public.dispatch_orders set received_at = coalesce(received_at, now()), received_by = auth.uid(), received_by_name = v_name where id = v_do;
+    insert into public.notifications (author_id, factory_code, type, title, body, link, ref)
+    select auth.uid(), d.factory_code, 'dispatch', '📦 Delivery received at warehouse',
+           'Delivery order ' || coalesce(d.do_number, '') || ' fully received'
+             || case when nullif(d.warehouse_grn, '') is not null then ' · GRN ' || d.warehouse_grn else '' end
+             || ' by ' || coalesce(v_name, 'warehouse') || '.',
+           '/dispatch', 'do_received:' || d.id::text
+      from public.dispatch_orders d where d.id = v_do
+      on conflict (ref) do nothing;
+  end if;
+end $$;
+grant execute on function public.confirm_do_line(uuid, text) to authenticated;
+
+-- Undo a line confirmation — also pull the booked goods back out of GOODS-IN (best-effort).
+create or replace function public.unconfirm_do_line(p_line_id uuid)
+  returns void language plpgsql security definer set search_path = public as $$
+declare v_do uuid; v_line public.dispatch_order_lines; v_stage uuid; v_have numeric; v_take numeric; v_batch text; v_name text;
+begin
+  if not (coalesce((select warehouse_user from public.profiles where id = auth.uid()), false) or public.is_ho_or_admin()) then
+    raise exception 'Only warehouse staff or Head Office can change a delivery line';
+  end if;
+  select * into v_line from public.dispatch_order_lines where id = p_line_id;
+  if not found then raise exception 'Delivery line not found'; end if;
+  v_do := v_line.dispatch_id;
+  -- Reverse the GOODS-IN booking if it was received and the stock is still there.
+  if v_line.received_at is not null and coalesce(v_line.quantity, 0) > 0 and nullif(btrim(v_line.item_code), '') is not null then
+    v_batch := coalesce(v_line.batch_no, '');
+    select full_name into v_name from public.profiles where id = auth.uid();
+    select id into v_stage from public.wms_locations where warehouse_code = '8BT' and code = 'GOODS-IN';
+    select quantity into v_have from public.wms_stock where warehouse_code = '8BT' and item_code = v_line.item_code and location_id = v_stage and batch_no = v_batch;
+    if v_stage is not null and coalesce(v_have, 0) > 0 then
+      v_take := least(v_have, v_line.quantity);
+      update public.wms_stock set quantity = quantity - v_take, updated_at = now() where warehouse_code = '8BT' and item_code = v_line.item_code and location_id = v_stage and batch_no = v_batch;
+      delete from public.wms_stock where warehouse_code = '8BT' and item_code = v_line.item_code and location_id = v_stage and batch_no = v_batch and quantity <= 0;
+      insert into public.wms_stock_moves (warehouse_code, move_type, item_id, item_code, description, from_location_id, from_location_code, batch_no, exp_date, quantity, reference, moved_by, moved_by_name)
+      values ('8BT', 'adjust', (select id from public.items where code = v_line.item_code), v_line.item_code, v_line.description, v_stage, 'GOODS-IN', v_batch, v_line.exp_date, v_take, 'Undo receiving', auth.uid(), v_name);
+    end if;
+  end if;
+  update public.dispatch_order_lines set received_at = null, received_by = null, received_by_name = null where id = p_line_id;
+  update public.dispatch_orders set received_at = null where id = v_do;
+end $$;
+grant execute on function public.unconfirm_do_line(uuid) to authenticated;
+
+-- ============================ PART B · auto-pick on receipt ============================
 
 create or replace function public.wms_auto_repick_on_receipt() returns trigger
 language plpgsql security definer set search_path = public as $$
