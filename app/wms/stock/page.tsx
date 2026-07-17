@@ -32,6 +32,8 @@ const EMPTY = { itemCode: '', description: '', uom: '', locationCode: '', batch:
 export default function WmsStockPage() {
   const { profile, loading } = useProfile()
   const canEdit = !!profile && can(profile, 'warehouse', 'edit')
+  // Head Office / admin apply stock changes at once; everyone else raises a request that HO approves.
+  const isHO = !!profile && (profile.factory_code === 'HEAD_OFFICE' || profile.role === 'admin')
 
   const [rows, setRows] = useState<Stock[]>([])
   const [items, setItems] = useState<Item[]>([])
@@ -39,6 +41,7 @@ export default function WmsStockPage() {
   const [resd, setResd] = useState<Map<string, { qty: number; orders: string[] }>>(new Map())
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [notice, setNotice] = useState('')
 
   // filters
   const [q, setQ] = useState('')
@@ -115,8 +118,24 @@ export default function WmsStockPage() {
     if (!loc) { setErr(`Location "${locCode}" is not in the Location Map.`); return }
     const qty = Number(form.quantity)
     if (!isFinite(qty) || qty < 0) { setErr('Enter a valid quantity (0 or more).'); return }
-    setBusy(true); setErr('')
-    // Set the exact on-hand via the logged RPC (records an 'adjust' move for the change).
+    setBusy(true); setErr(''); setNotice('')
+    if (!isHO) {
+      // Non-Head-Office: raise an approval request instead of changing stock directly.
+      const reason = window.prompt('Reason for this adjustment (optional):', '') ?? ''
+      const { error } = await supabase.rpc('request_stock_adjust', {
+        p_stock_id: editing ? editing.id : null,
+        p_item_code: editing ? editing.item_code : itemCode,
+        p_location_id: editing ? editing.location_id : loc.id,
+        p_batch: editing ? editing.batch_no : form.batch.trim(),
+        p_exp_date: form.exp_date || null,
+        p_new_qty: qty,
+        p_reason: reason.trim() || null,
+      })
+      setBusy(false)
+      if (error) { setErr(adjustHint(error.message)); return }
+      setShowForm(false); setNotice(`Adjustment sent to Head Office for approval — stock changes once approved.`); return
+    }
+    // Head Office / admin: set the exact on-hand via the logged RPC (records an 'adjust' move).
     const { error } = await supabase.rpc('wms_adjust_stock', {
       p_item_code: editing ? editing.item_code : itemCode,
       p_location_id: editing ? editing.location_id : loc.id,
@@ -141,6 +160,16 @@ export default function WmsStockPage() {
 
   async function remove(r: Stock) {
     if (!canEdit) return
+    if (!isHO) {
+      if (!confirm(`Request removal of ${fmtQty(r.quantity)} of ${r.item_code} from ${r.location_code}?\n\nHead Office must approve before the stock is removed.`)) return
+      const reason = window.prompt('Reason for removal (optional):', '') ?? ''
+      const { error } = await supabase.rpc('request_stock_adjust', {
+        p_stock_id: r.id, p_item_code: r.item_code, p_location_id: r.location_id,
+        p_batch: r.batch_no, p_exp_date: r.exp_date || null, p_new_qty: 0, p_reason: reason.trim() || null,
+      })
+      if (error) { alert(adjustHint(error.message)); return }
+      setNotice(`Removal of ${r.item_code} sent to Head Office for approval.`); return
+    }
     if (!confirm(`Remove ${fmtQty(r.quantity)} of ${r.item_code} from ${r.location_code}?`)) return
     const { error } = await supabase.rpc('wms_adjust_stock', {
       p_item_code: r.item_code, p_location_id: r.location_id, p_batch: r.batch_no,
@@ -149,6 +178,8 @@ export default function WmsStockPage() {
     if (error) { alert(error.message); return }
     load()
   }
+  const adjustHint = (m: string) => /request_stock_adjust|wms_correction_requests/.test(m) && /does not exist|schema cache|could not find/i.test(m)
+    ? 'This needs a database update — run db/2026-07-wms-stock-adjust-approval.sql in the Supabase SQL editor.' : m
   // Request to re-code this stock to the correct item (e.g. received under the wrong pack code) —
   // Head Office approves; approval moves the qty to the correct code, same bin/batch.
   async function requestRecode(r: Stock) {
@@ -212,10 +243,12 @@ export default function WmsStockPage() {
           </div>
           {canEdit && (
             <div className="flex flex-wrap gap-2">
-              <button onClick={() => { setShowImport(true); setErr('') }}
-                className="border border-emerald-600 text-emerald-700 px-4 py-2 rounded-lg hover:bg-emerald-50 text-sm font-medium">
-                ⇪ Import stock
-              </button>
+              {isHO && (
+                <button onClick={() => { setShowImport(true); setErr('') }}
+                  className="border border-emerald-600 text-emerald-700 px-4 py-2 rounded-lg hover:bg-emerald-50 text-sm font-medium">
+                  ⇪ Import stock
+                </button>
+              )}
               <button onClick={openCreate}
                 className="bg-emerald-700 text-white px-4 py-2 rounded-lg hover:bg-emerald-800 text-sm font-medium">
                 + Add / adjust stock
@@ -223,6 +256,9 @@ export default function WmsStockPage() {
             </div>
           )}
         </div>
+
+        {canEdit && !isHO && <p className="text-sm bg-amber-50 text-amber-700 border border-amber-200 rounded-lg p-3 mb-4">Stock adjustments and removals here are sent to Head Office for approval — they take effect once approved (see the Approvals page).</p>}
+        {notice && <p className="text-sm bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg p-3 mb-4">✓ {notice}</p>}
 
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3 mb-6">
           <Stat label="Total quantity" value={fmtQty(stats.qty)} accent="text-emerald-700" />
@@ -284,7 +320,7 @@ export default function WmsStockPage() {
             <div className="flex gap-3">
               <button type="submit" disabled={busy}
                 className="bg-emerald-700 text-white px-6 py-2 rounded-lg hover:bg-emerald-800 disabled:opacity-50 font-medium">
-                {busy ? 'Saving…' : 'Save'}
+                {busy ? 'Saving…' : isHO ? 'Save' : 'Send for approval'}
               </button>
               <button type="button" onClick={() => setShowForm(false)} className="border px-6 py-2 rounded-lg hover:bg-gray-50">Cancel</button>
             </div>
