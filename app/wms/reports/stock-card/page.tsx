@@ -82,7 +82,7 @@ export default function StockCardPage() {
 
   // For "By location" / "By batch" the bin / batch list is driven by the chosen period — only the
   // bins / batches that actually moved between From and To are offered. Date is required first.
-  const dateRequired = mode === 'location' || mode === 'batch'
+  const dateRequired = true   // a From date is required for every report type
   const periodMoves = useMemo(() => moves.filter(m => { const d = dOnly(m.created_at); if (from && d < from) return false; if (to && d > to) return false; return true }), [moves, from, to])
   const batchOptions = useMemo(() => [...new Set(periodMoves.map(m => m.batch_no).filter(Boolean))].sort(), [periodMoves])
   const locOptions = useMemo(() => [...new Set(periodMoves.flatMap(m => [m.from_location_code, m.to_location_code]).filter(Boolean) as string[])].sort(), [periodMoves])
@@ -163,7 +163,7 @@ export default function StockCardPage() {
             <h1 className="text-2xl font-bold">Stock Card</h1>
             <p className="text-gray-500 text-sm mt-1">Every movement for one item with a running balance. <Link href="/wms/reports" className="text-emerald-700 underline">Stock Reports</Link> · <Link href="/wms/reports/activity" className="text-emerald-700 underline">Activity</Link> · <Link href="/wms/reports/adjustments" className="text-emerald-700 underline">Adjustments</Link></p>
           </div>
-          {itemCode && <div className="flex gap-2">
+          {itemCode && from && <div className="flex gap-2">
             <button onClick={exportCsv} className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">⬇ CSV</button>
             <button onClick={exportPdf} className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">⬇ PDF</button>
           </div>}
@@ -220,7 +220,7 @@ export default function StockCardPage() {
         </div>
 
         {!itemCode ? <div className="bg-white rounded-xl border p-10 text-center text-gray-400 text-sm">Pick an item to see its stock card.</div>
-          : dateRequired && !from ? <div className="bg-white rounded-xl border p-10 text-center text-gray-400 text-sm">Choose a period first — set a <b>From</b> date. The {mode === 'location' ? 'bin' : 'batch'} list shows only what moved in that period.</div>
+          : dateRequired && !from ? <div className="bg-white rounded-xl border p-10 text-center text-gray-400 text-sm">Choose a period first — set a <b>From</b> date to run the report.{mode !== 'overall' ? ` The ${mode === 'location' ? 'bin' : 'batch'} list shows only what moved in that period.` : ''}</div>
           : mode === 'location' && !L ? <div className="bg-white rounded-xl border p-10 text-center text-gray-400 text-sm">Pick a bin above to see its ledger (with internal transfers in and out).</div>
           : mode === 'batch' && !B ? <div className="bg-white rounded-xl border p-10 text-center text-gray-400 text-sm">Pick a batch above to see every movement of it.</div>
           : busy ? <div className="text-gray-400 py-16 text-center">Loading…</div>
