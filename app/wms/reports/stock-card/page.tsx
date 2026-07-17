@@ -14,7 +14,6 @@ import { downloadCsv } from '@/lib/csv'
 // to that location.
 
 interface Item { code: string; description: string; unit: string; stock_group: string | null }
-interface Loc { code: string }
 interface Move { id: string; move_type: string; item_code: string; description: string | null; from_location_code: string | null; to_location_code: string | null; batch_no: string; exp_date: string | null; quantity: number; reference: string | null; moved_by_name: string | null; created_at: string }
 
 const clean = (n: number) => Number(n.toPrecision(12))
@@ -27,7 +26,6 @@ const TYPE_LABEL: Record<string, string> = { receipt: 'Receipt', putaway: 'Putaw
 export default function StockCardPage() {
   const { profile, loading } = useProfile()
   const [items, setItems] = useState<Item[]>([])
-  const [locs, setLocs] = useState<Loc[]>([])
   const [moves, setMoves] = useState<Move[]>([])
   const [onhand, setOnhand] = useState<{ location_code: string; batch_no: string; quantity: number }[]>([])   // current on-hand, to anchor the ledger
   const [busy, setBusy] = useState(false)
@@ -41,11 +39,8 @@ export default function StockCardPage() {
 
   useEffect(() => { if (profile) init() }, [profile])
   const init = useCallback(async () => {
-    const [it, lo] = await Promise.all([
-      fetchAll<Item>('items', 'code, description, unit, stock_group', 'code'),
-      fetchAll<Loc>('wms_locations', 'code', 'code'),
-    ])
-    setItems(it); setLocs(lo)
+    const it = await fetchAll<Item>('items', 'code, description, unit, stock_group', 'code')
+    setItems(it)
   }, [])
 
   // Item list narrowed by stock group + warehouse, for the picker.
@@ -84,6 +79,13 @@ export default function StockCardPage() {
     // only stock leaving the warehouse (dispatch/adjustment-out) is Out; internal moves show blank.
     return { inQ: (!m.from_location_code && m.to_location_code) ? q : 0, outQ: (m.from_location_code && !m.to_location_code) ? q : 0 }
   }, [L, mode])
+
+  // For "By location" / "By batch" the bin / batch list is driven by the chosen period — only the
+  // bins / batches that actually moved between From and To are offered. Date is required first.
+  const dateRequired = mode === 'location' || mode === 'batch'
+  const periodMoves = useMemo(() => moves.filter(m => { const d = dOnly(m.created_at); if (from && d < from) return false; if (to && d > to) return false; return true }), [moves, from, to])
+  const batchOptions = useMemo(() => [...new Set(periodMoves.map(m => m.batch_no).filter(Boolean))].sort(), [periodMoves])
+  const locOptions = useMemo(() => [...new Set(periodMoves.flatMap(m => [m.from_location_code, m.to_location_code]).filter(Boolean) as string[])].sort(), [periodMoves])
 
   // Ledger: opening balance (everything before `from`) + the in-range rows with a running balance.
   // The ledger is anchored to the CURRENT on-hand: any stock that isn't explained by recorded
@@ -189,32 +191,38 @@ export default function StockCardPage() {
             <label className="block text-xs text-gray-500 mb-1">Warehouse</label>
             <WarehouseTabs value={wh} onChange={setWh} className="w-full" />
           </div>
-          {mode === 'location' && (
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Location <span className="text-gray-400">(bin)</span></label>
-              <input list="sc-locs" value={loc} onChange={e => setLoc(e.target.value)} placeholder="pick a bin…" className="w-full border rounded-lg px-3 py-2 text-sm font-mono" />
-              <datalist id="sc-locs">{locs.map(l => <option key={l.code} value={l.code} />)}</datalist>
-            </div>
-          )}
-          {mode === 'batch' && (
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Batch</label>
-              <input value={batch} onChange={e => setBatch(e.target.value)} placeholder="type a batch…" className="w-full border rounded-lg px-3 py-2 text-sm font-mono" />
-            </div>
-          )}
           <div>
-            <label className="block text-xs text-gray-500 mb-1">From</label>
-            <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" />
+            <label className="block text-xs text-gray-500 mb-1">From{dateRequired && <span className="text-red-500"> *</span>}</label>
+            <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={`w-full border rounded-lg px-3 py-2 text-sm ${dateRequired && !from ? 'border-red-300' : ''}`} />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">To</label>
             <input type="date" value={to} onChange={e => setTo(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" />
           </div>
+          {mode === 'location' && (
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Location <span className="text-gray-400">(bin in this period)</span></label>
+              <select value={loc} onChange={e => setLoc(e.target.value)} disabled={!from} className="w-full border rounded-lg px-3 py-2 text-sm font-mono disabled:bg-gray-100 disabled:text-gray-400">
+                <option value="">{!from ? 'set a From date first…' : locOptions.length ? 'pick a bin…' : 'no bins moved in this period'}</option>
+                {locOptions.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          )}
+          {mode === 'batch' && (
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Batch <span className="text-gray-400">(in this period)</span></label>
+              <select value={batch} onChange={e => setBatch(e.target.value)} disabled={!from} className="w-full border rounded-lg px-3 py-2 text-sm font-mono disabled:bg-gray-100 disabled:text-gray-400">
+                <option value="">{!from ? 'set a From date first…' : batchOptions.length ? 'pick a batch…' : 'no batches moved in this period'}</option>
+                {batchOptions.map(b => <option key={b} value={b}>{b}</option>)}
+              </select>
+            </div>
+          )}
         </div>
 
         {!itemCode ? <div className="bg-white rounded-xl border p-10 text-center text-gray-400 text-sm">Pick an item to see its stock card.</div>
+          : dateRequired && !from ? <div className="bg-white rounded-xl border p-10 text-center text-gray-400 text-sm">Choose a period first — set a <b>From</b> date. The {mode === 'location' ? 'bin' : 'batch'} list shows only what moved in that period.</div>
           : mode === 'location' && !L ? <div className="bg-white rounded-xl border p-10 text-center text-gray-400 text-sm">Pick a bin above to see its ledger (with internal transfers in and out).</div>
-          : mode === 'batch' && !B ? <div className="bg-white rounded-xl border p-10 text-center text-gray-400 text-sm">Type a batch above to see every movement of it.</div>
+          : mode === 'batch' && !B ? <div className="bg-white rounded-xl border p-10 text-center text-gray-400 text-sm">Pick a batch above to see every movement of it.</div>
           : busy ? <div className="text-gray-400 py-16 text-center">Loading…</div>
           : <>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
