@@ -224,10 +224,32 @@ export default function WmsStockPage() {
       batch_no: g.batch, exp_date: g.exp_date, quantity: g.quantity,
       uom: itemByCode.get(g.item_code)?.unit ?? null,
     }))
+    // Log the CHANGE each import line makes as a stock movement, so the Stock Card ledger is
+    // itemised (not just an implied opening baseline). We record the delta vs the current on-hand
+    // so re-importing the same figures doesn't double-count. New stock → an "in" (Opening balance).
+    const oldQty = new Map<string, number>()
+    for (const r of rows) oldQty.set(`${r.item_code.toUpperCase()}|${r.location_id}|${r.batch_no || ''}`, Number(r.quantity || 0))
+    const movePayloads = good.flatMap(g => {
+      const delta = clean(g.quantity - (oldQty.get(`${g.item_code}|${g.location_id}|${g.batch || ''}`) || 0))
+      if (delta === 0) return []
+      return [{
+        warehouse_code: WAREHOUSE, move_type: 'adjust', item_id: idByCode.get(g.item_code) ?? null,
+        item_code: g.item_code, description: itemByCode.get(g.item_code)?.description ?? null,
+        from_location_id: delta < 0 ? g.location_id : null, from_location_code: delta < 0 ? g.location_code : null,
+        to_location_id: delta > 0 ? g.location_id : null, to_location_code: delta > 0 ? g.location_code : null,
+        batch_no: g.batch, exp_date: g.exp_date, quantity: Math.abs(delta), reference: 'Opening balance (import)',
+        moved_by: profile?.id ?? null, moved_by_name: profile?.full_name ?? null,
+      }]
+    })
+
     for (let i = 0; i < payloads.length; i += 500) {
       const chunk = payloads.slice(i, i + 500)
       const { error } = await supabase.from('wms_stock').upsert(chunk, { onConflict: 'warehouse_code,item_code,location_id,batch_no' })
       if (error) { setErr(error.message); setBusy(false); return }
+    }
+    // Stock is set; log the movements (best-effort — the Stock Card is still correct without them).
+    for (let i = 0; i < movePayloads.length; i += 500) {
+      await supabase.from('wms_stock_moves').insert(movePayloads.slice(i, i + 500))
     }
     setBusy(false); setShowImport(false); setPasteText(''); load()
   }
