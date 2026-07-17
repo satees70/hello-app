@@ -117,6 +117,8 @@ export default function WmsApprovalsPage() {
         ? `Re-code stock ${c.old_item_code || '?'} → ${c.new_item_code || '?'}${c.location_code ? ' · ' + c.location_code : ''}${c.batch_no ? ' · b:' + c.batch_no : ''}${c.reason ? ' · ' + c.reason : ''}`
         : (c.kind === 'batch_flag' || c.kind === 'stock_flag')
         ? flagSummary(c)
+        : c.kind === 'stock_adjust'
+        ? `${Number(c.new_qty) === 0 ? 'Remove' : 'Adjust'} stock ${c.old_item_code || '?'}${c.location_code ? ' · ' + c.location_code : ''}${c.batch_no ? ' · b:' + c.batch_no : ''} · ${c.old_qty ?? '?'} → ${c.new_qty ?? '?'}${c.reason ? ' · ' + c.reason : ''}`
         : `Edit PO line ${c.old_item_code || '?'} → ${c.new_item_code || c.old_item_code || '?'}${c.new_qty != null ? ' · qty ' + c.new_qty : ''}${c.reason ? ' · ' + c.reason : ''}`,
       by: c.requested_by_name, at: c.created_at, approve: () => approveCorr(c.id).then(() => {}), reject: () => rejectCorr(c.id).then(() => {}) })),
   ].sort((a, b) => (a.at || '').localeCompare(b.at || '')), [bypasses, adjs, checks, counts, papers, corrections, approveBypass, rejectBypass, approveAdj, rejectAdj, approveCheck, rejectCheck, applyCount, approvePaper, rejectPaper, approveCorr, rejectCorr])
