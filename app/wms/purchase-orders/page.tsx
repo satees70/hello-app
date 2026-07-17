@@ -56,6 +56,8 @@ export default function WmsPurchaseOrdersPage() {
   const [recvByPo, setRecvByPo] = useState<Record<string, Recv[]>>({})   // received batches per PO
   const [putStatus, setPutStatus] = useState<Record<string, 'pending' | 'done'>>({})   // put-away state per PO
   const [grnEdits, setGrnEdits] = useState<Record<string, string>>({})   // SQL GRN inline edits
+  const [poEditPending, setPoEditPending] = useState<Set<string>>(new Set())   // PO line ids with a pending edit request
+  const [poEdit, setPoEdit] = useState<{ lineId: string; item_code: string; description: string; quantity: string; uom: string; reason: string } | null>(null)
   useEffect(() => { const s = new URLSearchParams(window.location.search).get('status'); if (s) setStatusFilter(s) }, [])
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
@@ -190,9 +192,23 @@ export default function WmsPurchaseOrdersPage() {
   }
 
   async function viewLines(o: PO) {
-    setLinesFor(o)
+    setLinesFor(o); setPoEdit(null)
     const { data } = await supabase.from('wms_po_lines').select('*').eq('po_id', o.id).order('line_no')
-    setLines((data as POLine[]) || [])
+    const ls = (data as POLine[]) || []
+    setLines(ls)
+    const { data: cr } = await supabase.from('wms_correction_requests').select('po_line_id').eq('kind', 'po_line').eq('status', 'Pending').in('po_line_id', ls.map(l => l.id))
+    setPoEditPending(new Set(((cr as { po_line_id: string }[]) || []).map(x => x.po_line_id)))
+  }
+  // Request an edit to a wrongly-created PO line (Head Office approves before it applies).
+  async function submitLineEdit() {
+    const e = poEdit; if (!e) return
+    const { error } = await supabase.rpc('request_po_line_edit', {
+      p_line_id: e.lineId, p_new_item_code: e.item_code.trim(), p_new_description: e.description.trim() || null,
+      p_new_qty: e.quantity === '' ? null : Number(e.quantity), p_new_uom: e.uom.trim() || null, p_reason: e.reason.trim() || null,
+    })
+    if (error) { setErr(/request_po_line_edit|wms_correction_requests/.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-corrections.sql in the Supabase SQL editor.' : error.message); return }
+    setPoEditPending(s => new Set(s).add(e.lineId)); setPoEdit(null)
+    setMsg('Line change requested — waiting for Head Office approval.')
   }
   async function viewPdf(o: PO) {
     if (!o.file_path) return
@@ -320,9 +336,9 @@ export default function WmsPurchaseOrdersPage() {
             <div className="flex items-start justify-between mb-1"><h2 className="font-semibold text-lg">{linesFor.po_number || linesFor.file_name} <span className="text-gray-400 font-normal text-sm">· {linesFor.supplier_name || 'supplier ?'}</span></h2><button onClick={() => setLinesFor(null)} className="text-gray-400 hover:text-gray-600">✕</button></div>
             <div className="overflow-x-auto border rounded-lg mt-3">
               <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b"><tr>{['#', 'Item', 'Description', 'Ordered', 'Received', 'Unit'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600">{h}</th>)}</tr></thead>
+                <thead className="bg-gray-50 border-b"><tr>{['#', 'Item', 'Description', 'Ordered', 'Received', 'Unit', ''].map((h, i) => <th key={i} className="text-left px-3 py-2 font-medium text-gray-600">{h}</th>)}</tr></thead>
                 <tbody>
-                  {lines.length === 0 && <tr><td colSpan={6} className="text-center py-6 text-gray-400">No lines.</td></tr>}
+                  {lines.length === 0 && <tr><td colSpan={7} className="text-center py-6 text-gray-400">No lines.</td></tr>}
                   {lines.map(l => (
                     <tr key={l.id} className="border-b last:border-0">
                       <td className="px-3 py-2 text-gray-400">{l.line_no}</td>
@@ -331,11 +347,33 @@ export default function WmsPurchaseOrdersPage() {
                       <td className="px-3 py-2 tabular-nums">{fmtQty(l.quantity)}</td>
                       <td className="px-3 py-2 tabular-nums text-emerald-700">{fmtQty(l.qty_received)}</td>
                       <td className="px-3 py-2 text-gray-500">{l.uom}</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-xs">
+                        {Number(l.qty_received) > 0 ? <span className="text-gray-300" title="Already received — correct the stock on the Stock page">received</span>
+                          : poEditPending.has(l.id) ? <span className="text-amber-600">⏳ pending</span>
+                          : canEdit ? <button onClick={() => setPoEdit({ lineId: l.id, item_code: l.item_code, description: l.description || '', quantity: String(clean(l.quantity)), uom: l.uom || '', reason: '' })} className="text-indigo-600 hover:underline">Request edit</button>
+                          : null}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            {poEdit && (
+              <div className="mt-4 border rounded-lg p-4 bg-indigo-50/40">
+                <h3 className="font-semibold text-sm mb-2">Request line change <span className="text-gray-400 font-normal">(Head Office approves)</span></h3>
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+                  <div className="sm:col-span-6"><label className="block text-xs text-gray-500 mb-1">Correct item</label>
+                    <ItemPicker items={items} value={poEdit.item_code ? `${poEdit.item_code} — ${poEdit.description}` : ''} onPick={it => setPoEdit(e => e && { ...e, item_code: it.code, description: it.description, uom: it.unit })} /></div>
+                  <div className="sm:col-span-3"><label className="block text-xs text-gray-500 mb-1">Qty</label><input value={poEdit.quantity} onChange={e => setPoEdit(p => p && { ...p, quantity: e.target.value.replace(/[^0-9.]/g, '') })} className="w-full border rounded-lg px-3 py-2 text-sm text-right" inputMode="decimal" /></div>
+                  <div className="sm:col-span-3"><label className="block text-xs text-gray-500 mb-1">Unit</label><input value={poEdit.uom} onChange={e => setPoEdit(p => p && { ...p, uom: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                  <div className="sm:col-span-12"><label className="block text-xs text-gray-500 mb-1">Reason <span className="text-gray-400">(optional)</span></label><input value={poEdit.reason} onChange={e => setPoEdit(p => p && { ...p, reason: e.target.value })} placeholder="e.g. entered KG code, received 10KG pack" className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <button onClick={submitLineEdit} disabled={!poEdit.item_code.trim()} className="bg-emerald-700 text-white px-4 py-2 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium">Send request</button>
+                  <button onClick={() => setPoEdit(null)} className="border px-4 py-2 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

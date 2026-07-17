@@ -149,6 +149,17 @@ export default function WmsStockPage() {
     if (error) { alert(error.message); return }
     load()
   }
+  // Request to re-code this stock to the correct item (e.g. received under the wrong pack code) —
+  // Head Office approves; approval moves the qty to the correct code, same bin/batch.
+  async function requestRecode(r: Stock) {
+    if (!canEdit) return
+    const code = window.prompt(`Correct the item code for ${r.item_code} — ${r.description || ''}\n(${fmtQty(r.quantity)} in ${r.location_code}${r.batch_no ? ' · batch ' + r.batch_no : ''}).\n\nEnter the CORRECT item code:`, '')
+    if (code === null || !code.trim()) return
+    const reason = window.prompt('Reason (optional):', '') ?? ''
+    const { error } = await supabase.rpc('request_stock_recode', { p_stock_id: r.id, p_new_item_code: code.trim(), p_reason: reason || null })
+    if (error) { alert(/request_stock_recode|wms_correction_requests/.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-corrections.sql in the Supabase SQL editor.' : error.message); return }
+    alert(`Re-code requested: ${r.item_code} → ${code.trim().toUpperCase()}. Waiting for Head Office approval.`)
+  }
 
   // --- Import current on-hand: Item Code | Location | Quantity | Batch? | Expiry? ---
   const parsed = useMemo(() => parseStock(pasteText, locByCode), [pasteText, locByCode])
@@ -314,6 +325,7 @@ export default function WmsStockPage() {
                     {canEdit ? (
                       <div className="flex gap-3">
                         <button onClick={() => openEdit(r)} className="text-emerald-700 hover:underline text-xs">Adjust</button>
+                        <button onClick={() => requestRecode(r)} title="Received under the wrong item code? Request to re-code it (Head Office approves)." className="text-indigo-600 hover:underline text-xs">Change code</button>
                         <button onClick={() => toggleProd(r)} className={`hover:underline text-xs ${r.production_only ? 'text-purple-700 font-medium' : 'text-purple-500'}`}>{r.production_only ? 'Release to trading' : 'For production'}</button>
                         <button onClick={() => remove(r)} className="text-red-500 hover:underline text-xs">Remove</button>
                       </div>

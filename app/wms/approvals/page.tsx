@@ -14,6 +14,7 @@ interface StockAdj { id: string; factory_code: string | null; item_code: string;
 interface WmsCheck { id: string; order_no: string | null; note: string | null; corrections: { item_code: string; picked_qty: number; checked_qty: number }[] | null; status: string; requested_by_name: string | null; created_at: string }
 interface CountTask { id: string; count_no: string | null; name: string | null; status: string; completed_by_name: string | null; completed_at: string | null; created_by_name: string | null; created_at: string; wms_count_lines?: { count: number }[] }
 interface PaperReq { id: string; do_number: string | null; factory_code: string | null; item_code: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string }
+interface Correction { id: string; kind: string; old_item_code: string | null; new_item_code: string | null; old_qty: number | null; new_qty: number | null; location_code: string | null; batch_no: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string }
 
 type Pend = { key: string; id: string; kind: string; summary: string; by: string | null; at: string; approve: () => Promise<void>; reject: (() => Promise<void>) | null; open?: string }
 
@@ -24,6 +25,7 @@ const KIND_CHIP: Record<string, string> = {
   'Pick check correction': 'bg-sky-100 text-sky-700',
   'Stock count': 'bg-violet-100 text-violet-700',
   'Paper receipt': 'bg-teal-100 text-teal-700',
+  'Correction': 'bg-rose-100 text-rose-700',
 }
 
 export default function WmsApprovalsPage() {
@@ -35,6 +37,7 @@ export default function WmsApprovalsPage() {
   const [checks, setChecks] = useState<WmsCheck[]>([])
   const [counts, setCounts] = useState<CountTask[]>([])
   const [papers, setPapers] = useState<PaperReq[]>([])
+  const [corrections, setCorrections] = useState<Correction[]>([])
   const [busy, setBusy] = useState('')
   const [allBusy, setAllBusy] = useState(false)
   const [err, setErr] = useState(''); const [msg, setMsg] = useState('')
@@ -47,11 +50,13 @@ export default function WmsApprovalsPage() {
       supabase.from('wms_count_tasks').select('id, count_no, name, status, completed_by_name, completed_at, created_by_name, created_at, wms_count_lines(count)').eq('status', 'Review').order('completed_at', { ascending: false }),
       supabase.from('do_paper_receipt_requests').select('id, do_number, factory_code, item_code, reason, status, requested_by_name, created_at').eq('status', 'Pending').order('created_at', { ascending: false }),
     ])
+    const { data: cr } = await supabase.from('wms_correction_requests').select('id, kind, old_item_code, new_item_code, old_qty, new_qty, location_code, batch_no, reason, status, requested_by_name, created_at').eq('status', 'Pending').order('created_at', { ascending: false })
     setBypasses((bp as GrnBypass[]) || [])
     setAdjs((sa as StockAdj[]) || [])
     setChecks((wc as WmsCheck[]) || [])
     setCounts((ct as CountTask[]) || [])
     setPapers((pr as PaperReq[]) || [])
+    setCorrections((cr as Correction[]) || [])
   }, [])
 
   useEffect(() => {
@@ -64,6 +69,7 @@ export default function WmsApprovalsPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'wms_check_qty_requests' }, () => load())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'wms_count_tasks' }, () => load())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'do_paper_receipt_requests' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wms_correction_requests' }, () => load())
       .subscribe()
     const timer = setInterval(load, 20000)
     return () => { supabase.removeChannel(ch); clearInterval(timer) }
@@ -87,6 +93,8 @@ export default function WmsApprovalsPage() {
   const applyCount = (id: string) => run(id, 'wms_apply_count', { p_task_id: id }, 'Stock count applied — stock corrected.')
   const approvePaper = (id: string) => run(id, 'approve_do_paper_receipt', { p_id: id }, 'Paper receipt approved — the delivery is marked received.')
   const rejectPaper = (id: string) => run(id, 'reject_do_paper_receipt', { p_id: id }, 'Paper receipt rejected.')
+  const approveCorr = (id: string) => run(id, 'approve_wms_correction', { p_id: id }, 'Correction applied.')
+  const rejectCorr = (id: string) => run(id, 'reject_wms_correction', { p_id: id }, 'Correction rejected.')
 
   const allPending = useMemo<Pend[]>(() => [
     ...bypasses.map(b => ({ key: `bp|${b.id}`, id: b.id, kind: 'Photo bypass', summary: `${b.item_code || '—'}${b.description ? ' · ' + b.description : ''}${b.reason ? ' · ' + b.reason : ''}`, by: b.requested_by_name, at: b.created_at, approve: () => approveBypass(b.id).then(() => {}), reject: () => rejectBypass(b.id).then(() => {}) })),
@@ -94,7 +102,11 @@ export default function WmsApprovalsPage() {
     ...checks.map(w => ({ key: `wc|${w.id}`, id: w.id, kind: 'Pick check correction', summary: `${w.order_no || 'order'} · ${(w.corrections || []).map(c => `${c.item_code} ${c.picked_qty}→${c.checked_qty}`).join(', ') || w.note || ''}`, by: w.requested_by_name, at: w.created_at, approve: () => approveCheck(w.id).then(() => {}), reject: () => rejectCheck(w.id).then(() => {}) })),
     ...counts.map(c => ({ key: `ct|${c.id}`, id: c.id, kind: 'Stock count', summary: `${c.count_no || '—'}${c.name ? ' · ' + c.name : ''} · ${c.wms_count_lines?.[0]?.count ?? 0} line(s) counted`, by: c.completed_by_name || c.created_by_name, at: c.completed_at || c.created_at, approve: () => applyCount(c.id).then(() => {}), reject: null, open: `/wms/counts/${c.id}` })),
     ...papers.map(p => ({ key: `pr|${p.id}`, id: p.id, kind: 'Paper receipt', summary: `${p.do_number || 'DO'}${p.factory_code ? ' · ' + p.factory_code : ''}${p.item_code ? ' · item ' + p.item_code : ' · whole DO'}${p.reason ? ' · ' + p.reason : ''} — receive on paper (no photos)`, by: p.requested_by_name, at: p.created_at, approve: () => approvePaper(p.id).then(() => {}), reject: () => rejectPaper(p.id).then(() => {}) })),
-  ].sort((a, b) => (a.at || '').localeCompare(b.at || '')), [bypasses, adjs, checks, counts, papers, approveBypass, rejectBypass, approveAdj, rejectAdj, approveCheck, rejectCheck, applyCount, approvePaper, rejectPaper])
+    ...corrections.map(c => ({ key: `cr|${c.id}`, id: c.id, kind: 'Correction', summary: c.kind === 'stock_recode'
+        ? `Re-code stock ${c.old_item_code || '?'} → ${c.new_item_code || '?'}${c.location_code ? ' · ' + c.location_code : ''}${c.batch_no ? ' · b:' + c.batch_no : ''}${c.reason ? ' · ' + c.reason : ''}`
+        : `Edit PO line ${c.old_item_code || '?'} → ${c.new_item_code || c.old_item_code || '?'}${c.new_qty != null ? ' · qty ' + c.new_qty : ''}${c.reason ? ' · ' + c.reason : ''}`,
+      by: c.requested_by_name, at: c.created_at, approve: () => approveCorr(c.id).then(() => {}), reject: () => rejectCorr(c.id).then(() => {}) })),
+  ].sort((a, b) => (a.at || '').localeCompare(b.at || '')), [bypasses, adjs, checks, counts, papers, corrections, approveBypass, rejectBypass, approveAdj, rejectAdj, approveCheck, rejectCheck, applyCount, approvePaper, rejectPaper, approveCorr, rejectCorr])
 
   async function approveAll() {
     if (allPending.length === 0) return
@@ -116,6 +128,7 @@ export default function WmsApprovalsPage() {
     { kind: 'Pick check correction', n: byKind('Pick check correction') },
     { kind: 'Stock count', n: byKind('Stock count') },
     { kind: 'Paper receipt', n: byKind('Paper receipt') },
+    { kind: 'Correction', n: byKind('Correction') },
   ]
 
   return (
@@ -133,7 +146,7 @@ export default function WmsApprovalsPage() {
         {err && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg my-4">{err}</p>}
         {msg && <p className="text-emerald-700 text-sm bg-emerald-50 border border-emerald-200 p-3 rounded-lg my-4">✓ {msg}</p>}
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 my-5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 my-5">
           {CARDS.map(c => (
             <div key={c.kind} className="bg-white rounded-xl border shadow-sm px-4 py-3">
               <div className={`text-2xl font-bold tabular-nums ${c.n ? 'text-gray-900' : 'text-gray-300'}`}>{c.n}</div>
