@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import type { Metadata } from 'next'
 import AuthGate from '@/components/AuthGate'
 import WmsNavbar from '@/components/WmsNavbar'
+import WmsDiscussionWidget from '@/components/WmsDiscussionWidget'
 
 export const metadata: Metadata = {
   title: 'WMS EASWARI',
@@ -17,6 +18,7 @@ export default function WmsLayout({ children }: { children: ReactNode }) {
     <AuthGate requireModule="warehouse" hideBar>
       <WmsNavbar />
       {children}
+      <WmsDiscussionWidget />
     </AuthGate>
   )
 }
