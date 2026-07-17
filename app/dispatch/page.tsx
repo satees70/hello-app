@@ -525,7 +525,7 @@ export default function DispatchPage() {
     doc.text(`By: ${o.created_by_name || '—'}`, W - 10, 44.5, { align: 'right' })
     const fg = o.dispatch_order_lines || [], rt = o.material_returns || []
     const body = [
-      ...fg.map((l, i) => { const ex = l.exp_date || (l.batch_id ? expByBatch[l.batch_id] : ''); const so = (l.batch_id && soByBatch[l.batch_id]) || soByDoItem[`${o.do_number}|${l.item_code}`] || '—'; return [String(i + 1), so, l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', ex ? fmtD(ex) : '⚠ none'] }),
+      ...fg.map((l, i) => { const ex = l.exp_date || (l.batch_id ? expByBatch[l.batch_id] : ''); const so = (l.batch_id && soByBatch[l.batch_id]) || soByDoItem[`${o.do_number}|${l.item_code}`] || '—'; return [String(i + 1), so, l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', ex ? fmtD(ex) : 'none'] }),
       ...rt.map((l, i) => [String(fg.length + i + 1), soByDoItem[`${o.do_number}|${l.item_code}`] || 'Return', l.item_code, l.description || '', String(l.quantity), l.batch_no || '—', l.exp_date ? fmtD(l.exp_date) : '—']),
     ]
     autoTable(doc, {
@@ -537,11 +537,11 @@ export default function DispatchPage() {
       columnStyles: {
         0: { cellWidth: 10 },                         // #
         1: { cellWidth: 22 },                         // SO
-        2: { cellWidth: 36 },                         // Code
-        3: { cellWidth: 61 },                         // Item name
-        4: { halign: 'right', cellWidth: 15 },        // Qty
-        5: { cellWidth: 22 },                         // Batch
-        6: { cellWidth: 16 },                         // Exp
+        2: { cellWidth: 34 },                         // Code
+        3: { cellWidth: 53 },                         // Item name
+        4: { halign: 'right', cellWidth: 14 },        // Qty
+        5: { cellWidth: 33, overflow: 'linebreak' },  // Batch — wider + wraps so the full batch/expiry always shows
+        6: { cellWidth: 18 },                         // Exp
       }, margin: { left: 10, right: 10 },
     })
     const endY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || 40
