@@ -132,6 +132,9 @@ export default async function TenantsPage({ searchParams }: { searchParams: Prom
                         <Link href={`/tenants/${l.id}/statement`} className="btn-ghost py-1">
                           Statement
                         </Link>
+                        <a href={`/api/leases/${l.id}/agreement`} className="btn-ghost py-1">
+                          Agreement
+                        </a>
                       </div>
                     </td>
                   </tr>
@@ -179,6 +182,9 @@ export default async function TenantsPage({ searchParams }: { searchParams: Prom
                     <Link href={`/tenants/${l.id}`} className="text-primary">
                       {l.tenant.name}
                     </Link>
+                    <a href={`/api/leases/${l.id}/agreement`} className="block text-xs text-muted hover:text-primary no-print">
+                      Download agreement
+                    </a>
                   </td>
                   <td className="td">{l.property.name}</td>
                   <td className="td text-right num">{Number(l.monthlyRent).toFixed(2)}</td>
