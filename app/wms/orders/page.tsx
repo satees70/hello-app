@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api'
 import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
 import WarehouseTabs, { passWh, WhFilter } from '@/components/WarehouseTabs'
+import { openWmsDiscussion } from '@/components/WmsDiscussionWidget'
 
 interface Order {
   id: string; order_no: string | null; customer_name: string | null; order_date: string | null; delivery_date: string | null
@@ -280,6 +281,7 @@ export default function WmsOrdersPage() {
                       {['Checked', 'Partially Dispatched'].includes(o.status) && <Link href={`/wms/dispatch/${o.id}`} className="text-emerald-700 font-medium hover:underline">Dispatch →</Link>}
                       {outstandingOrders.has(o.id) && ['Picked', 'Checked', 'Partially Dispatched', 'Dispatched'].includes(o.status) && <Link href={`/wms/pick/${o.id}`} className="text-amber-700 font-medium hover:underline" title="Stock arrived — pick the outstanding balance">Pick outstanding →</Link>}
                       <button onClick={() => toggleLines(o)} className="text-emerald-700 hover:underline">{expandedId === o.id ? 'Hide lines' : 'View lines'}</button>
+                      <button onClick={() => openWmsDiscussion(`Order ${o.order_no || o.file_name || o.id.slice(0, 8)}`)} title="Ask a question about this order" className="text-indigo-600 hover:underline">💬 Discuss</button>
                       {o.file_path && <button onClick={() => viewPdf(o)} className="text-gray-500 hover:underline">PDF</button>}
                       {canEdit && ['Reserved', 'Released', 'Picking'].includes(o.status) && <button onClick={() => cancelOrder(o)} className="text-amber-600 hover:underline">Cancel</button>}
                       {canEdit && o.file_path && <button onClick={() => reRead(o)} className="text-gray-500 hover:underline">Re-read</button>}

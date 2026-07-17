@@ -41,6 +41,13 @@ function pageLabel(path: string): string {
 
 interface Group { id: string; name: string; created_by: string | null; created_by_name: string | null }
 const LAST_KEY = 'wms_disc_lastopen'
+const DISCUSS_EVENT = 'wms-discuss'
+
+// Open the WMS discussion focused on a specific record's thread, from anywhere in the WMS.
+// e.g. openWmsDiscussion('Count CC-000021') — the widget opens that thread ready to type.
+export function openWmsDiscussion(topic: string) {
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(DISCUSS_EVENT, { detail: { topic } }))
+}
 
 export default function WmsDiscussionWidget() {
   const { profile } = useProfile()
@@ -50,6 +57,7 @@ export default function WmsDiscussionWidget() {
 
   // Channels: 'wms' (shared) or a private group id.
   const [sel, setSel] = useState('wms')
+  const [topicOverride, setTopicOverride] = useState<string | null>(null)   // a specific record thread to open
   const [groups, setGroups] = useState<Group[]>([])
   const [users, setUsers] = useState<{ id: string; full_name: string }[]>([])
   const [newName, setNewName] = useState('')
@@ -87,6 +95,18 @@ export default function WmsDiscussionWidget() {
     return () => clearInterval(t)
   }, [profile, open, countUnread])
 
+  // Open straight into a specific record's thread when a page asks (openWmsDiscussion(...)).
+  useEffect(() => {
+    function onDiscuss(e: Event) {
+      const t = (e as CustomEvent).detail?.topic as string | undefined
+      setSel('wms'); setTopicOverride(t || null); setOpen(true)
+      try { localStorage.setItem(LAST_KEY, new Date().toISOString()) } catch { /* ignore */ }
+      setUnread(0)
+    }
+    window.addEventListener(DISCUSS_EVENT, onDiscuss)
+    return () => window.removeEventListener(DISCUSS_EVENT, onDiscuss)
+  }, [])
+
   // Load groups + the user directory once the panel is opened.
   useEffect(() => {
     if (!open || !profile) return
@@ -112,9 +132,10 @@ export default function WmsDiscussionWidget() {
   function toggle() {
     const nowOpen = !open
     setOpen(nowOpen)
-    if (nowOpen) { try { localStorage.setItem(LAST_KEY, new Date().toISOString()) } catch { /* ignore */ } ; setUnread(0) }
+    if (nowOpen) { setTopicOverride(null); try { localStorage.setItem(LAST_KEY, new Date().toISOString()) } catch { /* ignore */ } ; setUnread(0) }
     else countUnread()
   }
+  const defaultTopic = topicOverride || pageLabel(pathname)
 
   async function createGroup() {
     const n = newName.trim(); if (!n) return
@@ -165,7 +186,7 @@ export default function WmsDiscussionWidget() {
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 sm:p-4" onClick={() => toggle()}>
           <div className="bg-white w-full sm:max-w-4xl sm:rounded-xl shadow-lg max-h-[94vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-2.5 border-b bg-emerald-700 text-white">
-              <span className="font-semibold text-sm">{selGroup ? `🔒 ${selGroup.name}` : <>WMS Discussion <span className="font-normal text-emerald-200">· asking from {pageLabel(pathname)}</span></>}</span>
+              <span className="font-semibold text-sm">{selGroup ? `🔒 ${selGroup.name}` : <>WMS Discussion <span className="font-normal text-emerald-200">· {defaultTopic}</span></>}</span>
               <button onClick={() => toggle()} className="text-emerald-100 hover:text-white text-lg leading-none">✕</button>
             </div>
 
@@ -192,7 +213,7 @@ export default function WmsDiscussionWidget() {
 
             <div className="overflow-y-auto p-3">
               <DiscussionPanel key={channel} channel={channel} me={profile.id} meName={profile.full_name} title={title}
-                filterTopic={selGroup ? undefined : pageLabel(pathname)}
+                filterTopic={selGroup ? undefined : defaultTopic}
                 restrictToUserIds={selGroup ? selMembers : undefined} />
             </div>
           </div>

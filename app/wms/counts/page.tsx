@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
+import { openWmsDiscussion } from '@/components/WmsDiscussionWidget'
 
 interface Task {
   id: string; count_no: string | null; name: string | null; scope_type: string; scope: string[] | null
@@ -168,6 +169,7 @@ export default function WmsCountsPage() {
                   <td className="px-4 py-2.5 text-gray-500 text-xs">{t.created_by_name}</td>
                   <td className="px-4 py-2.5 whitespace-nowrap">
                     <Link href={`/wms/counts/${t.id}`} className="text-emerald-700 font-medium hover:underline text-xs">{t.status === 'Applied' ? 'View' : 'Open →'}</Link>
+                    <button onClick={() => openWmsDiscussion(`Count ${t.count_no || t.id.slice(0, 8)}`)} title="Ask a question about this count" className="ml-3 text-indigo-600 hover:underline text-xs">💬 Discuss</button>
                     {canEdit && (t.status === 'Counting' || t.status === 'Review') && <button onClick={() => cancelCount(t)} className="ml-3 text-red-500 hover:underline text-xs">Cancel</button>}
                   </td>
                 </tr>
