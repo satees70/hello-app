@@ -120,7 +120,7 @@ export default function WmsDispatchListPage() {
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search DO / customer / order…" className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[180px]" />
           <WarehouseTabs value={wh} onChange={setWh} />
         </div>
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+        <div className="hidden sm:block bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b"><tr>{['DO No', 'Customer', 'Order', 'Vehicle', 'Dispatched', 'By', ''].map(h => <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
             <tbody>
@@ -148,6 +148,36 @@ export default function WmsDispatchListPage() {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile: one card per Delivery Order */}
+        <div className="sm:hidden space-y-2">
+          {filtered.length === 0 && <div className="bg-white rounded-xl border p-6 text-center text-gray-400 text-sm">No dispatches yet.</div>}
+          {filtered.map(d => (
+            <div key={d.id} className="bg-white rounded-xl border shadow-sm p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-mono font-semibold text-sm">{d.do_number}</div>
+                  <div className="text-xs text-gray-500 leading-snug">{d.customer_name}</div>
+                </div>
+                <div className="text-right shrink-0 text-xs text-gray-500 whitespace-nowrap">{fmtTime(d.dispatched_at)}</div>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-gray-600">
+                <span>Order: <span className="font-mono">{d.order_no || '—'}</span></span>
+                <span>Vehicle: {d.vehicle || '—'}{d.driver ? ` · ${d.driver}` : ''}</span>
+                {d.dispatched_by_name && <span>By: {d.dispatched_by_name}</span>}
+              </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-2.5 pt-2 border-t text-xs">
+                <button onClick={() => reprint(d)} className="text-emerald-700 hover:underline font-medium">⬇ DO PDF</button>
+                <button onClick={() => openWmsDiscussion(`DO ${d.do_number || d.id.slice(0, 8)}`)} title="Ask a question about this delivery order" className="text-indigo-600 hover:underline font-medium">💬 Discuss</button>
+                {!(d.order_id && prodOrders.has(d.order_id)) && (
+                  d.load_checked_at
+                    ? <span className="text-teal-700" title={`Loading checked by ${d.load_checked_by_name || 'staff'}`}>✓ Loaded</span>
+                    : canEdit && <button onClick={() => { setLoadCheckFor(d); setLoadNote(''); setErr('') }} className="text-teal-700 hover:underline font-medium">Loading check</button>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

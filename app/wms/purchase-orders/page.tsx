@@ -325,7 +325,7 @@ export default function WmsPurchaseOrdersPage() {
           <div className="w-full sm:w-auto sm:ml-auto"><WarehouseTabs value={wh} onChange={setWh} /></div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+        <div className="hidden sm:block bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b"><tr>{['PO No', 'Supplier', 'Expected', 'Lines', 'Status', 'Put-away', 'SQL GRN', 'Added', 'Actions'].map(h => <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
             <tbody>
@@ -369,6 +369,51 @@ export default function WmsPurchaseOrdersPage() {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile: one card per purchase order */}
+        <div className="sm:hidden space-y-2">
+          {shownPos.length === 0 && <div className="bg-white rounded-xl border p-6 text-center text-gray-400 text-sm">No purchase orders{statusFilter ? ` with status “${statusFilter}”` : ''}{wh !== 'all' ? ' in this warehouse' : ' yet'}.</div>}
+          {shownPos.map(o => (
+            <div key={o.id} className="bg-white rounded-xl border shadow-sm p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-mono font-semibold text-sm">{o.po_number || <span className="text-gray-300">{o.file_name ? '(reading…)' : '—'}</span>}</div>
+                  <div className="text-xs text-gray-500 leading-snug">{o.supplier_name || '—'}</div>
+                </div>
+                <span className={`px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${STATUS_CHIP[o.status] || 'bg-gray-100'}`}>{o.status}</span>
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-gray-600">
+                <span>Lines: <span className="tabular-nums">{o.wms_po_lines?.[0]?.count ?? 0}</span></span>
+                {o.expected_date && <span>Expected: {o.expected_date}</span>}
+                <span>Added: {fmtTime(o.created_at)}</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5 text-xs">
+                <span className="text-gray-600">Put-away:{' '}
+                  {(recvByPo[o.id]?.length ?? 0) === 0 ? <span className="text-gray-300">—</span>
+                    : (putStatus[o.id] === 'done' && o.status === 'Fulfilled') ? <span className="px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700">Put away ✓</span>
+                    : <span className="px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700" title={putStatus[o.id] === 'pending' ? 'Received goods still in GOODS-IN' : 'Not all items received yet'}>Pending</span>}
+                </span>
+                {(recvByPo[o.id]?.length ?? 0) > 0 && <button onClick={() => putawayReport(o)} className="text-emerald-700 hover:underline">report</button>}
+              </div>
+              <div className="flex items-center gap-1 mt-2">
+                <span className="text-xs text-gray-500">SQL GRN:</span>
+                <input value={grnEdits[o.id] ?? o.sql_grn_no ?? ''} disabled={!canEdit} onChange={e => setGrnEdits(m => ({ ...m, [o.id]: e.target.value }))}
+                  placeholder="GRN #" className="border rounded px-2 py-1 text-xs w-24 disabled:bg-gray-100" />
+                {canEdit && (grnEdits[o.id] ?? o.sql_grn_no ?? '') !== (o.sql_grn_no ?? '') &&
+                  <button onClick={() => saveSqlGrn(o)} className="bg-emerald-600 text-white px-2 py-1 rounded text-xs hover:bg-emerald-700">Save</button>}
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-2.5 pt-2 border-t text-xs">
+                {['Open', 'Partially Received', 'Fulfilled'].includes(o.status) && <Link href={`/wms/receive/${o.id}`} className="text-emerald-700 font-medium hover:underline">Receive →</Link>}
+                <button onClick={() => viewLines(o)} className="text-emerald-700 hover:underline font-medium">View lines</button>
+                <button onClick={() => openWmsDiscussion(`PO ${o.po_number || o.file_name || o.id.slice(0, 8)}`)} title="Ask a question about this PO" className="text-indigo-600 hover:underline font-medium">💬 Discuss</button>
+                {o.file_path && <button onClick={() => viewPdf(o)} className="text-gray-500 hover:underline font-medium">PDF</button>}
+                {canEdit && o.file_path && <button onClick={() => reRead(o)} className="text-gray-500 hover:underline font-medium">Re-read</button>}
+                {canEdit && (recvByPo[o.id]?.length ?? 0) === 0 && <button onClick={() => startReplace(o)} title="Upload an amended PDF and re-read the lines" className="text-gray-500 hover:underline font-medium">Replace PDF</button>}
+                {canEdit && <button onClick={() => del(o)} className="text-red-500 hover:underline font-medium">Delete</button>}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

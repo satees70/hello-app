@@ -243,7 +243,7 @@ export default function WmsOrdersPage() {
           <div className="w-full sm:w-auto sm:ml-auto"><WarehouseTabs value={wh} onChange={setWh} /></div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+        <div className="hidden sm:block bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>{['File', 'Order No', 'Customer', 'Delivery', 'Lines', 'Status', 'Picker', 'Uploaded', 'Actions'].map(h => (
@@ -310,6 +310,69 @@ export default function WmsOrdersPage() {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile: one card per order */}
+        <div className="sm:hidden space-y-2">
+          {shownOrders.length === 0 && <div className="bg-white rounded-xl border p-6 text-center text-gray-400 text-sm">No orders{statusFilter ? ` with status “${statusFilter}”` : ''}{wh !== 'all' ? ' in this warehouse' : (statusFilter ? '' : ' yet — upload a PDF to start')}.</div>}
+          {shownOrders.map(o => (
+            <div key={o.id} className="bg-white rounded-xl border shadow-sm p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-mono font-semibold text-sm">{o.order_no || <span className="text-gray-300">—</span>}</div>
+                  {doByOrder[o.id]?.length ? <div className="text-[10px] text-emerald-700 font-medium" title="Dispatched on this DO">DO {doByOrder[o.id].join(', ')}</div> : null}
+                  <div className="text-xs text-gray-500 leading-snug truncate" title={o.file_name || ''}>{o.file_name}</div>
+                </div>
+                <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CHIP[o.status] || 'bg-gray-100'}`}>{o.status}</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-gray-600">
+                <span>{o.customer_name || <span className="text-gray-300">—</span>}</span>
+                {o.delivery_date && <span>Deliver: {o.delivery_date}</span>}
+                <span>Lines: <span className="tabular-nums">{o.wms_order_lines?.[0]?.count ?? 0}</span></span>
+                <span>Uploaded: {fmtTime(o.created_at)}</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs">
+                <span className="text-gray-500">Picker:</span>
+                {canEdit
+                  ? <select value={o.assigned_to || ''} onChange={e => assign(o, e.target.value)} className="border rounded px-1.5 py-1 text-xs max-w-[160px]">
+                      <option value="">— unassigned —</option>
+                      {o.assigned_to && !pickers.some(p => p.id === o.assigned_to) && <option value={o.assigned_to}>{o.assigned_to_name || 'assigned'}</option>}
+                      {pickers.map(p => <option key={p.id} value={p.id}>{p.full_name || p.id.slice(0, 6)}</option>)}
+                    </select>
+                  : <span className="text-gray-600">{o.assigned_to_name || '—'}</span>}
+                {pickDur(o) && <span className="text-gray-400">{pickDur(o)}</span>}
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-2.5 pt-2 border-t text-xs">
+                {canEdit && o.status === 'Review' && <button onClick={() => release(o)} className="text-teal-700 font-medium hover:underline">Release</button>}
+                {['Reserved', 'Released', 'Picking'].includes(o.status) &&
+                  <Link href={`/wms/pick/${o.id}`} className="text-emerald-700 font-medium hover:underline">Pick →</Link>}
+                {o.status === 'Picked' && <Link href={`/wms/pick/${o.id}`} className="text-teal-700 font-medium hover:underline">Check →</Link>}
+                {['Checked', 'Partially Dispatched'].includes(o.status) && <Link href={`/wms/dispatch/${o.id}`} className="text-emerald-700 font-medium hover:underline">Dispatch →</Link>}
+                {outstandingOrders.has(o.id) && ['Picked', 'Checked', 'Partially Dispatched', 'Dispatched'].includes(o.status) && <Link href={`/wms/pick/${o.id}`} className="text-amber-700 font-medium hover:underline" title="Stock arrived — pick the outstanding balance">Pick outstanding →</Link>}
+                <button onClick={() => toggleLines(o)} className="text-emerald-700 hover:underline">{expandedId === o.id ? 'Hide lines' : 'View lines'}</button>
+                <button onClick={() => openWmsDiscussion(`Order ${o.order_no || o.file_name || o.id.slice(0, 8)}`)} title="Ask a question about this order" className="text-indigo-600 hover:underline">💬 Discuss</button>
+                {o.file_path && <button onClick={() => viewPdf(o)} className="text-gray-500 hover:underline">PDF</button>}
+                {canEdit && ['Reserved', 'Released', 'Picking'].includes(o.status) && <button onClick={() => cancelOrder(o)} className="text-amber-600 hover:underline">Cancel</button>}
+                {canEdit && o.file_path && <button onClick={() => reRead(o)} className="text-gray-500 hover:underline">Re-read</button>}
+                {canEdit && <button onClick={() => del(o)} className="text-red-500 hover:underline">Delete</button>}
+              </div>
+              {expandedId === o.id && (
+                <div className="mt-2 border-t pt-2">
+                  <div className="text-xs font-medium text-gray-500 mb-1">Items in {o.order_no || o.file_name}</div>
+                  {expLines.length === 0 ? <div className="text-xs text-gray-400">No lines.</div> : (
+                    <div className="space-y-1">
+                      {expLines.map(l => (
+                        <div key={l.id} className="flex items-start justify-between gap-2 text-xs">
+                          <span className="min-w-0"><span className="font-mono">{l.item_code}</span><span className="text-gray-500"> · {l.description}</span></span>
+                          <span className="tabular-nums shrink-0 whitespace-nowrap">{l.quantity}{l.uom ? ' ' + l.uom : ''}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       </div>
 

@@ -108,7 +108,8 @@ export default function WmsDispatchPage() {
         {order.status === 'Dispatched' && drafts.length === 0 && <p className="text-sm bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg p-3 mb-4">This order is fully dispatched. Reprint its Delivery Orders on the Delivery Orders page.</p>}
         {err && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg mb-4">{err}</p>}
 
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto mb-4">
+        {/* Desktop: table */}
+        <div className="hidden sm:block bg-white rounded-xl shadow-sm border overflow-x-auto mb-4">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b"><tr>{['Item', 'Batch', 'Exp', 'To ship', 'Ship qty', 'Unit'].map(h => <th key={h} className="text-left px-4 py-2.5 font-medium text-gray-600">{h}</th>)}</tr></thead>
             <tbody>
@@ -125,6 +126,28 @@ export default function WmsDispatchPage() {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile: one card per line to ship */}
+        <div className="sm:hidden space-y-2 mb-4">
+          {drafts.length === 0 && <div className="bg-white rounded-xl border p-6 text-center text-gray-400 text-sm">Nothing left to dispatch (either not picked yet, or all shipped).</div>}
+          {drafts.map((d, i) => (
+            <div key={i} className="bg-white rounded-xl border shadow-sm p-3">
+              <div className="min-w-0">
+                <div className="font-mono font-semibold text-sm">{d.item_code}</div>
+                <div className="text-xs text-gray-500 leading-snug">{d.description}</div>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-gray-600">
+                <span>Batch: <span className="font-mono">{d.batch_no || '—'}</span></span>
+                {d.exp_date && <span>Exp: {fmtDate(d.exp_date)}</span>}
+                <span>To ship: <span className="tabular-nums">{fmtQty(d.staged)}</span></span>
+              </div>
+              <div className="flex items-center gap-2 mt-2.5 pt-2 border-t">
+                <label className="text-xs text-gray-500">Ship qty{d.uom ? ` (${d.uom})` : ''}</label>
+                <input value={d.qty} onChange={e => setQty(i, e.target.value)} className="w-24 border rounded-lg px-2 py-1 text-sm text-right tabular-nums ml-auto" inputMode="decimal" />
+              </div>
+            </div>
+          ))}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">

@@ -476,7 +476,8 @@ export default function WmsPickPage() {
               <div>
                 <h2 className="font-semibold text-sm mb-1">Check &amp; approve this pick</h2>
                 <p className="text-xs text-gray-500 mb-3">Confirm the picked quantities. Only change a number if it&apos;s wrong — a change is <b>sent to Head Office to approve</b>{isHO || isAdmin ? ' (applied straight away for you)' : ''}. The person who picked can&apos;t check their own order.</p>
-                <div className="overflow-x-auto border rounded-lg mb-3">
+                {/* Desktop: table */}
+                <div className="hidden sm:block overflow-x-auto border rounded-lg mb-3">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b text-xs text-gray-500"><tr>
                       <th className="text-left px-3 py-1.5 font-medium">Item</th>
@@ -500,6 +501,27 @@ export default function WmsPickPage() {
                       })}
                     </tbody>
                   </table>
+                </div>
+
+                {/* Mobile: one card per line */}
+                <div className="sm:hidden space-y-2 mb-3">
+                  {lines.map(l => {
+                    const cq = checkedQty[l.id] ?? String(clean(l.qty_picked))
+                    const diff = Number(cq) !== Number(l.qty_picked)
+                    return (
+                      <div key={l.id} className="bg-white rounded-xl border shadow-sm p-3">
+                        <div className="font-mono font-semibold text-sm">{l.item_code}</div>
+                        {l.description && <div className="text-xs text-gray-500 leading-snug">{l.description}</div>}
+                        <div className="flex items-center justify-between gap-3 mt-2">
+                          <span className="text-xs text-gray-500">Picked <span className="tabular-nums text-gray-600">{fmtQty(l.qty_picked)}{l.uom ? ' ' + l.uom : ''}</span></span>
+                          <label className="flex items-center gap-2 text-xs text-gray-500">Checked qty
+                            <input value={cq} onChange={e => setCheckedQty(q => ({ ...q, [l.id]: e.target.value.replace(/[^0-9.]/g, '') }))}
+                              className={`w-24 border rounded px-2 py-1 text-sm text-right tabular-nums ${diff ? 'border-amber-400 bg-amber-50' : ''}`} inputMode="decimal" />
+                          </label>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
                 <div className="flex flex-wrap items-end gap-2">
                   <div className="flex-1 min-w-[220px]">

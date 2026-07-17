@@ -152,7 +152,8 @@ export default function WmsCountsPage() {
           </form>
         )}
 
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+        {/* Desktop: table */}
+        <div className="hidden sm:block bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b"><tr>{['Count', 'What', 'Lines', 'Δ', 'Duration', 'Status', 'Started', 'By', ''].map(h => <th key={h} className="text-left px-4 py-3 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
             <tbody>
@@ -176,6 +177,34 @@ export default function WmsCountsPage() {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile: one card per count */}
+        <div className="sm:hidden space-y-2">
+          {tasks.length === 0 && <div className="bg-white rounded-xl border p-6 text-center text-gray-400 text-sm">No counts yet.</div>}
+          {tasks.map(t => (
+            <div key={t.id} className="bg-white rounded-xl border shadow-sm p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-mono font-semibold text-sm">{t.count_no}{t.blind ? <span className="ml-1 text-xs text-violet-600 font-sans">blind</span> : ''}</div>
+                  {t.name && <div className="text-xs text-gray-500 leading-snug">{t.name}</div>}
+                </div>
+                <span className={`px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${STATUS_CHIP[t.status] || 'bg-gray-100'}`}>{t.status}</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-gray-600">
+                <span>{SCOPE_LABEL[t.scope_type]}{t.scope && t.scope.length ? <span className="text-gray-400"> ({t.scope.slice(0, 4).join(', ')}{t.scope.length > 4 ? '…' : ''})</span> : ''}</span>
+                <span>Lines: <span className="tabular-nums">{t.wms_count_lines?.[0]?.count ?? 0}</span></span>
+                <span>Δ: {discByTask[t.id] ? <span className="text-red-600 font-medium tabular-nums">{discByTask[t.id]}</span> : <span className="text-gray-300 tabular-nums">0</span>}</span>
+                <span>Duration: {durText(t.created_at, t.completed_at)}</span>
+              </div>
+              <div className="text-xs text-gray-400 mt-1">{fmtTime(t.created_at)}{t.created_by_name ? ' · ' + t.created_by_name : ''}</div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-2.5 pt-2 border-t text-xs">
+                <Link href={`/wms/counts/${t.id}`} className="text-emerald-700 font-medium hover:underline">{t.status === 'Applied' ? 'View' : 'Open →'}</Link>
+                <button onClick={() => openWmsDiscussion(`Count ${t.count_no || t.id.slice(0, 8)}`)} title="Ask a question about this count" className="text-indigo-600 hover:underline">💬 Discuss</button>
+                {canEdit && (t.status === 'Counting' || t.status === 'Review') && <button onClick={() => cancelCount(t)} className="text-red-500 hover:underline">Cancel</button>}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>

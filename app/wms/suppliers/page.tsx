@@ -85,7 +85,7 @@ export default function WmsSuppliersPage() {
           </form>
         )}
 
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+        <div className="hidden sm:block bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b"><tr>{['Supplier', 'Batch code', 'Status', 'Actions'].map(h => <th key={h} className="text-left px-4 py-3 font-medium text-gray-600">{h}</th>)}</tr></thead>
             <tbody>
@@ -106,6 +106,30 @@ export default function WmsSuppliersPage() {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile: one card per supplier */}
+        <div className="sm:hidden space-y-2">
+          {filtered.length === 0 && <div className="bg-white rounded-xl border p-6 text-center text-gray-400 text-sm">No suppliers yet — add one so its code can tag batches.</div>}
+          {filtered.map(r => (
+            <div key={r.id} className={`bg-white rounded-xl border shadow-sm p-3 ${r.active ? '' : 'opacity-50'}`}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-semibold text-sm">{r.name}</div>
+                  {r.notes && <div className="text-xs text-gray-500 leading-snug">{r.notes}</div>}
+                </div>
+                <span className="font-mono font-medium bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded shrink-0">{r.code}</span>
+              </div>
+              <div className="mt-1.5 text-xs">{r.active ? <span className="text-emerald-700">Active</span> : <span className="text-gray-400">Inactive</span>}</div>
+              {canEdit && (
+                <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-2.5 pt-2 border-t text-xs">
+                  <button onClick={() => openEdit(r)} className="text-emerald-700 hover:underline font-medium">Edit</button>
+                  <button onClick={() => toggleActive(r)} className="text-gray-500 hover:underline font-medium">{r.active ? 'Deactivate' : 'Activate'}</button>
+                  <button onClick={() => remove(r)} className="text-red-500 hover:underline font-medium">Delete</button>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       </div>
     </div>

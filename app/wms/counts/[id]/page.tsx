@@ -294,6 +294,8 @@ export default function WmsCountPage() {
                 <button key={k} onClick={() => setReviewAll(k === 'all')} className={`px-3 py-1 rounded-lg text-xs font-medium border ${(reviewAll ? 'all' : 'disc') === k ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white hover:bg-gray-50'}`}>{lbl}</button>
               ))}
             </div>
+            {/* Desktop: table */}
+            <div className="hidden sm:block">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b"><tr>{['Bin', 'Item', 'Batch', 'System', 'Counted', 'Diff', 'Status', applied ? '' : 'Apply?'].map(h => <th key={h} className="text-left px-3 py-2.5 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
               <tbody>
@@ -315,6 +317,40 @@ export default function WmsCountPage() {
                 })}
               </tbody>
             </table>
+            </div>
+
+            {/* Mobile: one card per counted line */}
+            <div className="sm:hidden divide-y">
+              {reviewRows.length === 0 && <div className="px-3 py-10 text-center text-gray-400 text-sm">{reviewAll ? 'Nothing counted yet.' : 'No discrepancies — everything counted matches the system. 🎉'}</div>}
+              {reviewRows.map(l => {
+                const st = lineStatus(l); const disc = discrepancy(l); const diff = clean((l.counted_qty ?? 0) - l.expected_qty)
+                return (
+                  <div key={l.id} className={`p-3 ${l.skip ? 'opacity-40' : ''}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-mono font-medium text-sm">{l.item_code}</div>
+                        <div className="text-xs text-gray-400 leading-snug">{l.description}</div>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${st.chip}`}>{st.type}</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-gray-600">
+                      <span>Bin: <span className="font-mono">{l.location_code}</span></span>
+                      <span>Batch: <span className="font-mono">{l.batch_no || '—'}</span></span>
+                      <span>System: <span className="tabular-nums">{fmtQty(l.expected_qty)}</span></span>
+                      <span>Counted: <span className="tabular-nums font-medium">{fmtQty(l.counted_qty)}</span></span>
+                      <span>Diff: <span className={`tabular-nums font-medium ${diff < 0 ? 'text-red-600' : diff > 0 ? 'text-emerald-700' : 'text-gray-400'}`}>{diff > 0 ? '+' : ''}{fmtQty(diff)}</span></span>
+                    </div>
+                    {!applied && (
+                      <div className="mt-2 pt-2 border-t text-xs">
+                        {disc
+                          ? <label className="flex items-center gap-2 text-gray-600"><input type="checkbox" checked={!l.skip} onChange={() => toggleSkip(l)} title="Apply this correction" /> Apply this correction</label>
+                          : <span className="text-gray-300">—</span>}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
             {!applied && discreps.length > 0 && canEdit && (
               <div className="p-4 border-t flex items-center gap-3 flex-wrap">
                 {isHOD
