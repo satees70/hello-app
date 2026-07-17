@@ -68,7 +68,7 @@ export default function WmsPutawayPage() {
 
   // Suggest a shelf bin for an item: SL bin already holding it → empty SL → empty XS overflow.
   const suggestBin = useCallback((itemCode: string) => {
-    const active = locs.filter(l => l.active && l.location_type !== 'STAGE')
+    const active = locs.filter(l => l.active && l.location_type !== 'STAGE' && l.code !== 'PENDING')
     const sl = active.filter(l => l.location_type === 'SL').sort((a, b) => seqKey(a).localeCompare(seqKey(b)))
     const xs = active.filter(l => l.location_type === 'XS').sort((a, b) => seqKey(a).localeCompare(seqKey(b)))
     const itemLocIds = new Set(stock.filter(s => s.item_code === itemCode && s.quantity > 0 && s.location_code !== 'GOODS-IN').map(s => s.location_id))
@@ -112,19 +112,27 @@ export default function WmsPutawayPage() {
     load()
   }
 
-  // Stock has arrived for an item that orders were waiting on → re-open those orders for picking
-  // (they reappear in Orders to Pick, so pickers know stock is in).
-  async function releaseToPicking(itemCode: string) {
-    const d = demand[itemCode]; if (!d || !d.lines.length) return
-    if (!confirm(`Stock has arrived for ${itemCode}.\n\nRe-open ${d.orders.size} order(s) waiting on it for picking? Keep the ${fmtQty(d.qty)} they need here (or on a pick bin) so it can be picked.`)) return
-    setBusy('rel' + itemCode); setErr(''); setOk('')
-    let ok = 0
+  // Stock arrived for an item orders are waiting on → move the needed quantity into the PENDING
+  // area (kept apart from general stock), re-open those orders for picking, and leave the rest in
+  // GOODS-IN to shelf normally. One tap does the whole "stage the pending, release to picking".
+  async function stageToPending(row: Stock) {
+    const d = demand[row.item_code]; if (!d || !d.lines.length || !goodsIn) return
+    const pend = locByCode.get('PENDING')
+    if (!pend) { setErr('No PENDING area yet — run db/2026-07-wms-pending-area.sql in Supabase (it creates a bin coded PENDING).'); return }
+    const q = Math.min(clean(d.qty), row.quantity)
+    if (!(q > 0)) return
+    if (!confirm(`Move ${fmtQty(q)} of ${row.item_code} into the PENDING area for ${d.orders.size} waiting order(s), and tell pickers stock has arrived?\n\nPut the remaining ${fmtQty(clean(row.quantity - q))} onto normal shelves.`)) return
+    setBusy('pend' + row.id); setErr(''); setOk('')
+    const { error } = await supabase.rpc('wms_transfer', {
+      p_item_code: row.item_code, p_from_location_id: goodsIn.id, p_from_batch: row.batch_no,
+      p_to_location_id: pend.id, p_qty: q, p_reference: 'pending',
+    })
+    if (error) { setErr(error.message); setBusy(''); return }
     for (const id of d.lines) {
-      const { error } = await supabase.rpc('wms_reopen_line', { p_line_id: id })
-      if (error) { setErr(/wms_reopen_line/.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-repick-outstanding.sql in the Supabase SQL editor.' : error.message); setBusy(''); return }
-      ok++
+      const { error: e } = await supabase.rpc('wms_reopen_line', { p_line_id: id })
+      if (e) { setErr(/wms_reopen_line/.test(e.message) && /does not exist|schema cache|could not find/i.test(e.message) ? 'Staged to PENDING, but re-opening picking needs db/2026-07-wms-repick-outstanding.sql in Supabase.' : e.message); setBusy(''); load(); return }
     }
-    setBusy(''); setOk(`Re-opened ${ok} order line(s) for ${itemCode} — now in Orders to Pick.`); load()
+    setBusy(''); setOk(`Staged ${fmtQty(q)} of ${row.item_code} to PENDING and re-opened ${d.orders.size} order(s) for picking.`); load()
   }
 
   async function submitManual(e: React.FormEvent) {
@@ -191,10 +199,10 @@ export default function WmsPutawayPage() {
                       </>}
                       {demand[row.item_code] && (
                         <div className="basis-full flex flex-wrap items-center gap-2 text-xs bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 text-amber-800 mt-1">
-                          <span>⚠ <b>{fmtQty(demand[row.item_code].qty)}</b> needed for <b>{demand[row.item_code].orders.size}</b> outstanding order(s) — keep that much here for picking, don’t shelf it all.</span>
-                          {canEdit && <button onClick={() => releaseToPicking(row.item_code)} disabled={busy === 'rel' + row.item_code}
+                          <span>⚠ <b>{fmtQty(Math.min(demand[row.item_code].qty, row.quantity))}</b> needed for <b>{demand[row.item_code].orders.size}</b> outstanding order(s) — move this to PENDING, shelf the rest.</span>
+                          {canEdit && <button onClick={() => stageToPending(row)} disabled={busy === 'pend' + row.id}
                             className="ml-auto border border-amber-400 bg-white text-amber-800 rounded px-2 py-1 hover:bg-amber-100 disabled:opacity-50 font-medium whitespace-nowrap">
-                            {busy === 'rel' + row.item_code ? '…' : '🔄 Stock arrived — send to picking'}</button>}
+                            {busy === 'pend' + row.id ? '…' : `📦 Stage ${fmtQty(Math.min(demand[row.item_code].qty, row.quantity))} to PENDING & tell pickers`}</button>}
                         </div>
                       )}
                     </div>
