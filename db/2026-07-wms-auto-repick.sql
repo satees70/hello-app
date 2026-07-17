@@ -175,6 +175,11 @@ begin
       and dl.wms_booked_at is null
       and coalesce(dl.quantity, 0) > 0
       and nullif(btrim(dl.item_code), '') is not null
+      -- Safety: skip anything already booked with a receipt move for this DO + item.
+      and not exists (
+        select 1 from public.wms_stock_moves m
+        where m.move_type = 'receipt' and m.item_code = dl.item_code
+          and m.reference like 'DO ' || d.do_number || '%')
   loop
     v_batch := coalesce(r.batch_no, '');
     select id, description, unit into v_item_id, v_desc, v_uom from public.items where code = r.item_code;
