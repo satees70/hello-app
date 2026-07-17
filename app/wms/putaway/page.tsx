@@ -32,6 +32,7 @@ export default function WmsPutawayPage() {
   const [form, setForm] = useState(EMPTY)
   const [binTouched, setBinTouched] = useState(false)
   const [binEdits, setBinEdits] = useState<Record<string, string>>({})   // pending row -> chosen bin
+  const [qtyEdits, setQtyEdits] = useState<Record<string, string>>({})   // pending row -> qty to put in this bin (rest stays in GOODS-IN)
   const [busy, setBusy] = useState('')
   const [err, setErr] = useState(''); const [ok, setOk] = useState('')
   const [scanFor, setScanFor] = useState<{ row: Stock; bin: string } | null>(null)
@@ -84,15 +85,22 @@ export default function WmsPutawayPage() {
     if (!canEdit || !goodsIn) return
     const to = locByCode.get(toCode.toUpperCase())
     if (!to) { setErr(`Choose a valid bin for ${row.item_code}.`); return }
+    // Put away a chosen quantity (default = all). A partial amount leaves the rest in GOODS-IN,
+    // so the same item can be split across several bins in a few taps.
+    const q = qtyEdits[row.id] != null && qtyEdits[row.id] !== '' ? Number(qtyEdits[row.id]) : row.quantity
+    if (!(q > 0)) { setErr('Enter a quantity greater than zero.'); return }
+    if (q > row.quantity + 1e-9) { setErr(`Only ${fmtQty(row.quantity)} of ${row.item_code} is in GOODS-IN.`); return }
     setBusy(row.id); setErr(''); setOk('')
     const { error } = await supabase.rpc('wms_transfer', {
       p_item_code: row.item_code, p_from_location_id: goodsIn.id, p_from_batch: row.batch_no,
-      p_to_location_id: to.id, p_qty: row.quantity, p_reference: 'putaway',
+      p_to_location_id: to.id, p_qty: q, p_reference: 'putaway',
     })
     setBusy('')
     if (error) { setErr(error.message); return }
-    setOk(`Put ${fmtQty(row.quantity)} of ${row.item_code} away into ${to.code}.`)
-    setBinEdits(b => { const n = { ...b }; delete n[row.id]; return n }); load()
+    setOk(`Put ${fmtQty(q)} of ${row.item_code} away into ${to.code}${q < row.quantity ? ` · ${fmtQty(clean(row.quantity - q))} still in GOODS-IN to place` : ''}.`)
+    setBinEdits(b => { const n = { ...b }; delete n[row.id]; return n })
+    setQtyEdits(m => { const n = { ...m }; delete n[row.id]; return n })
+    load()
   }
 
   async function submitManual(e: React.FormEvent) {
@@ -146,6 +154,8 @@ export default function WmsPutawayPage() {
                         <div className="text-xs text-gray-500">{row.description}{row.batch_no ? ` · b:${row.batch_no}` : ''}{row.exp_date ? ` · exp ${fmtDate(row.exp_date)}` : ''}</div>
                       </div>
                       {canEdit && <>
+                        <input value={qtyEdits[row.id] ?? String(clean(row.quantity))} onChange={e => setQtyEdits(m => ({ ...m, [row.id]: e.target.value.replace(/[^0-9.]/g, '') }))}
+                          className="w-16 border rounded-lg px-2 py-1.5 text-sm text-right tabular-nums" inputMode="decimal" title="Qty for this bin — put the rest into another bin to split across locations" />
                         <input list="wms-bins" value={bin} onChange={e => setBinEdits(b => ({ ...b, [row.id]: e.target.value.toUpperCase() }))}
                           className="w-28 border rounded-lg px-2 py-1.5 text-sm font-mono" placeholder="bin" />
                         <button onClick={() => startPutaway(row)} disabled={busy === row.id}
