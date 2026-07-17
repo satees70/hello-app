@@ -55,6 +55,7 @@ export default function AdjustmentsReportPage() {
   const [truncated, setTruncated] = useState(false)
 
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')
+  const [view, setView] = useState<'period' | 'item' | 'person'>('period')   // what each row groups by
   const [groupBy, setGroupBy] = useState<GroupBy>('day')
   const [source, setSource] = useState<Source>('corr')
   const [wh, setWh] = useState<WhFilter>('all')
@@ -93,17 +94,22 @@ export default function AdjustmentsReportPage() {
       .filter(m => !needle || [m.item_code, m.description, m.reference, m.batch_no].some(v => (v || '').toLowerCase().includes(needle)))
   }, [moves, wh, source, q])
 
+  const groupCol = view === 'item' ? 'Item' : view === 'person' ? 'Person' : 'Period'
   const groups = useMemo(() => {
-    const m = new Map<string, { key: string; inc: number; dec: number; count: number }>()
+    const m = new Map<string, { key: string; label: string; sub: string; inc: number; dec: number; count: number }>()
     for (const mv of rowsShown) {
-      const k = periodKey(mv.created_at, groupBy)
-      const e = m.get(k) || { key: k, inc: 0, dec: 0, count: 0 }
+      const k = view === 'item' ? mv.item_code : view === 'person' ? (mv.moved_by_name || '—') : periodKey(mv.created_at, groupBy)
+      const label = view === 'period' ? periodLabel(k, groupBy) : k
+      const sub = view === 'item' ? (mv.description || '') : ''
+      const e = m.get(k) || { key: k, label, sub, inc: 0, dec: 0, count: 0 }
       const { inc, dec } = inOut(mv)
       e.inc = clean(e.inc + inc); e.dec = clean(e.dec + dec); e.count++
       m.set(k, e)
     }
-    return [...m.values()].sort((a, b) => b.key.localeCompare(a.key))
-  }, [rowsShown, groupBy])
+    const arr = [...m.values()]
+    // Period newest-first; item/person by most activity first.
+    return view === 'period' ? arr.sort((a, b) => b.key.localeCompare(a.key)) : arr.sort((a, b) => (b.inc + b.dec) - (a.inc + a.dec))
+  }, [rowsShown, view, groupBy])
 
   const totals = useMemo(() => {
     const inc = clean(rowsShown.reduce((s, m) => s + inOut(m).inc, 0))
@@ -112,10 +118,10 @@ export default function AdjustmentsReportPage() {
   }, [rowsShown])
 
   function exportCsv() {
-    const head = ['Period', 'Adjustments', 'Increase', 'Decrease', 'Net']
-    const body: (string | number)[][] = groups.map(g => [periodLabel(g.key, groupBy), g.count, fmtQty(g.inc), fmtQty(g.dec), fmtSigned(clean(g.inc - g.dec))])
+    const head = [groupCol, 'Adjustments', 'Increase', 'Decrease', 'Net']
+    const body: (string | number)[][] = groups.map(g => [g.sub ? `${g.label} — ${g.sub}` : g.label, g.count, fmtQty(g.inc), fmtQty(g.dec), fmtSigned(clean(g.inc - g.dec))])
     body.push(['TOTAL', totals.count, fmtQty(totals.inc), fmtQty(totals.dec), fmtSigned(totals.net)])
-    downloadCsv(`Adjustments_${groupBy}_${from || 'all'}_${to || 'all'}.csv`, head, body)
+    downloadCsv(`Adjustments_${view}_${from || 'all'}_${to || 'all'}.csv`, head, body)
   }
   async function exportPdf() {
     const { default: jsPDF } = await import('jspdf')
@@ -124,11 +130,11 @@ export default function AdjustmentsReportPage() {
     doc.setFontSize(14); doc.setFont('helvetica', 'bold'); doc.text('SRRI EASWARI MILLS SDN BHD', 14, 15)
     doc.setFontSize(11); doc.setFont('helvetica', 'normal'); doc.text('STOCK ADJUSTMENTS REPORT', 14, 22)
     doc.setFontSize(9)
-    doc.text([`Group: by ${groupBy}`, SOURCE_OPTS.find(s => s.k === source)?.label || '', (from || to) ? `Period: ${from || '…'} → ${to || '…'}` : 'Period: all'].join('    '), 14, 29)
+    doc.text([`By: ${view === 'period' ? groupBy : view}`, SOURCE_OPTS.find(s => s.k === source)?.label || '', (from || to) ? `Period: ${from || '…'} → ${to || '…'}` : 'Period: all'].join('    '), 14, 29)
     autoTable(doc, {
       startY: 34, styles: { fontSize: 8 }, headStyles: { fillColor: [4, 120, 87] },
-      head: [['Period', 'Adjustments', 'Increase', 'Decrease', 'Net']],
-      body: groups.map(g => [periodLabel(g.key, groupBy), String(g.count), fmtQty(g.inc), fmtQty(g.dec), fmtSigned(clean(g.inc - g.dec))]),
+      head: [[groupCol, 'Adjustments', 'Increase', 'Decrease', 'Net']],
+      body: groups.map(g => [g.sub ? `${g.label} — ${g.sub}` : g.label, String(g.count), fmtQty(g.inc), fmtQty(g.dec), fmtSigned(clean(g.inc - g.dec))]),
       foot: [['TOTAL', String(totals.count), fmtQty(totals.inc), fmtQty(totals.dec), fmtSigned(totals.net)]],
       footStyles: { fillColor: [235, 235, 235], textColor: 20, fontStyle: 'bold' },
       columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
@@ -162,8 +168,8 @@ export default function AdjustmentsReportPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div><label className="block text-xs text-gray-500 mb-1">From</label><input type="date" value={from} onChange={e => setFrom(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
             <div><label className="block text-xs text-gray-500 mb-1">To</label><input type="date" value={to} onChange={e => setTo(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-            <div><label className="block text-xs text-gray-500 mb-1">Group by</label>
-              <select value={groupBy} onChange={e => setGroupBy(e.target.value as GroupBy)} className="w-full border rounded-lg px-3 py-2 text-sm">
+            <div><label className="block text-xs text-gray-500 mb-1">Period grouping</label>
+              <select value={groupBy} onChange={e => setGroupBy(e.target.value as GroupBy)} disabled={view !== 'period'} className="w-full border rounded-lg px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-400">
                 <option value="day">Day</option><option value="month">Month</option><option value="year">Year</option>
               </select>
             </div>
@@ -187,15 +193,22 @@ export default function AdjustmentsReportPage() {
 
         {truncated && <p className="text-xs text-amber-600 mb-2">Showing the most recent 5,000 adjustments — narrow the date range for an exact total over a long period.</p>}
 
+        <div className="flex flex-wrap items-center gap-2 mb-2">
+          <span className="text-xs text-gray-500 mr-1">Break down by:</span>
+          {([['period', '📅 Period'], ['item', '📦 Item'], ['person', '👤 Person']] as const).map(([k, lbl]) => (
+            <button key={k} onClick={() => setView(k)} className={`px-3 py-1 rounded-lg text-xs font-medium border ${view === k ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white hover:bg-gray-50'}`}>{lbl}</button>
+          ))}
+        </div>
+
         <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b"><tr>{['Period', 'Adjustments', 'Increase', 'Decrease', 'Net'].map(h => <th key={h} className={`px-3 py-2.5 font-medium text-gray-600 whitespace-nowrap ${h === 'Period' ? 'text-left' : 'text-right'}`}>{h}</th>)}</tr></thead>
+            <thead className="bg-gray-50 border-b"><tr>{[groupCol, 'Adjustments', 'Increase', 'Decrease', 'Net'].map(h => <th key={h} className={`px-3 py-2.5 font-medium text-gray-600 whitespace-nowrap ${h === groupCol ? 'text-left' : 'text-right'}`}>{h}</th>)}</tr></thead>
             <tbody>
               {busy && <tr><td colSpan={5} className="text-center py-10 text-gray-400">Loading…</td></tr>}
               {!busy && groups.length === 0 && <tr><td colSpan={5} className="text-center py-10 text-gray-400">No adjustments in this timeframe.</td></tr>}
               {!busy && groups.map(g => { const net = clean(g.inc - g.dec); return (
                 <tr key={g.key} className="border-b last:border-0 hover:bg-gray-50">
-                  <td className="px-3 py-2 font-medium">{periodLabel(g.key, groupBy)}</td>
+                  <td className="px-3 py-2 font-medium">{view === 'item' ? <span className="font-mono">{g.label}</span> : g.label}{g.sub && <span className="text-gray-400 font-normal text-xs"> {g.sub}</span>}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-gray-500">{g.count}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{g.inc ? fmtQty(g.inc) : ''}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-amber-700">{g.dec ? fmtQty(g.dec) : ''}</td>
