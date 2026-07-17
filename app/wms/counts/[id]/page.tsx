@@ -39,6 +39,7 @@ export default function WmsCountPage() {
   const [locByCode, setLocByCode] = useState<Map<string, Loc>>(new Map())
   const [tab, setTab] = useState<'count' | 'review'>('count')
   const [activeBin, setActiveBin] = useState('')
+  const [typeBin, setTypeBin] = useState('')   // manually type any bin (e.g. one the system thinks is empty)
   const [scanOpen, setScanOpen] = useState(false)
   const [inputs, setInputs] = useState<Record<string, string>>({})
   const [uItem, setUItem] = useState(''); const [uDesc, setUDesc] = useState(''); const [uBatch, setUBatch] = useState(''); const [uQty, setUQty] = useState('')
@@ -173,6 +174,14 @@ export default function WmsCountPage() {
     doc.save(`Count_${task?.count_no || 'report'}.pdf`)
   }
 
+  // Manually open ANY bin in the Location Map — even one with no stock in the system (e.g. F103),
+  // so found stock can be recorded there via "Add unexpected".
+  function pickTypedBin() {
+    const code = typeBin.trim().toUpperCase()
+    if (!code) return
+    if (!locByCode.has(code)) { setErr(`Bin ${code} is not in the Location Map.`); return }
+    setActiveBin(code); setTypeBin(''); setErr(''); setTab('count')
+  }
   function onScan(raw: string) {
     const p = parseQr(raw)
     if (p.kind !== 'bin') { setErr('That’s not a bin QR.'); return }
@@ -215,6 +224,11 @@ export default function WmsCountPage() {
                 <option value="">…or pick a bin</option>
                 {bins.map(b => <option key={b} value={b}>{b} ({lines.filter(l => l.location_code === b && l.counted_qty != null).length}/{lines.filter(l => l.location_code === b).length})</option>)}
               </select>
+              <input list="wms-count-bins" value={typeBin} onChange={e => setTypeBin(e.target.value.toUpperCase())}
+                onKeyDown={e => { if (e.key === 'Enter') pickTypedBin() }} placeholder="…or type any bin (e.g. F103)"
+                className="border rounded-lg px-3 py-2 text-sm font-mono w-48" title="Open any bin — including one the system shows as empty — to record found stock" />
+              <datalist id="wms-count-bins">{[...locByCode.keys()].sort().map(c => <option key={c} value={c} />)}</datalist>
+              {typeBin.trim() && <button onClick={pickTypedBin} className="border border-emerald-600 text-emerald-700 px-3 py-2 rounded-lg hover:bg-emerald-50 text-sm font-medium">Count this bin</button>}
             </div>
 
             {activeBin && (
