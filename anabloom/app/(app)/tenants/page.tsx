@@ -293,6 +293,20 @@ export default async function TenantsPage({ searchParams }: { searchParams: Prom
                 <input className="input num" type="number" step="0.01" name="depositAmount" defaultValue="0" />
               </div>
             </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="label">Utility deposit</label>
+                <input className="input num" type="number" step="0.01" name="utilityDeposit" defaultValue="0" />
+              </div>
+              <div>
+                <label className="label">Use of premises</label>
+                <input className="input" name="premisesUse" placeholder="e.g. RESIDENTIAL" />
+              </div>
+              <div>
+                <label className="label">Option to renew</label>
+                <input className="input" name="renewalOption" placeholder="e.g. 2 years at market rate" />
+              </div>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="label">Signed date</label>

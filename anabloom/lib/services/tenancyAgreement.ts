@@ -151,9 +151,9 @@ export async function buildTenancyAgreementDocx(input: {
     ["E", "Term of Tenancy", term],
     ["F", "Rental per month", `${money(lease.monthlyRent, sym)} per month`],
     ["G", "Rental Deposit", money(lease.depositAmount, sym)],
-    ["H", "Utility Deposit", "[Utility deposit / N/A]"],
-    ["I", "Use of Demised premises", "[Use of premises — e.g. RESIDENTIAL / REGISTERED LEGAL BUSINESS]"],
-    ["J", "Option to renew", "[Option to renew — e.g. 2 years at market rate]"],
+    ["H", "Utility Deposit", Number(lease.utilityDeposit) > 0 ? money(lease.utilityDeposit, sym) : "N/A"],
+    ["I", "Use of Demised premises", lease.premisesUse || "[Use of premises — e.g. RESIDENTIAL / REGISTERED LEGAL BUSINESS]"],
+    ["J", "Option to renew", lease.renewalOption || "[Option to renew — e.g. 2 years at market rate]"],
   ];
 
   const children: Paragraph[] = [];

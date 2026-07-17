@@ -128,6 +128,9 @@ model Lease {
   monthlyRent        Decimal
   dueDay             Int       @default(1) // 1..28
   depositAmount      Decimal   @default(0)
+  utilityDeposit     Decimal   @default(0) // Schedule H
+  premisesUse        String? // Schedule I — use of demised premises
+  renewalOption      String? // Schedule J — option to renew
   status             String    @default("ACTIVE") // ACTIVE | ENDED
   signedDate         DateTime?
   noticePeriodDays   Int?
