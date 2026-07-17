@@ -289,7 +289,7 @@ export default function WmsLocationsPage() {
               )}
               {filtered.map(r => (
                 <tr key={r.id} className={`border-b last:border-0 hover:bg-gray-50 ${r.active ? '' : 'opacity-50'}`}>
-                  <td className="px-4 py-2.5 font-mono font-medium">{r.code}</td>
+                  <td className="px-4 py-2.5 font-mono font-medium">{r.code}{r.code === 'PENDING' && <span className="ml-1.5 inline-block bg-amber-100 text-amber-800 rounded px-1.5 py-0.5 text-[10px] font-sans font-semibold align-middle">📦 staging</span>}</td>
                   <td className="px-4 py-2.5">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${typeChip(r.location_type)}`}>
                       {typeLabel(r.location_type)}
