@@ -282,9 +282,11 @@ export default function WmsPurchaseOrdersPage() {
                   <td className="px-4 py-2.5 tabular-nums">{o.wms_po_lines?.[0]?.count ?? 0}</td>
                   <td className="px-4 py-2.5"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CHIP[o.status] || 'bg-gray-100'}`}>{o.status}</span></td>
                   <td className="px-4 py-2.5 whitespace-nowrap">
-                    {putStatus[o.id] === 'pending' ? <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">Pending</span>
-                      : putStatus[o.id] === 'done' ? <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Put away ✓</span>
-                      : <span className="text-gray-300 text-xs">—</span>}
+                    {/* Tick only when EVERY item is received (PO Fulfilled) AND all of it is put away
+                        (nothing left in GOODS-IN). Otherwise it's still Pending. */}
+                    {(recvByPo[o.id]?.length ?? 0) === 0 ? <span className="text-gray-300 text-xs">—</span>
+                      : (putStatus[o.id] === 'done' && o.status === 'Fulfilled') ? <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Put away ✓</span>
+                      : <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700" title={putStatus[o.id] === 'pending' ? 'Received goods still in GOODS-IN' : 'Not all items received yet'}>Pending</span>}
                     {(recvByPo[o.id]?.length ?? 0) > 0 && <button onClick={() => putawayReport(o)} className="ml-2 text-emerald-700 hover:underline text-xs">report</button>}
                   </td>
                   <td className="px-4 py-2.5 whitespace-nowrap">
