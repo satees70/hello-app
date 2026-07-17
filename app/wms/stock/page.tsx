@@ -350,7 +350,8 @@ export default function WmsStockPage() {
           </form>
         )}
 
-        <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+        {/* Desktop: table */}
+        <div className="hidden sm:block bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>
@@ -395,6 +396,43 @@ export default function WmsStockPage() {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile: one card per stock line */}
+        <div className="sm:hidden space-y-2">
+          {filtered.length === 0 && <div className="bg-white rounded-xl border p-6 text-center text-gray-400 text-sm">No stock {rows.length ? 'matches the search' : 'yet — use “Import stock” or “Add / adjust stock”'}.</div>}
+          {filtered.map(r => {
+            const rv = resd.get(`${r.item_code.toUpperCase()}|${r.location_id}|${r.batch_no}`)
+            return (
+              <div key={r.id} className="bg-white rounded-xl border shadow-sm p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="font-mono font-semibold text-sm">{r.item_code}</div>
+                    <div className="text-xs text-gray-500 leading-snug">{r.description}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="font-semibold tabular-nums">{fmtQty(r.quantity)}{r.uom ? <span className="text-gray-400 text-xs"> {r.uom}</span> : ''}</div>
+                    {r.production_only && <div className="text-[10px] font-semibold text-purple-700 bg-purple-50 rounded px-1 py-0.5 inline-block mt-0.5">🔒 Prod only</div>}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-gray-600">
+                  <span>Bin: {r.location_code === 'PENDING' ? <span className="bg-amber-100 text-amber-800 rounded px-1.5 py-0.5 font-semibold">📦 PENDING</span> : <span className="font-mono">{r.location_code}</span>}</span>
+                  <span>Batch: <span className="font-mono">{r.batch_no || '—'}</span></span>
+                  {r.exp_date && <span>Exp: {fmtDate(r.exp_date)}</span>}
+                </div>
+                {rv && <div className="text-[11px] text-teal-600 mt-1">🔒 {fmtQty(rv.qty)} reserved{rv.orders.length ? ` · ${rv.orders.slice(0, 2).join(', ')}` : ''}</div>}
+                {canEdit && (
+                  <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-2.5 pt-2 border-t text-xs">
+                    <button onClick={() => openEdit(r)} className="text-emerald-700 hover:underline font-medium">Adjust</button>
+                    <button onClick={() => requestRecode(r)} className="text-indigo-600 hover:underline font-medium">Change code</button>
+                    <button onClick={() => toggleProd(r)} className={`hover:underline font-medium ${r.production_only ? 'text-purple-700' : 'text-purple-500'}`}>{r.production_only ? 'Release to trading' : 'For production'}</button>
+                    <button onClick={() => openWmsDiscussion(`Item ${r.item_code}`)} className="text-indigo-600 hover:underline font-medium">💬 Discuss</button>
+                    <button onClick={() => remove(r)} className="text-red-500 hover:underline font-medium">Remove</button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
         <p className="text-xs text-gray-400 mt-3">Showing {filtered.length} of {stats.lines} stock lines.</p>
       </div>
