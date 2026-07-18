@@ -37,6 +37,8 @@ export default function WmsPutawayPage() {
   const [err, setErr] = useState(''); const [ok, setOk] = useState('')
   const [scanFor, setScanFor] = useState<{ row: Stock; bin: string } | null>(null)
   const [wh, setWh] = useState<WhFilter>('all')
+  const [q, setQ] = useState('')   // search pending list: item / description / batch / document no / supplier / production
+  const [sourceByKey, setSourceByKey] = useState<Map<string, { ref: string; supplier: string; kind: string }>>(new Map())   // (item|batch) -> where it was received from
   // Outstanding pick demand per item: orders that ran short (no-stock) still waiting for this item.
   const [demand, setDemand] = useState<Record<string, { qty: number; lines: string[]; orders: Set<string> }>>({})
   const [flagged, setFlagged] = useState<Set<string>>(new Set())   // stock ids with a flag waiting for the office
@@ -63,6 +65,29 @@ export default function WmsPutawayPage() {
     // Flags still waiting for the office (table may not exist yet — ignore if so).
     const { data: fl } = await supabase.from('wms_correction_requests').select('stock_id').in('kind', ['batch_flag', 'stock_flag']).eq('status', 'Pending')
     setFlagged(new Set(((fl as { stock_id: string | null }[]) || []).map(f => f.stock_id).filter(Boolean) as string[]))
+
+    // Where each pending line was received from — so the list is searchable by document no /
+    // supplier / production. Receipt moves carry the document (GRN for supplier, "DO …" for
+    // production); GRNs carry the supplier name.
+    const [{ data: rcpt }, { data: grns }, { data: pos }] = await Promise.all([
+      supabase.from('wms_stock_moves').select('item_code, batch_no, reference, created_at').eq('move_type', 'receipt').order('created_at', { ascending: false }).limit(5000),
+      supabase.from('wms_grns').select('grn_no, supplier_name, po_id'),
+      supabase.from('wms_purchase_orders').select('id, supplier_name'),
+    ])
+    const poSup = new Map((((pos as { id: string; supplier_name: string | null }[]) || [])).map(p => [p.id, p.supplier_name || '']))
+    const grnSup = new Map<string, string>()
+    ;((grns as { grn_no: string | null; supplier_name: string | null; po_id: string | null }[]) || []).forEach(g => { if (g.grn_no) grnSup.set(g.grn_no, g.supplier_name || (g.po_id ? poSup.get(g.po_id) || '' : '')) })
+    const src = new Map<string, { ref: string; supplier: string; kind: string }>()
+    ;((rcpt as { item_code: string; batch_no: string | null; reference: string | null }[]) || []).forEach(m => {
+      const key = `${m.item_code}|${m.batch_no || ''}`
+      if (src.has(key)) return   // list is newest-first, so the first hit is the latest receipt
+      const ref = (m.reference || '').trim()
+      const isProd = /^DO\b/i.test(ref)
+      let supplier = grnSup.get(ref) || ''
+      if (!supplier) { const g = ref.match(/GRN\s+(\S+)/i); if (g) supplier = grnSup.get(g[1]) || '' }
+      src.set(key, { ref, supplier, kind: isProd ? 'Production' : supplier ? 'Supplier' : '' })
+    })
+    setSourceByKey(src)
   }
 
   const locByCode = useMemo(() => new Map(locs.map(l => [l.code.toUpperCase(), l])), [locs])
@@ -70,7 +95,15 @@ export default function WmsPutawayPage() {
   const goodsIn = useMemo(() => locs.find(l => l.code === 'GOODS-IN'), [locs])
   const pending = useMemo(() => stock.filter(s => s.location_code === 'GOODS-IN' && s.quantity > 0)
     .sort((a, b) => a.item_code.localeCompare(b.item_code)), [stock])
-  const pendingShown = useMemo(() => pending.filter(s => passWh(wh, s.description)), [pending, wh])
+  const pendingShown = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    return pending.filter(s => passWh(wh, s.description)).filter(s => {
+      if (!needle) return true
+      const src = sourceByKey.get(`${s.item_code}|${s.batch_no || ''}`)
+      return [s.item_code, s.description, s.batch_no, src?.ref, src?.supplier, src?.kind]
+        .filter(Boolean).join(' ').toLowerCase().includes(needle)
+    })
+  }, [pending, wh, q, sourceByKey])
 
   // Suggest a shelf bin for an item: SL bin already holding it → empty SL → empty XS overflow.
   const suggestBin = useCallback((itemCode: string) => {
@@ -210,6 +243,8 @@ export default function WmsPutawayPage() {
             <h2 className="text-sm font-semibold text-gray-600">Pending putaway <span className="text-gray-400 font-normal">— just received, in GOODS-IN ({pendingShown.length})</span></h2>
             <WarehouseTabs value={wh} onChange={setWh} />
           </div>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 Search item, description, batch, document no, supplier, production…"
+            className="w-full border rounded-lg px-3 py-2 text-sm mb-2" />
           {pendingShown.length === 0
             ? <div className="bg-white rounded-xl border p-6 text-center text-gray-400 text-sm">{pending.length ? 'Nothing in this warehouse.' : 'Nothing waiting. Received goods appear here.'}</div>
             : <div className="space-y-2">
@@ -221,6 +256,7 @@ export default function WmsPutawayPage() {
                       <div className="flex-1 min-w-[180px]">
                         <div className="font-mono font-medium text-sm">{row.item_code} <span className="text-gray-400">×{fmtQty(row.quantity)}</span></div>
                         <div className="text-xs text-gray-500">{row.description}{row.batch_no ? ` · b:${row.batch_no}` : ''}{row.exp_date ? ` · exp ${fmtDate(row.exp_date)}` : ''}</div>
+                        {(() => { const src = sourceByKey.get(`${row.item_code}|${row.batch_no || ''}`); if (!src?.ref) return null; return <div className="text-[11px] text-gray-400 mt-0.5">📄 {src.ref}{src.supplier ? ` · ${src.supplier}` : src.kind ? ` · ${src.kind}` : ''}</div> })()}
                         {flagged.has(row.id) && <div className="text-[11px] text-rose-600 mt-0.5">⚑ Flagged — waiting for the office to revise.</div>}
                       </div>
                       {canEdit && <>
