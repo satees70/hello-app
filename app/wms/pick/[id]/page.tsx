@@ -11,7 +11,7 @@ import { matchBin, matchItem } from '@/lib/qr'
 interface Order { id: string; order_no: string | null; customer_name: string | null; status: string; delivery_date: string | null; source: string | null; pick_checked_by_name: string | null; pick_checked_at: string | null; pick_check_note: string | null; assigned_to_name: string | null; pick_started_at: string | null; pick_completed_at: string | null }
 interface Line { id: string; line_no: number | null; item_id: string | null; item_code: string; description: string | null; quantity: number; qty_picked: number; uom: string | null; source_hint: string | null; remarks: string | null; no_stock?: boolean; no_stock_qty?: number | null; no_stock_by_name?: string | null }
 interface Stock { id: string; item_code: string; location_id: string; location_code: string; batch_no: string; exp_date: string | null; quantity: number; created_at: string }
-interface Loc { id: string; location_type: string; pick_sequence: number | null; pickable: boolean }
+interface Loc { id: string; code: string; location_type: string; pick_sequence: number | null; pickable: boolean }
 
 const clean = (n: number) => Number(n.toPrecision(12))
 const fmtQty = (n: number) => clean(n).toLocaleString(undefined, { maximumFractionDigits: 4 })
@@ -56,6 +56,11 @@ export default function WmsPickPage() {
   const [checkedQty, setCheckedQty] = useState<Record<string, string>>({})   // lineId → verified qty
   const [pendingCorr, setPendingCorr] = useState(false)                       // a qty correction awaits HO
   const [manualPending, setManualPending] = useState<Set<string>>(new Set())  // line ids with a manual fill awaiting HO
+  const [manualFor, setManualFor] = useState<Line | null>(null)   // manual-fill modal target
+  const [mfLoc, setMfLoc] = useState(''); const [mfBatch, setMfBatch] = useState(''); const [mfQty, setMfQty] = useState('')
+  const [issueFor, setIssueFor] = useState<Line | null>(null)     // raise-issue modal target
+  const [issueFlags, setIssueFlags] = useState<{ qty: boolean; batch: boolean; damaged: boolean; other: boolean }>({ qty: false, batch: false, damaged: false, other: false })
+  const [issueNote, setIssueNote] = useState('')
   useEffect(() => { const m = localStorage.getItem('wmsPickMode'); if (m === 'scan' || m === 'manual') setPickMode(m) }, [])
   const setMode = (m: 'manual' | 'scan') => { setPickMode(m); try { localStorage.setItem('wmsPickMode', m) } catch { /* ignore */ } }
 
@@ -67,7 +72,7 @@ export default function WmsPickPage() {
     const st = codes.length
       ? (await supabase.from('wms_stock').select('id, item_code, location_id, location_code, batch_no, exp_date, quantity, created_at').in('item_code', codes)).data as Stock[]
       : []
-    const locs = await fetchAll<Loc>('wms_locations', 'id, location_type, pick_sequence, pickable')
+    const locs = await fetchAll<Loc>('wms_locations', 'id, code, location_type, pick_sequence, pickable')
     // stock reserved for OTHER orders — not available to this one
     const rmap = new Map<string, number>()
     if (codes.length) {
@@ -228,22 +233,55 @@ export default function WmsPickPage() {
     setMsg(`${l.item_code} marked as no stock (short ${fmtQty(rem)}).`); load()
   }
 
-  // Not enough in the system, but the stock is physically there: the picker enters the quantity to
-  // fill and it's sent to Head Office (HOD). Only once HOD approves is it booked as picked.
-  async function manualFill(l: Line) {
+  // Not enough in the system, but the stock is physically there: the picker says which bin + batch
+  // and how much; it's sent to Head Office (HOD). On approval it books a real pick OUT of that bin.
+  function openManual(l: Line) {
     if (!canEdit) return
     const rem = remainingOf(l)
     if (rem <= 0) return
-    const ans = window.prompt(`Manual fill for ${l.item_code} — the stock isn't in the system but you physically have it.\n\nHow many ${l.uom || ''} do you want to fill? This is sent to Head Office to approve before it's booked as picked.`, String(clean(rem)))
-    if (ans === null) return
-    const qty = Number(String(ans).replace(/[^0-9.]/g, ''))
+    const sug = availFor(l.item_code)[0]
+    setManualFor(l); setMfLoc(sug?.location_id || ''); setMfBatch(sug?.batch_no || ''); setMfQty(String(clean(rem))); setErr(''); setMsg('')
+  }
+  async function submitManual() {
+    if (!manualFor) return
+    const l = manualFor
+    const rem = remainingOf(l)
+    const qty = Number(mfQty)
+    if (!mfLoc) { setErr('Choose the bin you are filling from.'); return }
     if (!(qty > 0)) { setErr('Enter a quantity greater than zero.'); return }
     if (qty > rem) { setErr(`Only ${fmtQty(rem)} is still outstanding on this line.`); return }
     setBusy(l.id); setErr(''); setMsg('')
-    const { error } = await supabase.rpc('request_wms_manual_pick', { p_line_id: l.id, p_qty: qty, p_note: null })
+    const { error } = await supabase.rpc('request_wms_manual_pick', { p_line_id: l.id, p_qty: qty, p_location_id: mfLoc, p_batch: mfBatch.trim() || null, p_note: null })
     setBusy('')
-    if (error) { setErr(/request_wms_manual_pick|wms_manual_pick_requests/.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-manual-pick.sql in the Supabase SQL editor.' : error.message); return }
+    if (error) { setErr(/request_wms_manual_pick|wms_manual_pick_requests|location_id/.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-manual-pick.sql then db/2026-07-wms-manual-pick-v2.sql in the Supabase SQL editor.' : error.message); return }
+    setManualFor(null)
     setMsg(`Manual fill of ${fmtQty(qty)} ${l.item_code} sent to Head Office for approval.`); load()
+  }
+
+  // Picker flags that the info or the physical stock is wrong (qty / batch inaccurate, or the stock
+  // is damaged). Posts to the order's discussion thread; Head Office is notified to act.
+  function openIssue(l: Line) {
+    if (!canEdit) return
+    setIssueFor(l); setIssueFlags({ qty: false, batch: false, damaged: false, other: false }); setIssueNote(''); setErr(''); setMsg('')
+  }
+  async function submitIssue() {
+    if (!issueFor || !order?.order_no) return
+    const l = issueFor
+    const picked = (['qty', 'batch', 'damaged', 'other'] as const).filter(k => issueFlags[k])
+    if (picked.length === 0) { setErr('Pick what is wrong.'); return }
+    const label: Record<'qty' | 'batch' | 'damaged' | 'other', string> = {
+      qty: 'QTY inaccurate', batch: 'BATCH inaccurate', damaged: 'STOCK DAMAGED (bag/gunny)', other: 'OTHER',
+    }
+    const body = `⚠ Pick issue on ${l.item_code}${l.description ? ` (${l.description})` : ''} — ${picked.map(k => label[k]).join(', ')}.${issueNote.trim() ? ` ${issueNote.trim()}` : ''}`
+    setBusy(l.id); setErr(''); setMsg('')
+    const { error } = await supabase.from('discussions').insert({
+      channel: 'wms', topic: order.order_no, author_id: profile?.id, author_name: profile?.full_name || null,
+      body, mention_factories: ['HEAD_OFFICE'],
+    })
+    setBusy('')
+    if (error) { setErr(error.message); return }
+    setIssueFor(null)
+    setMsg(`Issue raised on ${l.item_code} — Head Office notified. See it in the WMS Discussion (topic ${order.order_no}).`)
   }
   // Stock arrived for a line that was marked no-stock — restore the outstanding qty and re-open
   // the order for picking, so the balance can be picked and dispatched in a later run.
@@ -306,6 +344,9 @@ export default function WmsPickPage() {
     if (!canEdit || !(qty > 0)) return
     setErr(''); setScanFor({ line: l, stock: s, qty })
   }
+
+  // All bins (for the manual-fill picker) — sorted by code.
+  const allLocs = useMemo(() => [...locMeta.values()].filter(l => l.code).sort((a, b) => a.code.localeCompare(b.code)), [locMeta])
 
   const totals = useMemo(() => ({
     lines: lines.length,
@@ -423,6 +464,18 @@ export default function WmsPickPage() {
                       <button onClick={() => undoPick(l)} disabled={busy === l.id}
                         className="text-xs border border-gray-300 text-gray-600 rounded px-2 py-1 hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap" title="Put picked stock back to its bin (wrong bag / batch / over-picked)">↩ Undo pick</button>
                     )}
+                    {canEdit && !done && (
+                      <div className="flex items-center gap-2">
+                        {!l.no_stock && !manualPending.has(l.id) && (
+                          <button onClick={() => confirmNoStock(l)} disabled={busy === l.id}
+                            title="Declare there is no stock for this item (even if the system shows some) — records it short so the order can move on."
+                            className="text-xs border border-amber-400 text-amber-700 rounded px-2 py-1 hover:bg-amber-50 disabled:opacity-50 whitespace-nowrap">⚠ No stock</button>
+                        )}
+                        <button onClick={() => openIssue(l)} disabled={busy === l.id}
+                          title="Info wrong (qty / batch) or stock damaged? Raise an issue to Head Office."
+                          className="text-xs border border-red-300 text-red-600 rounded px-2 py-1 hover:bg-red-50 disabled:opacity-50 whitespace-nowrap">⚠ Issue</button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -436,7 +489,7 @@ export default function WmsPickPage() {
                             : <>
                                 <button onClick={() => confirmNoStock(l)} disabled={busy === l.id}
                                   className="text-xs border border-amber-500 text-amber-700 rounded px-3 py-1.5 hover:bg-amber-50 font-medium disabled:opacity-50">{busy === l.id ? '…' : 'Confirm no stock'}</button>
-                                <button onClick={() => manualFill(l)} disabled={busy === l.id}
+                                <button onClick={() => openManual(l)} disabled={busy === l.id}
                                   title="You physically have the stock but it isn't in the system — enter the quantity; Head Office approves before it's booked."
                                   className="text-xs border border-sky-500 text-sky-700 rounded px-3 py-1.5 hover:bg-sky-50 font-medium disabled:opacity-50">🖐 Manual fill (needs HOD approval)</button>
                               </>}
@@ -473,7 +526,7 @@ export default function WmsPickPage() {
                           ? <span className="text-sky-600 font-medium">⏳ Manual fill pending Head Office approval</span>
                           : <>
                               <button onClick={() => confirmNoStock(l)} disabled={busy === l.id} className="underline text-amber-700 hover:text-amber-800">Confirm short (no more stock)</button>
-                              <button onClick={() => manualFill(l)} disabled={busy === l.id}
+                              <button onClick={() => openManual(l)} disabled={busy === l.id}
                                 title="You physically have the stock but it isn't in the system — enter the quantity; Head Office approves before it's booked."
                                 className="underline text-sky-700 hover:text-sky-800">🖐 Manual fill (needs HOD approval)</button>
                             </>}
@@ -583,6 +636,71 @@ export default function WmsPickPage() {
           onComplete={() => { const s = scanFor; setScanFor(null); if (s) pickFromBin(s.line, s.stock, s.qty) }}
           onCancel={() => setScanFor(null)}
         />
+      )}
+
+      {/* Manual fill — pick a bin + batch + qty; Head Office approves; books a real OUT of that bin. */}
+      {manualFor && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setManualFor(null)}>
+          <div className="bg-white rounded-xl shadow-xl border w-full max-w-md my-8 p-6" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-bold mb-1">🖐 Manual fill</h2>
+            <p className="text-gray-500 text-sm mb-4">
+              <span className="font-mono">{manualFor.item_code}</span>{manualFor.description ? ` — ${manualFor.description}` : ''}
+              <span className="block text-xs mt-0.5">The stock isn&apos;t in the system but you physically have it. Say which bin + batch and how much — Head Office approves, then it&apos;s booked as a pick OUT of that bin.</span>
+            </p>
+            <label className="block text-xs text-gray-500 mb-1">Bin you are filling from</label>
+            <select value={mfLoc} onChange={e => setMfLoc(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mb-3">
+              <option value="">Choose bin…</option>
+              {allLocs.map(l => <option key={l.id} value={l.id}>{l.code}</option>)}
+            </select>
+            <div className="flex gap-2 mb-4">
+              <div className="flex-1">
+                <label className="block text-xs text-gray-500 mb-1">Batch <span className="text-gray-400">(optional)</span></label>
+                <input value={mfBatch} onChange={e => setMfBatch(e.target.value)} placeholder="e.g. 240708" className="w-full border rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div className="w-28">
+                <label className="block text-xs text-gray-500 mb-1">Qty{manualFor.uom ? ` (${manualFor.uom})` : ''}</label>
+                <input value={mfQty} onChange={e => setMfQty(e.target.value.replace(/[^0-9.]/g, ''))} className="w-full border rounded-lg px-3 py-2 text-sm text-right tabular-nums" inputMode="decimal" />
+              </div>
+            </div>
+            <p className="text-[11px] text-amber-600 mb-4">If this bin holds less than you fill, its stock will show negative by exactly the amount that wasn&apos;t in the system — for inventory to reconcile with a stock count.</p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setManualFor(null)} className="border px-5 py-2 rounded-lg hover:bg-gray-50 font-medium text-sm">Cancel</button>
+              <button onClick={submitManual} disabled={busy === manualFor.id || !mfLoc || !(Number(mfQty) > 0)}
+                className="bg-sky-700 text-white px-5 py-2 rounded-lg hover:bg-sky-800 disabled:opacity-50 font-medium text-sm">Send to Head Office</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Raise issue — qty / batch inaccurate, or stock damaged. Posts to the order's discussion. */}
+      {issueFor && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setIssueFor(null)}>
+          <div className="bg-white rounded-xl shadow-xl border w-full max-w-md my-8 p-6" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-bold mb-1">⚠ Raise issue</h2>
+            <p className="text-gray-500 text-sm mb-4">
+              <span className="font-mono">{issueFor.item_code}</span>{issueFor.description ? ` — ${issueFor.description}` : ''}
+              <span className="block text-xs mt-0.5">on {order.order_no} · ordered {fmtQty(issueFor.quantity)}{issueFor.uom ? ' ' + issueFor.uom : ''}</span>
+            </p>
+            <label className="block text-xs text-gray-500 mb-1.5">What&apos;s wrong? <span className="text-gray-400">(pick one or more)</span></label>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {([['qty', 'Quantity inaccurate'], ['batch', 'Batch inaccurate'], ['damaged', 'Stock damaged (bag/gunny)'], ['other', 'Other']] as const).map(([k, lbl]) => (
+                <button key={k} type="button" onClick={() => setIssueFlags(f => ({ ...f, [k]: !f[k] }))}
+                  className={`px-3 py-1.5 rounded-lg border text-sm font-medium ${issueFlags[k] ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
+                  {issueFlags[k] ? '✓ ' : ''}{lbl}
+                </button>
+              ))}
+            </div>
+            <label className="block text-xs text-gray-500 mb-1">Details</label>
+            <textarea value={issueNote} onChange={e => setIssueNote(e.target.value)} rows={3}
+              placeholder="e.g. 3 bags torn, spilled · batch on bag is 260603 not 260708 · counted 8 not 10"
+              className="w-full border rounded-lg px-3 py-2 text-sm mb-4" />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setIssueFor(null)} className="border px-5 py-2 rounded-lg hover:bg-gray-50 font-medium text-sm">Cancel</button>
+              <button onClick={submitIssue} disabled={busy === issueFor.id || !(issueFlags.qty || issueFlags.batch || issueFlags.damaged || issueFlags.other)}
+                className="bg-red-600 text-white px-5 py-2 rounded-lg hover:bg-red-700 disabled:opacity-50 font-medium text-sm">Raise issue</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
