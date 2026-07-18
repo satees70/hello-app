@@ -66,6 +66,11 @@ export default function WarehouseReceivingPage() {
   const [openDisc, setOpenDisc] = useState<Set<string>>(new Set())   // DO ids whose thread is expanded
   const [replyText, setReplyText] = useState<Record<string, string>>({})
   const [busyDisc, setBusyDisc] = useState('')
+  const [soByItem, setSoByItem] = useState<Record<string, string>>({})   // `${do_number}|${item_code}` -> SO number(s)
+  // Per-line "raise issue": which item, which field(s) are wrong, and a note.
+  const [issueFor, setIssueFor] = useState<{ o: DO; item: Item } | null>(null)
+  const [issueFields, setIssueFields] = useState<{ item: boolean; qty: boolean; batch: boolean }>({ item: false, qty: false, batch: false })
+  const [issueNote, setIssueNote] = useState('')
 
   const canReceive = !!profile && (!!profile.warehouse_user || profile.factory_code === 'HEAD_OFFICE' || profile.role === 'admin')
   // A manager (Head Office / admin) can confirm items WITHOUT a photo right away — used to clear
@@ -100,7 +105,16 @@ export default function WarehouseReceivingPage() {
       const nm: Record<string, Note[]> = {}
       ;((dm as Note[]) || []).forEach(x => { if (x.topic) (nm[x.topic] ||= []).push(x) })
       setNotes(nm)
-    } else setNotes({})
+      // SO number(s) each delivered item is for (so receiving staff see which order it's for).
+      const { data: so } = await supabase.rpc('wms_so_for_dos', { p_do_numbers: doNums })
+      const sm: Record<string, string> = {}
+      ;((so as { do_number: string; item_code: string; so_number: string }[]) || []).forEach(r => {
+        if (!r.do_number || !r.item_code || !r.so_number) return
+        const k = `${r.do_number}|${r.item_code}`
+        sm[k] = sm[k] ? (sm[k].split(', ').includes(r.so_number) ? sm[k] : sm[k] + ', ' + r.so_number) : r.so_number
+      })
+      setSoByItem(sm)
+    } else { setNotes({}); setSoByItem({}) }
     setLoading(false)
   }, [])
   useEffect(() => { load() }, [load])
@@ -188,14 +202,24 @@ export default function WarehouseReceivingPage() {
     setOpenDisc(s => new Set(s).add(o.id))
     setReplyText(r => ({ ...r, [o.id]: '' }))
   }
-  // Warehouse raises a discrepancy (qty / batch not tally) → starts / adds to the DO thread.
-  async function raiseIssue(o: DO) {
-    const kind = window.prompt(`Raise an issue for ${o.do_number} — what doesn't tally?\n\nType: qty / batch / other`, 'qty')
-    if (kind === null) return
-    const note = window.prompt(`Describe it (item code, and expected vs actual qty/batch):`, '')
-    if (note === null || !note.trim()) return
-    await postDisc(o, `⚠ ${(kind || 'issue').trim().toUpperCase()} not tally — ${note.trim()}`)
-    setSuccess(`Issue raised on ${o.do_number} — Head Office & the factory notified. Discuss below or in the Discussion page.`)
+  // Warehouse raises a discrepancy on ONE item, flagging exactly which field(s) are wrong
+  // (item name / qty / batch) → starts / adds to the DO discussion thread.
+  function openLineIssue(o: DO, item: Item) {
+    setIssueFor({ o, item }); setIssueFields({ item: false, qty: false, batch: false }); setIssueNote(''); setError(null); setSuccess(null)
+  }
+  async function submitLineIssue() {
+    if (!issueFor) return
+    const { o, item } = issueFor
+    const picked = (['item', 'qty', 'batch'] as const).filter(k => issueFields[k])
+    if (picked.length === 0) { setError('Pick what is wrong — item name, qty or batch.'); return }
+    const label: Record<'item' | 'qty' | 'batch', string> = {
+      item: 'ITEM NAME', qty: `QTY (DO says ×${item.quantity})`, batch: `BATCH (DO says ${item.batch_no || '—'})`,
+    }
+    const fieldsTxt = picked.map(k => label[k]).join(', ')
+    const msg = `⚠ Issue on ${item.item_code}${item.description ? ` (${item.description})` : ''} — ${fieldsTxt} not tally.${issueNote.trim() ? ` ${issueNote.trim()}` : ''}`
+    await postDisc(o, msg)
+    setIssueFor(null)
+    setSuccess(`Issue raised on ${item.item_code} — Head Office & the factory notified. Discuss below or in the Discussion page.`)
   }
   async function undoItem(item: Item) {
     setError(null); setSuccess(null)
@@ -278,7 +302,6 @@ export default function WarehouseReceivingPage() {
                               {busyDo === o.id ? 'Sending…' : '🗒 Request received on paper (HOD approval)'}
                             </button>
                       )}
-                      {canReceive && o.do_number && <button onClick={() => raiseIssue(o)} className="text-xs px-2.5 py-1 rounded-lg border border-red-300 text-red-700 bg-red-50 hover:bg-red-100 whitespace-nowrap" title="Qty / batch doesn't tally? Raise an issue and start a discussion.">⚠ Raise issue</button>}
                       {o.do_number && <button onClick={() => setOpenDisc(s => { const n = new Set(s); n.has(o.id) ? n.delete(o.id) : n.add(o.id); return n })} className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 whitespace-nowrap">💬 {(notes[o.do_number] || []).length ? `Discussion (${(notes[o.do_number] || []).length})` : 'Discussion'}</button>}
                     </div>
 
@@ -297,9 +320,13 @@ export default function WarehouseReceivingPage() {
                             <span title={l.kind === 'return' ? 'Raw-material return' : 'Finished goods'}>{l.kind === 'return' ? '↩ ' : '📦 '}</span>
                             <span className="font-mono font-medium">{l.item_code}</span>
                             {l.description && <span className="text-gray-500"> — {l.description}</span>}
+                            {o.do_number && soByItem[`${o.do_number}|${l.item_code}`] && (
+                              <span className="ml-2 inline-block rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-medium px-2 py-0.5 align-middle" title="Sales order this item is for">SO {soByItem[`${o.do_number}|${l.item_code}`]}</span>
+                            )}
                             <span className="block text-gray-400 text-xs ml-5">× {l.quantity}{l.batch_no ? ` · batch ${l.batch_no}` : ''}{l.reason ? ` · ${l.reason}` : ''}{l.received_at ? ` · ✓ ${l.received_by_name || ''} ${fmt(l.received_at)}` : ''}</span>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
+                            {canReceive && o.do_number && <button onClick={() => openLineIssue(o, l)} className="text-red-600 hover:underline text-xs whitespace-nowrap" title="Item name / qty / batch doesn't tally? Flag this exact item.">⚠ issue</button>}
                             {l.photo_path && <button onClick={() => viewPhoto(l.photo_path!)} className="text-emerald-600 hover:underline text-xs">📷 photo</button>}
                             {canReceive && (l.received_at
                               ? <button onClick={() => undoItem(l)} className="text-gray-400 hover:underline text-xs">undo</button>
@@ -354,6 +381,36 @@ export default function WarehouseReceivingPage() {
               })}
             </div>}
       </div>
+
+      {issueFor && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setIssueFor(null)}>
+          <div className="bg-white rounded-xl shadow-xl border w-full max-w-md my-8 p-6" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-bold mb-1">⚠ Raise issue</h2>
+            <p className="text-gray-500 text-sm mb-4">
+              <span className="font-mono">{issueFor.item.item_code}</span>{issueFor.item.description ? ` — ${issueFor.item.description}` : ''}
+              <span className="block text-xs mt-0.5">on {issueFor.o.do_number} · DO says × {issueFor.item.quantity}{issueFor.item.batch_no ? ` · batch ${issueFor.item.batch_no}` : ''}</span>
+            </p>
+            <label className="block text-xs text-gray-500 mb-1.5">What&apos;s wrong? <span className="text-gray-400">(pick one or more)</span></label>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {([['item', 'Item name'], ['qty', 'Quantity'], ['batch', 'Batch']] as const).map(([k, lbl]) => (
+                <button key={k} type="button" onClick={() => setIssueFields(f => ({ ...f, [k]: !f[k] }))}
+                  className={`px-3 py-1.5 rounded-lg border text-sm font-medium ${issueFields[k] ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
+                  {issueFields[k] ? '✓ ' : ''}{lbl}
+                </button>
+              ))}
+            </div>
+            <label className="block text-xs text-gray-500 mb-1">Details <span className="text-gray-400">(what you actually received)</span></label>
+            <textarea value={issueNote} onChange={e => setIssueNote(e.target.value)} rows={3}
+              placeholder="e.g. bag says S.CILI but should be S.CILI KASAR · got ×1 not ×2 · batch 260716 not 260717"
+              className="w-full border rounded-lg px-3 py-2 text-sm mb-4" />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setIssueFor(null)} className="border px-5 py-2 rounded-lg hover:bg-gray-50 font-medium text-sm">Cancel</button>
+              <button onClick={submitLineIssue} disabled={busyDisc === issueFor.o.id || !(issueFields.item || issueFields.qty || issueFields.batch)}
+                className="bg-red-600 text-white px-5 py-2 rounded-lg hover:bg-red-700 disabled:opacity-50 font-medium text-sm">Raise issue</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
