@@ -294,6 +294,21 @@ export default function DispatchPage() {
   function openLink(lineId: string, isReturn: boolean, itemCode: string, description: string | null, factory: string, qty: number) {
     setLinkModal({ lineId, isReturn, itemCode, description, factory, qty }); setAlloc({}); setError(''); setSuccess('')
   }
+  // Fix a wrong SO link: unlink the currently-linked order(s) (restoring their outstanding),
+  // then reopen the Link screen so staff pick the correct order.
+  async function relinkLine(lineId: string, isReturn: boolean, itemCode: string, description: string | null, factory: string, qty: number, currentSos: string) {
+    const sos = currentSos.split(',').map(s => s.trim()).filter(Boolean)
+    if (sos.length === 0) return
+    if (!window.confirm(`This delivery is linked to ${sos.map(s => `SO ${s}`).join(', ')}.\n\nUnlink it (the order gets its outstanding quantity back) and pick the correct order?`)) return
+    setBusy(true); setError(''); setSuccess('')
+    for (const so of sos) {
+      const { error: er } = await supabase.rpc('unlink_line_from_so', { p_line_id: lineId, p_is_return: isReturn, p_so: so })
+      if (er) { setError(/unlink_line_from_so/.test(er.message) && /does not exist|schema cache|could not find/i.test(er.message) ? 'This needs a database update — run db/2026-07-relink-do-so.sql in the Supabase SQL editor.' : er.message); setBusy(false); return }
+    }
+    setBusy(false)
+    await load()
+    openLink(lineId, isReturn, itemCode, description, factory, qty)
+  }
   // Spread the delivered quantity across the pending orders by how much each needs,
   // in order, until the delivery is used up.
   function autoAssign() {
@@ -1070,6 +1085,10 @@ export default function DispatchPage() {
                           parts.push(exp ? `exp ${fmtD(exp)}` : '⚠ no expiry')
                           return <span className={`ml-2 text-xs ${exp ? 'text-gray-400' : 'text-amber-700'}`}>· {parts.join(' · ')}</span>
                         })()}
+                        {(() => {
+                          const so = (l.batch_id && soByBatch[l.batch_id]) || soByDoItem[`${o.do_number}|${l.item_code}`] || ''
+                          return so && canFac(o.factory_code) ? <button onClick={() => relinkLine(l.id, false, l.item_code, l.description, o.factory_code, l.quantity, so)} disabled={busy} className="ml-2 text-xs text-amber-600 hover:underline disabled:opacity-50">wrong SO?</button> : null
+                        })()}
                         {!((l.batch_id && soByBatch[l.batch_id]) || soByDoItem[`${o.do_number}|${l.item_code}`]) && canFac(o.factory_code) && (() => {
                           const cands = pendingDetailForItem(l.item_code, o.factory_code)
                           return cands.length ? <span className="block ml-5 text-xs text-amber-700">⚠ no SO linked · {cands.length} pending order(s) for this item <button onClick={() => openLink(l.id, false, l.item_code, l.description, o.factory_code, l.quantity)} disabled={busy} className="text-emerald-600 hover:underline disabled:opacity-50 font-medium">🔗 Link to order(s)</button></span> : null
@@ -1085,6 +1104,7 @@ export default function DispatchPage() {
                             ? <button onClick={() => openRetEdit({ id: l.id, factory_code: o.factory_code, item_code: l.item_code, description: l.description, batch_no: l.batch_no, exp_date: l.exp_date, quantity: l.quantity, reason: l.reason, created_by_name: null, created_at: o.created_at })} className="ml-2 text-emerald-600 hover:underline text-xs">Edit</button>
                             : null}
                         {(() => { const so = soByDoItem[`${o.do_number}|${l.item_code}`]; const bits = [so ? `SO ${so}` : '', l.batch_no ? `batch ${l.batch_no}` : '', l.exp_date ? `exp ${fmtD(l.exp_date)}` : ''].filter(Boolean); return bits.length ? <span className="ml-2 text-xs text-orange-400">· {bits.join(' · ')}</span> : null })()}
+                        {(() => { const so = soByDoItem[`${o.do_number}|${l.item_code}`]; return so && canFac(o.factory_code) ? <button onClick={() => relinkLine(l.id, true, l.item_code, l.description, o.factory_code, l.quantity, so)} disabled={busy} className="ml-2 text-xs text-amber-600 hover:underline disabled:opacity-50">wrong SO?</button> : null })()}
                         {!soByDoItem[`${o.do_number}|${l.item_code}`] && canFac(o.factory_code) && (() => { const cands = pendingDetailForItem(l.item_code, o.factory_code); return cands.length ? <span className="block ml-5 text-xs text-amber-700">⚠ {cands.length} pending order(s) for this item <button onClick={() => openLink(l.id, true, l.item_code, l.description, o.factory_code, l.quantity)} disabled={busy} className="text-emerald-600 hover:underline disabled:opacity-50 font-medium">🔗 Link to order(s)</button></span> : null })()}
                       </span>
                     ))}
