@@ -537,10 +537,10 @@ export default function DispatchPage() {
         0: { cellWidth: 10 },                         // #
         1: { cellWidth: 22 },                         // SO
         2: { cellWidth: 34 },                         // Code
-        3: { cellWidth: 53, overflow: 'linebreak' },  // Item name — wraps onto more lines so the full name shows
+        3: { cellWidth: 51, overflow: 'linebreak' },  // Item name — wraps onto more lines so the full name shows
         4: { halign: 'right', cellWidth: 14 },        // Qty
         5: { cellWidth: 33, overflow: 'linebreak' },  // Batch — wider + wraps so the full batch/expiry always shows
-        6: { cellWidth: 18 },                         // Exp
+        6: { cellWidth: 26 },                         // Exp — wide enough for a full DD/MM/YYYY date (no truncation)
       }, margin: { left: 10, right: 10 },
     })
     const endY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || 40
