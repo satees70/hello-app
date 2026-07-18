@@ -55,6 +55,7 @@ export default function WmsPickPage() {
   const [checkNote, setCheckNote] = useState('')
   const [checkedQty, setCheckedQty] = useState<Record<string, string>>({})   // lineId → verified qty
   const [pendingCorr, setPendingCorr] = useState(false)                       // a qty correction awaits HO
+  const [manualPending, setManualPending] = useState<Set<string>>(new Set())  // line ids with a manual fill awaiting HO
   useEffect(() => { const m = localStorage.getItem('wmsPickMode'); if (m === 'scan' || m === 'manual') setPickMode(m) }, [])
   const setMode = (m: 'manual' | 'scan') => { setPickMode(m); try { localStorage.setItem('wmsPickMode', m) } catch { /* ignore */ } }
 
@@ -78,6 +79,8 @@ export default function WmsPickPage() {
     }
     const { count: pc } = await supabase.from('wms_check_qty_requests').select('id', { count: 'exact', head: true }).eq('order_id', id).eq('status', 'Pending')
     setPendingCorr((pc || 0) > 0)
+    const { data: mp } = await supabase.from('wms_manual_pick_requests').select('line_id').eq('order_id', id).eq('status', 'Pending')
+    setManualPending(new Set(((mp as { line_id: string }[]) || []).map(x => x.line_id)))
     setOrder((o as Order) || null); setLines(lineList); setStock(st || []); setResd(rmap)
     setLocMeta(new Map(locs.map(l => [l.id, l])))
     setChosen({}); setQtyInput({})
@@ -223,6 +226,24 @@ export default function WmsPickPage() {
     setBusy('')
     if (error) { setErr(/wms_confirm_no_stock|no_stock|function|column/i.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-no-stock.sql in the Supabase SQL editor.' : error.message); return }
     setMsg(`${l.item_code} marked as no stock (short ${fmtQty(rem)}).`); load()
+  }
+
+  // Not enough in the system, but the stock is physically there: the picker enters the quantity to
+  // fill and it's sent to Head Office (HOD). Only once HOD approves is it booked as picked.
+  async function manualFill(l: Line) {
+    if (!canEdit) return
+    const rem = remainingOf(l)
+    if (rem <= 0) return
+    const ans = window.prompt(`Manual fill for ${l.item_code} — the stock isn't in the system but you physically have it.\n\nHow many ${l.uom || ''} do you want to fill? This is sent to Head Office to approve before it's booked as picked.`, String(clean(rem)))
+    if (ans === null) return
+    const qty = Number(String(ans).replace(/[^0-9.]/g, ''))
+    if (!(qty > 0)) { setErr('Enter a quantity greater than zero.'); return }
+    if (qty > rem) { setErr(`Only ${fmtQty(rem)} is still outstanding on this line.`); return }
+    setBusy(l.id); setErr(''); setMsg('')
+    const { error } = await supabase.rpc('request_wms_manual_pick', { p_line_id: l.id, p_qty: qty, p_note: null })
+    setBusy('')
+    if (error) { setErr(/request_wms_manual_pick|wms_manual_pick_requests/.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-manual-pick.sql in the Supabase SQL editor.' : error.message); return }
+    setMsg(`Manual fill of ${fmtQty(qty)} ${l.item_code} sent to Head Office for approval.`); load()
   }
   // Stock arrived for a line that was marked no-stock — restore the outstanding qty and re-open
   // the order for picking, so the balance can be picked and dispatched in a later run.
@@ -410,8 +431,15 @@ export default function WmsPickPage() {
                     {avail.length === 0
                       ? <div className="flex flex-wrap items-center gap-3">
                           <span className="text-xs text-red-600">No stock in the warehouse for this item.</span>
-                          <button onClick={() => confirmNoStock(l)} disabled={busy === l.id}
-                            className="text-xs border border-amber-500 text-amber-700 rounded px-3 py-1.5 hover:bg-amber-50 font-medium disabled:opacity-50">{busy === l.id ? '…' : 'Confirm no stock'}</button>
+                          {manualPending.has(l.id)
+                            ? <span className="text-xs text-sky-600 font-medium">⏳ Manual fill pending Head Office approval</span>
+                            : <>
+                                <button onClick={() => confirmNoStock(l)} disabled={busy === l.id}
+                                  className="text-xs border border-amber-500 text-amber-700 rounded px-3 py-1.5 hover:bg-amber-50 font-medium disabled:opacity-50">{busy === l.id ? '…' : 'Confirm no stock'}</button>
+                                <button onClick={() => manualFill(l)} disabled={busy === l.id}
+                                  title="You physically have the stock but it isn't in the system — enter the quantity; Head Office approves before it's booked."
+                                  className="text-xs border border-sky-500 text-sky-700 rounded px-3 py-1.5 hover:bg-sky-50 font-medium disabled:opacity-50">🖐 Manual fill (needs HOD approval)</button>
+                              </>}
                         </div>
                       : (
                         <div className="flex flex-wrap items-end gap-2">
@@ -441,7 +469,14 @@ export default function WmsPickPage() {
                     {avail.length > 0 && totalAvail < rem && (
                       <div className="text-xs text-amber-600 mt-1.5 flex flex-wrap items-center gap-2">
                         <span>⚠ Only {fmtQty(totalAvail)} in the warehouse across all bins — short by {fmtQty(rem - totalAvail)}.</span>
-                        <button onClick={() => confirmNoStock(l)} disabled={busy === l.id} className="underline text-amber-700 hover:text-amber-800">Confirm short (no more stock)</button>
+                        {manualPending.has(l.id)
+                          ? <span className="text-sky-600 font-medium">⏳ Manual fill pending Head Office approval</span>
+                          : <>
+                              <button onClick={() => confirmNoStock(l)} disabled={busy === l.id} className="underline text-amber-700 hover:text-amber-800">Confirm short (no more stock)</button>
+                              <button onClick={() => manualFill(l)} disabled={busy === l.id}
+                                title="You physically have the stock but it isn't in the system — enter the quantity; Head Office approves before it's booked."
+                                className="underline text-sky-700 hover:text-sky-800">🖐 Manual fill (needs HOD approval)</button>
+                            </>}
                       </div>
                     )}
                   </div>

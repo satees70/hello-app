@@ -15,6 +15,7 @@ interface WmsCheck { id: string; order_no: string | null; note: string | null; c
 interface CountTask { id: string; count_no: string | null; name: string | null; status: string; completed_by_name: string | null; completed_at: string | null; created_by_name: string | null; created_at: string; wms_count_lines?: { count: number }[] }
 interface PaperReq { id: string; do_number: string | null; factory_code: string | null; item_code: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string }
 interface Correction { id: string; kind: string; old_item_code: string | null; old_description: string | null; new_item_code: string | null; new_description: string | null; old_qty: number | null; new_qty: number | null; location_code: string | null; batch_no: string | null; new_batch: string | null; flag_fields: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string }
+interface ManualPick { id: string; order_no: string | null; item_code: string | null; description: string | null; uom: string | null; qty: number; note: string | null; status: string; requested_by_name: string | null; created_at: string }
 
 type Pend = { key: string; id: string; kind: string; summary: string; by: string | null; at: string; approve: () => Promise<void>; reject: (() => Promise<void>) | null; open?: string }
 
@@ -37,6 +38,7 @@ const KIND_CHIP: Record<string, string> = {
   'Stock count': 'bg-violet-100 text-violet-700',
   'Paper receipt': 'bg-teal-100 text-teal-700',
   'Correction': 'bg-rose-100 text-rose-700',
+  'Manual pick': 'bg-sky-100 text-sky-700',
 }
 
 export default function WmsApprovalsPage() {
@@ -49,6 +51,7 @@ export default function WmsApprovalsPage() {
   const [counts, setCounts] = useState<CountTask[]>([])
   const [papers, setPapers] = useState<PaperReq[]>([])
   const [corrections, setCorrections] = useState<Correction[]>([])
+  const [manualPicks, setManualPicks] = useState<ManualPick[]>([])
   const [busy, setBusy] = useState('')
   const [allBusy, setAllBusy] = useState(false)
   const [err, setErr] = useState(''); const [msg, setMsg] = useState('')
@@ -62,12 +65,14 @@ export default function WmsApprovalsPage() {
       supabase.from('do_paper_receipt_requests').select('id, do_number, factory_code, item_code, reason, status, requested_by_name, created_at').eq('status', 'Pending').order('created_at', { ascending: false }),
     ])
     const { data: cr } = await supabase.from('wms_correction_requests').select('id, kind, old_item_code, old_description, new_item_code, new_description, old_qty, new_qty, location_code, batch_no, new_batch, flag_fields, reason, status, requested_by_name, created_at').eq('status', 'Pending').order('created_at', { ascending: false })
+    const { data: mp } = await supabase.from('wms_manual_pick_requests').select('id, order_no, item_code, description, uom, qty, note, status, requested_by_name, created_at').eq('status', 'Pending').order('created_at', { ascending: false })
     setBypasses((bp as GrnBypass[]) || [])
     setAdjs((sa as StockAdj[]) || [])
     setChecks((wc as WmsCheck[]) || [])
     setCounts((ct as CountTask[]) || [])
     setPapers((pr as PaperReq[]) || [])
     setCorrections((cr as Correction[]) || [])
+    setManualPicks((mp as ManualPick[]) || [])
   }, [])
 
   useEffect(() => {
@@ -81,6 +86,7 @@ export default function WmsApprovalsPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'wms_count_tasks' }, () => load())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'do_paper_receipt_requests' }, () => load())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'wms_correction_requests' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wms_manual_pick_requests' }, () => load())
       .subscribe()
     const timer = setInterval(load, 20000)
     return () => { supabase.removeChannel(ch); clearInterval(timer) }
@@ -106,6 +112,8 @@ export default function WmsApprovalsPage() {
   const rejectPaper = (id: string) => run(id, 'reject_do_paper_receipt', { p_id: id }, 'Paper receipt rejected.')
   const approveCorr = (id: string) => run(id, 'approve_wms_correction', { p_id: id }, 'Correction applied.')
   const rejectCorr = (id: string) => run(id, 'reject_wms_correction', { p_id: id }, 'Correction rejected.')
+  const approveManual = (id: string) => run(id, 'approve_wms_manual_pick', { p_id: id }, 'Manual fill approved — booked as picked.')
+  const rejectManual = (id: string) => run(id, 'reject_wms_manual_pick', { p_id: id }, 'Manual fill rejected.')
 
   const allPending = useMemo<Pend[]>(() => [
     ...bypasses.map(b => ({ key: `bp|${b.id}`, id: b.id, kind: 'Photo bypass', summary: `${b.item_code || '—'}${b.description ? ' · ' + b.description : ''}${b.reason ? ' · ' + b.reason : ''}`, by: b.requested_by_name, at: b.created_at, approve: () => approveBypass(b.id).then(() => {}), reject: () => rejectBypass(b.id).then(() => {}) })),
@@ -121,7 +129,8 @@ export default function WmsApprovalsPage() {
         ? `${Number(c.new_qty) === 0 ? 'Remove' : 'Adjust'} stock ${c.old_item_code || '?'}${c.location_code ? ' · ' + c.location_code : ''}${c.batch_no ? ' · b:' + c.batch_no : ''} · ${c.old_qty ?? '?'} → ${c.new_qty ?? '?'}${c.reason ? ' · ' + c.reason : ''}`
         : `Edit PO line ${c.old_item_code || '?'} → ${c.new_item_code || c.old_item_code || '?'}${c.new_qty != null ? ' · qty ' + c.new_qty : ''}${c.reason ? ' · ' + c.reason : ''}`,
       by: c.requested_by_name, at: c.created_at, approve: () => approveCorr(c.id).then(() => {}), reject: () => rejectCorr(c.id).then(() => {}) })),
-  ].sort((a, b) => (a.at || '').localeCompare(b.at || '')), [bypasses, adjs, checks, counts, papers, corrections, approveBypass, rejectBypass, approveAdj, rejectAdj, approveCheck, rejectCheck, applyCount, approvePaper, rejectPaper, approveCorr, rejectCorr])
+    ...manualPicks.map(m => ({ key: `mp|${m.id}`, id: m.id, kind: 'Manual pick', summary: `${m.order_no || 'order'} · ${m.item_code || '?'}${m.description ? ' — ' + m.description : ''} · fill ${m.qty}${m.uom ? ' ' + m.uom : ''}${m.note ? ' · ' + m.note : ''}`, by: m.requested_by_name, at: m.created_at, approve: () => approveManual(m.id).then(() => {}), reject: () => rejectManual(m.id).then(() => {}) })),
+  ].sort((a, b) => (a.at || '').localeCompare(b.at || '')), [bypasses, adjs, checks, counts, papers, corrections, manualPicks, approveBypass, rejectBypass, approveAdj, rejectAdj, approveCheck, rejectCheck, applyCount, approvePaper, rejectPaper, approveCorr, rejectCorr, approveManual, rejectManual])
 
   async function approveAll() {
     if (allPending.length === 0) return
@@ -144,6 +153,7 @@ export default function WmsApprovalsPage() {
     { kind: 'Stock count', n: byKind('Stock count') },
     { kind: 'Paper receipt', n: byKind('Paper receipt') },
     { kind: 'Correction', n: byKind('Correction') },
+    { kind: 'Manual pick', n: byKind('Manual pick') },
   ]
 
   return (
@@ -161,7 +171,7 @@ export default function WmsApprovalsPage() {
         {err && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg my-4">{err}</p>}
         {msg && <p className="text-emerald-700 text-sm bg-emerald-50 border border-emerald-200 p-3 rounded-lg my-4">✓ {msg}</p>}
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 my-5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 my-5">
           {CARDS.map(c => (
             <div key={c.kind} className="bg-white rounded-xl border shadow-sm px-4 py-3">
               <div className={`text-2xl font-bold tabular-nums ${c.n ? 'text-gray-900' : 'text-gray-300'}`}>{c.n}</div>
