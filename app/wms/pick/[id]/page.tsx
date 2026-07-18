@@ -59,8 +59,10 @@ export default function WmsPickPage() {
   const [manualFor, setManualFor] = useState<Line | null>(null)   // manual-fill modal target
   const [mfLoc, setMfLoc] = useState(''); const [mfBatch, setMfBatch] = useState(''); const [mfQty, setMfQty] = useState('')
   const [issueFor, setIssueFor] = useState<Line | null>(null)     // raise-issue modal target
-  const [issueFlags, setIssueFlags] = useState<{ qty: boolean; batch: boolean; damaged: boolean; other: boolean }>({ qty: false, batch: false, damaged: false, other: false })
+  const [issueFlags, setIssueFlags] = useState<{ qty: boolean; batch: boolean; other: boolean }>({ qty: false, batch: false, other: false })
   const [issueNote, setIssueNote] = useState('')
+  const [damageFor, setDamageFor] = useState<Line | null>(null)   // report-damage modal target
+  const [dmLoc, setDmLoc] = useState(''); const [dmBatch, setDmBatch] = useState(''); const [dmQty, setDmQty] = useState(''); const [dmNote, setDmNote] = useState('')
   useEffect(() => { const m = localStorage.getItem('wmsPickMode'); if (m === 'scan' || m === 'manual') setPickMode(m) }, [])
   const setMode = (m: 'manual' | 'scan') => { setPickMode(m); try { localStorage.setItem('wmsPickMode', m) } catch { /* ignore */ } }
 
@@ -262,16 +264,14 @@ export default function WmsPickPage() {
   // is damaged). Posts to the order's discussion thread; Head Office is notified to act.
   function openIssue(l: Line) {
     if (!canEdit) return
-    setIssueFor(l); setIssueFlags({ qty: false, batch: false, damaged: false, other: false }); setIssueNote(''); setErr(''); setMsg('')
+    setIssueFor(l); setIssueFlags({ qty: false, batch: false, other: false }); setIssueNote(''); setErr(''); setMsg('')
   }
   async function submitIssue() {
     if (!issueFor || !order?.order_no) return
     const l = issueFor
-    const picked = (['qty', 'batch', 'damaged', 'other'] as const).filter(k => issueFlags[k])
+    const picked = (['qty', 'batch', 'other'] as const).filter(k => issueFlags[k])
     if (picked.length === 0) { setErr('Pick what is wrong.'); return }
-    const label: Record<'qty' | 'batch' | 'damaged' | 'other', string> = {
-      qty: 'QTY inaccurate', batch: 'BATCH inaccurate', damaged: 'STOCK DAMAGED (bag/gunny)', other: 'OTHER',
-    }
+    const label: Record<'qty' | 'batch' | 'other', string> = { qty: 'QTY inaccurate', batch: 'BATCH inaccurate', other: 'OTHER' }
     const body = `⚠ Pick issue on ${l.item_code}${l.description ? ` (${l.description})` : ''} — ${picked.map(k => label[k]).join(', ')}.${issueNote.trim() ? ` ${issueNote.trim()}` : ''}`
     setBusy(l.id); setErr(''); setMsg('')
     const { error } = await supabase.from('discussions').insert({
@@ -282,6 +282,27 @@ export default function WmsPickPage() {
     if (error) { setErr(error.message); return }
     setIssueFor(null)
     setMsg(`Issue raised on ${l.item_code} — Head Office notified. See it in the WMS Discussion (topic ${order.order_no}).`)
+  }
+
+  // Report damaged stock: it's physically there but the bag/gunny is damaged. Enter the bin + batch
+  // + qty; it's quarantined into the DAMAGED location and Head Office decides what to do.
+  function openDamage(l: Line) {
+    if (!canEdit) return
+    const sug = availFor(l.item_code)[0]
+    setDamageFor(l); setDmLoc(sug?.location_id || ''); setDmBatch(sug?.batch_no || ''); setDmQty(''); setDmNote(''); setErr(''); setMsg('')
+  }
+  async function submitDamage() {
+    if (!damageFor) return
+    const l = damageFor
+    const qty = Number(dmQty)
+    if (!dmLoc) { setErr('Choose the bin the damaged stock is in.'); return }
+    if (!(qty > 0)) { setErr('Enter a quantity greater than zero.'); return }
+    setBusy(l.id); setErr(''); setMsg('')
+    const { error } = await supabase.rpc('wms_report_damage', { p_line_id: l.id, p_location_id: dmLoc, p_batch: dmBatch.trim() || null, p_qty: qty, p_note: dmNote.trim() || null })
+    setBusy('')
+    if (error) { setErr(/wms_report_damage|wms_damage_reports|DAMAGED/.test(error.message) && /does not exist|schema cache|could not find|missing/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-damage.sql in the Supabase SQL editor.' : error.message); return }
+    setDamageFor(null)
+    setMsg(`Reported ${fmtQty(qty)} ${l.item_code} as damaged — moved to DAMAGED, Head Office will review.`); load()
   }
   // Stock arrived for a line that was marked no-stock — restore the outstanding qty and re-open
   // the order for picking, so the balance can be picked and dispatched in a later run.
@@ -472,8 +493,11 @@ export default function WmsPickPage() {
                             className="text-xs border border-amber-400 text-amber-700 rounded px-2 py-1 hover:bg-amber-50 disabled:opacity-50 whitespace-nowrap">⚠ No stock</button>
                         )}
                         <button onClick={() => openIssue(l)} disabled={busy === l.id}
-                          title="Info wrong (qty / batch) or stock damaged? Raise an issue to Head Office."
+                          title="Info wrong (qty / batch)? Raise an issue to Head Office."
                           className="text-xs border border-red-300 text-red-600 rounded px-2 py-1 hover:bg-red-50 disabled:opacity-50 whitespace-nowrap">⚠ Issue</button>
+                        <button onClick={() => openDamage(l)} disabled={busy === l.id}
+                          title="Stock is there but damaged (torn bag/gunny)? Move it to DAMAGED for Head Office to decide."
+                          className="text-xs border border-orange-300 text-orange-700 rounded px-2 py-1 hover:bg-orange-50 disabled:opacity-50 whitespace-nowrap">🐛 Damaged</button>
                       </div>
                     )}
                   </div>
@@ -683,7 +707,7 @@ export default function WmsPickPage() {
             </p>
             <label className="block text-xs text-gray-500 mb-1.5">What&apos;s wrong? <span className="text-gray-400">(pick one or more)</span></label>
             <div className="flex flex-wrap gap-2 mb-4">
-              {([['qty', 'Quantity inaccurate'], ['batch', 'Batch inaccurate'], ['damaged', 'Stock damaged (bag/gunny)'], ['other', 'Other']] as const).map(([k, lbl]) => (
+              {([['qty', 'Quantity inaccurate'], ['batch', 'Batch inaccurate'], ['other', 'Other']] as const).map(([k, lbl]) => (
                 <button key={k} type="button" onClick={() => setIssueFlags(f => ({ ...f, [k]: !f[k] }))}
                   className={`px-3 py-1.5 rounded-lg border text-sm font-medium ${issueFlags[k] ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
                   {issueFlags[k] ? '✓ ' : ''}{lbl}
@@ -696,8 +720,44 @@ export default function WmsPickPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-4" />
             <div className="flex justify-end gap-2">
               <button onClick={() => setIssueFor(null)} className="border px-5 py-2 rounded-lg hover:bg-gray-50 font-medium text-sm">Cancel</button>
-              <button onClick={submitIssue} disabled={busy === issueFor.id || !(issueFlags.qty || issueFlags.batch || issueFlags.damaged || issueFlags.other)}
+              <button onClick={submitIssue} disabled={busy === issueFor.id || !(issueFlags.qty || issueFlags.batch || issueFlags.other)}
                 className="bg-red-600 text-white px-5 py-2 rounded-lg hover:bg-red-700 disabled:opacity-50 font-medium text-sm">Raise issue</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Report damaged stock — quarantine to DAMAGED, Head Office decides write-off vs return. */}
+      {damageFor && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setDamageFor(null)}>
+          <div className="bg-white rounded-xl shadow-xl border w-full max-w-md my-8 p-6" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-bold mb-1">🐛 Report damaged stock</h2>
+            <p className="text-gray-500 text-sm mb-4">
+              <span className="font-mono">{damageFor.item_code}</span>{damageFor.description ? ` — ${damageFor.description}` : ''}
+              <span className="block text-xs mt-0.5">The stock is there but damaged. It&apos;ll move from the bin into <b>DAMAGED</b>, and Head Office decides whether to write it off or return it to stock.</span>
+            </p>
+            <label className="block text-xs text-gray-500 mb-1">Bin the damaged stock is in</label>
+            <select value={dmLoc} onChange={e => setDmLoc(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mb-3">
+              <option value="">Choose bin…</option>
+              {allLocs.filter(l => l.code !== 'DAMAGED').map(l => <option key={l.id} value={l.id}>{l.code}</option>)}
+            </select>
+            <div className="flex gap-2 mb-3">
+              <div className="flex-1">
+                <label className="block text-xs text-gray-500 mb-1">Batch <span className="text-gray-400">(optional)</span></label>
+                <input value={dmBatch} onChange={e => setDmBatch(e.target.value)} placeholder="e.g. 240708" className="w-full border rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div className="w-28">
+                <label className="block text-xs text-gray-500 mb-1">Qty{damageFor.uom ? ` (${damageFor.uom})` : ''}</label>
+                <input value={dmQty} onChange={e => setDmQty(e.target.value.replace(/[^0-9.]/g, ''))} className="w-full border rounded-lg px-3 py-2 text-sm text-right tabular-nums" inputMode="decimal" />
+              </div>
+            </div>
+            <label className="block text-xs text-gray-500 mb-1">What&apos;s the damage? <span className="text-gray-400">(optional)</span></label>
+            <textarea value={dmNote} onChange={e => setDmNote(e.target.value)} rows={2} placeholder="e.g. 3 bags torn, damp / gunny burst"
+              className="w-full border rounded-lg px-3 py-2 text-sm mb-4" />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setDamageFor(null)} className="border px-5 py-2 rounded-lg hover:bg-gray-50 font-medium text-sm">Cancel</button>
+              <button onClick={submitDamage} disabled={busy === damageFor.id || !dmLoc || !(Number(dmQty) > 0)}
+                className="bg-orange-600 text-white px-5 py-2 rounded-lg hover:bg-orange-700 disabled:opacity-50 font-medium text-sm">Move to DAMAGED</button>
             </div>
           </div>
         </div>
