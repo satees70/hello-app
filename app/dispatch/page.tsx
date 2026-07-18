@@ -101,6 +101,8 @@ export default function DispatchPage() {
   const ldKey = (id: string, kind: 'lorry' | 'driver') => `${id}:${kind}`
   const toggleLD = (id: string, kind: 'lorry' | 'driver') => setEditLD(s => { const n = new Set(s); const k = ldKey(id, kind); n.has(k) ? n.delete(k) : n.add(k); return n })
   const [recentQ, setRecentQ] = useState('')   // search Recent delivery orders by DO no. / item / location
+  const [searchHits, setSearchHits] = useState<DOrder[] | null>(null)   // DB search results (any age); null = not searching
+  const [searching, setSearching] = useState(false)
   const [lorryReqs, setLorryReqs] = useState<{ id: string; factory_code: string; kind: string; lorry_type: string; note: string | null; destination: string | null; status: string; fulfilled_lorry: string | null; requested_by_name: string | null; requested_at: string }[]>([])
   const [lrFactory, setLrFactory] = useState('')     // which factory to request a lorry for
   const [lrType, setLrType] = useState('any')        // see LORRY_TYPES
@@ -229,6 +231,74 @@ export default function DispatchPage() {
     }
     setSalesLines(sLines)
   }
+
+  // Fill in each order's SO link(s) and effective expiry, merging into the existing maps
+  // (so searched older orders get the same enrichment as the recent list without wiping it).
+  async function enrichOrders(ord: DOrder[]) {
+    const batchIds = [...new Set(ord.flatMap(d => (d.dispatch_order_lines || []).map(l => l.batch_id).filter(Boolean)))] as string[]
+    const sob: Record<string, string> = {}
+    const bexp: Record<string, { exp: string | null; mr: string | null }> = {}
+    for (let i = 0; i < batchIds.length; i += 200) {
+      const slice = batchIds.slice(i, i + 200)
+      const { data: pbi } = await supabase.from('production_batch_items').select('batch_id, so_number').in('batch_id', slice)
+      ;(pbi || []).forEach(r => { if (!r.batch_id || !r.so_number) return; sob[r.batch_id] = sob[r.batch_id] ? (sob[r.batch_id].includes(r.so_number) ? sob[r.batch_id] : sob[r.batch_id] + ', ' + r.so_number) : r.so_number })
+      const { data: bb } = await supabase.from('production_batches').select('id, exp_date, material_request_id').in('id', slice)
+      ;(bb || []).forEach(r => { bexp[r.id] = { exp: r.exp_date, mr: r.material_request_id } })
+    }
+    const mrIds = [...new Set(Object.values(bexp).filter(x => !x.exp && x.mr).map(x => x.mr as string))]
+    const lblExp: Record<string, string> = {}
+    for (let i = 0; i < mrIds.length; i += 200) {
+      const { data: mi } = await supabase.from('material_request_items').select('request_id, label_exp_date').in('request_id', mrIds.slice(i, i + 200))
+      ;(mi || []).forEach(r => { if (!r.label_exp_date) return; if (!lblExp[r.request_id] || r.label_exp_date > lblExp[r.request_id]) lblExp[r.request_id] = r.label_exp_date })
+    }
+    const eb: Record<string, string> = {}
+    Object.entries(bexp).forEach(([id, x]) => { const e = x.exp || (x.mr ? lblExp[x.mr] : null); if (e) eb[id] = e })
+    if (batchIds.length) { setSoByBatch(prev => ({ ...prev, ...sob })); setExpByBatch(prev => ({ ...prev, ...eb })) }
+
+    const doNos = [...new Set(ord.map(d => d.do_number).filter(Boolean))] as string[]
+    const sdi: Record<string, string> = {}
+    for (let i = 0; i < doNos.length; i += 100) {
+      const { data: dl } = await supabase.from('sales_order_lines').select('so_number, item_code, delivered_do').in('delivered_do', doNos.slice(i, i + 100))
+      ;(dl || []).forEach(r => { if (!r.delivered_do || !r.so_number) return; const k = `${r.delivered_do}|${r.item_code}`; sdi[k] = sdi[k] ? (sdi[k].includes(r.so_number) ? sdi[k] : sdi[k] + ', ' + r.so_number) : r.so_number })
+    }
+    if (doNos.length) setSoByDoItem(prev => ({ ...prev, ...sdi }))
+  }
+
+  // Search ALL delivery orders in the database (not just the recent 50) by DO number, lorry/driver,
+  // or item code/name — so old orders are findable. RLS still scopes to what the user may see.
+  async function searchOrders(term: string) {
+    const t = term.trim()
+    if (t.length < 2) { setSearchHits(null); setSearching(false); return }
+    setSearching(true)
+    const like = `%${t.replace(/[,()*]/g, ' ')}%`   // strip chars that break PostgREST or() parsing
+    const [byDo, byLine, byRet] = await Promise.all([
+      supabase.from('dispatch_orders').select('id').or(`do_number.ilike.${like},vehicle.ilike.${like},driver_name.ilike.${like}`).limit(300),
+      supabase.from('dispatch_order_lines').select('dispatch_id').or(`item_code.ilike.${like},description.ilike.${like}`).limit(1000),
+      supabase.from('material_returns').select('dispatch_id').or(`item_code.ilike.${like},description.ilike.${like}`).limit(1000),
+    ])
+    const ids = [...new Set([
+      ...((byDo.data as { id: string }[]) || []).map(x => x.id),
+      ...((byLine.data as { dispatch_id: string }[]) || []).map(x => x.dispatch_id),
+      ...((byRet.data as { dispatch_id: string }[]) || []).map(x => x.dispatch_id),
+    ].filter(Boolean))]
+    if (ids.length === 0) { setSearchHits([]); setSearching(false); return }
+    const { data: o } = await supabase.from('dispatch_orders')
+      .select('id, do_number, factory_code, status, created_by_name, created_at, vehicle, driver_name, departed_at, received_at, received_by_name, warehouse_grn, receipt_photo_path, dispatch_order_lines(id, item_code, description, quantity, batch_no, exp_date, batch_id), material_returns(id, item_code, description, quantity, batch_no, exp_date, reason)')
+      .in('id', ids.slice(0, 300)).order('created_at', { ascending: false })
+    const ord = (o as DOrder[]) || []
+    setSearchHits(ord)
+    setSearching(false)
+    await enrichOrders(ord)
+  }
+
+  // Debounce the search box: type → query the DB after a short pause.
+  useEffect(() => {
+    const t = recentQ.trim()
+    if (!t) { setSearchHits(null); setSearching(false); return }
+    setSearching(true)
+    const h = setTimeout(() => { searchOrders(t) }, 350)
+    return () => clearTimeout(h)
+  }, [recentQ])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const factoryName = (c: string) => factories.find(f => f.code === c)?.name || c || '—'
   const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleString() : '—'
@@ -1015,15 +1085,14 @@ export default function DispatchPage() {
           <h2 className="text-lg font-semibold">Recent delivery orders</h2>
           <input value={recentQ} onChange={e => setRecentQ(e.target.value)} placeholder="🔍 DO no., item or location…" className="border rounded-lg px-3 py-1.5 text-sm w-full sm:w-72" />
         </div>
-        {(() => { const rq = recentQ.trim().toLowerCase(); const shownOrders = rq
-          ? orders.filter(o => `${o.do_number || ''} ${factoryName(o.factory_code)} ${o.vehicle || ''} ${o.driver_name || ''} ${(o.dispatch_order_lines || []).map(l => `${l.item_code} ${l.description || ''}`).join(' ')} ${(o.material_returns || []).map(l => `${l.item_code} ${l.description || ''}`).join(' ')}`.toLowerCase().includes(rq))
-          : orders
+        {recentQ.trim() && <p className="text-xs text-gray-500 mb-2">{searching ? 'Searching all delivery orders…' : `${(searchHits || []).length} result(s) across all delivery orders`}</p>}
+        {(() => { const rq = recentQ.trim(); const shownOrders = rq ? (searchHits || []) : orders
         return (
         <div className="bg-white rounded-xl shadow-sm border overflow-auto max-h-[20rem] mb-8">
           <table className="w-full text-xs">
             <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{['DO No.', ...(multiFac ? ['Factory'] : []), 'Lorry / Driver', 'By', 'When', '', 'Items'].map((h, i) => <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
             <tbody>
-              {shownOrders.length === 0 && <tr><td colSpan={multiFac ? 8 : 7} className="text-center py-8 text-gray-400">{orders.length === 0 ? 'No delivery orders yet.' : 'No delivery orders match.'}</td></tr>}
+              {shownOrders.length === 0 && <tr><td colSpan={multiFac ? 8 : 7} className="text-center py-8 text-gray-400">{recentQ.trim() ? (searching ? 'Searching…' : 'No delivery orders match your search.') : (orders.length === 0 ? 'No delivery orders yet.' : 'No delivery orders.')}</td></tr>}
               {shownOrders.map(o => (
                 <tr key={o.id} className="border-b last:border-0 align-top hover:bg-gray-50">
                   <td className="px-3 py-2 font-mono font-medium whitespace-nowrap">{o.do_number}</td>
