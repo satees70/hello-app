@@ -16,6 +16,7 @@ interface CountTask { id: string; count_no: string | null; name: string | null; 
 interface PaperReq { id: string; do_number: string | null; factory_code: string | null; item_code: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string }
 interface Correction { id: string; kind: string; old_item_code: string | null; old_description: string | null; new_item_code: string | null; new_description: string | null; old_qty: number | null; new_qty: number | null; location_code: string | null; batch_no: string | null; new_batch: string | null; flag_fields: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string }
 interface ManualPick { id: string; order_no: string | null; item_code: string | null; description: string | null; uom: string | null; qty: number; note: string | null; status: string; requested_by_name: string | null; created_at: string }
+interface Damage { id: string; order_no: string | null; item_code: string | null; description: string | null; uom: string | null; qty: number; from_location_code: string | null; batch: string | null; note: string | null; status: string; reported_by_name: string | null; created_at: string }
 
 type Pend = { key: string; id: string; kind: string; summary: string; by: string | null; at: string; approve: () => Promise<void>; reject: (() => Promise<void>) | null; open?: string }
 
@@ -39,7 +40,10 @@ const KIND_CHIP: Record<string, string> = {
   'Paper receipt': 'bg-teal-100 text-teal-700',
   'Correction': 'bg-rose-100 text-rose-700',
   'Manual pick': 'bg-sky-100 text-sky-700',
+  'Damaged stock': 'bg-orange-100 text-orange-700',
 }
+const approveLabel = (k: string) => k === 'Stock count' ? 'Apply' : k === 'Damaged stock' ? 'Write off' : 'Approve'
+const rejectLabel = (k: string) => k === 'Damaged stock' ? 'Return to stock' : 'Reject'
 
 export default function WmsApprovalsPage() {
   const { profile, loading } = useProfile()
@@ -52,6 +56,7 @@ export default function WmsApprovalsPage() {
   const [papers, setPapers] = useState<PaperReq[]>([])
   const [corrections, setCorrections] = useState<Correction[]>([])
   const [manualPicks, setManualPicks] = useState<ManualPick[]>([])
+  const [damages, setDamages] = useState<Damage[]>([])
   const [busy, setBusy] = useState('')
   const [allBusy, setAllBusy] = useState(false)
   const [err, setErr] = useState(''); const [msg, setMsg] = useState('')
@@ -66,6 +71,7 @@ export default function WmsApprovalsPage() {
     ])
     const { data: cr } = await supabase.from('wms_correction_requests').select('id, kind, old_item_code, old_description, new_item_code, new_description, old_qty, new_qty, location_code, batch_no, new_batch, flag_fields, reason, status, requested_by_name, created_at').eq('status', 'Pending').order('created_at', { ascending: false })
     const { data: mp } = await supabase.from('wms_manual_pick_requests').select('id, order_no, item_code, description, uom, qty, note, status, requested_by_name, created_at').eq('status', 'Pending').order('created_at', { ascending: false })
+    const { data: dg } = await supabase.from('wms_damage_reports').select('id, order_no, item_code, description, uom, qty, from_location_code, batch, note, status, reported_by_name, created_at').eq('status', 'Pending').order('created_at', { ascending: false })
     setBypasses((bp as GrnBypass[]) || [])
     setAdjs((sa as StockAdj[]) || [])
     setChecks((wc as WmsCheck[]) || [])
@@ -73,6 +79,7 @@ export default function WmsApprovalsPage() {
     setPapers((pr as PaperReq[]) || [])
     setCorrections((cr as Correction[]) || [])
     setManualPicks((mp as ManualPick[]) || [])
+    setDamages((dg as Damage[]) || [])
   }, [])
 
   useEffect(() => {
@@ -87,6 +94,7 @@ export default function WmsApprovalsPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'do_paper_receipt_requests' }, () => load())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'wms_correction_requests' }, () => load())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'wms_manual_pick_requests' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wms_damage_reports' }, () => load())
       .subscribe()
     const timer = setInterval(load, 20000)
     return () => { supabase.removeChannel(ch); clearInterval(timer) }
@@ -114,6 +122,8 @@ export default function WmsApprovalsPage() {
   const rejectCorr = (id: string) => run(id, 'reject_wms_correction', { p_id: id }, 'Correction rejected.')
   const approveManual = (id: string) => run(id, 'approve_wms_manual_pick', { p_id: id }, 'Manual fill approved — booked as picked.')
   const rejectManual = (id: string) => run(id, 'reject_wms_manual_pick', { p_id: id }, 'Manual fill rejected.')
+  const damageWriteoff = (id: string) => run(id, 'resolve_damage_writeoff', { p_id: id }, 'Damaged stock written off.')
+  const damageReturn = (id: string) => run(id, 'resolve_damage_return', { p_id: id }, 'Damaged stock returned to its bin.')
 
   const allPending = useMemo<Pend[]>(() => [
     ...bypasses.map(b => ({ key: `bp|${b.id}`, id: b.id, kind: 'Photo bypass', summary: `${b.item_code || '—'}${b.description ? ' · ' + b.description : ''}${b.reason ? ' · ' + b.reason : ''}`, by: b.requested_by_name, at: b.created_at, approve: () => approveBypass(b.id).then(() => {}), reject: () => rejectBypass(b.id).then(() => {}) })),
@@ -130,12 +140,14 @@ export default function WmsApprovalsPage() {
         : `Edit PO line ${c.old_item_code || '?'} → ${c.new_item_code || c.old_item_code || '?'}${c.new_qty != null ? ' · qty ' + c.new_qty : ''}${c.reason ? ' · ' + c.reason : ''}`,
       by: c.requested_by_name, at: c.created_at, approve: () => approveCorr(c.id).then(() => {}), reject: () => rejectCorr(c.id).then(() => {}) })),
     ...manualPicks.map(m => ({ key: `mp|${m.id}`, id: m.id, kind: 'Manual pick', summary: `${m.order_no || 'order'} · ${m.item_code || '?'}${m.description ? ' — ' + m.description : ''} · fill ${m.qty}${m.uom ? ' ' + m.uom : ''}${m.note ? ' · ' + m.note : ''}`, by: m.requested_by_name, at: m.created_at, approve: () => approveManual(m.id).then(() => {}), reject: () => rejectManual(m.id).then(() => {}) })),
-  ].sort((a, b) => (a.at || '').localeCompare(b.at || '')), [bypasses, adjs, checks, counts, papers, corrections, manualPicks, approveBypass, rejectBypass, approveAdj, rejectAdj, approveCheck, rejectCheck, applyCount, approvePaper, rejectPaper, approveCorr, rejectCorr, approveManual, rejectManual])
+    ...damages.map(d => ({ key: `dg|${d.id}`, id: d.id, kind: 'Damaged stock', summary: `${d.item_code || '?'}${d.description ? ' — ' + d.description : ''} · ${d.qty}${d.uom ? ' ' + d.uom : ''} from ${d.from_location_code || '?'}${d.batch ? ' · b:' + d.batch : ''} → DAMAGED${d.note ? ' · ' + d.note : ''}${d.order_no ? ' · ' + d.order_no : ''}`, by: d.reported_by_name, at: d.created_at, approve: () => damageWriteoff(d.id).then(() => {}), reject: () => damageReturn(d.id).then(() => {}) })),
+  ].sort((a, b) => (a.at || '').localeCompare(b.at || '')), [bypasses, adjs, checks, counts, papers, corrections, manualPicks, damages, approveBypass, rejectBypass, approveAdj, rejectAdj, approveCheck, rejectCheck, applyCount, approvePaper, rejectPaper, approveCorr, rejectCorr, approveManual, rejectManual, damageWriteoff, damageReturn])
 
   async function approveAll() {
     if (allPending.length === 0) return
     const nCounts = counts.length
-    if (!confirm(`Approve all ${allPending.length} pending request(s)?${nCounts ? `\n\nThis includes ${nCounts} stock count(s) — approving them applies the counted stock corrections.` : ''}\n\nEach one is applied and logged.`)) return
+    const nDmg = damages.length
+    if (!confirm(`Approve all ${allPending.length} pending request(s)?${nCounts ? `\n\nThis includes ${nCounts} stock count(s) — approving them applies the counted stock corrections.` : ''}${nDmg ? `\n\n⚠ This includes ${nDmg} damaged-stock report(s) — "Approve all" WRITES THEM OFF. To return any to stock instead, handle it individually first.` : ''}\n\nEach one is applied and logged.`)) return
     setAllBusy(true); setErr(''); setMsg('')
     let ok = 0, fail = 0
     for (const p of allPending) { try { await p.approve(); ok++ } catch { fail++ } }
@@ -154,6 +166,7 @@ export default function WmsApprovalsPage() {
     { kind: 'Paper receipt', n: byKind('Paper receipt') },
     { kind: 'Correction', n: byKind('Correction') },
     { kind: 'Manual pick', n: byKind('Manual pick') },
+    { kind: 'Damaged stock', n: byKind('Damaged stock') },
   ]
 
   return (
@@ -171,7 +184,7 @@ export default function WmsApprovalsPage() {
         {err && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg my-4">{err}</p>}
         {msg && <p className="text-emerald-700 text-sm bg-emerald-50 border border-emerald-200 p-3 rounded-lg my-4">✓ {msg}</p>}
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 my-5">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 my-5">
           {CARDS.map(c => (
             <div key={c.kind} className="bg-white rounded-xl border shadow-sm px-4 py-3">
               <div className={`text-2xl font-bold tabular-nums ${c.n ? 'text-gray-900' : 'text-gray-300'}`}>{c.n}</div>
@@ -202,8 +215,8 @@ export default function WmsApprovalsPage() {
                     <td className="px-3 py-2.5 whitespace-nowrap text-xs"><span className="block">{p.by || '—'}</span><span className="block text-gray-400">{fmt(p.at)}</span></td>
                     <td className="px-3 py-2.5 whitespace-nowrap">
                       {isHO ? <div className="flex gap-2">
-                        <button onClick={() => p.approve()} disabled={busy === p.id || allBusy} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50 text-xs">{p.kind === 'Stock count' ? 'Apply' : 'Approve'}</button>
-                        {p.reject && <button onClick={() => p.reject!()} disabled={busy === p.id || allBusy} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50 text-xs">Reject</button>}
+                        <button onClick={() => p.approve()} disabled={busy === p.id || allBusy} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50 text-xs">{approveLabel(p.kind)}</button>
+                        {p.reject && <button onClick={() => p.reject!()} disabled={busy === p.id || allBusy} className={`text-white px-3 py-1 rounded disabled:opacity-50 text-xs ${p.kind === 'Damaged stock' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}>{rejectLabel(p.kind)}</button>}
                       </div> : <span className="text-gray-400 text-xs">—</span>}
                     </td>
                   </tr>
@@ -225,8 +238,8 @@ export default function WmsApprovalsPage() {
                 <div className="text-xs text-gray-400 mt-1">{p.by || '—'}</div>
                 {isHO && (
                   <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-2.5 pt-2 border-t text-xs">
-                    <button onClick={() => p.approve()} disabled={busy === p.id || allBusy} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">{p.kind === 'Stock count' ? 'Apply' : 'Approve'}</button>
-                    {p.reject && <button onClick={() => p.reject!()} disabled={busy === p.id || allBusy} className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 disabled:opacity-50">Reject</button>}
+                    <button onClick={() => p.approve()} disabled={busy === p.id || allBusy} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">{approveLabel(p.kind)}</button>
+                    {p.reject && <button onClick={() => p.reject!()} disabled={busy === p.id || allBusy} className={`text-white px-3 py-1 rounded disabled:opacity-50 ${p.kind === 'Damaged stock' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}>{rejectLabel(p.kind)}</button>}
                   </div>
                 )}
               </div>
