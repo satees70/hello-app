@@ -23,6 +23,28 @@ export default function CreditNotesPage() {
   // upload form
   const [file, setFile] = useState<File | null>(null)
   const [cnNo, setCnNo] = useState(''); const [cust, setCust] = useState(''); const [so, setSo] = useState(''); const [cnDate, setCnDate] = useState(''); const [note, setNote] = useState('')
+  const [reading, setReading] = useState(false)
+  const [lines, setLines] = useState<{ item_code: string; description: string; quantity: number }[]>([])
+
+  // Auto-read the CN PDF (like Sales Orders) to pre-fill the fields. The page still saves on review.
+  async function readPdf(f: File) {
+    setReading(true); setErr('')
+    try {
+      const { data: sess } = await supabase.auth.getSession()
+      const fd = new FormData(); fd.append('file', f)
+      const r = await fetch('/api/extract-credit-note', { method: 'POST', headers: { Authorization: `Bearer ${sess.session?.access_token || ''}` }, body: fd })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error || 'Could not read the PDF.')
+      const d = j.data || {}
+      if (d.cn_number) setCnNo(String(d.cn_number))
+      if (d.customer_name) setCust(String(d.customer_name))
+      if (d.cn_date && /^\d{4}-\d{2}-\d{2}$/.test(String(d.cn_date))) setCnDate(String(d.cn_date))
+      if (d.so_number) setSo(String(d.so_number))
+      setLines(Array.isArray(d.lines) ? d.lines : [])
+      setMsg('Read the PDF — check the details below, then upload.')
+    } catch (e) { setErr(e instanceof Error ? e.message : 'Could not read the PDF.') }
+    setReading(false)
+  }
 
   const load = useCallback(async () => {
     const { data } = await supabase.from('credit_notes').select('id, cn_number, customer_name, so_number, cn_date, note, file_path, file_name, created_by_name, created_at').order('created_at', { ascending: false }).limit(500)
@@ -48,7 +70,7 @@ export default function CreditNotesPage() {
       })
       if (ie) throw ie
       setMsg(`Credit note ${cnNo.trim()} uploaded.`)
-      setFile(null); setCnNo(''); setCust(''); setSo(''); setCnDate(''); setNote('')
+      setFile(null); setCnNo(''); setCust(''); setSo(''); setCnDate(''); setNote(''); setLines([])
       load()
     } catch (e) {
       setErr(/credit_notes|does not exist|schema cache|could not find/i.test(e instanceof Error ? e.message : String(e)) ? 'This needs a database update — run db/2026-07-credit-notes.sql in the Supabase SQL editor.' : (e instanceof Error ? e.message : String(e)))
@@ -95,9 +117,11 @@ export default function CreditNotesPage() {
               <div><label className="block text-xs text-gray-500 mb-1">Linked SO / invoice <span className="text-gray-400">(optional)</span></label><input value={so} onChange={e => setSo(e.target.value)} placeholder="e.g. SO-41492" className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
               <div className="sm:col-span-2"><label className="block text-xs text-gray-500 mb-1">Note <span className="text-gray-400">(optional)</span></label><input value={note} onChange={e => setNote(e.target.value)} placeholder="reason / reference" className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
               <div className="sm:col-span-2">
-                <label className="block text-xs text-gray-500 mb-1">CN PDF *</label>
-                <input type="file" accept="application/pdf,image/*" onChange={e => setFile(e.target.files?.[0] || null)} className="text-sm" />
-                {file && <span className="ml-2 text-xs text-gray-500">{file.name}</span>}
+                <label className="block text-xs text-gray-500 mb-1">CN PDF * <span className="text-gray-400">(auto-reads to fill the fields above)</span></label>
+                <input type="file" accept="application/pdf,image/*" onChange={e => { const f = e.target.files?.[0] || null; setFile(f); setLines([]); if (f) readPdf(f) }} className="text-sm" />
+                {reading && <span className="ml-2 text-xs text-emerald-600">🔍 reading…</span>}
+                {file && !reading && <span className="ml-2 text-xs text-gray-500">{file.name}</span>}
+                {lines.length > 0 && <div className="mt-2 text-xs text-gray-500">Read {lines.length} line(s): {lines.slice(0, 6).map(l => `${l.item_code}×${l.quantity}`).join(', ')}{lines.length > 6 ? '…' : ''}</div>}
               </div>
             </div>
             <div className="mt-3">
