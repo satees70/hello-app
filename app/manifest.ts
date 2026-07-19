@@ -1,16 +1,26 @@
 import type { MetadataRoute } from 'next'
+import { headers } from 'next/headers'
+import { appForHost } from '@/lib/appIdentity'
 
-export default function manifest(): MetadataRoute.Manifest {
+// Per-subdomain manifest, so each app installs with its own name / icon / home page and shows as
+// a separate app on the phone (Warehouse vs Production vs HR …). The subdomain requesting
+// /manifest.webmanifest determines which one is returned.
+export default async function manifest(): Promise<MetadataRoute.Manifest> {
+  const h = await headers()
+  const app = appForHost(h.get('host'))
   return {
-    name: 'EASWARI / AVINA',
-    short_name: 'EASWARI',
-    description: 'Factory production & traceability',
-    start_url: '/dashboard',
+    id: `/app/${app.key}`,
+    name: app.name,
+    short_name: app.short,
+    description: 'SRRI EASWARI MILLS',
+    start_url: app.start,
+    scope: '/',
     display: 'standalone',
     background_color: '#f8fafc',
-    theme_color: '#047857',
+    theme_color: app.theme,
     icons: [
-      { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+      { src: app.icon, sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+      { src: app.icon, sizes: 'any', type: 'image/svg+xml', purpose: 'maskable' },
     ],
   }
 }
