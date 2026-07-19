@@ -31,6 +31,7 @@ const STATUS_CHIP: Record<string, string> = {
 export default function WmsPurchaseOrdersPage() {
   const { profile, loading } = useProfile()
   const canEdit = !!profile && can(profile, 'warehouse', 'edit')
+  const isHO = !!profile && (profile.factory_code === 'HEAD_OFFICE' || profile.role === 'admin')
 
   const [pos, setPos] = useState<PO[]>([])
   const [items, setItems] = useState<Item[]>([])
@@ -59,6 +60,7 @@ export default function WmsPurchaseOrdersPage() {
   const [recvByPo, setRecvByPo] = useState<Record<string, Recv[]>>({})   // received batches per PO
   const [putStatus, setPutStatus] = useState<Record<string, 'pending' | 'done'>>({})   // put-away state per PO
   const [grnEdits, setGrnEdits] = useState<Record<string, string>>({})   // SQL GRN inline edits
+  const [grnEditing, setGrnEditing] = useState<Set<string>>(new Set())   // PO ids whose saved GRN HO is re-editing
   const [poEditPending, setPoEditPending] = useState<Set<string>>(new Set())   // PO line ids with a pending edit request
   const [poEdit, setPoEdit] = useState<{ lineId: string; item_code: string; description: string; quantity: string; uom: string; reason: string } | null>(null)
   useEffect(() => { const s = new URLSearchParams(window.location.search).get('status'); if (s) setStatusFilter(s) }, [])
@@ -105,9 +107,36 @@ export default function WmsPurchaseOrdersPage() {
     const grn = (grnEdits[po.id] ?? po.sql_grn_no ?? '').trim()
     setErr(''); setMsg('')
     const { error } = await supabase.rpc('set_po_sql_grn', { p_po_id: po.id, p_grn: grn || null })
-    if (error) { setErr(/set_po_sql_grn|sql_grn_no/.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-po-sql-grn.sql in the Supabase SQL editor.' : error.message); return }
+    if (error) { setErr(/set_po_sql_grn|sql_grn_no/.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-po-grn-lock.sql in the Supabase SQL editor.' : error.message); return }
     setPos(prev => prev.map(p => p.id === po.id ? { ...p, sql_grn_no: grn || null } : p))
+    setGrnEditing(s => { const n = new Set(s); n.delete(po.id); return n })
     setMsg(`SQL GRN saved for ${po.po_number || 'PO'}.`)
+  }
+  // SQL GRN cell: once saved it's LOCKED — shown in full. Only Head Office can re-open it to edit.
+  function renderGrn(o: PO) {
+    const saved = (o.sql_grn_no || '').trim()
+    const editing = grnEditing.has(o.id)
+    if (saved && !(isHO && editing)) {
+      return (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="font-mono text-xs break-all" title={saved}>🔒 {saved}</span>
+          {isHO
+            ? <button onClick={() => { setGrnEdits(m => ({ ...m, [o.id]: saved })); setGrnEditing(s => new Set(s).add(o.id)) }} className="text-emerald-700 hover:underline text-[11px]">edit</button>
+            : <span className="text-gray-400 text-[10px] whitespace-nowrap" title="Locked once saved — ask Head Office to change it">HO only</span>}
+        </div>
+      )
+    }
+    const val = grnEdits[o.id] ?? o.sql_grn_no ?? ''
+    return (
+      <div className="flex items-center gap-1">
+        <input value={val} disabled={!canEdit} onChange={e => setGrnEdits(m => ({ ...m, [o.id]: e.target.value }))}
+          placeholder="GRN #" title={val} className="border rounded px-2 py-1 text-xs w-40 disabled:bg-gray-100" />
+        {canEdit && val.trim() !== (o.sql_grn_no ?? '') &&
+          <button onClick={() => saveSqlGrn(o)} className="bg-emerald-600 text-white px-2 py-1 rounded text-xs hover:bg-emerald-700">Save</button>}
+        {saved && isHO && editing &&
+          <button onClick={() => { setGrnEditing(s => { const n = new Set(s); n.delete(o.id); return n }); setGrnEdits(m => { const n = { ...m }; delete n[o.id]; return n }) }} className="text-gray-400 text-[11px] hover:underline">cancel</button>}
+      </div>
+    )
   }
 
   // Put-away report: where the received goods ended up — item, batch, bin, qty.
@@ -345,14 +374,7 @@ export default function WmsPurchaseOrdersPage() {
                       : <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700" title={putStatus[o.id] === 'pending' ? 'Received goods still in GOODS-IN' : 'Not all items received yet'}>Pending</span>}
                     {(recvByPo[o.id]?.length ?? 0) > 0 && <button onClick={() => putawayReport(o)} className="ml-2 text-emerald-700 hover:underline text-xs">report</button>}
                   </td>
-                  <td className="px-4 py-2.5 whitespace-nowrap">
-                    <div className="flex items-center gap-1">
-                      <input value={grnEdits[o.id] ?? o.sql_grn_no ?? ''} disabled={!canEdit} onChange={e => setGrnEdits(m => ({ ...m, [o.id]: e.target.value }))}
-                        placeholder="GRN #" className="border rounded px-2 py-1 text-xs w-24 disabled:bg-gray-100" />
-                      {canEdit && (grnEdits[o.id] ?? o.sql_grn_no ?? '') !== (o.sql_grn_no ?? '') &&
-                        <button onClick={() => saveSqlGrn(o)} className="bg-emerald-600 text-white px-2 py-1 rounded text-xs hover:bg-emerald-700">Save</button>}
-                    </div>
-                  </td>
+                  <td className="px-4 py-2.5">{renderGrn(o)}</td>
                   <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">{fmtTime(o.created_at)}</td>
                   <td className="px-4 py-2.5 whitespace-nowrap">
                     <div className="flex gap-3 text-xs">
@@ -396,12 +418,9 @@ export default function WmsPurchaseOrdersPage() {
                 </span>
                 {(recvByPo[o.id]?.length ?? 0) > 0 && <button onClick={() => putawayReport(o)} className="text-emerald-700 hover:underline">report</button>}
               </div>
-              <div className="flex items-center gap-1 mt-2">
+              <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                 <span className="text-xs text-gray-500">SQL GRN:</span>
-                <input value={grnEdits[o.id] ?? o.sql_grn_no ?? ''} disabled={!canEdit} onChange={e => setGrnEdits(m => ({ ...m, [o.id]: e.target.value }))}
-                  placeholder="GRN #" className="border rounded px-2 py-1 text-xs w-24 disabled:bg-gray-100" />
-                {canEdit && (grnEdits[o.id] ?? o.sql_grn_no ?? '') !== (o.sql_grn_no ?? '') &&
-                  <button onClick={() => saveSqlGrn(o)} className="bg-emerald-600 text-white px-2 py-1 rounded text-xs hover:bg-emerald-700">Save</button>}
+                {renderGrn(o)}
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-2.5 pt-2 border-t text-xs">
                 {['Open', 'Partially Received', 'Fulfilled'].includes(o.status) && <Link href={`/wms/receive/${o.id}`} className="text-emerald-700 font-medium hover:underline">Receive →</Link>}
