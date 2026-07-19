@@ -285,6 +285,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/oprp', label: 'OPRP Record', module: 'oprp' },
     ] },
     { header: 'Reports', items: [
+      ...(isHO || isAdmin ? [{ href: '/reports', label: '📊 Management Reports' }] : []),
       { href: '/stock', label: 'Stock', module: 'stock' },
       { href: '/stock-adjustment', label: 'Stock Adjustment', module: 'stock_adjustment' as ModuleKey },
       { href: '/traceability', label: 'Traceability', module: 'traceability' },
