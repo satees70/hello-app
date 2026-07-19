@@ -17,11 +17,15 @@ interface Toast { id: number; title: string; message: string }
 export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const router = useRouter()
   const pathname = usePathname()
-  const [onWarehouse, setOnWarehouse] = useState(false)   // warehouse.srrieaswari.com → focused warehouse menu
-  useEffect(() => { if (typeof window !== 'undefined') setOnWarehouse(window.location.host.startsWith('warehouse.')) }, [])
+  const [onWhHost, setOnWhHost] = useState(false)   // warehouse.srrieaswari.com
+  useEffect(() => { if (typeof window !== 'undefined') setOnWhHost(window.location.host.startsWith('warehouse.')) }, [])
+  // The Warehouse app menu shows on the warehouse subdomain AND on every warehouse page
+  // (/wms/* and /warehouse*), so the header is identical wherever you are in that app.
+  const onWarehouse = onWhHost || pathname.startsWith('/wms') || pathname.startsWith('/warehouse')
   const isHO = factoryCode === 'HEAD_OFFICE'
   const isAdmin = role === 'admin'
   const [pendingCount, setPendingCount] = useState(0)
+  const [wmsPending, setWmsPending] = useState(0)   // WMS approvals waiting (badge on the Control tab)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [openMenu, setOpenMenu] = useState<string | null>(null)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -133,6 +137,29 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     const timer = setInterval(refreshPending, 30000)
     return () => clearInterval(timer)
   }, [isHO, pathname, refreshPending])
+
+  // WMS approvals badge (Head Office only, on warehouse pages) — mirrors the WMS Approvals page.
+  useEffect(() => {
+    if (!isHO || !onWarehouse) { setWmsPending(0); return }
+    let alive = true
+    const opts = { count: 'exact' as const, head: true }
+    const count = async () => {
+      const r = await Promise.all([
+        supabase.from('grn_bypass_requests').select('id', opts).eq('status', 'Pending'),
+        supabase.from('stock_adjustments').select('id', opts).eq('status', 'Pending'),
+        supabase.from('wms_check_qty_requests').select('id', opts).eq('status', 'Pending'),
+        supabase.from('wms_count_tasks').select('id', opts).eq('status', 'Review'),
+        supabase.from('do_paper_receipt_requests').select('id', opts).eq('status', 'Pending'),
+        supabase.from('wms_correction_requests').select('id', opts).eq('status', 'Pending'),
+        supabase.from('wms_manual_pick_requests').select('id', opts).eq('status', 'Pending'),
+        supabase.from('wms_damage_reports').select('id', opts).eq('status', 'Pending'),
+      ])
+      if (alive) setWmsPending(r.reduce((s, x) => s + (x.count || 0), 0))
+    }
+    count()
+    const t = setInterval(count, 30000)
+    return () => { alive = false; clearInterval(t) }
+  }, [isHO, onWarehouse, pathname])
 
   // Live notifications:
   //  - Head Office gets a toast + badge bump when any new request is raised
@@ -291,39 +318,35 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       ...(isHO ? [{ href: '/admin/allowed-networks', label: 'Allowed Networks' }] : []),
     ] },
   ]
-  // On the warehouse subdomain this is the ONE and only nav — no separate green WMS
-  // bar. Everything lives under two dropdowns so nothing is hidden in another page:
-  // "Production" (the receiving / supply-to-production flow) and "WMS" (the warehouse
-  // management system). The green "EASWARI WMS" bar only appears on the main portal.
+  // The Warehouse app — one consistent menu on every warehouse page (subdomain, /wms/*, /warehouse*).
+  // Grouped by the warehouse process so nothing is hidden: Inbound → Stock → Outbound → Control → Reports.
   const warehouseGroups: { header?: string; items: Item[] }[] = [
-    // Ordered by the process: demand → pick for the factory → receive → dispatch.
-    { header: 'Production', items: [
-      { href: '/sales-orders', label: 'Outstanding Sales Order', module: 'sales' },
-      { href: '/material-requests', label: 'Pick Runs', module: 'material_requests' },
-      { href: '/warehouse/pick-production', label: 'Pick for Production', module: 'material_requests' },
-      { href: '/incoming', label: 'Goods Received', module: 'goods_received' },
-      { href: '/warehouse', label: 'Warehouse Receiving', module: 'goods_received' },
-      { href: '/dispatch/dashboard', label: 'Delivery Status', module: 'dispatch' },
-      { href: '/discussion', label: 'Discussion' },
-    ] },
-    // Ordered by the warehouse process: inbound → store → outbound → control.
-    { header: 'WMS', items: [
-      // Inbound
+    { items: [{ href: '/wms', label: 'Home', module: 'warehouse' as ModuleKey }] },
+    { header: 'Inbound', items: [
       { href: '/wms/purchase-orders', label: 'Purchase Orders', module: 'warehouse' },
       { href: '/wms/suppliers', label: 'Suppliers', module: 'warehouse' },
       { href: '/wms/putaway', label: 'Putaway', module: 'warehouse' },
-      // Store
+      { href: '/warehouse', label: 'Warehouse Receiving', module: 'goods_received' },
+      { href: '/incoming', label: 'Goods Received', module: 'goods_received' },
+    ] },
+    { header: 'Stock', items: [
       { href: '/wms/stock', label: 'Stock', module: 'warehouse' },
       { href: '/wms/locations', label: 'Location Map', module: 'warehouse' },
       { href: '/wms/transfers', label: 'Transfers', module: 'warehouse' },
-      // Outbound
+      { href: '/wms/movements', label: 'Movements', module: 'warehouse' },
+    ] },
+    { header: 'Outbound', items: [
       { href: '/wms/orders', label: 'Orders to Pick', module: 'warehouse' },
       { href: '/wms/dispatch', label: 'Delivery Orders', module: 'warehouse' },
-      // Control
+    ] },
+    { header: 'Control', items: [
       { href: '/wms/counts', label: 'Stock Counts', module: 'warehouse' },
-      { href: '/wms/movements', label: 'Movements', module: 'warehouse' },
+      { href: '/wms/approvals', label: 'Approvals', module: 'warehouse' },
       { href: '/wms/reports/expiry', label: 'Expiry Alerts', module: 'warehouse' },
+    ] },
+    { header: 'Reports', items: [
       { href: '/wms/reports', label: 'Reports', module: 'warehouse' },
+      { href: '/wms/reports/stock-card', label: 'Stock Card', module: 'warehouse' },
       { href: '/wms/labels', label: 'Labels (QR)', module: 'warehouse' },
     ] },
   ]
@@ -351,6 +374,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
             // Otherwise → a top menu button that opens a dropdown
             const open = openMenu === g.header
             const activeHere = g.items.some(l => l.href === pathname)
+            const grpPending = isHO && g.items.some(l => l.href === '/wms/approvals') ? wmsPending : 0
             return (
               <div key={gi} className="relative shrink-0">
                 <button
@@ -358,6 +382,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
                   onMouseEnter={() => { if (openMenu) setOpenMenu(g.header!) }}
                   className={`inline-flex items-center gap-1 px-3 py-3 text-sm hover:bg-emerald-800 ${open || activeHere ? 'bg-emerald-800 font-semibold' : ''}`}>
                   {g.header}<span className="text-[10px] opacity-80">▾</span>
+                  {grpPending > 0 && <span className="bg-red-500 text-white text-xs font-semibold rounded-full min-w-[1.25rem] text-center px-1.5 py-0.5 leading-none">{grpPending}</span>}
                 </button>
                 {open && (
                   <div className="absolute left-0 top-full z-50 w-56 bg-white text-gray-800 rounded-b-lg shadow-xl border py-1.5">
@@ -365,6 +390,9 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
                       <Link key={l.href} href={l.href} onClick={() => setOpenMenu(null)}
                         className={`flex items-center justify-between px-4 py-2 text-sm hover:bg-emerald-50 ${pathname === l.href ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'text-gray-700'}`}>
                         <span>{l.label}</span>
+                        {l.href === '/wms/approvals' && isHO && wmsPending > 0 && (
+                          <span className="bg-red-500 text-white text-xs font-semibold rounded-full min-w-[1.25rem] text-center px-1.5 py-0.5 leading-none">{wmsPending}</span>
+                        )}
                       </Link>
                     ))}
                   </div>
@@ -375,6 +403,13 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
           </div>
         </div>
         <div className="flex items-center gap-2 sm:gap-4 text-sm shrink-0">
+          {/* Quick jump back to the Production app / main portal from the Warehouse app */}
+          {onWarehouse && (
+            <div className="hidden lg:flex items-center gap-3 text-emerald-100 text-xs">
+              <Link href="/production" className="hover:text-white whitespace-nowrap">🏭 Production ↗</Link>
+              <Link href="/dashboard" className="hover:text-white whitespace-nowrap">Portal ↗</Link>
+            </div>
+          )}
           {/* Notification bell */}
           <div className="relative">
             <button onClick={openNotifs} className="relative inline-flex items-center justify-center w-9 h-9 rounded hover:bg-emerald-800" aria-label="Notifications" title="Notifications">
@@ -446,10 +481,19 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
                   {l.href === '/sales-orders/changes' && isHO && pendingCount > 0 && (
                     <span className="bg-red-500 text-white text-xs font-semibold rounded-full min-w-[1.25rem] text-center px-1.5 py-0.5 leading-none">{pendingCount}</span>
                   )}
+                  {l.href === '/wms/approvals' && isHO && wmsPending > 0 && (
+                    <span className="bg-red-500 text-white text-xs font-semibold rounded-full min-w-[1.25rem] text-center px-1.5 py-0.5 leading-none">{wmsPending}</span>
+                  )}
                 </Link>
               ))}
             </div>
           ))}
+          {onWarehouse && (
+            <div className="border-b border-emerald-600/60 py-1">
+              <Link href="/production" onClick={() => setMobileOpen(false)} className="block px-5 py-2.5 text-sm hover:bg-emerald-800">🏭 Production app ↗</Link>
+              <Link href="/dashboard" onClick={() => setMobileOpen(false)} className="block px-5 py-2.5 text-sm hover:bg-emerald-800">Main portal ↗</Link>
+            </div>
+          )}
           <button onClick={handleLogout} className="w-full text-left px-5 py-3 text-sm font-medium hover:bg-emerald-800">Logout</button>
         </div>
       )}
