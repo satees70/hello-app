@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { can, type ModuleKey, type Permissions } from '@/lib/permissions'
+import { can, canWmsArea, WMS_AREA_MODULES, type ModuleKey, type Permissions } from '@/lib/permissions'
 import { enablePush, pushAlreadyOn, pushSupported } from '@/lib/push'
 
 interface NavbarProps {
@@ -326,31 +326,31 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const warehouseGroups: { header?: string; items: Item[] }[] = [
     { items: [{ href: '/wms', label: 'Home', module: 'warehouse' as ModuleKey }] },
     { header: 'Inbound', items: [
-      { href: '/wms/purchase-orders', label: 'Purchase Orders', module: 'warehouse' },
-      { href: '/wms/suppliers', label: 'Suppliers', module: 'warehouse' },
-      { href: '/wms/putaway', label: 'Putaway', module: 'warehouse' },
+      { href: '/wms/purchase-orders', label: 'Purchase Orders', module: 'wms_inbound' },
+      { href: '/wms/suppliers', label: 'Suppliers', module: 'wms_inbound' },
+      { href: '/wms/putaway', label: 'Putaway', module: 'wms_inbound' },
       { href: '/warehouse', label: 'Warehouse Receiving', module: 'goods_received' },
       { href: '/incoming', label: 'Goods Received', module: 'goods_received' },
     ] },
     { header: 'Stock', items: [
-      { href: '/wms/stock', label: 'Stock', module: 'warehouse' },
-      { href: '/wms/locations', label: 'Location Map', module: 'warehouse' },
-      { href: '/wms/transfers', label: 'Transfers', module: 'warehouse' },
-      { href: '/wms/movements', label: 'Movements', module: 'warehouse' },
+      { href: '/wms/stock', label: 'Stock', module: 'wms_stock' },
+      { href: '/wms/locations', label: 'Location Map', module: 'wms_stock' },
+      { href: '/wms/transfers', label: 'Transfers', module: 'wms_stock' },
+      { href: '/wms/movements', label: 'Movements', module: 'wms_stock' },
     ] },
     { header: 'Outbound', items: [
-      { href: '/wms/orders', label: 'Orders to Pick', module: 'warehouse' },
-      { href: '/wms/dispatch', label: 'Delivery Orders', module: 'warehouse' },
+      { href: '/wms/orders', label: 'Orders to Pick', module: 'wms_picking' },
+      { href: '/wms/dispatch', label: 'Delivery Orders', module: 'wms_picking' },
     ] },
     { header: 'Control', items: [
-      { href: '/wms/counts', label: 'Stock Counts', module: 'warehouse' },
-      { href: '/wms/approvals', label: 'Approvals', module: 'warehouse' },
-      { href: '/wms/reports/expiry', label: 'Expiry Alerts', module: 'warehouse' },
+      { href: '/wms/counts', label: 'Stock Counts', module: 'wms_control' },
+      { href: '/wms/approvals', label: 'Approvals', module: 'wms_control' },
+      { href: '/wms/reports/expiry', label: 'Expiry Alerts', module: 'wms_control' },
     ] },
     { header: 'Reports', items: [
-      { href: '/wms/reports', label: 'Reports', module: 'warehouse' },
-      { href: '/wms/reports/stock-card', label: 'Stock Card', module: 'warehouse' },
-      { href: '/wms/labels', label: 'Labels (QR)', module: 'warehouse' },
+      { href: '/wms/reports', label: 'Reports', module: 'wms_reports' },
+      { href: '/wms/reports/stock-card', label: 'Stock Card', module: 'wms_reports' },
+      { href: '/wms/labels', label: 'Labels (QR)', module: 'wms_reports' },
     ] },
     // Supply — the production-facing pages warehouse staff use (pick for the factory, track it out).
     { header: 'Supply', items: [
@@ -362,8 +362,11 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     ] },
   ]
   // Hide links the user has no View permission for (admins/HO/unconfigured see all).
+  // WMS areas also require the 'warehouse' master grant.
+  const wmsAreas = new Set<string>(WMS_AREA_MODULES)
+  const canSee = (it: Item) => !it.module || (wmsAreas.has(it.module) ? canWmsArea(profileLike, it.module) : can(profileLike, it.module, 'view'))
   const menuGroups = (onWarehouse ? warehouseGroups : allGroups)
-    .map(g => ({ ...g, items: g.items.filter(it => !it.module || can(profileLike, it.module, 'view')) }))
+    .map(g => ({ ...g, items: g.items.filter(canSee) }))
     .filter(g => g.items.length > 0)
   return (
     <>

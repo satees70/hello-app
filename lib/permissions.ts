@@ -29,8 +29,17 @@ export const PERMISSION_MODULES = [
   { key: 'hr', label: 'HR / Attendance', desc: 'Attendance, overtime & payroll hours (hr.srrieaswari.com)', group: 'HR', needsApproval: false },
   { key: 'driver', label: 'Driver app', desc: 'Delivery driver app (driver.srrieaswari.com)', group: 'HR', needsApproval: false },
   { key: 'import', label: 'Import shipments', desc: 'Overseas import shipment tracking (import.srrieaswari.com)', group: 'Import', needsApproval: false },
-  { key: 'warehouse', label: 'Warehouse (WMS)', desc: 'Warehouse management system — location map, stock, putaway & picking', group: 'Warehouse', needsApproval: false },
+  { key: 'warehouse', label: 'Warehouse (WMS) — master', desc: 'Master switch: lets the user into the warehouse app at all (needed for any WMS area below)', group: 'Warehouse', needsApproval: false },
+  // WMS areas — allow / restrict each part of the warehouse app per user (needs the master above).
+  { key: 'wms_inbound', label: 'WMS · Inbound', desc: 'Purchase orders, suppliers, putaway', group: 'Warehouse', needsApproval: false },
+  { key: 'wms_stock', label: 'WMS · Stock & locations', desc: 'Stock, location map, transfers, movements', group: 'Warehouse', needsApproval: false },
+  { key: 'wms_picking', label: 'WMS · Picking & delivery', desc: 'Orders to pick, delivery orders', group: 'Warehouse', needsApproval: false },
+  { key: 'wms_control', label: 'WMS · Counts & approvals', desc: 'Stock counts, approvals, expiry alerts', group: 'Warehouse', needsApproval: false },
+  { key: 'wms_reports', label: 'WMS · Reports', desc: 'Reports, stock card, labels', group: 'Warehouse', needsApproval: false },
 ] as const
+
+// The WMS areas gated per-user under the 'warehouse' master. Each also requires the master.
+export const WMS_AREA_MODULES = ['wms_inbound', 'wms_stock', 'wms_picking', 'wms_control', 'wms_reports'] as const
 
 // Sections that are HIDDEN by default — a user sees them ONLY if explicitly
 // granted (the opposite of the normal "open unless restricted" rule). Used for
@@ -116,4 +125,13 @@ export function can(
   // Restricted sections need an explicit grant (no legacy-full default).
   if (!isConfigured(profile.permissions)) return !RESTRICTED_MODULES.includes(module)
   return !!profile.permissions?.[module]?.[action]
+}
+
+// A WMS area: needs the 'warehouse' master grant AND view on that specific area.
+// (Head Office / admins pass both via can().)
+export function canWmsArea(
+  profile: Parameters<typeof can>[0],
+  area: ModuleKey,
+): boolean {
+  return can(profile, 'warehouse', 'view') && can(profile, area, 'view')
 }

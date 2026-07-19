@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import type { Metadata } from 'next'
 import AuthGate from '@/components/AuthGate'
 import WmsNavbar from '@/components/WmsNavbar'
+import WmsAreaGate from '@/components/WmsAreaGate'
 import WmsDiscussionWidget from '@/components/WmsDiscussionWidget'
 
 export const metadata: Metadata = {
@@ -17,7 +18,7 @@ export default function WmsLayout({ children }: { children: ReactNode }) {
   return (
     <AuthGate requireModule="warehouse" hideBar>
       <WmsNavbar />
-      {children}
+      <WmsAreaGate>{children}</WmsAreaGate>
       <WmsDiscussionWidget />
     </AuthGate>
   )
