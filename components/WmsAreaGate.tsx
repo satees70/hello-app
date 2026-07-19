@@ -19,6 +19,7 @@ const AREA_BY_PREFIX: [string, ModuleKey][] = [
   ['/wms/movements', 'wms_stock'],
   ['/wms/orders', 'wms_picking'],
   ['/wms/dispatch', 'wms_picking'],
+  ['/wms/qc', 'wms_control'],
   ['/wms/counts', 'wms_control'],
   ['/wms/approvals', 'wms_control'],
   ['/wms/reports/expiry', 'wms_control'],   // before /wms/reports
