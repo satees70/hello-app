@@ -6,6 +6,7 @@ import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can } from '@/lib/permissions'
 import { apiFetch } from '@/lib/api'
+import DocFlag from '@/components/DocFlag'
 
 interface DeliveryOrder {
   id: string
@@ -823,7 +824,7 @@ export default function IncomingPage() {
                       {photoCtl(l, editable)}
                       <span className="ml-auto">{receiveBtn(l)}</span>
                     </div>
-                    <div className="mt-2 pt-2 border-t">{reqCtl(l)}</div>
+                    <div className="mt-2 pt-2 border-t flex items-center justify-between gap-2">{reqCtl(l)}<DocFlag line={{ item_code: l.item_code, description: l.description, quantity: l.quantity, batch_no: l.batch_no }} channel="goods_received" topic={linesFor.do_number || linesFor.file_name || linesFor.id} factoryCode={linesFor.factory_code} authorId={profile?.id} authorName={profile?.full_name} /></div>
                   </div>
                 )
               })}
@@ -852,7 +853,7 @@ export default function IncomingPage() {
                         <td className="px-3 py-2 font-mono">{l.batch_no || '—'}</td>
                         <td className="px-3 py-2 text-right whitespace-nowrap">{!c.known || c.factor === null ? '—' : <span className="font-semibold text-emerald-700">{c.into} {c.unit}{c.factor !== 1 ? <span className="text-gray-400 font-normal"> ({l.quantity}×{c.factor})</span> : null}</span>}</td>
                         <td className="px-3 py-2 whitespace-nowrap">{statusNode(c.known, c.factor, c.matched)}</td>
-                        <td className="px-3 py-2 whitespace-nowrap"><div className="flex flex-col items-start gap-1">{receiveBtn(l)}{reqCtl(l)}</div></td>
+                        <td className="px-3 py-2 whitespace-nowrap"><div className="flex flex-col items-start gap-1">{receiveBtn(l)}{reqCtl(l)}<DocFlag line={{ item_code: l.item_code, description: l.description, quantity: l.quantity, batch_no: l.batch_no }} channel="goods_received" topic={linesFor.do_number || linesFor.file_name || linesFor.id} factoryCode={linesFor.factory_code} authorId={profile?.id} authorName={profile?.full_name} /></div></td>
                       </tr>
                     )
                   })}

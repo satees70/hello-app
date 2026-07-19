@@ -6,6 +6,7 @@ import { useRequireView } from '@/hooks/useRequireView'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { can, hasCap } from '@/lib/permissions'
 import ItemPicker from '@/components/ItemPicker'
+import DocFlag from '@/components/DocFlag'
 
 interface MRItem {
   id: string
@@ -1013,7 +1014,7 @@ export default function MaterialRequestsPage() {
                 <div className="overflow-x-auto border rounded-lg">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b">
-                      <tr>{['Material', 'Description', 'Unit', 'Requested', 'Received', 'Remaining', ...(canEditFac(r.factory_code) ? [''] : [])].map((h, i) => (
+                      <tr>{['Material', 'Description', 'Unit', 'Requested', 'Received', 'Remaining', ''].map((h, i) => (
                         <th key={i} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>))}</tr>
                     </thead>
                     <tbody>
@@ -1028,11 +1029,21 @@ export default function MaterialRequestsPage() {
                             <td className="px-3 py-2 text-right font-semibold text-emerald-700">{it.requested_qty}</td>
                             <td className="px-3 py-2 text-right text-gray-700">{it.received_qty}</td>
                             <td className={`px-3 py-2 text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}`}>{remaining}</td>
-                            {canEditFac(r.factory_code) && <td className="px-3 py-2 whitespace-nowrap text-right">
-                              {movePending.has(it.id) ? <span className="text-amber-600 text-xs">⏳ move pending</span>
-                                : it.received_qty > 0 && hasCap(profile, 'move_received_qty') && moveTargets(it, r).length > 0 ? <button onClick={() => openMove(it, r)} className="text-emerald-600 hover:underline text-xs">Move qty</button>
-                                  : null}
-                            </td>}
+                            <td className="px-3 py-2 whitespace-nowrap text-right">
+                              <div className="flex items-center justify-end gap-3">
+                                {canEditFac(r.factory_code) && (movePending.has(it.id) ? <span className="text-amber-600 text-xs">⏳ move pending</span>
+                                  : it.received_qty > 0 && hasCap(profile, 'move_received_qty') && moveTargets(it, r).length > 0 ? <button onClick={() => openMove(it, r)} className="text-emerald-600 hover:underline text-xs">Move qty</button>
+                                    : null)}
+                                <DocFlag
+                                  line={{ item_code: it.item_code, description: it.description, quantity: it.requested_qty }}
+                                  channel="material_requests"
+                                  topic={r.request_no}
+                                  factoryCode={r.factory_code}
+                                  authorId={profile?.id}
+                                  authorName={profile?.full_name}
+                                />
+                              </div>
+                            </td>
                           </tr>
                         )
                       })}
