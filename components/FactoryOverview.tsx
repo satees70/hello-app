@@ -33,7 +33,7 @@ export default function FactoryOverview() {
     try {
       const [f, sl, b] = await Promise.all([
         supabase.from('factories').select('code, name'),
-        fetchAll<SLine>('sales_order_lines', 'so_number, item_code, description, quantity, delivered_qty, factory_code'),
+        fetchAll<SLine>('sales_order_lines', 'so_number, item_code, description, quantity, delivered_qty, factory_code', qb => qb.is('superseded_at', null)),
         supabase.from('production_batches').select('item_code, description, factory_code, status, produced_qty, total_quantity, dispatched_at').is('dispatched_at', null).neq('status', 'Bypassed').limit(2000),
       ])
       setFacs(Object.fromEntries(((f.data as { code: string; name: string }[]) || []).map(x => [x.code, x.name])))

@@ -222,7 +222,7 @@ export default function DispatchPage() {
     const facCodes = isHO ? null : codes
     const sLines: SLine[] = []
     for (let from = 0; ; from += 1000) {
-      let q = supabase.from('sales_order_lines').select('id, so_number, customer_name, item_code, description, quantity, outstanding_qty, factory_code, delivered_qty')
+      let q = supabase.from('sales_order_lines').select('id, so_number, customer_name, item_code, description, quantity, outstanding_qty, factory_code, delivered_qty').is('superseded_at', null)
       if (facCodes) q = q.in('factory_code', facCodes)
       const { data: sl } = await q.range(from, from + 999)
       const page = (sl as SLine[]) || []
