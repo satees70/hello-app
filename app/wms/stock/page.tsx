@@ -6,6 +6,7 @@ import WarehouseTabs, { passWh, WhFilter } from '@/components/WarehouseTabs'
 import { can } from '@/lib/permissions'
 import ItemPicker from '@/components/ItemPicker'
 import { openWmsDiscussion } from '@/components/WmsDiscussionWidget'
+import StockFlag from '@/components/StockFlag'
 
 interface Stock {
   id: string
@@ -43,6 +44,7 @@ export default function WmsStockPage() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [notice, setNotice] = useState('')
+  const [flagged, setFlagged] = useState<Set<string>>(new Set())   // stock ids with a flag waiting for the office
 
   // filters
   const [q, setQ] = useState('')
@@ -68,6 +70,8 @@ export default function WmsStockPage() {
       fetchAll<Loc>('wms_locations', 'id, code, location_type, active', 'code'),
     ])
     setRows(s); setItems(it); setLocs(lo)
+    const { data: fl } = await supabase.from('wms_correction_requests').select('stock_id').eq('kind', 'stock_flag').eq('status', 'Pending')
+    setFlagged(new Set(((fl as { stock_id: string | null }[]) || []).map(f => f.stock_id).filter(Boolean) as string[]))
     const { data: res } = await supabase.from('wms_reservations').select('item_code, location_id, batch_no, qty, wms_orders(order_no)').eq('status', 'active')
     type ResRow = { item_code: string; location_id: string; batch_no: string; qty: number; wms_orders: { order_no: string | null } | { order_no: string | null }[] | null }
     const m = new Map<string, { qty: number; orders: Set<string> }>()
@@ -388,6 +392,7 @@ export default function WmsStockPage() {
                         <button onClick={() => requestRecode(r)} title="Received under the wrong item code? Request to re-code it (Head Office approves)." className="text-indigo-600 hover:underline text-xs">Change code</button>
                         <button onClick={() => toggleProd(r)} className={`hover:underline text-xs ${r.production_only ? 'text-purple-700 font-medium' : 'text-purple-500'}`}>{r.production_only ? 'Release to trading' : 'For production'}</button>
                         <button onClick={() => openWmsDiscussion(`Item ${r.item_code}`)} title="Ask a question about this item" className="text-indigo-600 hover:underline text-xs">💬 Discuss</button>
+                        <StockFlag row={r} flagged={flagged.has(r.id)} onFlagged={id => setFlagged(s => new Set(s).add(id))} buttonClassName="text-rose-600 hover:underline text-xs" />
                         <button onClick={() => remove(r)} className="text-red-500 hover:underline text-xs">Remove</button>
                       </div>
                     ) : <span className="text-gray-300 text-xs">—</span>}
@@ -427,6 +432,7 @@ export default function WmsStockPage() {
                     <button onClick={() => requestRecode(r)} className="text-indigo-600 hover:underline font-medium">Change code</button>
                     <button onClick={() => toggleProd(r)} className={`hover:underline font-medium ${r.production_only ? 'text-purple-700' : 'text-purple-500'}`}>{r.production_only ? 'Release to trading' : 'For production'}</button>
                     <button onClick={() => openWmsDiscussion(`Item ${r.item_code}`)} className="text-indigo-600 hover:underline font-medium">💬 Discuss</button>
+                    <StockFlag row={r} flagged={flagged.has(r.id)} onFlagged={id => setFlagged(s => new Set(s).add(id))} buttonClassName="text-rose-600 hover:underline font-medium" />
                     <button onClick={() => remove(r)} className="text-red-500 hover:underline font-medium">Remove</button>
                   </div>
                 )}
