@@ -7,6 +7,7 @@ import { supabase, fetchAll } from '@/lib/supabase'
 import { can, hasCap } from '@/lib/permissions'
 import { fetchTomorrowDeliverySOs } from '@/lib/delivery'
 import ItemPicker from '@/components/ItemPicker'
+import DocFlag from '@/components/DocFlag'
 
 interface PBItem { customer_name: string; quantity: number; so_number?: string | null }
 interface Batch {
@@ -439,7 +440,10 @@ export default function PackingPage() {
                                   <td className={`px-3 py-2 text-right font-semibold ${backorder > 0 ? 'text-red-600' : 'text-green-600'}`}>{backorder}</td>
                                   <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[status(b)] || 'bg-gray-100 text-gray-700'}`}>{status(b)}</span></td>
                                   <td className="px-3 py-2 whitespace-nowrap text-right">
-                                    <a href={`/inspection?batch=${b.id}`} className="border border-green-600 text-green-700 px-3 py-1 rounded-lg hover:bg-green-50 text-xs font-medium">📋 Packing &amp; Finished Goods Inspection Record</a>
+                                    <div className="flex items-center justify-end gap-3">
+                                      <a href={`/inspection?batch=${b.id}`} className="border border-green-600 text-green-700 px-3 py-1 rounded-lg hover:bg-green-50 text-xs font-medium">📋 Packing &amp; Finished Goods Inspection Record</a>
+                                      <DocFlag line={{ item_code: b.item_code, description: b.description, quantity: b.total_quantity, batch_no: b.batch_no }} channel="packing" topic={b.batch_no || b.id} factoryCode={b.factory_code} authorId={profile?.id} authorName={profile?.full_name} />
+                                    </div>
                                   </td>
                                 </tr>
                               )
@@ -470,6 +474,7 @@ export default function PackingPage() {
               <button onClick={() => toggleMat(b.id)} className="text-emerald-600 hover:underline text-xs mt-1">{openMat.has(b.id) ? '▾ hide materials' : '▸ show materials'}</button>
               {openMat.has(b.id) && <div className="mt-2">{MaterialTable({ b })}</div>}
               <div className="mt-3 pt-2 border-t">{canEditFac(b.factory_code) ? <PackForm b={b} /> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${partial(b) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{partial(b) ? `Enough for ${availability(b).units}` : 'Materials ready'}</span>}</div>
+              <div className="mt-2 flex justify-end"><DocFlag line={{ item_code: b.item_code, description: b.description, quantity: b.total_quantity, batch_no: b.batch_no }} channel="packing" topic={b.batch_no || b.id} factoryCode={b.factory_code} authorId={profile?.id} authorName={profile?.full_name} /></div>
             </div>
           ))}
         </div>
@@ -491,7 +496,12 @@ export default function PackingPage() {
                       <button onClick={() => toggleMat(b.id)} className="text-emerald-600 hover:underline text-xs mt-0.5">{openMat.has(b.id) ? '▾ hide materials' : '▸ show materials'}</button></td>
                     <td className="px-3 py-2 text-right font-semibold">{b.total_quantity}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-gray-600">{b.delivery_date ? fmtDate(b.delivery_date) : '—'}{dueTomorrow(b) && <span className="block mt-0.5 bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-[11px] font-bold">🚚 TOMORROW</span>}</td>
-                    <td className="px-3 py-2">{canEditFac(b.factory_code) ? <PackForm b={b} /> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${partial(b) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{partial(b) ? `Enough for ${availability(b).units}` : 'Materials ready'}</span>}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-col items-end gap-1">
+                        {canEditFac(b.factory_code) ? <PackForm b={b} /> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${partial(b) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{partial(b) ? `Enough for ${availability(b).units}` : 'Materials ready'}</span>}
+                        <DocFlag line={{ item_code: b.item_code, description: b.description, quantity: b.total_quantity, batch_no: b.batch_no }} channel="packing" topic={b.batch_no || b.id} factoryCode={b.factory_code} authorId={profile?.id} authorName={profile?.full_name} />
+                      </div>
+                    </td>
                   </tr>
                   {openMat.has(b.id) && (
                     <tr className="bg-gray-50/60 border-b"><td colSpan={multiFac ? 6 : 5} className="px-3 py-3">
@@ -524,7 +534,12 @@ export default function PackingPage() {
                       <button onClick={() => toggleMat(b.id)} className="text-emerald-600 hover:underline text-xs mt-0.5">{openMat.has(b.id) ? '▾ hide materials' : '▸ show materials'}</button></td>
                     <td className="px-3 py-2 text-right font-semibold">{b.total_quantity}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-gray-600">{b.delivery_date ? fmtDate(b.delivery_date) : '—'}{dueTomorrow(b) && <span className="block mt-0.5 bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-[11px] font-bold">🚚 TOMORROW</span>}</td>
-                    <td className="px-3 py-2"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{waitReason(b)}</span></td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-col items-start gap-1">
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{waitReason(b)}</span>
+                        <DocFlag line={{ item_code: b.item_code, description: b.description, quantity: b.total_quantity, batch_no: b.batch_no }} channel="packing" topic={b.batch_no || b.id} factoryCode={b.factory_code} authorId={profile?.id} authorName={profile?.full_name} />
+                      </div>
+                    </td>
                   </tr>
                   {openMat.has(b.id) && (
                     <tr className="bg-gray-50/60 border-b"><td colSpan={multiFac ? 6 : 5} className="px-3 py-3">

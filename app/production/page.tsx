@@ -7,6 +7,7 @@ import { supabase, fetchAll } from '@/lib/supabase'
 import { can, hasCap } from '@/lib/permissions'
 import { fetchTomorrowDeliverySOs } from '@/lib/delivery'
 import ItemPicker from '@/components/ItemPicker'
+import DocFlag from '@/components/DocFlag'
 
 interface BatchItem { id: string; customer_name: string; so_number: string; quantity: number; line_id: string | null }
 interface Batch {
@@ -588,6 +589,7 @@ export default function ProductionPage() {
                                               {derivedStatus(m) !== 'Completed' && canEditFac(m.factory_code) && <button onClick={() => markCompleted(m)} title="Mark this batch completed, skipping the steps (for old orders)" className="text-green-700 hover:underline text-xs font-medium whitespace-nowrap">✓ Mark completed</button>}
                                               {hasCap(profile, 'request_split') && <button onClick={() => requestUncombine(m)}
                                                 title="Request to run this batch on its own — Head Office must approve" className="text-red-600 hover:underline text-xs font-medium whitespace-nowrap">✕ Run on its own (needs approval)</button>}
+                                              <DocFlag line={{ item_code: m.item_code, description: m.description, quantity: m.total_quantity, batch_no: m.batch_no }} channel="order_board" topic={m.batch_no || m.id} factoryCode={m.factory_code} authorId={profile?.id} authorName={profile?.full_name} />
                                             </span>
                                           </div>
                                           <ul className="space-y-0.5 pl-1">
@@ -631,7 +633,10 @@ export default function ProductionPage() {
                               </td>
                               <td className="px-3 py-2 text-right whitespace-nowrap">
                                 {combineOn && b.no_combine && isHO && <button onClick={e => { e.stopPropagation(); recombine(b) }} className="text-emerald-600 hover:underline text-xs mr-2">↩ Re-combine</button>}
-                                {b.material_request_id && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">MR</span>}
+                                {b.material_request_id && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 mr-2">MR</span>}
+                                <span className="inline-block" onClick={e => e.stopPropagation()}>
+                                  <DocFlag line={{ item_code: b.item_code, description: b.description, quantity: b.total_quantity, batch_no: b.batch_no }} channel="order_board" topic={b.batch_no || b.id} factoryCode={b.factory_code} authorId={profile?.id} authorName={profile?.full_name} />
+                                </span>
                               </td>
                             </tr>
                             {expanded.has(b.id) && (
