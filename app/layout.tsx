@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
+import { appForHost } from "@/lib/appIdentity";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -12,13 +14,18 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: "EASWARI Portal",
-  description: "SRRI EASWARI MILLS — production & traceability portal",
-  manifest: "/manifest.webmanifest",
-  appleWebApp: { capable: true, title: "EASWARI", statusBarStyle: "default" },
-  icons: { apple: "/icon.svg" },
-};
+// Per-subdomain metadata so the installed app (esp. iOS "Add to Home Screen") gets the right
+// name and icon — Warehouse, Production, HR, Driver or Import.
+export async function generateMetadata(): Promise<Metadata> {
+  const app = appForHost((await headers()).get("host"));
+  return {
+    title: app.name,
+    description: "SRRI EASWARI MILLS",
+    manifest: "/manifest.webmanifest",
+    appleWebApp: { capable: true, title: app.short, statusBarStyle: "default" },
+    icons: { apple: app.icon, icon: app.icon },
+  };
+}
 
 export const viewport: Viewport = {
   width: "device-width",
