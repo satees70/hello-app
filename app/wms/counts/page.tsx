@@ -102,7 +102,7 @@ export default function WmsCountsPage() {
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
         <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
-          <div><h1 className="text-2xl font-bold">Stock Counts</h1><p className="text-gray-500 text-sm mt-1">Count a section (or the whole warehouse) and correct the stock — with your approval.</p></div>
+          <div><h1 className="text-2xl font-bold">Stock Counts</h1><p className="text-gray-500 text-sm mt-1">Count a section (or the whole warehouse) and correct the stock — with your approval. <Link href="/wms/counts/cycle" className="text-emerald-700 underline">🔁 Cycle count</Link> for a scheduled ABC program.</p></div>
           {canEdit && <button onClick={() => { setShowForm(v => !v); setErr('') }} className="bg-emerald-700 text-white px-4 py-2 rounded-lg hover:bg-emerald-800 text-sm font-medium">{showForm ? 'Close' : '+ New count'}</button>}
         </div>
 
