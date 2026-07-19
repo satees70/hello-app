@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { requirePerm } from '@/lib/apiAuth'
+import { logError, MAX_UPLOAD_BYTES } from '@/lib/log'
 
 // Server-only clients — these keys must never reach the browser.
 const supabaseAdmin = createClient(
@@ -80,6 +81,10 @@ export async function POST(request: Request) {
       await markError(importId)
       return NextResponse.json({ error: `Could not read file: ${dlError?.message}` }, { status: 400 })
     }
+    if (fileBlob.size > MAX_UPLOAD_BYTES) {
+      await markError(importId)
+      return NextResponse.json({ error: `File is too large (max ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB).` }, { status: 413 })
+    }
     const base64 = Buffer.from(await fileBlob.arrayBuffer()).toString('base64')
 
     // 2. Ask Claude to read the PDF and return structured rows.
@@ -145,6 +150,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, count: lines.length })
   } catch (e) {
     await markError(importId)
+    logError('extract-sales-order', e, { importId })
     const msg = e instanceof Error ? e.message : 'Unknown error'
     return NextResponse.json({ error: msg }, { status: 500 })
   }

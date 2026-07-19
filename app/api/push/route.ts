@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import webpush from 'web-push'
+import { logError } from '@/lib/log'
 
 export const runtime = 'nodejs'
 
@@ -35,7 +36,7 @@ export async function POST(req: Request) {
 
   const { data: subs } = await admin.from('push_subscriptions').select('endpoint, p256dh, auth').in('user_id', userIds)
   const payload = JSON.stringify({ title: note.title, body: note.body || '', url: note.link || '/', tag: note.type })
-  let sent = 0
+  let sent = 0, dropped = 0, failed = 0
   await Promise.all(((subs as Sub[]) || []).map(async s => {
     try {
       await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload)
@@ -43,8 +44,10 @@ export async function POST(req: Request) {
     } catch (e) {
       const code = (e as { statusCode?: number })?.statusCode
       // 400/403 = stale/mismatched key (e.g. after rotation), 404/410 = gone → drop it so it re-subscribes clean.
-      if (code && [400, 403, 404, 410].includes(code)) await admin.from('push_subscriptions').delete().eq('endpoint', s.endpoint)
+      if (code && [400, 403, 404, 410].includes(code)) { await admin.from('push_subscriptions').delete().eq('endpoint', s.endpoint); dropped++ }
+      else { failed++; logError('push.send', e, { notif: note.id, code }) }   // a real send failure (network/5xx) — surface it
     }
   }))
-  return NextResponse.json({ sent })
+  if (failed) logError('push', `${failed} push send(s) failed`, { notif: note.id, sent, dropped, failed })
+  return NextResponse.json({ sent, dropped, failed })
 }

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { getCaller } from '@/lib/apiAuth'
 import { can } from '@/lib/permissions'
+import { logError, MAX_UPLOAD_BYTES } from '@/lib/log'
 
 // Reads a customer Credit Note PDF (raised in SQL Account) and returns its header + line items so
 // the upload form can auto-fill. Nothing is written to the DB here — the page saves after review.
@@ -55,6 +56,7 @@ export async function POST(request: Request) {
     const form = await request.formData()
     const file = form.get('file')
     if (!(file instanceof Blob)) return NextResponse.json({ error: 'No file uploaded.' }, { status: 400 })
+    if (file.size > MAX_UPLOAD_BYTES) return NextResponse.json({ error: `File is too large (max ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB).` }, { status: 413 })
     const base64 = Buffer.from(await file.arrayBuffer()).toString('base64')
     const media = (file.type || 'application/pdf')
     const isPdf = media.includes('pdf')
@@ -78,6 +80,7 @@ export async function POST(request: Request) {
     if (!toolUse || toolUse.type !== 'tool_use') return NextResponse.json({ error: 'Could not read the document.' }, { status: 400 })
     return NextResponse.json({ success: true, data: toolUse.input })
   } catch (e) {
+    logError('extract-credit-note', e)
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Unknown error' }, { status: 500 })
   }
 }
