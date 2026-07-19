@@ -4,6 +4,7 @@ import { supabase, fetchAll } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
 import ItemPicker from '@/components/ItemPicker'
+import BinPicker from '@/components/BinPicker'
 import ScanGate from '@/components/ScanGate'
 import { matchBin, matchItem } from '@/lib/qr'
 import WarehouseTabs, { passWh, WhFilter } from '@/components/WarehouseTabs'
@@ -122,6 +123,7 @@ export default function WmsPutawayPage() {
 
   const suggestion = form.itemCode ? suggestBin(form.itemCode) : null
   const binValue = binTouched ? form.bin : (suggestion?.code || form.bin)
+  const binCodes = useMemo(() => locs.filter(l => l.active && l.location_type !== 'STAGE').map(l => l.code), [locs])
 
   function startPutaway(row: Stock) {
     const toCode = (binEdits[row.id] ?? suggestBin(row.item_code)?.code ?? '').toUpperCase()
@@ -262,7 +264,7 @@ export default function WmsPutawayPage() {
                       {canEdit && <>
                         <input value={qtyEdits[row.id] ?? String(clean(row.quantity))} onChange={e => setQtyEdits(m => ({ ...m, [row.id]: e.target.value.replace(/[^0-9.]/g, '') }))}
                           className="w-16 border rounded-lg px-2 py-1.5 text-sm text-right tabular-nums" inputMode="decimal" title="Qty for this bin — put the rest into another bin to split across locations" />
-                        <input list="wms-bins" value={bin} onChange={e => setBinEdits(b => ({ ...b, [row.id]: e.target.value.toUpperCase() }))}
+                        <BinPicker bins={binCodes} value={bin} onChange={v => setBinEdits(b => ({ ...b, [row.id]: v }))}
                           className="w-28 border rounded-lg px-2 py-1.5 text-sm font-mono" placeholder="bin" />
                         <button onClick={() => startPutaway(row)} disabled={busy === row.id}
                           className="bg-emerald-700 text-white px-4 py-1.5 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium">{busy === row.id ? '…' : '📷 Scan & put away'}</button>
@@ -300,7 +302,7 @@ export default function WmsPutawayPage() {
                 <div><label className="block text-sm font-medium mb-1">Expiry</label><input type="date" value={form.exp_date} onChange={e => setForm({ ...form, exp_date: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
               </div>
               <div><label className="block text-sm font-medium mb-1">Bin</label>
-                <input list="wms-bins" value={binValue} onChange={e => { setBinTouched(true); setForm({ ...form, bin: e.target.value.toUpperCase() }) }} className="w-full border rounded-lg px-3 py-2 text-sm font-mono" placeholder="A105" />
+                <BinPicker bins={binCodes} value={binValue} onChange={v => { setBinTouched(true); setForm({ ...form, bin: v }) }} className="w-full border rounded-lg px-3 py-2 text-sm font-mono" placeholder="A105" />
                 {suggestion && !binTouched && <p className="text-xs text-emerald-700 mt-1">Suggested: <b>{suggestion.code}</b> — {suggestion.why}.</p>}
               </div>
               <button type="submit" disabled={busy === 'manual'} className="bg-emerald-700 text-white px-6 py-2 rounded-lg hover:bg-emerald-800 disabled:opacity-50 font-medium">{busy === 'manual' ? 'Saving…' : 'Add to bin'}</button>
@@ -308,7 +310,6 @@ export default function WmsPutawayPage() {
           </details>
         )}
 
-        <datalist id="wms-bins">{locs.filter(l => l.active && l.location_type !== 'STAGE').slice(0, 2000).map(l => <option key={l.id} value={l.code} />)}</datalist>
 
         <h2 className="text-sm font-semibold text-gray-600 mb-2">Recent goods-in &amp; putaways</h2>
         {/* Desktop: table */}
