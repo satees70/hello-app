@@ -1980,7 +1980,7 @@ begin
   if p_out then
     insert into public.notifications (factory_code, type, title, body, link, ref)
     values (v_fac, 'transport', 'Lorry out: ' || coalesce(v_no, 'DO'),
-            'Lorry ' || coalesce(v_veh, '(unassigned)') || coalesce(' · driver ' || v_drv, '') || ' has left production — on the way to the warehouse.',
+            'Lorry ' || coalesce(v_veh, '(unassigned)') || coalesce(' · driver ' || v_drv, '') || ' has left production - on the way to the warehouse.',
             '/incoming', 'lorry-out:' || p_do_id::text || ':' || floor(extract(epoch from now()))::text)
     on conflict (ref) do nothing;
   end if;
@@ -2092,7 +2092,7 @@ begin
   if p_out then
     insert into public.notifications (factory_code, type, title, body, link, ref)
     values (v_fac, 'transport', 'Incoming lorry on the way: ' || coalesce(v_no, ''),
-            'Lorry ' || coalesce(v_veh, '') || coalesce(' · driver ' || v_drv, '') || ' has left the warehouse — confirm when it arrives.', '/incoming',
+            'Lorry ' || coalesce(v_veh, '') || coalesce(' · driver ' || v_drv, '') || ' has left the warehouse - confirm when it arrives.', '/incoming',
             'gr-out:' || p_doc_id::text || ':' || floor(extract(epoch from now()))::text)
     on conflict (ref) do nothing;
   end if;
