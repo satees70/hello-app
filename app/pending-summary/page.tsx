@@ -73,7 +73,7 @@ export default function PendingSummaryPage() {
     setTomorrowSOs(await fetchTomorrowDeliverySOs())
     const { data: f } = await supabase.from('factories').select('code, name').order('code')
     setFactories(f || [])
-    const all = await fetchAll<Line>('sales_order_lines', 'id, so_number, item_code, description, quantity, outstanding_qty, delivered_qty, factory_code, is_grinding')
+    const all = await fetchAll<Line>('sales_order_lines', 'id, so_number, item_code, description, quantity, outstanding_qty, delivered_qty, factory_code, is_grinding', qb => qb.is('superseded_at', null))
     setLines(all)
     // Production status per line (factory|item|SO), traced through batches → material requests.
     const sos = [...new Set(all.map(l => l.so_number).filter(Boolean))] as string[]

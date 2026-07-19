@@ -179,7 +179,7 @@ export default function DeliverySchedulePage() {
       const chunk = sos.slice(i, i + 60)
       // Paginate — PostgREST caps each response at 1000 rows, and these chunks can exceed that.
       for (let from = 0; ; from += 1000) {
-        const { data: sl } = await supabase.from('sales_order_lines').select('so_number, factory_code, item_code, description, quantity').in('so_number', chunk).range(from, from + 999)
+        const { data: sl } = await supabase.from('sales_order_lines').select('so_number, factory_code, item_code, description, quantity').is('superseded_at', null).in('so_number', chunk).range(from, from + 999)
         const rows = sl || []
         rows.forEach(l => {
           if (l.so_number && l.factory_code && !sf[l.so_number]) sf[l.so_number] = l.factory_code

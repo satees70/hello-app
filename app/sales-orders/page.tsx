@@ -125,6 +125,7 @@ export default function SalesOrdersPage() {
   const [docDelPending, setDocDelPending] = useState<Set<string>>(new Set())
   const [lineStatuses, setLineStatuses] = useState<Record<string, string>>({}) // sales line id -> production lifecycle status
   const [onBoard, setOnBoard] = useState<Set<string>>(new Set())               // sales line ids that already have a production batch
+  const [supBusy, setSupBusy] = useState(false)                                // superseding earlier (re-uploaded) listings
 
   // Trace each confirmed line to its production batch and report where it is.
   async function loadLineStatuses(ls: SalesLine[]) {
@@ -223,7 +224,8 @@ export default function SalesOrdersPage() {
       supabase.from('change_requests').select('import_id, status'),
       supabase.from('document_confirmations').select('import_id, factory_code'),
       fetchAll<{ import_id: string; so_number: string | null; item_code: string | null; description: string | null; location_code: string | null; factory_code: string | null; delivered_qty: number | null }>(
-        'sales_order_lines', 'import_id, so_number, item_code, description, location_code, factory_code, delivered_qty'),
+        'sales_order_lines', 'import_id, so_number, item_code, description, location_code, factory_code, delivered_qty',
+        q => q.is('superseded_at', null)),   // superseded (replaced) listings drop out of the counts
     ])
     const pending: Record<string, number> = {}
     ;(crs || []).forEach(c => { if (c.status === 'Pending') pending[c.import_id] = (pending[c.import_id] || 0) + 1 })
@@ -414,7 +416,7 @@ export default function SalesOrdersPage() {
     const [{ data: lineData }, { data: crData }, { data: allLines }, { data: confData }] = await Promise.all([
       supabase.from('sales_order_lines').select('*').eq('import_id', doc.id).order('customer_name'),
       supabase.from('change_requests').select('id, line_id, field, status').eq('import_id', doc.id),
-      supabase.from('sales_order_lines').select('so_number, item_code, import_id'),
+      supabase.from('sales_order_lines').select('so_number, item_code, import_id').is('superseded_at', null),
       supabase.from('document_confirmations').select('factory_code, confirmed_by_name').eq('import_id', doc.id),
     ])
     setLines(lineData || [])
@@ -490,6 +492,22 @@ export default function SalesOrdersPage() {
   const dupForFactory = (f: string) => lines.filter(l => l.factory_code === f && isDuplicate(l)).length
   const isFactoryConfirmed = (f: string) => confirmations.some(c => c.factory_code === f)
   const confirmedByName = (f: string) => confirmations.find(c => c.factory_code === f)?.confirmed_by_name
+
+  // Earlier documents this open listing overlaps (a re-upload): the other imports
+  // that share an SO+item with a duplicate line here. Superseding them marks them
+  // replaced by this listing so their orders drop out of the counts.
+  const priorDupDocs = [...new Set(lines.filter(isDuplicate).flatMap(l => dupImports[`${l.so_number}||${l.item_code}`] || []))]
+    .filter(id => id !== linesFor?.id)
+    .map(id => imports.find(i => i.id === id)).filter(Boolean) as SalesImport[]
+  async function supersedePrior() {
+    if (!linesFor || !priorDupDocs.length) return
+    if (!window.confirm(`Mark ${priorDupDocs.length} earlier listing(s) as replaced by "${linesFor.file_name}"?\n\n${priorDupDocs.map(d => '• ' + d.file_name).join('\n')}\n\nTheir orders drop out of the outstanding counts and this listing can be confirmed. Batches not yet started are rebuilt from this listing; started ones are flagged for Head Office to check. This can be undone.`)) return
+    setSupBusy(true)
+    const { error } = await supabase.rpc('supersede_prior_listing', { p_new_import_id: linesFor.id })
+    setSupBusy(false)
+    if (error) { alert(/supersede_prior_listing|superseded_at|does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-supersede-listing.sql in the Supabase SQL editor.' : error.message); return }
+    await viewLines(linesFor); loadSummary()
+  }
 
   function openRequest(line: SalesLine) {
     setReqMode('edit')
@@ -922,6 +940,12 @@ export default function SalesOrdersPage() {
                     <li key={l.id}><span className="font-mono">{l.item_code}</span> ({l.so_number}) — {dupWhere(l)}</li>
                   ))}
                 </ul>
+                {priorDupDocs.length > 0 && can(profile, 'sales', 'edit') && (
+                  <div className="mt-2 pt-2 border-t border-amber-200 flex items-center gap-2 flex-wrap">
+                    <span>If this is a re-upload, replace the earlier listing(s) — <span className="font-medium">{priorDupDocs.map(d => d.file_name).join(', ')}</span>:</span>
+                    <button onClick={supersedePrior} disabled={supBusy} className="text-xs bg-amber-600 text-white px-3 py-1.5 rounded-lg hover:bg-amber-700 disabled:opacity-50 font-medium whitespace-nowrap">{supBusy ? 'Superseding…' : '⤺ Supersede earlier listing(s)'}</button>
+                  </div>
+                )}
               </div>
             )}
 

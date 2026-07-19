@@ -46,7 +46,7 @@ export default function SupplierPage() {
     const [rows, { data: pos }, master] = await Promise.all([
       fetchAll<Line>('sales_order_lines',
         'id, customer_name, so_number, item_code, description, quantity, outstanding_qty, delivery_date, location_code, factory_code',
-        qb => qb.or('location_code.eq.SUPPLIER,factory_code.eq.SUPPLIER')),
+        qb => qb.or('location_code.eq.SUPPLIER,factory_code.eq.SUPPLIER').is('superseded_at', null)),
       supabase.from('supplier_orders').select('*, supplier_order_items(*)').order('created_at', { ascending: false }),
       fetchAll<{ code: string; description: string; unit: string }>('items', 'code, description, unit'),
     ])

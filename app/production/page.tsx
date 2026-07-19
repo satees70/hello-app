@@ -26,6 +26,8 @@ interface Batch {
   pack_date: string | null
   run_mode: string | null
   no_combine?: boolean
+  review_flag?: string | null   // 'orphaned' | 'superseded_inprogress' — set when a re-uploaded listing changed this order
+  review_note?: string | null
   production_batch_items: BatchItem[]
 }
 interface ConsRow { id: string; item_code: string; description: string | null; batch_no: string | null; exp_date: string | null; qty_consumed: number; consumed_at: string }
@@ -365,6 +367,20 @@ export default function ProductionPage() {
     setSuccess(`${b.batch_no} re-combined.`)
   }
 
+  // Head Office resolves a batch flagged by a listing re-upload: close it (order gone)
+  // or clear the flag (keep the batch as-is).
+  async function resolveFlag(b: Batch, action: 'close' | 'clear') {
+    if (!isHO) { setError('Only Head Office can resolve this.'); return }
+    if (action === 'close' && !confirm(`Close (cancel) batch ${b.batch_no}? It's no longer on the latest sales listing.`)) return
+    setError(''); setSuccess('')
+    const { error: e } = await supabase.rpc(action === 'close' ? 'close_orphaned_batch' : 'clear_batch_flag', { p_batch_id: b.id })
+    if (e) { setError(e.message); return }
+    setBatches(prev => action === 'close'
+      ? prev.map(x => (x.id === b.id ? { ...x, status: 'Cancelled', review_flag: null } : x))
+      : prev.map(x => (x.id === b.id ? { ...x, review_flag: null } : x)))
+    setSuccess(action === 'close' ? `${b.batch_no} closed.` : `${b.batch_no} flag cleared.`)
+  }
+
   async function requestSplit(b: Batch, it: BatchItem) {
     if (!canEditFac(b.factory_code)) { setError("You have view-only access at this factory."); return }
     const reason = window.prompt(`Split "${it.customer_name}" (${it.so_number || ''} · qty ${it.quantity}) out of ${b.batch_no} into its own batch?\n\nThis goes to Pending Changes for Head Office approval.\n\nReason (optional):`, '')
@@ -630,6 +646,17 @@ export default function ProductionPage() {
                               <td className="px-3 py-2">
                                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[derivedStatus(b)] || 'bg-gray-100 text-gray-700'}`}>{derivedStatus(b)}</span>
                                 {dueTomorrow(b) && <span className="block mt-0.5 bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-[11px] font-bold whitespace-nowrap">🚚 TOMORROW DELIVERY</span>}
+                                {b.review_flag && (
+                                  <span className="block mt-0.5" onClick={e => e.stopPropagation()}>
+                                    <span className="inline-block bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded text-[11px] font-bold" title={b.review_note || ''}>{b.review_flag === 'orphaned' ? '⚠ Not on latest listing' : '⚠ Listing re-uploaded — check qty'}</span>
+                                    {isHO && (
+                                      <span className="block mt-0.5">
+                                        <button onClick={() => resolveFlag(b, 'close')} className="text-rose-600 hover:underline text-[11px] mr-2">Close batch</button>
+                                        <button onClick={() => resolveFlag(b, 'clear')} className="text-gray-500 hover:underline text-[11px]">Keep</button>
+                                      </span>
+                                    )}
+                                  </span>
+                                )}
                               </td>
                               <td className="px-3 py-2 text-right whitespace-nowrap">
                                 {combineOn && b.no_combine && isHO && <button onClick={e => { e.stopPropagation(); recombine(b) }} className="text-emerald-600 hover:underline text-xs mr-2">↩ Re-combine</button>}
