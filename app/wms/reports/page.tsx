@@ -19,16 +19,18 @@ const fmtDate = (d: string | null) => d ? new Date(d + 'T00:00:00').toLocaleDate
 const ageDays = (iso: string) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 86400000))
 const ageBucket = (d: number) => d <= 30 ? '0–30d' : d <= 60 ? '31–60d' : d <= 90 ? '61–90d' : '90d+'
 
-type View = 'item' | 'bin' | 'zone' | 'batch' | 'aging' | 'low'
+type View = 'item' | 'bin' | 'zone' | 'batch' | 'aging' | 'low' | 'neg'
 const VIEWS: { k: View; label: string }[] = [
   { k: 'item', label: 'On-hand by item' }, { k: 'bin', label: 'By bin' }, { k: 'zone', label: 'By zone' },
   { k: 'batch', label: 'By batch' }, { k: 'aging', label: 'Stock aging' }, { k: 'low', label: 'Low stock' },
+  { k: 'neg', label: '⚠ Negative stock' },
 ]
 
 export default function StockReportsPage() {
   const { profile, loading } = useProfile()
   const canEdit = !!profile && can(profile, 'warehouse', 'edit')
   const [stock, setStock] = useState<Stock[]>([])
+  const [neg, setNeg] = useState<Stock[]>([])   // bins that went negative — need reconciliation
   const [locs, setLocs] = useState<Map<string, Loc>>(new Map())
   const [items, setItems] = useState<Item[]>([])
   const [reorder, setReorder] = useState<Map<string, number | null>>(new Map())
@@ -46,7 +48,7 @@ export default function StockReportsPage() {
       fetchAll<Item>('items', 'code, description, unit', 'code'),
       fetchAll<Setting>('wms_item_settings', 'item_code, reorder_level'),
     ])
-    setStock(st.filter(s => s.quantity > 0)); setItems(it)
+    setStock(st.filter(s => s.quantity > 0)); setNeg(st.filter(s => s.quantity < 0)); setItems(it)
     setLocs(new Map(lo.map(l => [l.code.toUpperCase(), l])))
     setReorder(new Map(se.map(s => [s.item_code.toUpperCase(), s.reorder_level])))
   }, [])
@@ -80,11 +82,12 @@ export default function StockReportsPage() {
       return { headers: ['Item', 'Batch', 'Expiry', 'On-hand'], rows: [...m.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([k, v]) => [k.split('|')[0], k.split('|')[1] || '—', fmtDate(v.exp), fmtQty(v.qty)]) }
     }
     if (view === 'aging') return { headers: ['Item', 'Bin', 'Batch', 'Qty', 'Age (days)', 'Bucket'], rows: whStock.map(s => ({ s, d: ageDays(s.created_at) })).sort((a, b) => b.d - a.d).map(({ s, d }) => [s.item_code, s.location_code, s.batch_no, fmtQty(s.quantity), d, ageBucket(d)]) }
+    if (view === 'neg') return { headers: ['Item', 'Description', 'Bin', 'Batch', 'Qty'], rows: neg.filter(s => passWh(wh, s.description)).slice().sort((a, b) => a.quantity - b.quantity).map(s => [s.item_code, s.description || '', s.location_code, s.batch_no || '—', fmtQty(s.quantity)]) }
     // low stock — filter by the item's warehouse (from the item master description)
     const rows: (string | number)[][] = []
     for (const [code, lvl] of reorder.entries()) { if (lvl == null) continue; if (!passWh(wh, descByCode.get(code.toUpperCase()))) continue; const oh = onHandUpper.get(code) || 0; rows.push([code, fmtQty(oh), fmtQty(lvl), oh <= lvl ? 'LOW' : 'ok']) }
     return { headers: ['Item', 'On-hand', 'Reorder level', 'Status'], rows: rows.sort((a, b) => (a[3] === 'LOW' ? 0 : 1) - (b[3] === 'LOW' ? 0 : 1) || String(a[0]).localeCompare(String(b[0]))) }
-  }, [view, whStock, locs, reorder, onHandUpper, wh, descByCode])
+  }, [view, whStock, neg, locs, reorder, onHandUpper, wh, descByCode])
 
   const filtered = useMemo(() => { const n = q.trim().toLowerCase(); return n ? report.rows.filter(r => r.some(c => String(c).toLowerCase().includes(n))) : report.rows }, [report, q])
 
@@ -105,7 +108,7 @@ export default function StockReportsPage() {
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-          <div><h1 className="text-2xl font-bold">Stock Reports</h1><p className="text-gray-500 text-sm mt-1">On-hand, aging and low-stock. <Link href="/wms/reports/stock-card" className="text-emerald-700 underline">Stock card</Link> · <Link href="/wms/reports/expiry" className="text-emerald-700 underline">Expiry alerts</Link> · <Link href="/wms/reports/activity" className="text-emerald-700 underline">Activity</Link> · <Link href="/wms/reports/adjustments" className="text-emerald-700 underline">Adjustments</Link> · <Link href="/wms/reports/counting" className="text-emerald-700 underline">Count by counter</Link></p></div>
+          <div><h1 className="text-2xl font-bold">Stock Reports</h1><p className="text-gray-500 text-sm mt-1">On-hand, aging and low-stock. <Link href="/wms/reports/stock-card" className="text-emerald-700 underline">Stock card</Link> · <Link href="/wms/reports/expiry" className="text-emerald-700 underline">Expiry alerts</Link> · <Link href="/wms/reports/activity" className="text-emerald-700 underline">Activity</Link> · <Link href="/wms/reports/adjustments" className="text-emerald-700 underline">Adjustments</Link> · <Link href="/wms/reports/counting" className="text-emerald-700 underline">Count by counter</Link> · <Link href="/wms/reports/batch" className="text-emerald-700 underline">Batch recall</Link></p></div>
           <button onClick={() => downloadCsv(`Stock_${view}.csv`, report.headers, filtered)} className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">⬇ CSV</button>
         </div>
 
@@ -136,7 +139,7 @@ export default function StockReportsPage() {
                 const code = String(r[0]); const isItem = view === 'item'; const open = isItem && expanded.has(code)
                 return (
                 <Fragment key={i}>
-                  <tr onClick={isItem ? () => toggleExp(code) : undefined} className={`border-b last:border-0 hover:bg-gray-50 ${isItem ? 'cursor-pointer' : ''} ${view === 'low' && r[3] === 'LOW' ? 'bg-red-50/40' : ''}`}>
+                  <tr onClick={isItem ? () => toggleExp(code) : undefined} className={`border-b last:border-0 hover:bg-gray-50 ${isItem ? 'cursor-pointer' : ''} ${(view === 'low' && r[3] === 'LOW') || view === 'neg' ? 'bg-red-50/40' : ''}`}>
                     {r.map((c, j) => (
                       <td key={j} className={`px-3 py-2 ${j === 0 ? 'font-mono font-medium' : 'tabular-nums'} ${view === 'low' && j === 3 && c === 'LOW' ? 'text-red-600 font-semibold' : ''}`}>
                         {isItem && j === 0 ? <span className="inline-flex items-center gap-1.5"><span className="text-gray-400 text-xs">{open ? '▾' : '▸'}</span>{c}</span> : c}
@@ -171,7 +174,7 @@ export default function StockReportsPage() {
         <div className="sm:hidden space-y-2">
           {filtered.length === 0 && <div className="bg-white rounded-xl border p-6 text-center text-gray-400 text-sm">No data.</div>}
           {filtered.map((r, i) => (
-            <div key={i} className={`bg-white rounded-xl border shadow-sm p-3 ${view === 'low' && r[3] === 'LOW' ? 'border-red-200 bg-red-50/50' : ''}`}>
+            <div key={i} className={`bg-white rounded-xl border shadow-sm p-3 ${(view === 'low' && r[3] === 'LOW') || view === 'neg' ? 'border-red-200 bg-red-50/50' : ''}`}>
               <div className="font-mono font-semibold text-sm mb-1.5">{r[0]}</div>
               <div className="space-y-1">
                 {r.map((c, j) => j === 0 ? null : (
@@ -205,7 +208,7 @@ export default function StockReportsPage() {
             </div>
           ))}
         </div>
-        <p className="text-xs text-gray-400 mt-3">{filtered.length} rows{view === 'aging' ? ' · age = time since the lot landed in its bin' : ''}.</p>
+        <p className="text-xs text-gray-400 mt-3">{filtered.length} rows{view === 'aging' ? ' · age = time since the lot landed in its bin' : ''}{view === 'neg' ? ' · a negative bin means more was taken out than the system had — reconcile it with a stock count' : ''}.</p>
       </div>
     </div>
   )
