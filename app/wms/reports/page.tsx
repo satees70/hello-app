@@ -85,8 +85,8 @@ export default function StockReportsPage() {
     if (view === 'neg') return { headers: ['Item', 'Description', 'Bin', 'Batch', 'Qty'], rows: neg.filter(s => passWh(wh, s.description)).slice().sort((a, b) => a.quantity - b.quantity).map(s => [s.item_code, s.description || '', s.location_code, s.batch_no || '—', fmtQty(s.quantity)]) }
     // low stock — filter by the item's warehouse (from the item master description)
     const rows: (string | number)[][] = []
-    for (const [code, lvl] of reorder.entries()) { if (lvl == null) continue; if (!passWh(wh, descByCode.get(code.toUpperCase()))) continue; const oh = onHandUpper.get(code) || 0; rows.push([code, fmtQty(oh), fmtQty(lvl), oh <= lvl ? 'LOW' : 'ok']) }
-    return { headers: ['Item', 'On-hand', 'Reorder level', 'Status'], rows: rows.sort((a, b) => (a[3] === 'LOW' ? 0 : 1) - (b[3] === 'LOW' ? 0 : 1) || String(a[0]).localeCompare(String(b[0]))) }
+    for (const [code, lvl] of reorder.entries()) { if (lvl == null) continue; if (!passWh(wh, descByCode.get(code.toUpperCase()))) continue; const oh = onHandUpper.get(code) || 0; const short = Math.max(0, clean(lvl - oh)); rows.push([code, fmtQty(oh), fmtQty(lvl), oh <= lvl ? 'LOW' : 'ok', short > 0 ? fmtQty(short) : '—']) }
+    return { headers: ['Item', 'On-hand', 'Reorder level', 'Status', 'Suggested order'], rows: rows.sort((a, b) => (a[3] === 'LOW' ? 0 : 1) - (b[3] === 'LOW' ? 0 : 1) || String(a[0]).localeCompare(String(b[0]))) }
   }, [view, whStock, neg, locs, reorder, onHandUpper, wh, descByCode])
 
   const filtered = useMemo(() => { const n = q.trim().toLowerCase(); return n ? report.rows.filter(r => r.some(c => String(c).toLowerCase().includes(n))) : report.rows }, [report, q])
@@ -101,6 +101,20 @@ export default function StockReportsPage() {
     const code = addItem.trim(); if (!code || !canEdit) return
     await saveReorder(code, addLevel); setAddItem(''); setAddLevel('')
   }
+  // The reorder buy-list: only items below their reorder level, with a suggested order qty to
+  // bring them back up. The buyer raises the actual POs (per supplier) from this.
+  function reorderListCsv() {
+    const rows: (string | number)[][] = []
+    for (const [code, lvl] of reorder.entries()) {
+      if (lvl == null) continue
+      if (!passWh(wh, descByCode.get(code.toUpperCase()))) continue
+      const oh = onHandUpper.get(code) || 0
+      if (oh > lvl) continue
+      rows.push([code, descByCode.get(code.toUpperCase()) || '', fmtQty(oh), fmtQty(lvl), fmtQty(Math.max(0, clean(lvl - oh)))])
+    }
+    rows.sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+    downloadCsv('Reorder_list.csv', ['Item', 'Description', 'On-hand', 'Reorder level', 'Suggested order (to level)'], rows)
+  }
 
   if (loading) return <div className="p-8 text-sm text-gray-500">Loading…</div>
 
@@ -109,7 +123,10 @@ export default function StockReportsPage() {
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
           <div><h1 className="text-2xl font-bold">Stock Reports</h1><p className="text-gray-500 text-sm mt-1">On-hand, aging and low-stock. <Link href="/wms/reports/stock-card" className="text-emerald-700 underline">Stock card</Link> · <Link href="/wms/reports/expiry" className="text-emerald-700 underline">Expiry alerts</Link> · <Link href="/wms/reports/activity" className="text-emerald-700 underline">Activity</Link> · <Link href="/wms/reports/adjustments" className="text-emerald-700 underline">Adjustments</Link> · <Link href="/wms/reports/counting" className="text-emerald-700 underline">Count by counter</Link> · <Link href="/wms/reports/batch" className="text-emerald-700 underline">Batch recall</Link></p></div>
-          <button onClick={() => downloadCsv(`Stock_${view}.csv`, report.headers, filtered)} className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">⬇ CSV</button>
+          <div className="flex items-center gap-2">
+            {view === 'low' && <button onClick={reorderListCsv} className="border border-amber-300 text-amber-800 bg-amber-50 px-3 py-2 rounded-lg text-sm font-medium hover:bg-amber-100">🛒 Reorder list</button>}
+            <button onClick={() => downloadCsv(`Stock_${view}.csv`, report.headers, filtered)} className="border px-3 py-2 rounded-lg text-sm hover:bg-gray-50">⬇ CSV</button>
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-1.5 mb-4">
