@@ -332,7 +332,6 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/warehouse', label: 'Warehouse Receiving', module: 'goods_received' },
       { href: '/incoming', label: 'Goods Received', module: 'goods_received' },
       { href: '/wms/returns', label: 'Supplier Returns', module: 'wms_inbound' },
-      { href: '/wms/credit-notes', label: 'Credit Notes & Returns', module: 'wms_inbound' },
     ] },
     { header: 'Stock', items: [
       { href: '/wms/stock', label: 'Stock', module: 'wms_stock' },
@@ -343,6 +342,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     { header: 'Outbound', items: [
       { href: '/wms/orders', label: 'Orders to Pick', module: 'wms_picking' },
       { href: '/wms/dispatch', label: 'Delivery Orders', module: 'wms_picking' },
+      { href: '/wms/credit-notes', label: 'Customer Returns (CN)', module: 'wms_picking' },
     ] },
     { header: 'Control', items: [
       // Quality Check is on hold until QC staffing is ready — hidden from the menu for now.

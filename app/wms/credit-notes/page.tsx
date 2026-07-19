@@ -129,23 +129,31 @@ export default function WmsCreditNotesPage() {
         {err && <div className="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2">{err}</div>}
         {msg && <div className="mb-4 rounded-lg bg-green-50 border border-green-200 text-green-700 text-sm px-3 py-2">✓ {msg}</div>}
 
-        {/* Upload + auto-read */}
+        {/* Upload + auto-read — PDF first: pick the file, we read the rest from it. */}
         {canEdit && (
           <div className="bg-white rounded-xl border shadow-sm p-4 mb-6">
-            <h2 className="font-semibold text-sm mb-3">Upload a CN from SQL Account</h2>
-            <div className="mb-3">
+            <h2 className="font-semibold text-sm mb-1">Upload a CN from SQL Account</h2>
+            <p className="text-xs text-gray-500 mb-3">Just choose the CN PDF — the CN number, customer, date and returned items are read from it automatically.</p>
+            <div className="mb-1">
               <input type="file" accept="application/pdf,image/*" onChange={e => { const f = e.target.files?.[0] || null; setFile(f); setLines([]); if (f) readPdf(f) }} className="text-sm" />
-              {reading && <span className="ml-2 text-xs text-emerald-600">🔍 reading…</span>}
+              {reading && <span className="ml-2 text-xs text-emerald-600">🔍 reading the PDF…</span>}
               {file && !reading && <span className="ml-2 text-xs text-gray-500">{file.name}</span>}
             </div>
-            <div className="grid sm:grid-cols-2 gap-3">
-              <div><label className="block text-xs text-gray-500 mb-1">CN number *</label><input value={cnNo} onChange={e => setCnNo(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-              <div><label className="block text-xs text-gray-500 mb-1">Customer</label><input value={cust} onChange={e => setCust(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-              <div><label className="block text-xs text-gray-500 mb-1">CN date</label><input type="date" value={cnDate} onChange={e => setCnDate(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-              <div><label className="block text-xs text-gray-500 mb-1">Linked SO / invoice</label><input value={so} onChange={e => setSo(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-              <div className="sm:col-span-2"><label className="block text-xs text-gray-500 mb-1">Note</label><input value={note} onChange={e => setNote(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-            </div>
-            <button onClick={saveCN} disabled={busy === 'cn' || !file || !cnNo.trim()} className="mt-3 bg-emerald-700 text-white px-5 py-2 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium">{busy === 'cn' ? 'Uploading…' : '⬆ Upload CN'}</button>
+
+            {/* Nothing to fill until a PDF is chosen — the fields below are just a read-back of the PDF. */}
+            {file && (<>
+              <div className="mt-4 border-t pt-3">
+                <div className="text-xs font-semibold text-gray-600 mb-2">Read from the PDF — change only if something is wrong</div>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <div><label className="block text-xs text-gray-500 mb-1">CN number *</label><input value={cnNo} onChange={e => setCnNo(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                  <div><label className="block text-xs text-gray-500 mb-1">Customer</label><input value={cust} onChange={e => setCust(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                  <div><label className="block text-xs text-gray-500 mb-1">CN date</label><input type="date" value={cnDate} onChange={e => setCnDate(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                  <div><label className="block text-xs text-gray-500 mb-1">Linked SO / invoice</label><input value={so} onChange={e => setSo(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                  <div className="sm:col-span-2"><label className="block text-xs text-gray-500 mb-1">Note</label><input value={note} onChange={e => setNote(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                </div>
+                <button onClick={saveCN} disabled={busy === 'cn' || !file || !cnNo.trim() || reading} className="mt-3 bg-emerald-700 text-white px-5 py-2 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium">{busy === 'cn' ? 'Uploading…' : '⬆ Upload CN'}</button>
+              </div>
+            </>)}
 
             {lines.length > 0 && (
               <div className="mt-4 border-t pt-3">

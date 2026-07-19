@@ -14,12 +14,25 @@ interface Draft { order_line_id: string | null; item_id: string | null; item_cod
 const clean = (n: number) => Number(n.toPrecision(12))
 const fmtQty = (n: number) => clean(n).toLocaleString(undefined, { maximumFractionDigits: 4 })
 const fmtDate = (d: string | null) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB') : ''
+// EXPIRY POLICY: expired only if a real exp_date is in the past (null = never expired);
+// near-expiry = within 180 days (non-blocking warning).
+const NEAR_EXPIRY_DAYS = 180
+const todayMidnight = () => new Date(new Date().toDateString())
+const isExpired = (s: { exp_date: string | null }) => !!s.exp_date && new Date(s.exp_date + 'T00:00:00') < todayMidnight()
+const nearExpiry = (s: { exp_date: string | null }) => {
+  if (!s.exp_date) return false
+  const e = new Date(s.exp_date + 'T00:00:00'), t = todayMidnight()
+  if (e < t) return false
+  const lim = new Date(t); lim.setDate(lim.getDate() + NEAR_EXPIRY_DAYS)
+  return e < lim
+}
 
 export default function WmsDispatchPage() {
   const { id } = useParams<{ id: string }>()
   const { profile, loading } = useProfile()
   const router = useRouter()
   const canEdit = !!profile && can(profile, 'warehouse', 'edit')
+  const canOverride = profile?.factory_code === 'HEAD_OFFICE' || profile?.role === 'admin'   // who may ship an expired lot
 
   const [order, setOrder] = useState<Order | null>(null)
   const [drafts, setDrafts] = useState<Draft[]>([])
@@ -85,8 +98,18 @@ export default function WmsDispatchPage() {
     if (!canEdit) return
     const lines = drafts.filter(d => Number(d.qty) > 0).map(d => ({ order_line_id: d.order_line_id, item_id: d.item_id, item_code: d.item_code, description: d.description, batch_no: d.batch_no, exp_date: d.exp_date, qty: Number(d.qty), uom: d.uom }))
     if (!lines.length) { setErr('Nothing to dispatch.'); return }
+    // Expiry enforcement: block shipping an expired lot; Head Office can override with a reason.
+    let overrideExpiry = false, overrideReason: string | null = null
+    const expired = lines.filter(l => isExpired({ exp_date: l.exp_date }))
+    if (expired.length) {
+      if (!canOverride) { setErr(`This shipment includes ${expired.length} expired lot(s) — only Head Office can release it. Remove them or ask Head Office.`); return }
+      const reason = window.prompt(`This shipment includes EXPIRED lot(s):\n${expired.map(l => `• ${l.item_code}${l.batch_no ? ' b:' + l.batch_no : ''} exp ${fmtDate(l.exp_date)}`).join('\n')}\n\nHead Office override — type a reason to release:`, '')
+      if (reason === null) return
+      if (!reason.trim()) { setErr('A reason is required to dispatch an expired lot.'); return }
+      overrideExpiry = true; overrideReason = reason.trim()
+    }
     setBusy(true); setErr('')
-    const { data, error } = await supabase.rpc('wms_dispatch_order', { p_order_id: id, p_vehicle: vehicle, p_driver: driver, p_remark: remark, p_lines: lines })
+    const { data, error } = await supabase.rpc('wms_dispatch_order', { p_order_id: id, p_vehicle: vehicle, p_driver: driver, p_remark: remark, p_lines: lines, p_override_expiry: overrideExpiry, p_override_reason: overrideReason })
     if (error) { setErr(error.message); setBusy(false); return }
     const res = data as { do_number: string; fully_dispatched: boolean }
     await generatePdf(res.do_number)
@@ -118,7 +141,13 @@ export default function WmsDispatchPage() {
                 <tr key={i} className="border-b last:border-0">
                   <td className="px-4 py-2.5"><span className="font-mono font-medium">{d.item_code}</span> <span className="text-gray-400 text-xs">{d.description}</span></td>
                   <td className="px-4 py-2.5 font-mono text-xs">{d.batch_no || '—'}</td>
-                  <td className="px-4 py-2.5 text-xs">{fmtDate(d.exp_date) || '—'}</td>
+                  <td className="px-4 py-2.5 text-xs">
+                    {d.exp_date
+                      ? (isExpired(d) ? <span className="text-red-600 font-medium">⛔ EXPIRED {fmtDate(d.exp_date)}</span>
+                        : nearExpiry(d) ? <span className="text-amber-600 font-medium">⏳ {fmtDate(d.exp_date)}</span>
+                        : fmtDate(d.exp_date))
+                      : '—'}
+                  </td>
                   <td className="px-4 py-2.5 tabular-nums text-gray-500">{fmtQty(d.staged)}</td>
                   <td className="px-4 py-2.5"><input value={d.qty} onChange={e => setQty(i, e.target.value)} className="w-24 border rounded-lg px-2 py-1 text-sm text-right tabular-nums" inputMode="decimal" /></td>
                   <td className="px-4 py-2.5 text-gray-500">{d.uom}</td>
@@ -139,7 +168,10 @@ export default function WmsDispatchPage() {
               </div>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-gray-600">
                 <span>Batch: <span className="font-mono">{d.batch_no || '—'}</span></span>
-                {d.exp_date && <span>Exp: {fmtDate(d.exp_date)}</span>}
+                {d.exp_date && (isExpired(d)
+                  ? <span className="text-red-600 font-medium">⛔ EXPIRED {fmtDate(d.exp_date)}</span>
+                  : nearExpiry(d) ? <span className="text-amber-600 font-medium">⏳ Exp {fmtDate(d.exp_date)}</span>
+                  : <span>Exp: {fmtDate(d.exp_date)}</span>)}
                 <span>To ship: <span className="tabular-nums">{fmtQty(d.staged)}</span></span>
               </div>
               <div className="flex items-center gap-2 mt-2.5 pt-2 border-t">
@@ -156,7 +188,29 @@ export default function WmsDispatchPage() {
           <div><label className="block text-xs text-gray-500 mb-1">Remark <span className="text-gray-400">(optional)</span></label><input value={remark} onChange={e => setRemark(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
         </div>
 
-        {canEdit && <button onClick={dispatch} disabled={busy || drafts.length === 0} className="bg-emerald-700 text-white px-6 py-2.5 rounded-lg hover:bg-emerald-800 disabled:opacity-50 font-medium">{busy ? 'Dispatching…' : 'Dispatch & print Delivery Order'}</button>}
+        {(() => {
+          const shipping = drafts.filter(d => Number(d.qty) > 0)
+          const hasExpired = shipping.some(d => isExpired(d))
+          const hasNear = shipping.some(d => !isExpired(d) && nearExpiry(d))
+          const blocked = hasExpired && !canOverride
+          return (
+            <>
+              {hasExpired && (
+                <p className="text-sm bg-red-50 text-red-700 border border-red-200 rounded-lg p-3 mb-3">
+                  ⛔ This shipment includes an EXPIRED lot. {canOverride ? 'As Head Office you can release it — you’ll be asked for a reason.' : 'Only Head Office can release expired stock. Remove those lines or ask Head Office.'}
+                </p>
+              )}
+              {hasNear && (
+                <p className="text-sm bg-amber-50 text-amber-700 border border-amber-200 rounded-lg p-3 mb-3">
+                  ⏳ Some lots are expiring soon (within {NEAR_EXPIRY_DAYS} days). You can still ship them.
+                </p>
+              )}
+              {canEdit && <button onClick={dispatch} disabled={busy || drafts.length === 0 || blocked}
+                title={blocked ? 'Expired lot — Head Office only' : ''}
+                className="bg-emerald-700 text-white px-6 py-2.5 rounded-lg hover:bg-emerald-800 disabled:opacity-50 font-medium">{busy ? 'Dispatching…' : blocked ? 'Expired — Head Office only' : 'Dispatch & print Delivery Order'}</button>}
+            </>
+          )
+        })()}
       </div>
     </div>
   )

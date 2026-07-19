@@ -12,6 +12,9 @@ interface Stock { item_code: string; description: string | null; location_code: 
 interface Loc { code: string; aisle: string | null; location_type: string }
 interface Item { code: string; description: string; unit: string }
 interface Setting { item_code: string; reorder_level: number | null }
+interface PlanRow { item_code: string; reorder_max: number | null; lead_time_days: number | null }
+interface UsageRow { item_code: string; avg_daily_use: number | null }
+interface ItemSetting { reorder_level: number | null; reorder_max: number | null; lead_time_days: number | null }
 
 const clean = (n: number) => Number(n.toPrecision(12))
 const fmtQty = (n: number) => clean(n).toLocaleString(undefined, { maximumFractionDigits: 4 })
@@ -33,24 +36,36 @@ export default function StockReportsPage() {
   const [neg, setNeg] = useState<Stock[]>([])   // bins that went negative — need reconciliation
   const [locs, setLocs] = useState<Map<string, Loc>>(new Map())
   const [items, setItems] = useState<Item[]>([])
-  const [reorder, setReorder] = useState<Map<string, number | null>>(new Map())
+  const [settings, setSettings] = useState<Map<string, ItemSetting>>(new Map())
+  const [usage, setUsage] = useState<Map<string, number>>(new Map())
+  const [planMsg, setPlanMsg] = useState('')
   const [view, setView] = useState<View>('item')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())   // item codes expanded to show bins/batches
   const [q, setQ] = useState('')
   const [wh, setWh] = useState<WhFilter>('all')
-  const [addItem, setAddItem] = useState(''); const [addLevel, setAddLevel] = useState('')
+  const [addItem, setAddItem] = useState(''); const [addLevel, setAddLevel] = useState(''); const [addMax, setAddMax] = useState(''); const [addLead, setAddLead] = useState('')
 
   useEffect(() => { if (profile) load() }, [profile])
   const load = useCallback(async () => {
-    const [st, lo, it, se] = await Promise.all([
+    const [st, lo, it, se, plan, use] = await Promise.all([
       fetchAll<Stock>('wms_stock', 'item_code, description, location_code, batch_no, exp_date, quantity, uom, created_at'),
       fetchAll<Loc>('wms_locations', 'code, aisle, location_type'),
       fetchAll<Item>('items', 'code, description, unit', 'code'),
       fetchAll<Setting>('wms_item_settings', 'item_code, reorder_level'),
+      supabase.from('wms_item_settings').select('item_code, reorder_max, lead_time_days'),
+      supabase.rpc('wms_item_usage', { p_days: 90 }),
     ])
     setStock(st.filter(s => s.quantity > 0)); setNeg(st.filter(s => s.quantity < 0)); setItems(it)
     setLocs(new Map(lo.map(l => [l.code.toUpperCase(), l])))
-    setReorder(new Map(se.map(s => [s.item_code.toUpperCase(), s.reorder_level])))
+    // Base reorder levels always load (existing behaviour). Target/lead-time columns + usage
+    // are additive and only appear once db/2026-07-reorder-planning.sql has been run.
+    const missing = (e: { message: string } | null) => !!e && /reorder_max|lead_time_days|wms_item_usage|column|function/i.test(e.message) && /does not exist|schema cache|could not find/i.test(e.message)
+    setPlanMsg(missing(plan.error) || missing(use.error) ? 'For target (max) levels, supplier lead time and usage-driven suggestions, run db/2026-07-reorder-planning.sql in the Supabase SQL editor.' : '')
+    const m = new Map<string, ItemSetting>()
+    for (const s of se) m.set(s.item_code.toUpperCase(), { reorder_level: s.reorder_level, reorder_max: null, lead_time_days: null })
+    for (const p of (plan.data as PlanRow[] | null) || []) { const k = p.item_code.toUpperCase(); const e = m.get(k) || { reorder_level: null, reorder_max: null, lead_time_days: null }; e.reorder_max = p.reorder_max; e.lead_time_days = p.lead_time_days; m.set(k, e) }
+    setSettings(m)
+    setUsage(new Map(((use.data as UsageRow[] | null) || []).map(u => [u.item_code.toUpperCase(), Number(u.avg_daily_use)])))
   }, [])
 
   const zoneOf = (code: string) => locs.get(code.toUpperCase())?.aisle || ''
@@ -62,6 +77,23 @@ export default function StockReportsPage() {
   const descByCode = useMemo(() => new Map(items.map(i => [i.code.toUpperCase(), i.description])), [items])
   const onHandByItem = useMemo(() => { const m = new Map<string, number>(); for (const s of whStock) m.set(s.item_code, clean((m.get(s.item_code) || 0) + Number(s.quantity))); return m }, [whStock])
   const onHandUpper = useMemo(() => { const m = new Map<string, number>(); for (const s of whStock) { const k = s.item_code.toUpperCase(); m.set(k, clean((m.get(k) || 0) + Number(s.quantity))) } return m }, [whStock])
+
+  // Reorder planning for one item (UPPER code): usage-driven suggested reorder LEVEL =
+  // avg daily use × lead-time days, falling back to the hand-entered reorder level when usage
+  // or lead time is missing. Suggested order qty tops up to the target (max) when set, else to
+  // the effective reorder level. LOW = on-hand at/below the effective reorder level.
+  const planFor = useCallback((codeUpper: string) => {
+    const s = settings.get(codeUpper) || { reorder_level: null, reorder_max: null, lead_time_days: null }
+    const oh = onHandUpper.get(codeUpper) || 0
+    const avg = usage.has(codeUpper) ? Number(usage.get(codeUpper)) : null
+    const lead = s.lead_time_days ?? null
+    const usageLevel = (avg != null && lead != null && avg > 0 && lead > 0) ? clean(avg * lead) : null
+    const effLevel = usageLevel ?? s.reorder_level ?? null
+    const target = s.reorder_max ?? null
+    const suggestQty = target != null ? Math.max(0, clean(target - oh)) : (effLevel != null ? Math.max(0, clean(effLevel - oh)) : 0)
+    const low = effLevel != null && oh <= effLevel
+    return { s, oh, avg, lead, usageLevel, effLevel, target, suggestQty, low }
+  }, [settings, usage, onHandUpper])
 
   // Build {headers, rows} for the current view.
   const report = useMemo((): { headers: string[]; rows: (string | number)[][] } => {
@@ -83,37 +115,46 @@ export default function StockReportsPage() {
     }
     if (view === 'aging') return { headers: ['Item', 'Bin', 'Batch', 'Qty', 'Age (days)', 'Bucket'], rows: whStock.map(s => ({ s, d: ageDays(s.created_at) })).sort((a, b) => b.d - a.d).map(({ s, d }) => [s.item_code, s.location_code, s.batch_no, fmtQty(s.quantity), d, ageBucket(d)]) }
     if (view === 'neg') return { headers: ['Item', 'Description', 'Bin', 'Batch', 'Qty'], rows: neg.filter(s => passWh(wh, s.description)).slice().sort((a, b) => a.quantity - b.quantity).map(s => [s.item_code, s.description || '', s.location_code, s.batch_no || '—', fmtQty(s.quantity)]) }
-    // low stock — filter by the item's warehouse (from the item master description)
+    // low stock — the reorder buy-list. Filter by the item's warehouse (from the item master).
     const rows: (string | number)[][] = []
-    for (const [code, lvl] of reorder.entries()) { if (lvl == null) continue; if (!passWh(wh, descByCode.get(code.toUpperCase()))) continue; const oh = onHandUpper.get(code) || 0; const short = Math.max(0, clean(lvl - oh)); rows.push([code, fmtQty(oh), fmtQty(lvl), oh <= lvl ? 'LOW' : 'ok', short > 0 ? fmtQty(short) : '—']) }
-    return { headers: ['Item', 'On-hand', 'Reorder level', 'Status', 'Suggested order'], rows: rows.sort((a, b) => (a[3] === 'LOW' ? 0 : 1) - (b[3] === 'LOW' ? 0 : 1) || String(a[0]).localeCompare(String(b[0]))) }
-  }, [view, whStock, neg, locs, reorder, onHandUpper, wh, descByCode])
+    for (const [code, s] of settings.entries()) {
+      if (s.reorder_level == null && s.reorder_max == null && s.lead_time_days == null) continue
+      if (!passWh(wh, descByCode.get(code))) continue
+      const p = planFor(code)
+      rows.push([code, fmtQty(p.oh), p.s.reorder_level != null ? fmtQty(p.s.reorder_level) : '—', p.target != null ? fmtQty(p.target) : '—', p.avg != null ? fmtQty(p.avg) : '—', p.lead != null ? String(p.lead) : '—', p.suggestQty > 0 ? fmtQty(p.suggestQty) : '—', p.low ? 'LOW' : 'ok'])
+    }
+    return { headers: ['Item', 'On hand', 'Reorder level', 'Target (max)', 'Avg daily use', 'Lead time', 'Suggested order', 'Status'], rows: rows.sort((a, b) => (a[7] === 'LOW' ? 0 : 1) - (b[7] === 'LOW' ? 0 : 1) || String(a[0]).localeCompare(String(b[0]))) }
+  }, [view, whStock, neg, locs, settings, planFor, onHandUpper, wh, descByCode])
 
   const filtered = useMemo(() => { const n = q.trim().toLowerCase(); return n ? report.rows.filter(r => r.some(c => String(c).toLowerCase().includes(n))) : report.rows }, [report, q])
 
-  async function saveReorder(code: string, val: string) {
+  const numOrNull = (v: string) => v === '' ? null : Number(v)
+  const intOrNull = (v: string) => v === '' ? null : Math.round(Number(v))
+  async function saveSettings(code: string, patch: Partial<ItemSetting>) {
     if (!canEdit) return
-    const lvl = val === '' ? null : Number(val)
-    await supabase.from('wms_item_settings').upsert({ item_code: code, reorder_level: lvl, updated_at: new Date().toISOString() }, { onConflict: 'item_code' })
-    setReorder(m => new Map(m).set(code.toUpperCase(), lvl))
+    await supabase.from('wms_item_settings').upsert({ item_code: code, ...patch, updated_at: new Date().toISOString() }, { onConflict: 'item_code' })
+    setSettings(m => { const n = new Map(m); const k = code.toUpperCase(); n.set(k, { ...(n.get(k) || { reorder_level: null, reorder_max: null, lead_time_days: null }), ...patch }); return n })
   }
   async function addReorder() {
     const code = addItem.trim(); if (!code || !canEdit) return
-    await saveReorder(code, addLevel); setAddItem(''); setAddLevel('')
+    const patch: Partial<ItemSetting> = { reorder_level: numOrNull(addLevel) }
+    if (!planMsg) { patch.reorder_max = numOrNull(addMax); patch.lead_time_days = intOrNull(addLead) }
+    await saveSettings(code, patch); setAddItem(''); setAddLevel(''); setAddMax(''); setAddLead('')
   }
-  // The reorder buy-list: only items below their reorder level, with a suggested order qty to
-  // bring them back up. The buyer raises the actual POs (per supplier) from this.
+  // The reorder buy-list: only items at/below their effective reorder level, with a suggested
+  // order qty (top up to the target/max when set, else to the reorder level). The buyer raises
+  // the actual POs (per supplier) from this.
   function reorderListCsv() {
     const rows: (string | number)[][] = []
-    for (const [code, lvl] of reorder.entries()) {
-      if (lvl == null) continue
-      if (!passWh(wh, descByCode.get(code.toUpperCase()))) continue
-      const oh = onHandUpper.get(code) || 0
-      if (oh > lvl) continue
-      rows.push([code, descByCode.get(code.toUpperCase()) || '', fmtQty(oh), fmtQty(lvl), fmtQty(Math.max(0, clean(lvl - oh)))])
+    for (const [code, s] of settings.entries()) {
+      if (s.reorder_level == null && s.reorder_max == null && s.lead_time_days == null) continue
+      if (!passWh(wh, descByCode.get(code))) continue
+      const p = planFor(code)
+      if (!p.low) continue
+      rows.push([code, descByCode.get(code) || '', fmtQty(p.oh), p.s.reorder_level != null ? fmtQty(p.s.reorder_level) : '', p.target != null ? fmtQty(p.target) : '', p.avg != null ? fmtQty(p.avg) : '', p.lead != null ? String(p.lead) : '', p.suggestQty > 0 ? fmtQty(p.suggestQty) : ''])
     }
     rows.sort((a, b) => String(a[0]).localeCompare(String(b[0])))
-    downloadCsv('Reorder_list.csv', ['Item', 'Description', 'On-hand', 'Reorder level', 'Suggested order (to level)'], rows)
+    downloadCsv('Reorder_list.csv', ['Item', 'Description', 'On hand', 'Reorder level', 'Target (max)', 'Avg daily use', 'Lead time', 'Suggested order'], rows)
   }
 
   if (loading) return <div className="p-8 text-sm text-gray-500">Loading…</div>
@@ -133,10 +174,16 @@ export default function StockReportsPage() {
           {VIEWS.map(v => <button key={v.k} onClick={() => setView(v.k)} className={`px-3 py-1.5 rounded-lg text-sm font-medium ${view === v.k ? 'bg-emerald-700 text-white' : 'bg-white border text-gray-600 hover:bg-gray-50'}`}>{v.label}</button>)}
         </div>
 
+        {view === 'low' && planMsg && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3 mb-4 text-sm">{planMsg}</div>
+        )}
+
         {view === 'low' && canEdit && (
           <div className="bg-white rounded-xl border shadow-sm p-4 mb-4 flex flex-wrap items-end gap-2">
-            <div className="flex-1 min-w-[200px]"><label className="block text-xs text-gray-500 mb-1">Set reorder level for an item</label><ItemPicker items={items} value={addItem} onPick={it => setAddItem(it.code)} /></div>
-            <input value={addLevel} onChange={e => setAddLevel(e.target.value.replace(/[^0-9.]/g, ''))} placeholder="level" className="w-28 border rounded-lg px-3 py-2 text-sm text-right" inputMode="decimal" />
+            <div className="flex-1 min-w-[200px]"><label className="block text-xs text-gray-500 mb-1">Set reorder plan for an item</label><ItemPicker items={items} value={addItem} onPick={it => setAddItem(it.code)} /></div>
+            <div><label className="block text-xs text-gray-500 mb-1">Reorder level</label><input value={addLevel} onChange={e => setAddLevel(e.target.value.replace(/[^0-9.]/g, ''))} placeholder="level" className="w-24 border rounded-lg px-3 py-2 text-sm text-right" inputMode="decimal" /></div>
+            <div><label className="block text-xs text-gray-500 mb-1">Target (max)</label><input value={addMax} onChange={e => setAddMax(e.target.value.replace(/[^0-9.]/g, ''))} disabled={!!planMsg} placeholder="max" className="w-24 border rounded-lg px-3 py-2 text-sm text-right disabled:bg-gray-100" inputMode="decimal" /></div>
+            <div><label className="block text-xs text-gray-500 mb-1">Lead time (days)</label><input value={addLead} onChange={e => setAddLead(e.target.value.replace(/[^0-9]/g, ''))} disabled={!!planMsg} placeholder="days" className="w-24 border rounded-lg px-3 py-2 text-sm text-right disabled:bg-gray-100" inputMode="numeric" /></div>
             <button onClick={addReorder} disabled={!addItem} className="bg-emerald-700 text-white px-4 py-2 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium">Save</button>
           </div>
         )}
@@ -149,20 +196,26 @@ export default function StockReportsPage() {
         {/* Desktop: table */}
         <div className="hidden sm:block bg-white rounded-xl shadow-sm border overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b"><tr>{report.headers.map(h => <th key={h} className="text-left px-3 py-2.5 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}{view === 'low' && canEdit && <th className="px-3 py-2.5" />}</tr></thead>
+            <thead className="bg-gray-50 border-b"><tr>{report.headers.map(h => <th key={h} className="text-left px-3 py-2.5 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}{view === 'low' && canEdit && <th className="text-left px-3 py-2.5 font-medium text-gray-600 whitespace-nowrap">Edit · level / max / lead</th>}</tr></thead>
             <tbody>
               {filtered.length === 0 && <tr><td colSpan={report.headers.length + 1} className="text-center py-10 text-gray-400">No data.</td></tr>}
               {filtered.map((r, i) => {
                 const code = String(r[0]); const isItem = view === 'item'; const open = isItem && expanded.has(code)
                 return (
                 <Fragment key={i}>
-                  <tr onClick={isItem ? () => toggleExp(code) : undefined} className={`border-b last:border-0 hover:bg-gray-50 ${isItem ? 'cursor-pointer' : ''} ${(view === 'low' && r[3] === 'LOW') || view === 'neg' ? 'bg-red-50/40' : ''}`}>
+                  <tr onClick={isItem ? () => toggleExp(code) : undefined} className={`border-b last:border-0 hover:bg-gray-50 ${isItem ? 'cursor-pointer' : ''} ${(view === 'low' && r[7] === 'LOW') || view === 'neg' ? 'bg-red-50/40' : ''}`}>
                     {r.map((c, j) => (
-                      <td key={j} className={`px-3 py-2 ${j === 0 ? 'font-mono font-medium' : 'tabular-nums'} ${view === 'low' && j === 3 && c === 'LOW' ? 'text-red-600 font-semibold' : ''}`}>
+                      <td key={j} className={`px-3 py-2 ${j === 0 ? 'font-mono font-medium' : 'tabular-nums'} ${view === 'low' && j === 7 && c === 'LOW' ? 'text-red-600 font-semibold' : ''}`}>
                         {isItem && j === 0 ? <span className="inline-flex items-center gap-1.5"><span className="text-gray-400 text-xs">{open ? '▾' : '▸'}</span>{c}</span> : c}
                       </td>
                     ))}
-                    {view === 'low' && canEdit && <td className="px-3 py-2"><input defaultValue={String(r[2] === '—' ? '' : r[2]).replace(/,/g, '')} onBlur={e => saveReorder(String(r[0]), e.target.value.replace(/[^0-9.]/g, ''))} className="w-20 border rounded px-2 py-1 text-xs text-right" placeholder="level" /></td>}
+                    {view === 'low' && canEdit && (() => { const st = settings.get(String(r[0]).toUpperCase()); return (
+                      <td className="px-3 py-2"><div className="flex items-center gap-1 justify-end">
+                        <input title="Reorder level" defaultValue={st?.reorder_level ?? ''} onBlur={e => saveSettings(String(r[0]), { reorder_level: numOrNull(e.target.value.replace(/[^0-9.]/g, '')) })} className="w-16 border rounded px-1.5 py-1 text-xs text-right" placeholder="lvl" />
+                        <input title="Target (max)" defaultValue={st?.reorder_max ?? ''} disabled={!!planMsg} onBlur={e => saveSettings(String(r[0]), { reorder_max: numOrNull(e.target.value.replace(/[^0-9.]/g, '')) })} className="w-16 border rounded px-1.5 py-1 text-xs text-right disabled:bg-gray-100" placeholder="max" />
+                        <input title="Lead time (days)" defaultValue={st?.lead_time_days ?? ''} disabled={!!planMsg} onBlur={e => saveSettings(String(r[0]), { lead_time_days: intOrNull(e.target.value.replace(/[^0-9]/g, '')) })} className="w-16 border rounded px-1.5 py-1 text-xs text-right disabled:bg-gray-100" placeholder="days" />
+                      </div></td>
+                    ) })()}
                   </tr>
                   {open && (
                     <tr className="bg-gray-50/60"><td colSpan={report.headers.length} className="px-6 py-2">
@@ -191,7 +244,7 @@ export default function StockReportsPage() {
         <div className="sm:hidden space-y-2">
           {filtered.length === 0 && <div className="bg-white rounded-xl border p-6 text-center text-gray-400 text-sm">No data.</div>}
           {filtered.map((r, i) => (
-            <div key={i} className={`bg-white rounded-xl border shadow-sm p-3 ${(view === 'low' && r[3] === 'LOW') || view === 'neg' ? 'border-red-200 bg-red-50/50' : ''}`}>
+            <div key={i} className={`bg-white rounded-xl border shadow-sm p-3 ${(view === 'low' && r[7] === 'LOW') || view === 'neg' ? 'border-red-200 bg-red-50/50' : ''}`}>
               <div className="font-mono font-semibold text-sm mb-1.5">{r[0]}</div>
               <div className="space-y-1">
                 {r.map((c, j) => j === 0 ? null : (
@@ -199,15 +252,16 @@ export default function StockReportsPage() {
                     ? <div key={j} className="text-sm text-gray-700 leading-snug">{c}</div>
                     : <div key={j} className="flex items-center justify-between gap-3 text-sm">
                         <span className="text-gray-500 text-xs">{report.headers[j]}</span>
-                        <span className={`tabular-nums font-medium text-right ${view === 'low' && j === 3 && c === 'LOW' ? 'text-red-600 font-semibold' : ''}`}>{c}</span>
+                        <span className={`tabular-nums font-medium text-right ${view === 'low' && j === 7 && c === 'LOW' ? 'text-red-600 font-semibold' : ''}`}>{c}</span>
                       </div>
                 ))}
-                {view === 'low' && canEdit && (
-                  <div className="flex items-center justify-between gap-3 pt-1.5 mt-1 border-t">
-                    <span className="text-gray-500 text-xs">Reorder level</span>
-                    <input defaultValue={String(r[2] === '—' ? '' : r[2]).replace(/,/g, '')} onBlur={e => saveReorder(String(r[0]), e.target.value.replace(/[^0-9.]/g, ''))} className="w-24 border rounded px-2 py-1 text-xs text-right" placeholder="level" />
+                {view === 'low' && canEdit && (() => { const st = settings.get(String(r[0]).toUpperCase()); return (
+                  <div className="pt-1.5 mt-1 border-t space-y-1.5">
+                    <div className="flex items-center justify-between gap-3"><span className="text-gray-500 text-xs">Reorder level</span><input defaultValue={st?.reorder_level ?? ''} onBlur={e => saveSettings(String(r[0]), { reorder_level: numOrNull(e.target.value.replace(/[^0-9.]/g, '')) })} className="w-24 border rounded px-2 py-1 text-xs text-right" placeholder="level" /></div>
+                    <div className="flex items-center justify-between gap-3"><span className="text-gray-500 text-xs">Target (max)</span><input defaultValue={st?.reorder_max ?? ''} disabled={!!planMsg} onBlur={e => saveSettings(String(r[0]), { reorder_max: numOrNull(e.target.value.replace(/[^0-9.]/g, '')) })} className="w-24 border rounded px-2 py-1 text-xs text-right disabled:bg-gray-100" placeholder="max" /></div>
+                    <div className="flex items-center justify-between gap-3"><span className="text-gray-500 text-xs">Lead time (days)</span><input defaultValue={st?.lead_time_days ?? ''} disabled={!!planMsg} onBlur={e => saveSettings(String(r[0]), { lead_time_days: intOrNull(e.target.value.replace(/[^0-9]/g, '')) })} className="w-24 border rounded px-2 py-1 text-xs text-right disabled:bg-gray-100" placeholder="days" /></div>
                   </div>
-                )}
+                ) })()}
               </div>
               {view === 'item' && (
                 <button onClick={() => toggleExp(String(r[0]))} className="text-xs text-emerald-700 hover:underline mt-2">{expanded.has(String(r[0])) ? '▾ Hide bins & batches' : '▸ Show bins & batches'}</button>

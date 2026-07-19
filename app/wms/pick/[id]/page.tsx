@@ -28,6 +28,19 @@ const effExp = (s: { exp_date: string | null; batch_no: string; created_at: stri
   if (s.exp_date) return s.exp_date
   const bd = batchDate(s.batch_no); return bd ? plusYear(bd) : plusYear(s.created_at.slice(0, 10))
 }
+// EXPIRY POLICY: a lot is expired only if it HAS a real exp_date in the past (null = never
+// expired). Near-expiry = within 180 days (non-blocking warning). Uses the RAW exp_date,
+// never effExp (which is a FEFO-sort fallback only).
+const NEAR_EXPIRY_DAYS = 180
+const todayMidnight = () => new Date(new Date().toDateString())
+const isExpired = (s: { exp_date: string | null }) => !!s.exp_date && new Date(s.exp_date + 'T00:00:00') < todayMidnight()
+const nearExpiry = (s: { exp_date: string | null }) => {
+  if (!s.exp_date) return false
+  const e = new Date(s.exp_date + 'T00:00:00'), t = todayMidnight()
+  if (e < t) return false
+  const lim = new Date(t); lim.setDate(lim.getDate() + NEAR_EXPIRY_DAYS)
+  return e < lim
+}
 const STATUS_CHIP: Record<string, string> = {
   Review: 'bg-amber-100 text-amber-700', Released: 'bg-emerald-100 text-emerald-700',
   Picking: 'bg-emerald-100 text-emerald-700', Picked: 'bg-emerald-100 text-emerald-700',
@@ -40,6 +53,7 @@ export default function WmsPickPage() {
   const canEdit = !!profile && can(profile, 'warehouse', 'edit')
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
   const isAdmin = profile?.role === 'admin'
+  const canOverride = isHO || isAdmin   // who may release an expired lot
 
   const [order, setOrder] = useState<Order | null>(null)
   const [lines, setLines] = useState<Line[]>([])
@@ -50,7 +64,7 @@ export default function WmsPickPage() {
   const [qtyInput, setQtyInput] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState('')
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
-  const [scanFor, setScanFor] = useState<{ line: Line; stock: Stock; qty: number } | null>(null)
+  const [scanFor, setScanFor] = useState<{ line: Line; stock: Stock; qty: number; overrideExpiry?: boolean; overrideReason?: string | null } | null>(null)
   const [pickMode, setPickMode] = useState<'manual' | 'scan'>('manual')
   const [checkNote, setCheckNote] = useState('')
   const [checkedQty, setCheckedQty] = useState<Record<string, string>>({})   // lineId → verified qty
@@ -102,6 +116,8 @@ export default function WmsPickPage() {
   const availFor = useCallback((itemCode: string) => {
     return stock.filter(s => s.item_code === itemCode && availQty(s) > 0 && locMeta.get(s.location_id)?.location_type !== 'STAGE' && locMeta.get(s.location_id)?.pickable !== false).slice().sort((a, b) => {
       const la = locMeta.get(a.location_id), lb = locMeta.get(b.location_id)
+      const exA = isExpired(a) ? 1 : 0, exB = isExpired(b) ? 1 : 0   // expired lots sink to the bottom (never suggested)
+      if (exA !== exB) return exA - exB
       const slA = la?.location_type === 'SL' ? 0 : 1, slB = lb?.location_type === 'SL' ? 0 : 1
       if (slA !== slB) return slA - slB
       const ea = effExp(a), eb = effExp(b)   // no expiry → treated as received + 1 year (FEFO only)
@@ -114,7 +130,7 @@ export default function WmsPickPage() {
 
   // FEFO allocation (which bins/batches to pull) for the printed pick list.
   const allocate = useCallback((itemCode: string, need: number) => {
-    const rows = availFor(itemCode)
+    const rows = availFor(itemCode).filter(r => !isExpired(r))   // auto-FEFO never allocates an expired lot
     const allocs: { bin: string; batch: string; exp: string | null; qty: number }[] = []
     let left = need
     for (const r of rows) {
@@ -207,11 +223,12 @@ export default function WmsPickPage() {
     doc.save(`Outstanding_${(order?.order_no || 'order').replace(/[\/\s]/g, '-')}.pdf`)
   }
 
-  async function pickFromBin(l: Line, s: Stock, qty: number) {
+  async function pickFromBin(l: Line, s: Stock, qty: number, overrideExpiry = false, overrideReason: string | null = null) {
     if (!canEdit || qty <= 0) return
     setBusy(l.id); setErr(''); setMsg('')
     const { data, error } = await supabase.rpc('wms_pick_from_bin', {
       p_line_id: l.id, p_location_id: s.location_id, p_batch: s.batch_no, p_qty: qty, p_reference: order?.order_no ?? null,
+      p_override_expiry: overrideExpiry, p_override_reason: overrideReason,
     })
     setBusy('')
     if (error) { setErr(error.message); return }
@@ -361,9 +378,24 @@ export default function WmsPickPage() {
     return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`
   }
 
-  function startPick(l: Line, s: Stock, qty: number) {
+  function startPick(l: Line, s: Stock, qty: number, overrideExpiry = false, overrideReason: string | null = null) {
     if (!canEdit || !(qty > 0)) return
-    setErr(''); setScanFor({ line: l, stock: s, qty })
+    setErr(''); setScanFor({ line: l, stock: s, qty, overrideExpiry, overrideReason })
+  }
+
+  // Gate a pick on expiry: an expired lot is blocked for normal staff; Head Office / admin
+  // can release it after typing a reason (passed through as an override to the RPC).
+  function requestPick(l: Line, s: Stock, qty: number) {
+    if (!canEdit || !s || !(qty > 0)) return
+    if (isExpired(s)) {
+      if (!canOverride) { setErr(`${l.item_code} from ${s.location_code} is EXPIRED (${fmtDate(s.exp_date)}) — only Head Office can release it.`); return }
+      const reason = window.prompt(`This lot is EXPIRED (${fmtDate(s.exp_date)}).\n\nHead Office override — type a reason to release ${l.item_code} from ${s.location_code}:`, '')
+      if (reason === null) return
+      if (!reason.trim()) { setErr('A reason is required to release an expired lot.'); return }
+      if (pickMode === 'manual') pickFromBin(l, s, qty, true, reason.trim()); else startPick(l, s, qty, true, reason.trim())
+      return
+    }
+    if (pickMode === 'manual') pickFromBin(l, s, qty); else startPick(l, s, qty)
   }
 
   // All bins (for the manual-fill picker) — sorted by code.
@@ -524,22 +556,34 @@ export default function WmsPickPage() {
                             <label className="block text-xs text-gray-500 mb-1">Pick from bin / batch <span className="text-gray-400">(earliest expiry first)</span></label>
                             <select value={chosenId} onChange={e => { setChosen(c => ({ ...c, [l.id]: e.target.value })); setQtyInput(q => { const nq = { ...q }; delete nq[l.id]; return nq }) }}
                               className="w-full border rounded-lg px-3 py-2 text-sm">
-                              {avail.map((a, i) => (
-                                <option key={a.id} value={a.id}>
-                                  {a.location_code}{a.batch_no ? ` · b:${a.batch_no}` : ' · no batch'}{a.exp_date ? ` · exp ${fmtDate(a.exp_date)}` : ''} — {fmtQty(availQty(a))} available{i === 0 ? '  (suggested)' : ''}
-                                </option>
-                              ))}
+                              {avail.map((a, i) => {
+                                const expTxt = a.exp_date
+                                  ? (isExpired(a) ? ` · ⛔ EXPIRED ${fmtDate(a.exp_date)}` : nearExpiry(a) ? ` · ⏳ expiring soon ${fmtDate(a.exp_date)}` : ` · exp ${fmtDate(a.exp_date)}`)
+                                  : ''
+                                return (
+                                  <option key={a.id} value={a.id}>
+                                    {a.location_code}{a.batch_no ? ` · b:${a.batch_no}` : ' · no batch'}{expTxt} — {fmtQty(availQty(a))} available{i === 0 && !isExpired(a) ? '  (suggested)' : ''}
+                                  </option>
+                                )
+                              })}
                             </select>
+                            {chosenStock && isExpired(chosenStock) && (
+                              <p className="text-xs mt-1.5 text-red-600 font-medium">⛔ EXPIRED {fmtDate(chosenStock.exp_date)} — {canOverride ? 'Head Office override required (you’ll be asked for a reason).' : 'Head Office only.'}</p>
+                            )}
+                            {chosenStock && !isExpired(chosenStock) && nearExpiry(chosenStock) && (
+                              <p className="text-xs mt-1.5 text-amber-600 font-medium">⏳ Expiring soon ({fmtDate(chosenStock.exp_date)}) — you can still pick it.</p>
+                            )}
                           </div>
                           <div>
                             <label className="block text-xs text-gray-500 mb-1">Qty</label>
                             <input value={input} onChange={e => setQtyInput(q => ({ ...q, [l.id]: e.target.value.replace(/[^0-9.]/g, '') }))}
                               className="w-24 border rounded-lg px-3 py-2 text-sm text-right tabular-nums" inputMode="decimal" />
                           </div>
-                          <button onClick={() => chosenStock && (pickMode === 'manual' ? pickFromBin(l, chosenStock, Number(input)) : startPick(l, chosenStock, Number(input)))}
-                            disabled={busy === l.id || !chosenStock || !(Number(input) > 0)}
+                          <button onClick={() => chosenStock && requestPick(l, chosenStock, Number(input))}
+                            disabled={busy === l.id || !chosenStock || !(Number(input) > 0) || (!!chosenStock && isExpired(chosenStock) && !canOverride)}
+                            title={chosenStock && isExpired(chosenStock) && !canOverride ? 'Expired — Head Office only' : ''}
                             className="bg-emerald-700 text-white px-4 py-2 rounded-lg hover:bg-emerald-800 disabled:opacity-50 text-sm font-medium whitespace-nowrap">
-                            {busy === l.id ? 'Picking…' : pickMode === 'manual' ? 'Pick' : '📷 Scan & pick'}
+                            {busy === l.id ? 'Picking…' : chosenStock && isExpired(chosenStock) && !canOverride ? 'Expired — HO only' : pickMode === 'manual' ? 'Pick' : '📷 Scan & pick'}
                           </button>
                         </div>
                       )}
@@ -657,7 +701,7 @@ export default function WmsPickPage() {
             { label: 'bin', expectText: scanFor.stock.location_code, match: raw => matchBin(raw, scanFor.stock.location_code) },
             { label: 'item / batch', expectText: `${scanFor.line.item_code}${scanFor.stock.batch_no ? ' · ' + scanFor.stock.batch_no : ''}`, match: raw => matchItem(raw, scanFor.line.item_code, scanFor.stock.batch_no) },
           ]}
-          onComplete={() => { const s = scanFor; setScanFor(null); if (s) pickFromBin(s.line, s.stock, s.qty) }}
+          onComplete={() => { const s = scanFor; setScanFor(null); if (s) pickFromBin(s.line, s.stock, s.qty, s.overrideExpiry, s.overrideReason) }}
           onCancel={() => setScanFor(null)}
         />
       )}
