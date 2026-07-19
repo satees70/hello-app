@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
-import { requirePerm } from '@/lib/apiAuth'
+import { getCaller } from '@/lib/apiAuth'
+import { can } from '@/lib/permissions'
 
 // Reads a customer Credit Note PDF (raised in SQL Account) and returns its header + line items so
 // the upload form can auto-fill. Nothing is written to the DB here — the page saves after review.
@@ -44,8 +45,12 @@ const PROMPT = `This is a customer CREDIT NOTE (CN) PDF from an accounting syste
 Call record_credit_note with what you find. If a field isn't present, use an empty string (or an empty list for lines).`
 
 export async function POST(request: Request) {
-  const auth = await requirePerm(request, 'sales', 'view')
-  if (auth instanceof NextResponse) return auth
+  // Credit Notes live in the warehouse app but are also sales data — allow either grant.
+  const caller = await getCaller(request)
+  if (!caller) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
+  if (!can(caller.profile, 'warehouse', 'view') && !can(caller.profile, 'sales', 'view')) {
+    return NextResponse.json({ error: 'You don’t have permission to do that.' }, { status: 403 })
+  }
   try {
     const form = await request.formData()
     const file = form.get('file')
