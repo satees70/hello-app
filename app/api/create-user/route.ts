@@ -10,7 +10,7 @@ const supabaseAdmin = createClient(
 const LOGIN_DOMAIN = 'avina.local'
 
 export async function POST(request: Request) {
-  const auth = await requirePerm(request, 'users', 'view')
+  const auth = await requirePerm(request, 'users', 'edit')   // creating accounts is an edit action, not view
   if (auth instanceof NextResponse) return auth
 
   const { username, email, password, full_name, factory_code, factory_codes, readonly_factories, warehouse_user, offsite_allowed, role, permissions, capabilities, location_perms, customer_filter } = await request.json()
