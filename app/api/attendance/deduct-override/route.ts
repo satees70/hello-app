@@ -28,7 +28,7 @@ export async function POST(request: Request) {
   }
 
   const { error } = await admin.from('late_deduction_overrides')
-    .upsert({ employee_code, month, no_deduct: true, updated_at: new Date().toISOString() }, { onConflict: 'employee_code,month' })
+    .upsert({ employee_code, month, no_deduct: true, updated_at: new Date().toISOString(), updated_by: auth.userId, updated_by_name: auth.profile.full_name || null }, { onConflict: 'employee_code,month' })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })
 }

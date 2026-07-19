@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   }
   if (end_date < start_date) return NextResponse.json({ error: 'Return date is before departure.' }, { status: 400 })
 
-  const { error } = await admin.from('outstation_trips').insert({ employee_code, start_date, end_date })
+  const { error } = await admin.from('outstation_trips').insert({ employee_code, start_date, end_date, created_by: auth.userId, created_by_name: auth.profile.full_name || null })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })
 }

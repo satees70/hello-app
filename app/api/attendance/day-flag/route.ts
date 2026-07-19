@@ -37,7 +37,7 @@ export async function POST(request: Request) {
   }
 
   const { error } = await admin.from('attendance_day_flags')
-    .upsert({ employee_code, work_date, ...next, updated_at: new Date().toISOString() }, { onConflict: 'employee_code,work_date' })
+    .upsert({ employee_code, work_date, ...next, updated_at: new Date().toISOString(), updated_by: auth.userId, updated_by_name: auth.profile.full_name || null }, { onConflict: 'employee_code,work_date' })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })
 }
