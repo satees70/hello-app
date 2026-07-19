@@ -331,6 +331,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/wms/putaway', label: 'Putaway', module: 'wms_inbound' },
       { href: '/warehouse', label: 'Warehouse Receiving', module: 'goods_received' },
       { href: '/incoming', label: 'Goods Received', module: 'goods_received' },
+      { href: '/wms/returns', label: 'Supplier Returns', module: 'wms_inbound' },
     ] },
     { header: 'Stock', items: [
       { href: '/wms/stock', label: 'Stock', module: 'wms_stock' },

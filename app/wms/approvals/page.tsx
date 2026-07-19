@@ -18,7 +18,7 @@ interface Correction { id: string; kind: string; old_item_code: string | null; o
 interface ManualPick { id: string; order_no: string | null; item_code: string | null; description: string | null; uom: string | null; qty: number; note: string | null; status: string; requested_by_name: string | null; created_at: string }
 interface Damage { id: string; order_no: string | null; item_code: string | null; description: string | null; uom: string | null; qty: number; from_location_code: string | null; batch: string | null; note: string | null; status: string; reported_by_name: string | null; created_at: string }
 
-type Pend = { key: string; id: string; kind: string; summary: string; by: string | null; at: string; approve: () => Promise<void>; reject: (() => Promise<void>) | null; open?: string }
+type Pend = { key: string; id: string; kind: string; summary: string; by: string | null; at: string; approve: () => Promise<void>; reject: (() => Promise<void>) | null; extra?: { label: string; fn: () => Promise<void> } | null; open?: string }
 
 const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
 
@@ -124,6 +124,7 @@ export default function WmsApprovalsPage() {
   const rejectManual = (id: string) => run(id, 'reject_wms_manual_pick', { p_id: id }, 'Manual fill rejected.')
   const damageWriteoff = (id: string) => run(id, 'resolve_damage_writeoff', { p_id: id }, 'Damaged stock written off.')
   const damageReturn = (id: string) => run(id, 'resolve_damage_return', { p_id: id }, 'Damaged stock returned to its bin.')
+  const damageReturnSupplier = (id: string) => run(id, 'resolve_damage_return_supplier', { p_id: id }, 'Damaged stock returned to supplier.')
 
   const allPending = useMemo<Pend[]>(() => [
     ...bypasses.map(b => ({ key: `bp|${b.id}`, id: b.id, kind: 'Photo bypass', summary: `${b.item_code || '—'}${b.description ? ' · ' + b.description : ''}${b.reason ? ' · ' + b.reason : ''}`, by: b.requested_by_name, at: b.created_at, approve: () => approveBypass(b.id).then(() => {}), reject: () => rejectBypass(b.id).then(() => {}) })),
@@ -140,8 +141,8 @@ export default function WmsApprovalsPage() {
         : `Edit PO line ${c.old_item_code || '?'} → ${c.new_item_code || c.old_item_code || '?'}${c.new_qty != null ? ' · qty ' + c.new_qty : ''}${c.reason ? ' · ' + c.reason : ''}`,
       by: c.requested_by_name, at: c.created_at, approve: () => approveCorr(c.id).then(() => {}), reject: () => rejectCorr(c.id).then(() => {}) })),
     ...manualPicks.map(m => ({ key: `mp|${m.id}`, id: m.id, kind: 'Manual pick', summary: `${m.order_no || 'order'} · ${m.item_code || '?'}${m.description ? ' — ' + m.description : ''} · fill ${m.qty}${m.uom ? ' ' + m.uom : ''}${m.note ? ' · ' + m.note : ''}`, by: m.requested_by_name, at: m.created_at, approve: () => approveManual(m.id).then(() => {}), reject: () => rejectManual(m.id).then(() => {}) })),
-    ...damages.map(d => ({ key: `dg|${d.id}`, id: d.id, kind: 'Damaged stock', summary: `${d.item_code || '?'}${d.description ? ' — ' + d.description : ''} · ${d.qty}${d.uom ? ' ' + d.uom : ''} from ${d.from_location_code || '?'}${d.batch ? ' · b:' + d.batch : ''} → DAMAGED${d.note ? ' · ' + d.note : ''}${d.order_no ? ' · ' + d.order_no : ''}`, by: d.reported_by_name, at: d.created_at, approve: () => damageWriteoff(d.id).then(() => {}), reject: () => damageReturn(d.id).then(() => {}) })),
-  ].sort((a, b) => (a.at || '').localeCompare(b.at || '')), [bypasses, adjs, checks, counts, papers, corrections, manualPicks, damages, approveBypass, rejectBypass, approveAdj, rejectAdj, approveCheck, rejectCheck, applyCount, approvePaper, rejectPaper, approveCorr, rejectCorr, approveManual, rejectManual, damageWriteoff, damageReturn])
+    ...damages.map(d => ({ key: `dg|${d.id}`, id: d.id, kind: 'Damaged stock', summary: `${d.item_code || '?'}${d.description ? ' — ' + d.description : ''} · ${d.qty}${d.uom ? ' ' + d.uom : ''} from ${d.from_location_code || '?'}${d.batch ? ' · b:' + d.batch : ''} → DAMAGED${d.note ? ' · ' + d.note : ''}${d.order_no ? ' · ' + d.order_no : ''}`, by: d.reported_by_name, at: d.created_at, approve: () => damageWriteoff(d.id).then(() => {}), reject: () => damageReturn(d.id).then(() => {}), extra: { label: 'Return to supplier', fn: () => damageReturnSupplier(d.id).then(() => {}) } })),
+  ].sort((a, b) => (a.at || '').localeCompare(b.at || '')), [bypasses, adjs, checks, counts, papers, corrections, manualPicks, damages, approveBypass, rejectBypass, approveAdj, rejectAdj, approveCheck, rejectCheck, applyCount, approvePaper, rejectPaper, approveCorr, rejectCorr, approveManual, rejectManual, damageWriteoff, damageReturn, damageReturnSupplier])
 
   async function approveAll() {
     if (allPending.length === 0) return
@@ -217,6 +218,7 @@ export default function WmsApprovalsPage() {
                       {isHO ? <div className="flex gap-2">
                         <button onClick={() => p.approve()} disabled={busy === p.id || allBusy} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50 text-xs">{approveLabel(p.kind)}</button>
                         {p.reject && <button onClick={() => p.reject!()} disabled={busy === p.id || allBusy} className={`text-white px-3 py-1 rounded disabled:opacity-50 text-xs ${p.kind === 'Damaged stock' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}>{rejectLabel(p.kind)}</button>}
+                        {p.extra && <button onClick={() => p.extra!.fn()} disabled={busy === p.id || allBusy} className="bg-rose-600 text-white px-3 py-1 rounded hover:bg-rose-700 disabled:opacity-50 text-xs">{p.extra.label}</button>}
                       </div> : <span className="text-gray-400 text-xs">—</span>}
                     </td>
                   </tr>
@@ -240,6 +242,7 @@ export default function WmsApprovalsPage() {
                   <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-2.5 pt-2 border-t text-xs">
                     <button onClick={() => p.approve()} disabled={busy === p.id || allBusy} className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50">{approveLabel(p.kind)}</button>
                     {p.reject && <button onClick={() => p.reject!()} disabled={busy === p.id || allBusy} className={`text-white px-3 py-1 rounded disabled:opacity-50 ${p.kind === 'Damaged stock' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}>{rejectLabel(p.kind)}</button>}
+                    {p.extra && <button onClick={() => p.extra!.fn()} disabled={busy === p.id || allBusy} className="bg-rose-600 text-white px-3 py-1 rounded hover:bg-rose-700 disabled:opacity-50">{p.extra.label}</button>}
                   </div>
                 )}
               </div>

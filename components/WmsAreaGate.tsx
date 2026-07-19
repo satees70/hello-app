@@ -13,6 +13,7 @@ const AREA_BY_PREFIX: [string, ModuleKey][] = [
   ['/wms/purchase-orders', 'wms_inbound'],
   ['/wms/suppliers', 'wms_inbound'],
   ['/wms/putaway', 'wms_inbound'],
+  ['/wms/returns', 'wms_inbound'],
   ['/wms/stock', 'wms_stock'],
   ['/wms/locations', 'wms_stock'],
   ['/wms/transfers', 'wms_stock'],
