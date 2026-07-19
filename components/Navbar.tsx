@@ -24,6 +24,9 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const onWarehouse = onWhHost || pathname.startsWith('/wms') || pathname.startsWith('/warehouse')
   const isHO = factoryCode === 'HEAD_OFFICE'
   const isAdmin = role === 'admin'
+  // Only Head Office / admin (HOD) may cross between the two apps. Everyone else stays in
+  // their own app — warehouse staff in the warehouse menu, production staff in the portal.
+  const bothApps = isHO || isAdmin
   const [pendingCount, setPendingCount] = useState(0)
   const [wmsPending, setWmsPending] = useState(0)   // WMS approvals waiting (badge on the Control tab)
   const [toasts, setToasts] = useState<Toast[]>([])
@@ -295,7 +298,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/import', label: 'Shipments', module: 'import' as ModuleKey },
       { href: '/import/suppliers', label: 'Suppliers', module: 'import' as ModuleKey },
     ] },
-    { header: 'Warehouse (WMS)', items: [
+    ...(bothApps ? [{ header: 'Warehouse (WMS)', items: [
       { href: '/wms/locations', label: 'Location Map', module: 'warehouse' as ModuleKey },
       { href: '/wms/stock', label: 'Stock', module: 'warehouse' as ModuleKey },
       { href: '/wms/purchase-orders', label: 'Purchase Orders', module: 'warehouse' as ModuleKey },
@@ -309,7 +312,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/wms/reports', label: 'Reports', module: 'warehouse' as ModuleKey },
       { href: '/wms/labels', label: 'Labels (QR)', module: 'warehouse' as ModuleKey },
       { href: '/wms/movements', label: 'Movements', module: 'warehouse' as ModuleKey },
-    ] },
+    ] }] : []),
     { header: 'Setup', items: [
       { href: '/admin/packing-lines', label: 'Packing Lines', module: 'packing_lines' as ModuleKey },
       { href: '/admin/grinding-machines', label: 'Grinding Machines', module: 'grinding' as ModuleKey },
@@ -348,6 +351,14 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/wms/reports', label: 'Reports', module: 'warehouse' },
       { href: '/wms/reports/stock-card', label: 'Stock Card', module: 'warehouse' },
       { href: '/wms/labels', label: 'Labels (QR)', module: 'warehouse' },
+    ] },
+    // Supply — the production-facing pages warehouse staff use (pick for the factory, track it out).
+    { header: 'Supply', items: [
+      { href: '/sales-orders', label: 'Outstanding Sales Order', module: 'sales' },
+      { href: '/material-requests', label: 'Pick Runs', module: 'material_requests' },
+      { href: '/warehouse/pick-production', label: 'Pick for Production', module: 'material_requests' },
+      { href: '/dispatch/dashboard', label: 'Delivery Status', module: 'dispatch' as ModuleKey },
+      { href: '/discussion', label: 'Discussion' },
     ] },
   ]
   // Hide links the user has no View permission for (admins/HO/unconfigured see all).
@@ -403,8 +414,8 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
           </div>
         </div>
         <div className="flex items-center gap-2 sm:gap-4 text-sm shrink-0">
-          {/* Quick jump back to the Production app / main portal from the Warehouse app */}
-          {onWarehouse && (
+          {/* Quick jump to the Production app / main portal — HOD only (others stay in one app) */}
+          {onWarehouse && bothApps && (
             <div className="hidden lg:flex items-center gap-3 text-emerald-100 text-xs">
               <Link href="/production" className="hover:text-white whitespace-nowrap">🏭 Production ↗</Link>
               <Link href="/dashboard" className="hover:text-white whitespace-nowrap">Portal ↗</Link>
@@ -488,7 +499,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
               ))}
             </div>
           ))}
-          {onWarehouse && (
+          {onWarehouse && bothApps && (
             <div className="border-b border-emerald-600/60 py-1">
               <Link href="/production" onClick={() => setMobileOpen(false)} className="block px-5 py-2.5 text-sm hover:bg-emerald-800">🏭 Production app ↗</Link>
               <Link href="/dashboard" onClick={() => setMobileOpen(false)} className="block px-5 py-2.5 text-sm hover:bg-emerald-800">Main portal ↗</Link>
