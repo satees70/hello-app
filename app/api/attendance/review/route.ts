@@ -52,7 +52,9 @@ export async function POST(request: Request) {
       ? (body.manual_minutes != null && body.manual_minutes !== '' ? Number(body.manual_minutes) : 0)
       : null,
     manual_time,
-    reviewed_by_name: (body.reviewed_by_name ?? '').trim() || null,
+    // Record the AUTHENTICATED reviewer — never trust a client-supplied name.
+    reviewed_by: auth.userId,
+    reviewed_by_name: auth.profile.full_name || null,
     reviewed_at: new Date().toISOString(),
   }
 

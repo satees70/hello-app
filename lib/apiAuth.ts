@@ -25,6 +25,7 @@ const admin = createClient(
 export interface CallerProfile {
   id: string
   role: string
+  full_name: string | null
   permissions: Permissions | null
   readonly_factories: string[] | null
   location_perms: LocationPerms | null
@@ -51,7 +52,7 @@ export async function getCaller(request: Request): Promise<Caller | null> {
   if (error || !user) return null
   const { data: profile } = await admin
     .from('profiles')
-    .select('id, role, permissions, readonly_factories, location_perms, warehouse_user')
+    .select('id, role, full_name, permissions, readonly_factories, location_perms, warehouse_user')
     .eq('id', user.id)
     .single()
   if (!profile) return null

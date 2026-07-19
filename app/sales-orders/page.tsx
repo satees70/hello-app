@@ -763,9 +763,10 @@ export default function SalesOrdersPage() {
   async function handleDelete(doc: SalesImport) {
     if (!confirm(`Delete "${doc.file_name}"?\n\nThis removes the PDF, all extracted lines and their change requests. This cannot be undone.`)) return
     setError(''); setSuccess('')
-    await supabase.storage.from('sales-orders').remove([doc.file_path])
-    const { error: delError } = await supabase.from('sales_imports').delete().eq('id', doc.id)
+    // Audit + delete via RPC (records who/when + line & change-request counts before the cascade).
+    const { error: delError } = await supabase.rpc('delete_sales_document', { p_import_id: doc.id })
     if (delError) { setError(`Delete failed: ${delError.message}`); return }
+    await supabase.storage.from('sales-orders').remove([doc.file_path])
     if (linesFor?.id === doc.id) { setLinesFor(null); setLines([]) }
     setSuccess(`Deleted "${doc.file_name}".`)
     loadImports()
