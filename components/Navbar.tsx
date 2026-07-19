@@ -266,6 +266,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/transport', label: 'Lorry Internal Transfer', module: 'dispatch' as ModuleKey },
       { href: '/supplier', label: 'Supplier (to order)', module: 'sales' },
       { href: '/cancel-notes', label: 'Cancel Notes', module: 'sales' },
+      { href: '/credit-notes', label: 'Credit Notes (CN)', module: 'sales' },
     ] },
     { header: 'Receiving', items: [
       { href: '/material-requests', label: 'Material Requests', module: 'material_requests' },
