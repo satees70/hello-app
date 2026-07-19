@@ -343,6 +343,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       { href: '/wms/dispatch', label: 'Delivery Orders', module: 'wms_picking' },
     ] },
     { header: 'Control', items: [
+      { href: '/wms/qc', label: 'Quality Check', module: 'wms_control' },
       { href: '/wms/counts', label: 'Stock Counts', module: 'wms_control' },
       { href: '/wms/approvals', label: 'Approvals', module: 'wms_control' },
       { href: '/wms/reports/expiry', label: 'Expiry Alerts', module: 'wms_control' },
