@@ -1,3 +1,9 @@
+-- ⚠️ SUPERSEDED — DO NOT RUN THIS FILE. Run db/2026-07-fix-stock-audit-and-reconcile.sql
+-- instead. This version's reconciliation logs to `stock_adjustments`, which is actually the
+-- stock-adjustment REQUEST table and lacks old_qty/new_qty — so it errors and rolls back
+-- (the create_direct_delivery fix below never applies). The corrective file re-does the fix
+-- and reconciles against a dedicated item_stock_audit table. Kept only for history.
+-- ----------------------------------------------------------------------------
 -- Stop "direct delivery" from creating negative item_stock, and clean up the mess it made.
 -- ----------------------------------------------------------------------------
 -- THE LEAK: create_direct_delivery (Dispatch → deliver straight off a sales line)
