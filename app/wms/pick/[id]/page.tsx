@@ -256,10 +256,11 @@ export default function WmsPickPage() {
   // and how much; it's sent to Head Office (HOD). On approval it books a real pick OUT of that bin.
   function openManual(l: Line) {
     if (!canEdit) return
-    const rem = remainingOf(l)
-    if (rem <= 0) return
+    // A no-stock line has its outstanding parked in no_stock_qty (its quantity was shrunk to picked).
+    const target = l.no_stock ? clean(Number(l.no_stock_qty ?? 0)) : remainingOf(l)
+    if (target <= 0) return
     const sug = availFor(l.item_code)[0]
-    setManualFor(l); setMfLoc(sug?.location_id || ''); setMfBatch(sug?.batch_no || ''); setMfQty(String(clean(rem))); setErr(''); setMsg('')
+    setManualFor(l); setMfLoc(sug?.location_id || ''); setMfBatch(sug?.batch_no || ''); setMfQty(String(target)); setErr(''); setMsg('')
   }
   async function submitManual() {
     if (!manualFor) return
@@ -511,6 +512,11 @@ export default function WmsPickPage() {
                           {canEdit && Number(l.no_stock_qty) > 0 && <button onClick={() => reopenLine(l)} disabled={busy === l.id}
                             title="Stock has arrived — re-open the outstanding quantity so you can pick it."
                             className="text-xs border border-emerald-500 text-emerald-700 rounded px-2 py-1 hover:bg-emerald-50 disabled:opacity-50 whitespace-nowrap">🔄 Stock arrived — pick outstanding</button>}
+                          {canEdit && Number(l.no_stock_qty) > 0 && (manualPending.has(l.id)
+                            ? <span className="text-xs text-sky-600 font-medium whitespace-nowrap">⏳ Manual fill pending HO approval</span>
+                            : <button onClick={() => openManual(l)} disabled={busy === l.id}
+                                title="You physically have this stock but it isn't in the system — request Head Office approval to pick it."
+                                className="text-xs border border-sky-500 text-sky-700 rounded px-2 py-1 hover:bg-sky-50 disabled:opacity-50 whitespace-nowrap">🖐 Manual fill (HOD approval)</button>)}
                         </>
                       : done && <span className="text-emerald-700 text-sm font-medium">✓ Picked</span>}
                     {canEdit && Number(l.qty_picked) > 0 && ['Picking', 'Picked', 'Reserved'].includes(order.status) && (
