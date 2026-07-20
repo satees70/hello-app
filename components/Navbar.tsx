@@ -350,6 +350,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       // Re-enable by restoring: { href: '/wms/qc', label: 'Quality Check', module: 'wms_control' },
       { href: '/wms/counts', label: 'Stock Counts', module: 'wms_control' },
       { href: '/wms/approvals', label: 'Approvals', module: 'wms_control' },
+      { href: '/wms/reservations', label: 'Stale Reservations', module: 'wms_control' },
       { href: '/wms/reports/expiry', label: 'Expiry Alerts', module: 'wms_control' },
     ] },
     { header: 'Reports', items: [
