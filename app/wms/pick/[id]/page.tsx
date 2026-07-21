@@ -53,7 +53,8 @@ export default function WmsPickPage() {
   const canEdit = !!profile && can(profile, 'warehouse', 'edit')
   const isHO = profile?.factory_code === 'HEAD_OFFICE'
   const isAdmin = profile?.role === 'admin'
-  const canOverride = isHO || isAdmin   // who may release an expired lot
+  const canOverride = isHO || isAdmin   // who may release an expired lot / fill stock into negative
+  const fillLabel = canOverride ? '🖐 Fill now (HO — allows negative)' : '🖐 Manual fill (needs HOD approval)'
 
   const [order, setOrder] = useState<Order | null>(null)
   const [lines, setLines] = useState<Line[]>([])
@@ -265,17 +266,22 @@ export default function WmsPickPage() {
   async function submitManual() {
     if (!manualFor) return
     const l = manualFor
-    const rem = remainingOf(l)
+    // A no-stock line parks its outstanding in no_stock_qty (its quantity was shrunk to picked).
+    const outstanding = l.no_stock ? clean(Number(l.no_stock_qty ?? 0)) : remainingOf(l)
     const qty = Number(mfQty)
     if (!mfLoc) { setErr('Choose the bin you are filling from.'); return }
     if (!(qty > 0)) { setErr('Enter a quantity greater than zero.'); return }
-    if (qty > rem) { setErr(`Only ${fmtQty(rem)} is still outstanding on this line.`); return }
+    if (qty > outstanding) { setErr(`Only ${fmtQty(outstanding)} is still outstanding on this line.`); return }
     setBusy(l.id); setErr(''); setMsg('')
-    const { error } = await supabase.rpc('request_wms_manual_pick', { p_line_id: l.id, p_qty: qty, p_location_id: mfLoc, p_batch: mfBatch.trim() || null, p_note: null })
+    // Head Office books it immediately (stock may go negative); everyone else sends it for approval.
+    const rpc = canOverride ? 'wms_manual_pick_now' : 'request_wms_manual_pick'
+    const { error } = await supabase.rpc(rpc, { p_line_id: l.id, p_qty: qty, p_location_id: mfLoc, p_batch: mfBatch.trim() || null, p_note: null })
     setBusy('')
-    if (error) { setErr(/request_wms_manual_pick|wms_manual_pick_requests|location_id/.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-manual-pick.sql then db/2026-07-wms-manual-pick-v2.sql in the Supabase SQL editor.' : error.message); return }
+    if (error) { setErr(/wms_manual_pick_now|request_wms_manual_pick|wms_manual_pick_requests|location_id/.test(error.message) && /does not exist|schema cache|could not find/i.test(error.message) ? 'This needs a database update — run db/2026-07-wms-manual-pick-nostock.sql and db/2026-07-wms-manual-pick-hod-now.sql in the Supabase SQL editor.' : error.message); return }
     setManualFor(null)
-    setMsg(`Manual fill of ${fmtQty(qty)} ${l.item_code} sent to Head Office for approval.`); load()
+    setMsg(canOverride
+      ? `Filled ${fmtQty(qty)} ${l.item_code} — booked as picked (stock may go negative for a count to reconcile).`
+      : `Manual fill of ${fmtQty(qty)} ${l.item_code} sent to Head Office for approval.`); load()
   }
 
   // Picker flags that the info or the physical stock is wrong (qty / batch inaccurate, or the stock
@@ -515,8 +521,8 @@ export default function WmsPickPage() {
                           {canEdit && Number(l.no_stock_qty) > 0 && (manualPending.has(l.id)
                             ? <span className="text-xs text-sky-600 font-medium whitespace-nowrap">⏳ Manual fill pending HO approval</span>
                             : <button onClick={() => openManual(l)} disabled={busy === l.id}
-                                title="You physically have this stock but it isn't in the system — request Head Office approval to pick it."
-                                className="text-xs border border-sky-500 text-sky-700 rounded px-2 py-1 hover:bg-sky-50 disabled:opacity-50 whitespace-nowrap">🖐 Manual fill (HOD approval)</button>)}
+                                title={canOverride ? "Book this stock as picked now — allowed to go negative for a stock count to reconcile." : "You physically have this stock but it isn't in the system — request Head Office approval to pick it."}
+                                className="text-xs border border-sky-500 text-sky-700 rounded px-2 py-1 hover:bg-sky-50 disabled:opacity-50 whitespace-nowrap">{fillLabel}</button>)}
                         </>
                       : done && <span className="text-emerald-700 text-sm font-medium">✓ Picked</span>}
                     {canEdit && Number(l.qty_picked) > 0 && ['Picking', 'Picked', 'Reserved'].includes(order.status) && (
@@ -552,8 +558,8 @@ export default function WmsPickPage() {
                                 <button onClick={() => confirmNoStock(l)} disabled={busy === l.id}
                                   className="text-xs border border-amber-500 text-amber-700 rounded px-3 py-1.5 hover:bg-amber-50 font-medium disabled:opacity-50">{busy === l.id ? '…' : 'Confirm no stock'}</button>
                                 <button onClick={() => openManual(l)} disabled={busy === l.id}
-                                  title="You physically have the stock but it isn't in the system — enter the quantity; Head Office approves before it's booked."
-                                  className="text-xs border border-sky-500 text-sky-700 rounded px-3 py-1.5 hover:bg-sky-50 font-medium disabled:opacity-50">🖐 Manual fill (needs HOD approval)</button>
+                                  title={canOverride ? "Book this stock as picked now — allowed to go negative for a stock count to reconcile." : "You physically have the stock but it isn't in the system — enter the quantity; Head Office approves before it's booked."}
+                                  className="text-xs border border-sky-500 text-sky-700 rounded px-3 py-1.5 hover:bg-sky-50 font-medium disabled:opacity-50">{fillLabel}</button>
                               </>}
                         </div>
                       : (
@@ -601,8 +607,8 @@ export default function WmsPickPage() {
                           : <>
                               <button onClick={() => confirmNoStock(l)} disabled={busy === l.id} className="underline text-amber-700 hover:text-amber-800">Confirm short (no more stock)</button>
                               <button onClick={() => openManual(l)} disabled={busy === l.id}
-                                title="You physically have the stock but it isn't in the system — enter the quantity; Head Office approves before it's booked."
-                                className="underline text-sky-700 hover:text-sky-800">🖐 Manual fill (needs HOD approval)</button>
+                                title={canOverride ? "Book this stock as picked now — allowed to go negative for a stock count to reconcile." : "You physically have the stock but it isn't in the system — enter the quantity; Head Office approves before it's booked."}
+                                className="underline text-sky-700 hover:text-sky-800">{fillLabel}</button>
                             </>}
                       </div>
                     )}
@@ -719,7 +725,9 @@ export default function WmsPickPage() {
             <h2 className="text-lg font-bold mb-1">🖐 Manual fill</h2>
             <p className="text-gray-500 text-sm mb-4">
               <span className="font-mono">{manualFor.item_code}</span>{manualFor.description ? ` — ${manualFor.description}` : ''}
-              <span className="block text-xs mt-0.5">The stock isn&apos;t in the system but you physically have it. Say which bin + batch and how much — Head Office approves, then it&apos;s booked as a pick OUT of that bin.</span>
+              <span className="block text-xs mt-0.5">{canOverride
+                ? 'Say which bin + batch and how much — it’s booked as a pick OUT of that bin right away. The bin is allowed to go negative (a stock count reconciles the difference later).'
+                : 'The stock isn’t in the system but you physically have it. Say which bin + batch and how much — Head Office approves, then it’s booked as a pick OUT of that bin.'}</span>
             </p>
             <label className="block text-xs text-gray-500 mb-1">Bin you are filling from</label>
             <select value={mfLoc} onChange={e => setMfLoc(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm mb-3">
@@ -740,7 +748,7 @@ export default function WmsPickPage() {
             <div className="flex justify-end gap-2">
               <button onClick={() => setManualFor(null)} className="border px-5 py-2 rounded-lg hover:bg-gray-50 font-medium text-sm">Cancel</button>
               <button onClick={submitManual} disabled={busy === manualFor.id || !mfLoc || !(Number(mfQty) > 0)}
-                className="bg-sky-700 text-white px-5 py-2 rounded-lg hover:bg-sky-800 disabled:opacity-50 font-medium text-sm">Send to Head Office</button>
+                className="bg-sky-700 text-white px-5 py-2 rounded-lg hover:bg-sky-800 disabled:opacity-50 font-medium text-sm">{canOverride ? 'Fill now' : 'Send to Head Office'}</button>
             </div>
           </div>
         </div>
