@@ -28,7 +28,7 @@ export default function WmsHome() {
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
     const start = new Date(); start.setHours(0, 0, 0, 0)
-    const [stock, settings, res, allOrd, allPo, todayMv, discRes, facNeg] = await Promise.all([
+    const [stock, settings, res, allOrd, allPo, todayMv, discRes] = await Promise.all([
       fetchAll<StockRow>('wms_stock', 'item_code, location_code, batch_no, exp_date, quantity'),
       fetchAll<{ item_code: string; reorder_level: number | null }>('wms_item_settings', 'item_code, reorder_level'),
       supabase.from('wms_reservations').select('qty').eq('status', 'active').limit(5000),
@@ -36,7 +36,6 @@ export default function WmsHome() {
       supabase.from('wms_purchase_orders').select('status').limit(3000),
       supabase.from('wms_stock_moves').select('move_type').gte('created_at', start.toISOString()).limit(5000),
       supabase.from('wms_count_lines').select('expected_qty, counted_qty, is_unexpected').not('counted_qty', 'is', null).limit(2000),
-      supabase.rpc('item_stock_negatives'),   // factory / raw-material rows below zero (HO / own-factory)
     ])
     const t0 = start.getTime()
     let onHand = 0, goodsIn = 0, dispatchHold = 0, putawayLines = 0, binsNeg = 0
@@ -59,8 +58,7 @@ export default function WmsHome() {
     const tally = (rows: { [k: string]: string }[] | null, key: string) => { const m: Record<string, number> = {}; for (const r of rows || []) m[r[key]] = (m[r[key]] || 0) + 1; return m }
     const ord = tally(allOrd.data, 'status'), po = tally(allPo.data, 'status')
     setOrdStatus(ord); setPoStatus(po); setToday(tally(todayMv.data, 'move_type'))
-    const facNegCount = ((facNeg.data as unknown[]) || []).length
-    setExp(e); setAlerts({ expired: e.expired, near: e.w30, low, disc, neg: binsNeg + facNegCount })
+    setExp(e); setAlerts({ expired: e.expired, near: e.w30, low, disc, neg: binsNeg })
     setSnap({ items: items.size, onHand: clean(onHand), bins: bins.size, batches: batches.size, goodsIn: clean(goodsIn), dispatchHold: clean(dispatchHold), reserved })
     setWork({
       po: (po['Open'] || 0) + (po['Partially Received'] || 0),
