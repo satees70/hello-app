@@ -9,18 +9,29 @@ import { useProfile } from '@/hooks/useProfile'
 // Sales-Orders Pending Changes page, but scoped to WMS: photo bypass, stock
 // adjustments, pick-check quantity corrections, and stock counts waiting to be applied.
 
-interface GrnBypass { id: string; item_code: string | null; description: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null }
-interface StockAdj { id: string; factory_code: string | null; item_code: string; description: string | null; direction: string; quantity: number; batch_no: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null }
-interface WmsCheck { id: string; order_no: string | null; note: string | null; corrections: { item_code: string; picked_qty: number; checked_qty: number }[] | null; status: string; requested_by_name: string | null; created_at: string }
-interface CountTask { id: string; count_no: string | null; name: string | null; status: string; completed_by_name: string | null; completed_at: string | null; created_by_name: string | null; created_at: string; wms_count_lines?: { count: number }[] }
-interface PaperReq { id: string; do_number: string | null; factory_code: string | null; item_code: string | null; line_id: string | null; line_kind: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string; qty?: number | null; batch?: string | null; description?: string | null }
-interface Correction { id: string; kind: string; old_item_code: string | null; old_description: string | null; new_item_code: string | null; new_description: string | null; old_qty: number | null; new_qty: number | null; location_code: string | null; batch_no: string | null; new_batch: string | null; flag_fields: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string }
-interface ManualPick { id: string; order_no: string | null; item_code: string | null; description: string | null; uom: string | null; qty: number; location_code: string | null; batch: string | null; note: string | null; status: string; requested_by_name: string | null; created_at: string }
-interface Damage { id: string; order_no: string | null; item_code: string | null; description: string | null; uom: string | null; qty: number; from_location_code: string | null; batch: string | null; note: string | null; status: string; reported_by_name: string | null; created_at: string }
+interface Reviewed { reviewed_by_name?: string | null; reviewed_at?: string | null }
+interface GrnBypass extends Reviewed { id: string; item_code: string | null; description: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string }
+interface StockAdj extends Reviewed { id: string; factory_code: string | null; item_code: string; description: string | null; direction: string; quantity: number; batch_no: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string }
+interface WmsCheck extends Reviewed { id: string; order_no: string | null; note: string | null; corrections: { item_code: string; picked_qty: number; checked_qty: number }[] | null; status: string; requested_by_name: string | null; created_at: string }
+interface CountTask { id: string; count_no: string | null; name: string | null; status: string; completed_by_name: string | null; completed_at: string | null; created_by_name: string | null; created_at: string; applied_by_name?: string | null; applied_at?: string | null; wms_count_lines?: { count: number }[] }
+interface PaperReq extends Reviewed { id: string; do_number: string | null; factory_code: string | null; item_code: string | null; line_id: string | null; line_kind: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string; qty?: number | null; batch?: string | null; description?: string | null }
+interface Correction extends Reviewed { id: string; kind: string; old_item_code: string | null; old_description: string | null; new_item_code: string | null; new_description: string | null; old_qty: number | null; new_qty: number | null; location_code: string | null; batch_no: string | null; new_batch: string | null; flag_fields: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string }
+interface ManualPick extends Reviewed { id: string; order_no: string | null; item_code: string | null; description: string | null; uom: string | null; qty: number; location_code: string | null; batch: string | null; note: string | null; status: string; requested_by_name: string | null; created_at: string }
+interface Damage extends Reviewed { id: string; order_no: string | null; item_code: string | null; description: string | null; uom: string | null; qty: number; from_location_code: string | null; batch: string | null; note: string | null; status: string; reported_by_name: string | null; created_at: string }
 
 type Pend = { key: string; id: string; kind: string; summary: string; by: string | null; at: string; approve: () => Promise<void>; reject: (() => Promise<void>) | null; extra?: { label: string; fn: () => Promise<void> } | null; open?: string }
+type Hist = { key: string; kind: string; summary: string; by: string | null; reviewer: string | null; outcome: string; at: string | null }
 
 const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+
+// Summary builders — shared by the pending list and the history list.
+const bypassSummary = (b: GrnBypass) => `${b.item_code || '—'}${b.description ? ' · ' + b.description : ''}${b.reason ? ' · ' + b.reason : ''}`
+const adjSummary = (a: StockAdj) => `${a.item_code}${a.description ? ' — ' + a.description : ''} · ${a.direction === 'in' ? 'IN' : 'OUT'} ${a.quantity}${a.batch_no ? ' · ' + a.batch_no : ''}${a.reason ? ' · ' + a.reason : ''}`
+const checkSummary = (w: WmsCheck) => `${w.order_no || 'order'} · ${(w.corrections || []).map(c => `${c.item_code} ${c.picked_qty}→${c.checked_qty}`).join(', ') || w.note || ''}`
+const countSummary = (c: CountTask) => `${c.count_no || '—'}${c.name ? ' · ' + c.name : ''} · ${c.wms_count_lines?.[0]?.count ?? 0} line(s) counted`
+const paperSummary = (p: PaperReq) => `${p.do_number || 'DO'}${p.factory_code ? ' · ' + p.factory_code : ''}${p.item_code ? ' · ' + p.item_code + (p.description ? ' — ' + p.description : '') : ' · whole DO'}${p.qty != null ? ' · qty ' + p.qty : ''}${p.batch ? ' · b:' + p.batch : ''}${p.line_kind === 'return' ? ' · return' : ''}${p.reason ? ' · ' + p.reason : ''} — receive on paper (no photos)`
+const manualSummary = (m: ManualPick) => `${m.order_no || 'order'} · ${m.item_code || '?'}${m.description ? ' — ' + m.description : ''} · fill ${m.qty}${m.uom ? ' ' + m.uom : ''}${m.location_code ? ' from ' + m.location_code : ''}${m.batch ? ' · b:' + m.batch : ''}${m.note ? ' · ' + m.note : ''}`
+const damageSummary = (d: Damage) => `${d.item_code || '?'}${d.description ? ' — ' + d.description : ''} · ${d.qty}${d.uom ? ' ' + d.uom : ''} from ${d.from_location_code || '?'}${d.batch ? ' · b:' + d.batch : ''} → DAMAGED${d.note ? ' · ' + d.note : ''}${d.order_no ? ' · ' + d.order_no : ''}`
 
 // A Putaway flag (item / qty / batch) raised for the office to revise. Shows each flagged field
 // with the suggested correction (or "check" when the warehouse didn't know the right value).
@@ -32,6 +43,15 @@ function flagSummary(c: Correction): string {
   if (fields.includes('batch')) parts.push(`batch ${c.batch_no || '—'}${c.new_batch ? ' → ' + c.new_batch : ' (check)'}`)
   return `Flag ${c.old_item_code || '?'}${c.location_code ? ' · ' + c.location_code : ''} — ${parts.join(', ') || 'check'}${c.reason ? ' · ' + c.reason : ''}`
 }
+function corrSummary(c: Correction): string {
+  return c.kind === 'stock_recode'
+    ? `Re-code stock ${c.old_item_code || '?'} → ${c.new_item_code || '?'}${c.location_code ? ' · ' + c.location_code : ''}${c.batch_no ? ' · b:' + c.batch_no : ''}${c.reason ? ' · ' + c.reason : ''}`
+    : (c.kind === 'batch_flag' || c.kind === 'stock_flag')
+    ? flagSummary(c)
+    : c.kind === 'stock_adjust'
+    ? `${Number(c.new_qty) === 0 ? 'Remove' : 'Adjust'} stock ${c.old_item_code || '?'}${c.location_code ? ' · ' + c.location_code : ''}${c.batch_no ? ' · b:' + c.batch_no : ''} · ${c.old_qty ?? '?'} → ${c.new_qty ?? '?'}${c.reason ? ' · ' + c.reason : ''}`
+    : `Edit PO line ${c.old_item_code || '?'} → ${c.new_item_code || c.old_item_code || '?'}${c.new_qty != null ? ' · qty ' + c.new_qty : ''}${c.reason ? ' · ' + c.reason : ''}`
+}
 const KIND_CHIP: Record<string, string> = {
   'Photo bypass': 'bg-indigo-100 text-indigo-700',
   'Stock adjustment': 'bg-amber-100 text-amber-700',
@@ -42,6 +62,7 @@ const KIND_CHIP: Record<string, string> = {
   'Manual pick': 'bg-sky-100 text-sky-700',
   'Damaged stock': 'bg-orange-100 text-orange-700',
 }
+const OUTCOME_CHIP = (s: string) => /reject|cancel/i.test(s) ? 'bg-red-100 text-red-700' : /return/i.test(s) ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
 const approveLabel = (k: string) => k === 'Stock count' ? 'Apply' : k === 'Damaged stock' ? 'Write off' : 'Approve'
 const rejectLabel = (k: string) => k === 'Damaged stock' ? 'Return to stock' : 'Reject'
 
@@ -60,6 +81,8 @@ export default function WmsApprovalsPage() {
   const [busy, setBusy] = useState('')
   const [allBusy, setAllBusy] = useState(false)
   const [err, setErr] = useState(''); const [msg, setMsg] = useState('')
+  const [tab, setTab] = useState<'pending' | 'history'>('pending')
+  const [history, setHistory] = useState<Hist[]>([]); const [histBusy, setHistBusy] = useState(false)
 
   const load = useCallback(async () => {
     const [{ data: bp }, { data: sa }, { data: wc }, { data: ct }, { data: pr }] = await Promise.all([
@@ -96,6 +119,35 @@ export default function WmsApprovalsPage() {
     setManualPicks((mp as ManualPick[]) || [])
     setDamages((dg as Damage[]) || [])
   }, [])
+
+  // History = everything already reviewed (approved / rejected / applied / written-off …), newest first.
+  const loadHistory = useCallback(async () => {
+    setHistBusy(true); setErr('')
+    const L = 60
+    const [bp, sa, wc, cr, mp, dg, pr, ct] = await Promise.all([
+      supabase.from('grn_bypass_requests').select('*').neq('status', 'Pending').order('reviewed_at', { ascending: false }).limit(L),
+      supabase.from('stock_adjustments').select('*').neq('status', 'Pending').order('reviewed_at', { ascending: false }).limit(L),
+      supabase.from('wms_check_qty_requests').select('id, order_no, note, corrections, status, requested_by_name, reviewed_by_name, reviewed_at').neq('status', 'Pending').order('reviewed_at', { ascending: false }).limit(L),
+      supabase.from('wms_correction_requests').select('id, kind, old_item_code, old_description, new_item_code, new_description, old_qty, new_qty, location_code, batch_no, new_batch, flag_fields, reason, status, requested_by_name, reviewed_by_name, reviewed_at').neq('status', 'Pending').order('reviewed_at', { ascending: false }).limit(L),
+      supabase.from('wms_manual_pick_requests').select('id, order_no, item_code, description, uom, qty, location_code, batch, note, status, requested_by_name, reviewed_by_name, reviewed_at').neq('status', 'Pending').order('reviewed_at', { ascending: false }).limit(L),
+      supabase.from('wms_damage_reports').select('id, order_no, item_code, description, uom, qty, from_location_code, batch, note, status, reported_by_name, reviewed_by_name, reviewed_at').neq('status', 'Pending').order('reviewed_at', { ascending: false }).limit(L),
+      supabase.from('do_paper_receipt_requests').select('id, do_number, factory_code, item_code, line_id, line_kind, reason, status, requested_by_name, reviewed_by_name, reviewed_at').neq('status', 'Pending').order('reviewed_at', { ascending: false }).limit(L),
+      supabase.from('wms_count_tasks').select('id, count_no, name, status, created_by_name, applied_by_name, applied_at, wms_count_lines(count)').in('status', ['Applied', 'Cancelled']).order('applied_at', { ascending: false }).limit(L),
+    ])
+    const rows: Hist[] = [
+      ...((bp.data as GrnBypass[]) || []).map(b => ({ key: `bp|${b.id}`, kind: 'Photo bypass', summary: bypassSummary(b), by: b.requested_by_name, reviewer: b.reviewed_by_name ?? null, outcome: b.status, at: b.reviewed_at ?? null })),
+      ...((sa.data as StockAdj[]) || []).map(a => ({ key: `sa|${a.id}`, kind: 'Stock adjustment', summary: adjSummary(a), by: a.requested_by_name, reviewer: a.reviewed_by_name ?? null, outcome: a.status, at: a.reviewed_at ?? null })),
+      ...((wc.data as WmsCheck[]) || []).map(w => ({ key: `wc|${w.id}`, kind: 'Pick check correction', summary: checkSummary(w), by: w.requested_by_name, reviewer: w.reviewed_by_name ?? null, outcome: w.status, at: w.reviewed_at ?? null })),
+      ...((cr.data as Correction[]) || []).map(c => ({ key: `cr|${c.id}`, kind: 'Correction', summary: corrSummary(c), by: c.requested_by_name, reviewer: c.reviewed_by_name ?? null, outcome: c.status, at: c.reviewed_at ?? null })),
+      ...((mp.data as ManualPick[]) || []).map(m => ({ key: `mp|${m.id}`, kind: 'Manual pick', summary: manualSummary(m), by: m.requested_by_name, reviewer: m.reviewed_by_name ?? null, outcome: m.status, at: m.reviewed_at ?? null })),
+      ...((dg.data as Damage[]) || []).map(d => ({ key: `dg|${d.id}`, kind: 'Damaged stock', summary: damageSummary(d), by: d.reported_by_name, reviewer: d.reviewed_by_name ?? null, outcome: d.status, at: d.reviewed_at ?? null })),
+      ...((pr.data as PaperReq[]) || []).map(p => ({ key: `pr|${p.id}`, kind: 'Paper receipt', summary: paperSummary(p), by: p.requested_by_name, reviewer: p.reviewed_by_name ?? null, outcome: p.status, at: p.reviewed_at ?? null })),
+      ...((ct.data as CountTask[]) || []).map(c => ({ key: `ct|${c.id}`, kind: 'Stock count', summary: countSummary(c), by: c.created_by_name, reviewer: c.applied_by_name ?? null, outcome: c.status, at: c.applied_at ?? null })),
+    ].sort((a, b) => (b.at || '').localeCompare(a.at || ''))
+    setHistory(rows.slice(0, 200)); setHistBusy(false)
+  }, [])
+
+  useEffect(() => { if (profile && tab === 'history') loadHistory() }, [profile, tab, loadHistory])
 
   useEffect(() => {
     if (!profile) return
@@ -142,21 +194,14 @@ export default function WmsApprovalsPage() {
   const damageReturnSupplier = (id: string) => run(id, 'resolve_damage_return_supplier', { p_id: id }, 'Damaged stock returned to supplier.')
 
   const allPending = useMemo<Pend[]>(() => [
-    ...bypasses.map(b => ({ key: `bp|${b.id}`, id: b.id, kind: 'Photo bypass', summary: `${b.item_code || '—'}${b.description ? ' · ' + b.description : ''}${b.reason ? ' · ' + b.reason : ''}`, by: b.requested_by_name, at: b.created_at, approve: () => approveBypass(b.id).then(() => {}), reject: () => rejectBypass(b.id).then(() => {}) })),
-    ...adjs.map(a => ({ key: `sa|${a.id}`, id: a.id, kind: 'Stock adjustment', summary: `${a.item_code}${a.description ? ' — ' + a.description : ''} · ${a.direction === 'in' ? 'IN' : 'OUT'} ${a.quantity}${a.batch_no ? ' · ' + a.batch_no : ''}${a.reason ? ' · ' + a.reason : ''}`, by: a.requested_by_name, at: a.created_at, approve: () => approveAdj(a.id).then(() => {}), reject: () => rejectAdj(a.id).then(() => {}) })),
-    ...checks.map(w => ({ key: `wc|${w.id}`, id: w.id, kind: 'Pick check correction', summary: `${w.order_no || 'order'} · ${(w.corrections || []).map(c => `${c.item_code} ${c.picked_qty}→${c.checked_qty}`).join(', ') || w.note || ''}`, by: w.requested_by_name, at: w.created_at, approve: () => approveCheck(w.id).then(() => {}), reject: () => rejectCheck(w.id).then(() => {}) })),
-    ...counts.map(c => ({ key: `ct|${c.id}`, id: c.id, kind: 'Stock count', summary: `${c.count_no || '—'}${c.name ? ' · ' + c.name : ''} · ${c.wms_count_lines?.[0]?.count ?? 0} line(s) counted`, by: c.completed_by_name || c.created_by_name, at: c.completed_at || c.created_at, approve: () => applyCount(c.id).then(() => {}), reject: null, open: `/wms/counts/${c.id}` })),
-    ...papers.map(p => ({ key: `pr|${p.id}`, id: p.id, kind: 'Paper receipt', summary: `${p.do_number || 'DO'}${p.factory_code ? ' · ' + p.factory_code : ''}${p.item_code ? ' · ' + p.item_code + (p.description ? ' — ' + p.description : '') : ' · whole DO'}${p.qty != null ? ' · qty ' + p.qty : ''}${p.batch ? ' · b:' + p.batch : ''}${p.line_kind === 'return' ? ' · return' : ''}${p.reason ? ' · ' + p.reason : ''} — receive on paper (no photos)`, by: p.requested_by_name, at: p.created_at, approve: () => approvePaper(p.id).then(() => {}), reject: () => rejectPaper(p.id).then(() => {}) })),
-    ...corrections.map(c => ({ key: `cr|${c.id}`, id: c.id, kind: 'Correction', summary: c.kind === 'stock_recode'
-        ? `Re-code stock ${c.old_item_code || '?'} → ${c.new_item_code || '?'}${c.location_code ? ' · ' + c.location_code : ''}${c.batch_no ? ' · b:' + c.batch_no : ''}${c.reason ? ' · ' + c.reason : ''}`
-        : (c.kind === 'batch_flag' || c.kind === 'stock_flag')
-        ? flagSummary(c)
-        : c.kind === 'stock_adjust'
-        ? `${Number(c.new_qty) === 0 ? 'Remove' : 'Adjust'} stock ${c.old_item_code || '?'}${c.location_code ? ' · ' + c.location_code : ''}${c.batch_no ? ' · b:' + c.batch_no : ''} · ${c.old_qty ?? '?'} → ${c.new_qty ?? '?'}${c.reason ? ' · ' + c.reason : ''}`
-        : `Edit PO line ${c.old_item_code || '?'} → ${c.new_item_code || c.old_item_code || '?'}${c.new_qty != null ? ' · qty ' + c.new_qty : ''}${c.reason ? ' · ' + c.reason : ''}`,
-      by: c.requested_by_name, at: c.created_at, approve: () => approveCorr(c.id).then(() => {}), reject: () => rejectCorr(c.id).then(() => {}) })),
-    ...manualPicks.map(m => ({ key: `mp|${m.id}`, id: m.id, kind: 'Manual pick', summary: `${m.order_no || 'order'} · ${m.item_code || '?'}${m.description ? ' — ' + m.description : ''} · fill ${m.qty}${m.uom ? ' ' + m.uom : ''}${m.location_code ? ' from ' + m.location_code : ''}${m.batch ? ' · b:' + m.batch : ''}${m.note ? ' · ' + m.note : ''}`, by: m.requested_by_name, at: m.created_at, approve: () => approveManual(m.id).then(() => {}), reject: () => rejectManual(m.id).then(() => {}) })),
-    ...damages.map(d => ({ key: `dg|${d.id}`, id: d.id, kind: 'Damaged stock', summary: `${d.item_code || '?'}${d.description ? ' — ' + d.description : ''} · ${d.qty}${d.uom ? ' ' + d.uom : ''} from ${d.from_location_code || '?'}${d.batch ? ' · b:' + d.batch : ''} → DAMAGED${d.note ? ' · ' + d.note : ''}${d.order_no ? ' · ' + d.order_no : ''}`, by: d.reported_by_name, at: d.created_at, approve: () => damageWriteoff(d.id).then(() => {}), reject: () => damageReturn(d.id).then(() => {}), extra: { label: 'Return to supplier', fn: () => damageReturnSupplier(d.id).then(() => {}) } })),
+    ...bypasses.map(b => ({ key: `bp|${b.id}`, id: b.id, kind: 'Photo bypass', summary: bypassSummary(b), by: b.requested_by_name, at: b.created_at, approve: () => approveBypass(b.id).then(() => {}), reject: () => rejectBypass(b.id).then(() => {}) })),
+    ...adjs.map(a => ({ key: `sa|${a.id}`, id: a.id, kind: 'Stock adjustment', summary: adjSummary(a), by: a.requested_by_name, at: a.created_at, approve: () => approveAdj(a.id).then(() => {}), reject: () => rejectAdj(a.id).then(() => {}) })),
+    ...checks.map(w => ({ key: `wc|${w.id}`, id: w.id, kind: 'Pick check correction', summary: checkSummary(w), by: w.requested_by_name, at: w.created_at, approve: () => approveCheck(w.id).then(() => {}), reject: () => rejectCheck(w.id).then(() => {}) })),
+    ...counts.map(c => ({ key: `ct|${c.id}`, id: c.id, kind: 'Stock count', summary: countSummary(c), by: c.completed_by_name || c.created_by_name, at: c.completed_at || c.created_at, approve: () => applyCount(c.id).then(() => {}), reject: null, open: `/wms/counts/${c.id}` })),
+    ...papers.map(p => ({ key: `pr|${p.id}`, id: p.id, kind: 'Paper receipt', summary: paperSummary(p), by: p.requested_by_name, at: p.created_at, approve: () => approvePaper(p.id).then(() => {}), reject: () => rejectPaper(p.id).then(() => {}) })),
+    ...corrections.map(c => ({ key: `cr|${c.id}`, id: c.id, kind: 'Correction', summary: corrSummary(c), by: c.requested_by_name, at: c.created_at, approve: () => approveCorr(c.id).then(() => {}), reject: () => rejectCorr(c.id).then(() => {}) })),
+    ...manualPicks.map(m => ({ key: `mp|${m.id}`, id: m.id, kind: 'Manual pick', summary: manualSummary(m), by: m.requested_by_name, at: m.created_at, approve: () => approveManual(m.id).then(() => {}), reject: () => rejectManual(m.id).then(() => {}) })),
+    ...damages.map(d => ({ key: `dg|${d.id}`, id: d.id, kind: 'Damaged stock', summary: damageSummary(d), by: d.reported_by_name, at: d.created_at, approve: () => damageWriteoff(d.id).then(() => {}), reject: () => damageReturn(d.id).then(() => {}), extra: { label: 'Return to supplier', fn: () => damageReturnSupplier(d.id).then(() => {}) } })),
   ].sort((a, b) => (a.at || '').localeCompare(b.at || '')), [bypasses, adjs, checks, counts, papers, corrections, manualPicks, damages, approveBypass, rejectBypass, approveAdj, rejectAdj, approveCheck, rejectCheck, applyCount, approvePaper, rejectPaper, approveCorr, rejectCorr, approveManual, rejectManual, damageWriteoff, damageReturn, damageReturnSupplier])
 
   async function approveAll() {
@@ -193,13 +238,44 @@ export default function WmsApprovalsPage() {
             <h1 className="text-2xl font-bold">WMS Approvals</h1>
             <p className="text-gray-500 text-sm mt-1">Warehouse requests waiting for Head Office — approve them one by one, or all at once.</p>
           </div>
-          <button onClick={load} className="text-sm text-emerald-700 hover:underline">↻ Refresh</button>
+          <button onClick={() => (tab === 'history' ? loadHistory() : load())} className="text-sm text-emerald-700 hover:underline">↻ Refresh</button>
+        </div>
+
+        <div className="flex gap-1.5 mt-3">
+          {(['pending', 'history'] as const).map(t => (
+            <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded-lg text-sm font-medium ${tab === t ? 'bg-emerald-700 text-white' : 'bg-white border text-gray-600 hover:bg-gray-50'}`}>
+              {t === 'pending' ? 'Pending' : 'History'}
+            </button>
+          ))}
         </div>
 
         {!isHO && <p className="text-sm bg-amber-50 text-amber-700 border border-amber-200 rounded-lg p-3 my-4">Only Head Office can approve these. You can see what’s pending, but the buttons are hidden.</p>}
         {err && <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg my-4">{err}</p>}
         {msg && <p className="text-emerald-700 text-sm bg-emerald-50 border border-emerald-200 p-3 rounded-lg my-4">✓ {msg}</p>}
 
+        {tab === 'history' ? (
+          <div className="bg-white rounded-xl shadow-sm border mt-5">
+            <div className="px-4 py-2.5 border-b bg-gray-50 font-semibold">🗂 History <span className="text-gray-400 font-normal">— {history.length} reviewed request(s), newest first</span></div>
+            <div className="overflow-auto max-h-[36rem]">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b sticky top-0 z-10"><tr>{['Type', 'Details', 'Outcome', 'By / when'].map(h => <th key={h} className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">{h}</th>)}</tr></thead>
+                <tbody>
+                  {histBusy && history.length === 0 && <tr><td colSpan={4} className="text-center py-12 text-gray-400">Loading…</td></tr>}
+                  {!histBusy && history.length === 0 && <tr><td colSpan={4} className="text-center py-12 text-gray-400">No reviewed requests yet.</td></tr>}
+                  {history.map(h => (
+                    <tr key={h.key} className="border-b last:border-0 hover:bg-gray-50 align-top">
+                      <td className="px-3 py-2.5 whitespace-nowrap"><span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${KIND_CHIP[h.kind] || 'bg-gray-100 text-gray-700'}`}>{h.kind}</span></td>
+                      <td className="px-3 py-2.5 min-w-[260px]">{h.summary}</td>
+                      <td className="px-3 py-2.5 whitespace-nowrap"><span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${OUTCOME_CHIP(h.outcome)}`}>{h.outcome}</span></td>
+                      <td className="px-3 py-2.5 whitespace-nowrap text-xs"><span className="block">{h.reviewer || '—'}</span><span className="block text-gray-400">{fmt(h.at)}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-gray-400 px-4 py-2 border-t">Requests you (or other Head Office users) already approved, rejected, applied or wrote off — showing who acted and when. Most recent {history.length} shown.</p>
+          </div>
+        ) : (<>
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 my-5">
           {CARDS.map(c => (
             <div key={c.kind} className="bg-white rounded-xl border shadow-sm px-4 py-3">
@@ -265,6 +341,7 @@ export default function WmsApprovalsPage() {
           </div>
           <p className="text-xs text-gray-400 px-4 py-2 border-t">Photo bypasses, stock adjustments and pick-check corrections all appear here. “Stock count” rows are counts finished and waiting to be applied — approving one applies its stock corrections. The full Sales/production Pending Changes page still lives under Sales Orders.</p>
         </div>
+        </>)}
       </div>
     </div>
   )
