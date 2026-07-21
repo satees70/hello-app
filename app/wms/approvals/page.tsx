@@ -13,7 +13,7 @@ interface GrnBypass { id: string; item_code: string | null; description: string 
 interface StockAdj { id: string; factory_code: string | null; item_code: string; description: string | null; direction: string; quantity: number; batch_no: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string; reviewed_by_name: string | null; reviewed_at: string | null }
 interface WmsCheck { id: string; order_no: string | null; note: string | null; corrections: { item_code: string; picked_qty: number; checked_qty: number }[] | null; status: string; requested_by_name: string | null; created_at: string }
 interface CountTask { id: string; count_no: string | null; name: string | null; status: string; completed_by_name: string | null; completed_at: string | null; created_by_name: string | null; created_at: string; wms_count_lines?: { count: number }[] }
-interface PaperReq { id: string; do_number: string | null; factory_code: string | null; item_code: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string }
+interface PaperReq { id: string; do_number: string | null; factory_code: string | null; item_code: string | null; line_id: string | null; line_kind: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string; qty?: number | null; batch?: string | null }
 interface Correction { id: string; kind: string; old_item_code: string | null; old_description: string | null; new_item_code: string | null; new_description: string | null; old_qty: number | null; new_qty: number | null; location_code: string | null; batch_no: string | null; new_batch: string | null; flag_fields: string | null; reason: string | null; status: string; requested_by_name: string | null; created_at: string }
 interface ManualPick { id: string; order_no: string | null; item_code: string | null; description: string | null; uom: string | null; qty: number; location_code: string | null; batch: string | null; note: string | null; status: string; requested_by_name: string | null; created_at: string }
 interface Damage { id: string; order_no: string | null; item_code: string | null; description: string | null; uom: string | null; qty: number; from_location_code: string | null; batch: string | null; note: string | null; status: string; reported_by_name: string | null; created_at: string }
@@ -67,8 +67,23 @@ export default function WmsApprovalsPage() {
       supabase.from('stock_adjustments').select('*').eq('status', 'Pending').order('created_at', { ascending: false }),
       supabase.from('wms_check_qty_requests').select('id, order_no, note, corrections, status, requested_by_name, created_at').eq('status', 'Pending').order('created_at', { ascending: false }),
       supabase.from('wms_count_tasks').select('id, count_no, name, status, completed_by_name, completed_at, created_by_name, created_at, wms_count_lines(count)').eq('status', 'Review').order('completed_at', { ascending: false }),
-      supabase.from('do_paper_receipt_requests').select('id, do_number, factory_code, item_code, reason, status, requested_by_name, created_at').eq('status', 'Pending').order('created_at', { ascending: false }),
+      supabase.from('do_paper_receipt_requests').select('id, do_number, factory_code, item_code, line_id, line_kind, reason, status, requested_by_name, created_at').eq('status', 'Pending').order('created_at', { ascending: false }),
     ])
+    // Paper receipts store only the line reference — pull qty + batch from the referenced line
+    // (a finished-goods dispatch line, or a raw-material return line).
+    const paperRows = (pr as PaperReq[]) || []
+    const fgIds = paperRows.filter(p => p.line_kind !== 'return' && p.line_id).map(p => p.line_id as string)
+    const retIds = paperRows.filter(p => p.line_kind === 'return' && p.line_id).map(p => p.line_id as string)
+    const lineQB = new Map<string, { qty: number | null; batch: string | null }>()
+    if (fgIds.length) {
+      const { data: fg } = await supabase.from('dispatch_order_lines').select('id, quantity, batch_no').in('id', fgIds)
+      for (const l of (fg as { id: string; quantity: number | null; batch_no: string | null }[]) || []) lineQB.set(l.id, { qty: l.quantity, batch: l.batch_no })
+    }
+    if (retIds.length) {
+      const { data: rt } = await supabase.from('material_returns').select('id, quantity, batch_no').in('id', retIds)
+      for (const l of (rt as { id: string; quantity: number | null; batch_no: string | null }[]) || []) lineQB.set(l.id, { qty: l.quantity, batch: l.batch_no })
+    }
+    for (const p of paperRows) { const qb = p.line_id ? lineQB.get(p.line_id) : undefined; p.qty = qb?.qty ?? null; p.batch = qb?.batch ?? null }
     const { data: cr } = await supabase.from('wms_correction_requests').select('id, kind, old_item_code, old_description, new_item_code, new_description, old_qty, new_qty, location_code, batch_no, new_batch, flag_fields, reason, status, requested_by_name, created_at').eq('status', 'Pending').order('created_at', { ascending: false })
     const { data: mp } = await supabase.from('wms_manual_pick_requests').select('id, order_no, item_code, description, uom, qty, location_code, batch, note, status, requested_by_name, created_at').eq('status', 'Pending').order('created_at', { ascending: false })
     const { data: dg } = await supabase.from('wms_damage_reports').select('id, order_no, item_code, description, uom, qty, from_location_code, batch, note, status, reported_by_name, created_at').eq('status', 'Pending').order('created_at', { ascending: false })
@@ -76,7 +91,7 @@ export default function WmsApprovalsPage() {
     setAdjs((sa as StockAdj[]) || [])
     setChecks((wc as WmsCheck[]) || [])
     setCounts((ct as CountTask[]) || [])
-    setPapers((pr as PaperReq[]) || [])
+    setPapers(paperRows)
     setCorrections((cr as Correction[]) || [])
     setManualPicks((mp as ManualPick[]) || [])
     setDamages((dg as Damage[]) || [])
@@ -131,7 +146,7 @@ export default function WmsApprovalsPage() {
     ...adjs.map(a => ({ key: `sa|${a.id}`, id: a.id, kind: 'Stock adjustment', summary: `${a.item_code}${a.description ? ' — ' + a.description : ''} · ${a.direction === 'in' ? 'IN' : 'OUT'} ${a.quantity}${a.batch_no ? ' · ' + a.batch_no : ''}${a.reason ? ' · ' + a.reason : ''}`, by: a.requested_by_name, at: a.created_at, approve: () => approveAdj(a.id).then(() => {}), reject: () => rejectAdj(a.id).then(() => {}) })),
     ...checks.map(w => ({ key: `wc|${w.id}`, id: w.id, kind: 'Pick check correction', summary: `${w.order_no || 'order'} · ${(w.corrections || []).map(c => `${c.item_code} ${c.picked_qty}→${c.checked_qty}`).join(', ') || w.note || ''}`, by: w.requested_by_name, at: w.created_at, approve: () => approveCheck(w.id).then(() => {}), reject: () => rejectCheck(w.id).then(() => {}) })),
     ...counts.map(c => ({ key: `ct|${c.id}`, id: c.id, kind: 'Stock count', summary: `${c.count_no || '—'}${c.name ? ' · ' + c.name : ''} · ${c.wms_count_lines?.[0]?.count ?? 0} line(s) counted`, by: c.completed_by_name || c.created_by_name, at: c.completed_at || c.created_at, approve: () => applyCount(c.id).then(() => {}), reject: null, open: `/wms/counts/${c.id}` })),
-    ...papers.map(p => ({ key: `pr|${p.id}`, id: p.id, kind: 'Paper receipt', summary: `${p.do_number || 'DO'}${p.factory_code ? ' · ' + p.factory_code : ''}${p.item_code ? ' · item ' + p.item_code : ' · whole DO'}${p.reason ? ' · ' + p.reason : ''} — receive on paper (no photos)`, by: p.requested_by_name, at: p.created_at, approve: () => approvePaper(p.id).then(() => {}), reject: () => rejectPaper(p.id).then(() => {}) })),
+    ...papers.map(p => ({ key: `pr|${p.id}`, id: p.id, kind: 'Paper receipt', summary: `${p.do_number || 'DO'}${p.factory_code ? ' · ' + p.factory_code : ''}${p.item_code ? ' · item ' + p.item_code : ' · whole DO'}${p.qty != null ? ' · qty ' + p.qty : ''}${p.batch ? ' · b:' + p.batch : ''}${p.line_kind === 'return' ? ' · return' : ''}${p.reason ? ' · ' + p.reason : ''} — receive on paper (no photos)`, by: p.requested_by_name, at: p.created_at, approve: () => approvePaper(p.id).then(() => {}), reject: () => rejectPaper(p.id).then(() => {}) })),
     ...corrections.map(c => ({ key: `cr|${c.id}`, id: c.id, kind: 'Correction', summary: c.kind === 'stock_recode'
         ? `Re-code stock ${c.old_item_code || '?'} → ${c.new_item_code || '?'}${c.location_code ? ' · ' + c.location_code : ''}${c.batch_no ? ' · b:' + c.batch_no : ''}${c.reason ? ' · ' + c.reason : ''}`
         : (c.kind === 'batch_flag' || c.kind === 'stock_flag')
