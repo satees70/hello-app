@@ -42,8 +42,35 @@ export default function WmsCountsPage() {
   // "Specific items" scope: search the item master by name/code and pick — staff can't remember codes.
   const [pickedItems, setPickedItems] = useState<{ code: string; description: string | null }[]>([])
   const [itemQuery, setItemQuery] = useState(''); const [itemResults, setItemResults] = useState<{ code: string; description: string | null }[]>([]); const [searching, setSearching] = useState(false)
+  // "Specific bins" scope: pick real bins — typing them breaks on bin codes with spaces (e.g. "COLDROOM A").
+  const [pickedBins, setPickedBins] = useState<{ code: string; label: string | null }[]>([])
+  const [binQuery, setBinQuery] = useState(''); const [binResults, setBinResults] = useState<{ code: string; label: string | null }[]>([]); const [binSearching, setBinSearching] = useState(false)
 
   useEffect(() => { if (profile) load() }, [profile])
+
+  // Live bin search (by code OR label) for the "Specific bins" picker. Skips staging bins (not counted).
+  useEffect(() => {
+    if (scopeType !== 'bins') return
+    const q = binQuery.trim()
+    if (q.length < 1) { setBinResults([]); setBinSearching(false); return }
+    let active = true; setBinSearching(true)
+    const t = setTimeout(async () => {
+      const safe = q.replace(/[(),]/g, ' ')
+      const { data } = await supabase.from('wms_locations').select('code, label')
+        .eq('active', true).neq('location_type', 'STAGE')
+        .or(`code.ilike.%${safe}%,label.ilike.%${safe}%`).order('code').limit(20)
+      if (!active) return
+      const already = new Set(pickedBins.map(b => b.code))
+      setBinResults(((data as { code: string; label: string | null }[]) || []).filter(r => !already.has(r.code)))
+      setBinSearching(false)
+    }, 250)
+    return () => { active = false; clearTimeout(t) }
+  }, [binQuery, scopeType, pickedBins])
+
+  function addBin(b: { code: string; label: string | null }) {
+    setPickedBins(p => p.some(x => x.code === b.code) ? p : [...p, b]); setBinQuery(''); setBinResults([])
+  }
+  function removeBin(code: string) { setPickedBins(p => p.filter(x => x.code !== code)) }
 
   // Live item search (by description OR code) for the "Specific items" picker.
   useEffect(() => {
@@ -105,9 +132,11 @@ export default function WmsCountsPage() {
     if (!canEdit) return
     const scope = scopeType === 'full' ? []
       : scopeType === 'items' ? pickedItems.map(p => p.code)
+      : scopeType === 'bins' ? pickedBins.map(b => b.code)
       : scopeText.split(/[\s,]+/).map(s => s.trim()).filter(Boolean)
-    if (scopeType !== 'full' && scope.length === 0) { setErr(scopeType === 'items' ? 'Search and pick at least one item.' : 'Enter at least one ' + (scopeType === 'zones' ? 'aisle' : 'bin') + '.'); return }
-    const norm = scopeType === 'items' ? scope : scope.map(s => s.toUpperCase())
+    if (scopeType !== 'full' && scope.length === 0) { setErr(scopeType === 'items' ? 'Search and pick at least one item.' : scopeType === 'bins' ? 'Search and pick at least one bin.' : 'Enter at least one aisle.'); return }
+    // Items and bins come from real records (exact codes); only free-typed aisles get upper-cased.
+    const norm = (scopeType === 'items' || scopeType === 'bins') ? scope : scope.map(s => s.toUpperCase())
     setBusy(true); setErr('')
     const { data, error } = await supabase.rpc('wms_start_count', { p_name: name.trim(), p_scope_type: scopeType, p_scope: norm, p_blind: blind })
     setBusy(false)
@@ -160,7 +189,7 @@ export default function WmsCountsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div><label className="block text-sm font-medium mb-1">Name <span className="text-gray-400 font-normal">(optional)</span></label><input value={name} onChange={e => setName(e.target.value)} className="w-full border rounded-lg px-3 py-2" placeholder="e.g. Aisle A weekly" /></div>
               <div><label className="block text-sm font-medium mb-1">What to count</label>
-                <select value={scopeType} onChange={e => { setScopeType(e.target.value); setScopeText(''); setPickedItems([]); setItemQuery(''); setItemResults([]) }} className="w-full border rounded-lg px-3 py-2">
+                <select value={scopeType} onChange={e => { setScopeType(e.target.value); setScopeText(''); setPickedItems([]); setItemQuery(''); setItemResults([]); setPickedBins([]); setBinQuery(''); setBinResults([]) }} className="w-full border rounded-lg px-3 py-2">
                   <option value="full">Whole warehouse</option>
                   <option value="bins">Specific bins</option>
                   <option value="zones">Specific zones (aisles)</option>
@@ -202,10 +231,43 @@ export default function WmsCountsPage() {
                 <p className="text-xs text-gray-400 mt-1">{pickedItems.length ? `${pickedItems.length} item(s) selected` : 'Search and pick the items you want to count.'}</p>
               </div>
             )}
-            {(scopeType === 'bins' || scopeType === 'zones') && (
+            {scopeType === 'bins' && (
               <div>
-                <label className="block text-sm font-medium mb-1">{scopeType === 'zones' ? 'Aisles' : 'Bin codes'} <span className="text-gray-400 font-normal">(separate with spaces, commas or new lines)</span></label>
-                <textarea value={scopeText} onChange={e => setScopeText(e.target.value)} rows={3} className="w-full border rounded-lg px-3 py-2 font-mono text-sm" placeholder={scopeType === 'zones' ? 'A  AA  ZG' : 'A105 A106 A107'} />
+                <label className="block text-sm font-medium mb-1">Bins to count <span className="text-gray-400 font-normal">(search by bin code or name — pick the real bins)</span></label>
+                <div className="relative">
+                  <input value={binQuery} onChange={e => setBinQuery(e.target.value)} autoComplete="off" className="w-full border rounded-lg px-3 py-2" placeholder="Type a bin, e.g. COLDROOM A or A105…" />
+                  {binQuery.trim().length >= 1 && (
+                    <ul className="absolute z-10 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-64 overflow-auto text-sm">
+                      {binSearching && binResults.length === 0 && <li className="px-3 py-2 text-gray-400">Searching…</li>}
+                      {binResults.map(r => (
+                        <li key={r.code}>
+                          <button type="button" onClick={() => addBin(r)} className="w-full text-left px-3 py-2 hover:bg-emerald-50 flex items-center justify-between gap-3">
+                            <span className="font-mono">{r.code}</span>
+                            {r.label && <span className="text-xs text-gray-400 truncate">{r.label}</span>}
+                          </button>
+                        </li>
+                      ))}
+                      {!binSearching && binResults.length === 0 && <li className="px-3 py-2 text-gray-400">No bins match &ldquo;{binQuery.trim()}&rdquo;</li>}
+                    </ul>
+                  )}
+                </div>
+                {pickedBins.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {pickedBins.map(b => (
+                      <span key={b.code} className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-full pl-3 pr-1.5 py-1 text-xs">
+                        <span className="font-mono font-medium">{b.code}</span>
+                        <button type="button" onClick={() => removeBin(b.code)} className="w-4 h-4 rounded-full hover:bg-emerald-200 text-emerald-600 flex items-center justify-center text-sm leading-none" aria-label={`Remove ${b.code}`}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <p className="text-xs text-gray-400 mt-1">{pickedBins.length ? `${pickedBins.length} bin(s) selected` : 'Search and pick the bins to count — works even for bin names with spaces (e.g. “COLDROOM A”).'}</p>
+              </div>
+            )}
+            {scopeType === 'zones' && (
+              <div>
+                <label className="block text-sm font-medium mb-1">Aisles <span className="text-gray-400 font-normal">(separate with spaces, commas or new lines)</span></label>
+                <textarea value={scopeText} onChange={e => setScopeText(e.target.value)} rows={3} className="w-full border rounded-lg px-3 py-2 font-mono text-sm" placeholder="A  AA  ZG" />
               </div>
             )}
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={blind} onChange={e => setBlind(e.target.checked)} /> <b>Blind count</b> — hide the system quantity while counting (avoids bias)</label>
