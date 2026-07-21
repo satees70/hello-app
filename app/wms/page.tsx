@@ -18,7 +18,7 @@ const PO_COLORS: Record<string, string> = { Processing: 'bg-gray-300', Open: 'bg
 export default function WmsHome() {
   const { profile, loading } = useProfile()
   const [work, setWork] = useState({ po: 0, putaway: 0, pick: 0, dispatch: 0 })
-  const [alerts, setAlerts] = useState({ expired: 0, near: 0, low: 0, disc: 0 })
+  const [alerts, setAlerts] = useState({ expired: 0, near: 0, low: 0, disc: 0, neg: 0 })
   const [snap, setSnap] = useState({ items: 0, onHand: 0, bins: 0, batches: 0, goodsIn: 0, dispatchHold: 0, reserved: 0 })
   const [exp, setExp] = useState({ expired: 0, w30: 0, w60: 0, w90: 0 })
   const [ordStatus, setOrdStatus] = useState<Record<string, number>>({})
@@ -28,7 +28,7 @@ export default function WmsHome() {
   useEffect(() => { if (profile) load() }, [profile])
   async function load() {
     const start = new Date(); start.setHours(0, 0, 0, 0)
-    const [stock, settings, res, allOrd, allPo, todayMv, discRes] = await Promise.all([
+    const [stock, settings, res, allOrd, allPo, todayMv, discRes, facNeg] = await Promise.all([
       fetchAll<StockRow>('wms_stock', 'item_code, location_code, batch_no, exp_date, quantity'),
       fetchAll<{ item_code: string; reorder_level: number | null }>('wms_item_settings', 'item_code, reorder_level'),
       supabase.from('wms_reservations').select('qty').eq('status', 'active').limit(5000),
@@ -36,13 +36,16 @@ export default function WmsHome() {
       supabase.from('wms_purchase_orders').select('status').limit(3000),
       supabase.from('wms_stock_moves').select('move_type').gte('created_at', start.toISOString()).limit(5000),
       supabase.from('wms_count_lines').select('expected_qty, counted_qty, is_unexpected').not('counted_qty', 'is', null).limit(2000),
+      supabase.rpc('item_stock_negatives'),   // factory / raw-material rows below zero (HO / own-factory)
     ])
     const t0 = start.getTime()
-    let onHand = 0, goodsIn = 0, dispatchHold = 0, putawayLines = 0
+    let onHand = 0, goodsIn = 0, dispatchHold = 0, putawayLines = 0, binsNeg = 0
     const items = new Set<string>(), bins = new Set<string>(), batches = new Set<string>(), oh = new Map<string, number>()
     const e = { expired: 0, w30: 0, w60: 0, w90: 0 }
     for (const s of stock) {
-      const q = Number(s.quantity); if (q <= 0) continue
+      const q = Number(s.quantity)
+      if (q < 0) binsNeg++
+      if (q <= 0) continue
       onHand += q; items.add(s.item_code); batches.add(`${s.item_code}|${s.batch_no}`)
       oh.set(s.item_code.toUpperCase(), (oh.get(s.item_code.toUpperCase()) || 0) + q)
       if (s.location_code === 'GOODS-IN') { goodsIn += q; putawayLines++ }
@@ -56,7 +59,8 @@ export default function WmsHome() {
     const tally = (rows: { [k: string]: string }[] | null, key: string) => { const m: Record<string, number> = {}; for (const r of rows || []) m[r[key]] = (m[r[key]] || 0) + 1; return m }
     const ord = tally(allOrd.data, 'status'), po = tally(allPo.data, 'status')
     setOrdStatus(ord); setPoStatus(po); setToday(tally(todayMv.data, 'move_type'))
-    setExp(e); setAlerts({ expired: e.expired, near: e.w30, low, disc })
+    const facNegCount = ((facNeg.data as unknown[]) || []).length
+    setExp(e); setAlerts({ expired: e.expired, near: e.w30, low, disc, neg: binsNeg + facNegCount })
     setSnap({ items: items.size, onHand: clean(onHand), bins: bins.size, batches: batches.size, goodsIn: clean(goodsIn), dispatchHold: clean(dispatchHold), reserved })
     setWork({
       po: (po['Open'] || 0) + (po['Partially Received'] || 0),
@@ -83,7 +87,8 @@ export default function WmsHome() {
         </div>
 
         <p className="text-xs font-semibold text-gray-400 tracking-wide mb-2">NEEDS ATTENTION</p>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
+          <Tile href="/wms/reports/negatives" n={alerts.neg} label="Negative stock" accent="text-red-600" />
           <Tile href="/wms/reports/expiry" n={alerts.expired} label="Expired lots" accent="text-red-600" />
           <Tile href="/wms/reports/expiry" n={alerts.near} label="Near expiry (30d)" accent="text-amber-600" />
           <Tile href="/wms/reports" n={alerts.low} label="Low stock" accent="text-orange-600" />
