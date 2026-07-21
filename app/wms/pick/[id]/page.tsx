@@ -129,6 +129,11 @@ export default function WmsPickPage() {
 
   const remainingOf = (l: Line) => clean(l.quantity - l.qty_picked)
 
+  // How much of this item is sitting in GOODS-IN (received but not put away) — pickable only after putaway.
+  const goodsInFor = useCallback((itemCode: string) =>
+    clean(stock.filter(s => s.item_code === itemCode && s.location_code === 'GOODS-IN').reduce((sum, s) => sum + Number(s.quantity || 0), 0)),
+  [stock])
+
   // FEFO allocation (which bins/batches to pull) for the printed pick list.
   const allocate = useCallback((itemCode: string, need: number) => {
     const rows = availFor(itemCode).filter(r => !isExpired(r))   // auto-FEFO never allocates an expired lot
@@ -492,6 +497,7 @@ export default function WmsPickPage() {
           {lines.map(l => {
             const rem = remainingOf(l)
             const done = rem <= 0
+            const gi = goodsInFor(l.item_code)   // qty received but not yet put away (not pickable)
             const avail = availFor(l.item_code)
             const totalAvail = clean(avail.reduce((s, a) => s + availQty(a), 0))
             const chosenId = chosen[l.id] ?? avail[0]?.id ?? ''
@@ -546,6 +552,13 @@ export default function WmsPickPage() {
                     )}
                   </div>
                 </div>
+
+                {!done && gi > 0 && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-sky-50 border border-sky-200 text-sky-800 text-xs px-3 py-2">
+                    <span>📥 <b>{fmtQty(gi)}</b>{l.uom ? ' ' + l.uom : ''} of this item is in <b>goods-in</b> — received but not put away, so it can&rsquo;t be picked yet.</span>
+                    <Link href="/wms/putaway" className="font-medium text-sky-700 hover:underline">Put away →</Link>
+                  </div>
+                )}
 
                 {!done && canEdit && (
                   <div className="mt-3 border-t pt-3">
