@@ -199,13 +199,15 @@ function Items({ shipmentId, items, containers, master, canEdit, reload }: {
   }
   // Save an inline field edit (qty / weight / container) for an existing row.
   async function patch(row: ImportItem, changes: Partial<ImportItem>) {
-    await supabase.from('import_shipment_items').update(changes).eq('id', row.id)
-    reload()
+    const { error } = await supabase.from('import_shipment_items').update(changes).eq('id', row.id)
+    if (error) { setErr(error.message); return }
+    setErr(''); reload()
   }
   async function remove(row: ImportItem) {
     if (!confirm(`Remove ${row.item_code} from this shipment?`)) return
-    await supabase.from('import_shipment_items').delete().eq('id', row.id)
-    reload()
+    const { error } = await supabase.from('import_shipment_items').delete().eq('id', row.id)
+    if (error) { setErr(error.message); return }
+    setErr(''); reload()
   }
 
   const containerLabel = (c: ImportContainer) => c.container_no || 'Container'
@@ -276,8 +278,10 @@ function BillsOfLading({ shipmentId, bls, canEdit, reload }: {
   const [busy, setBusy] = useState(false)
   async function add() {
     setBusy(true)
-    await supabase.from('import_bills_of_lading').insert({ shipment_id: shipmentId })
-    setBusy(false); reload()
+    const { error } = await supabase.from('import_bills_of_lading').insert({ shipment_id: shipmentId })
+    setBusy(false)
+    if (error) { alert(error.message); return }
+    reload()
   }
   return (
     <section className="bg-white rounded-xl shadow-sm border p-5 mb-5">
@@ -321,7 +325,8 @@ function BLCard({ bl, canEdit, reload }: { bl: ImportBL; canEdit: boolean; reloa
   }
   async function remove() {
     if (!confirm('Remove this Bill of Lading?')) return
-    await supabase.from('import_bills_of_lading').delete().eq('id', bl.id)
+    const { error } = await supabase.from('import_bills_of_lading').delete().eq('id', bl.id)
+    if (error) { setMsg(error.message); return }
     reload()
   }
   const label = 'text-xs font-medium text-gray-600'
@@ -364,8 +369,10 @@ function Containers({ shipmentId, containers, bls, charges, canEdit, reload, rel
   const [busy, setBusy] = useState(false)
   async function add() {
     setBusy(true)
-    await supabase.from('import_containers').insert({ shipment_id: shipmentId })
-    setBusy(false); reload()
+    const { error } = await supabase.from('import_containers').insert({ shipment_id: shipmentId })
+    setBusy(false)
+    if (error) { alert(error.message); return }
+    reload()
   }
   return (
     <section className="bg-white rounded-xl shadow-sm border p-5 mb-5">
@@ -409,7 +416,8 @@ function ContainerCard({ c, bls, charge, canEdit, reload, reloadCharges }: {
   }
   async function remove() {
     if (!confirm('Remove this container?')) return
-    await supabase.from('import_containers').delete().eq('id', c.id)
+    const { error } = await supabase.from('import_containers').delete().eq('id', c.id)
+    if (error) { setMsg(error.message); return }
     reload()
   }
   const blLabel = (b: ImportBL) => b.bl_number || `BL (${b.shipping_line || 'unnamed'})`
@@ -510,7 +518,8 @@ function Documents({ shipment, documents, suppliers, master, profileId, profileN
 
   async function reExtract(doc: ImportDocument) {
     setMsg(`Re-reading "${doc.file_name}"…`)
-    await supabase.from('import_documents').update({ status: 'Processing' }).eq('id', doc.id)
+    const { error } = await supabase.from('import_documents').update({ status: 'Processing' }).eq('id', doc.id)
+    if (error) { setMsg(`Could not re-read: ${error.message}`); return }
     reload()
     try {
       const res = await apiFetch('/api/extract-import-document', {
@@ -530,8 +539,13 @@ function Documents({ shipment, documents, suppliers, master, profileId, profileN
   }
   async function remove(doc: ImportDocument) {
     if (!confirm(`Delete "${doc.file_name}"? (The shipment data it created stays.)`)) return
-    await supabase.storage.from('import-docs').remove([doc.file_path])
-    await supabase.from('import_documents').delete().eq('id', doc.id)
+    // Delete the record first (check a row came back — an RLS-blocked delete returns
+    // no error but 0 rows); only then remove the PDF file.
+    const { data: gone, error } = await supabase.from('import_documents').delete().eq('id', doc.id).select('id')
+    if (error) { setMsg(`Delete failed: ${error.message}`); return }
+    if (!gone || gone.length === 0) { setMsg('Delete failed — you may not have permission.'); return }
+    const { error: fErr } = await supabase.storage.from('import-docs').remove([doc.file_path])
+    setMsg(fErr ? `Document deleted, but the PDF file could not be removed: ${fErr.message}` : '')
     reload()
   }
 
@@ -620,40 +634,48 @@ function DocumentReview({ doc, extracted, shipment, suppliers, master, profileId
           if (data) supplierId = data.id
           else { const { data: ex } = await supabase.from('import_suppliers').select('id').ilike('name', extracted.supplier_name).maybeSingle(); supplierId = ex?.id }
         }
-        if (supplierId) await supabase.from('import_shipments').update({ supplier_id: supplierId }).eq('id', shipment.id)
+        if (supplierId) {
+          const { error: sErr } = await supabase.from('import_shipments').update({ supplier_id: supplierId }).eq('id', shipment.id)
+          if (sErr) throw new Error(`Supplier: ${sErr.message}`)
+        }
       }
       // 2) Reference
       if (applyReference && extracted.reference) {
-        await supabase.from('import_shipments').update({ reference: extracted.reference }).eq('id', shipment.id)
+        const { error: rErr } = await supabase.from('import_shipments').update({ reference: extracted.reference }).eq('id', shipment.id)
+        if (rErr) throw new Error(`Reference: ${rErr.message}`)
       }
       // 3) Bill of Lading
       let newBlId: string | null = null
       if (applyBL && extracted.bl) {
         const b = extracted.bl
-        const { data } = await supabase.from('import_bills_of_lading').insert({
+        const { data, error: blErr } = await supabase.from('import_bills_of_lading').insert({
           shipment_id: shipment.id, bl_number: b.bl_number || null, shipping_line: b.shipping_line || null,
           vessel: b.vessel || null, port_of_loading: b.port_of_loading || null, port_of_discharge: b.port_of_discharge || null,
           shipped_date: isoOrNull(b.shipped_date), eta: isoOrNull(b.eta), arrival_date: isoOrNull(b.arrival_date),
         }).select('id').single()
-        newBlId = data?.id ?? null
+        if (blErr || !data) throw new Error(`Bill of Lading: ${blErr?.message || 'not saved'}`)
+        newBlId = data.id
       }
       // 4) Containers
       const cons = (extracted.containers || []).filter((_, i) => conSel[i])
       if (cons.length) {
-        await supabase.from('import_containers').insert(cons.map(c => ({
+        const { error: cErr } = await supabase.from('import_containers').insert(cons.map(c => ({
           shipment_id: shipment.id, bl_id: newBlId, container_no: c.container_no || null, container_type: c.container_type || null,
         })))
+        if (cErr) throw new Error(`Containers: ${cErr.message}`)
       }
       // 5) Items (only rows the user kept AND matched to a real master code)
       const itemRows = rows.filter(r => r.include && r.code && codeToItem[r.code])
       if (itemRows.length) {
-        await supabase.from('import_shipment_items').insert(itemRows.map(r => {
+        const { error: iErr } = await supabase.from('import_shipment_items').insert(itemRows.map(r => {
           const m = codeToItem[r.code]
           return { shipment_id: shipment.id, item_id: m.id || null, item_code: m.code, description: m.description, unit: m.unit, quantity: Number(r.quantity) || 0, declared_weight: r.declared_weight }
         }))
+        if (iErr) throw new Error(`Items: ${iErr.message}`)
       }
       // 6) Mark applied
-      await supabase.from('import_documents').update({ status: 'Applied', bl_id: newBlId }).eq('id', doc.id)
+      const { error: aErr } = await supabase.from('import_documents').update({ status: 'Applied', bl_id: newBlId }).eq('id', doc.id)
+      if (aErr) throw new Error(`Data was added but the document could not be marked Applied: ${aErr.message}`)
       onDone()
     } catch (e) {
       setApplying(false); setErr(e instanceof Error ? e.message : 'Could not apply.')

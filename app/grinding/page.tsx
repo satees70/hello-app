@@ -269,7 +269,7 @@ export default function GrindingPage() {
         const { error } = await supabase.from('grinding_recipes').update({ product: recipeForm.product, recipe_type: recipeForm.recipe_type, active: recipeForm.active }).eq('id', rid)
         if (error) throw error
       }
-      await supabase.from('grinding_recipe_components').delete().eq('recipe_id', rid)
+      { const { error } = await supabase.from('grinding_recipe_components').delete().eq('recipe_id', rid); if (error) throw error }
       const rows = recipeForm.components.filter(c => c.item.trim()).map(c => ({ recipe_id: rid, item: c.item.trim(), qty_per_lot: c.qty_per_lot === '' ? 0 : Number(c.qty_per_lot) }))
       if (rows.length) { const { error } = await supabase.from('grinding_recipe_components').insert(rows); if (error) throw error }
       setEditRecipe(null); setRecipeForm(null); load()
