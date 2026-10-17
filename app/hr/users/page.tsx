@@ -9,13 +9,13 @@ import { apiFetch } from '@/lib/api'
 interface U {
   id: string; username: string | null; full_name: string; role: string
   factory_code: string; factory_codes: string[] | null; readonly_factories: string[] | null
-  warehouse_user: boolean | null; capabilities: Record<string, boolean> | null
+  warehouse_user: boolean | null; offsite_allowed: boolean | null; capabilities: Record<string, boolean> | null
   location_perms: Record<string, unknown> | null; customer_filter: string | null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   permissions: Record<string, any> | null
 }
 
-const HR_FIELDS = 'id, username, full_name, role, factory_code, factory_codes, readonly_factories, warehouse_user, capabilities, location_perms, customer_filter, permissions'
+const HR_FIELDS = 'id, username, full_name, role, factory_code, factory_codes, readonly_factories, warehouse_user, offsite_allowed, capabilities, location_perms, customer_filter, permissions'
 
 export default function HrUsersPage() {
   const { profile } = useProfile()
@@ -26,6 +26,8 @@ export default function HrUsersPage() {
   const [form, setForm] = useState({ username: '', full_name: '', password: '', hr: true, driver: false })
 
   const canManage = !!profile && (profile.role === 'admin' || can(profile, 'users', 'view'))
+  // Creating logins / toggling access is an edit (the API checks the same) — view-only users just see the list.
+  const canEdit = !!profile && (profile.role === 'admin' || can(profile, 'users', 'edit'))
 
   const load = useCallback(async () => {
     const { data } = await supabase.from('profiles').select(HR_FIELDS).order('username')
@@ -47,7 +49,7 @@ export default function HrUsersPage() {
       body: JSON.stringify({
         id: u.id, username: u.username, full_name: u.full_name, role: u.role,
         factory_code: u.factory_code, factory_codes: u.factory_codes, readonly_factories: u.readonly_factories,
-        warehouse_user: u.warehouse_user, capabilities: u.capabilities, location_perms: u.location_perms,
+        warehouse_user: u.warehouse_user, offsite_allowed: u.offsite_allowed, capabilities: u.capabilities, location_perms: u.location_perms,
         customer_filter: u.customer_filter, permissions,
       }),
     })
@@ -88,7 +90,7 @@ export default function HrUsersPage() {
       {msg && <div className="mb-4 rounded-md bg-green-50 border border-green-200 px-3 py-2 text-sm text-green-800">{msg}</div>}
 
       {/* Add user */}
-      <form onSubmit={addUser} className="mb-6 rounded-lg border border-gray-200 p-4">
+      {canEdit && <form onSubmit={addUser} className="mb-6 rounded-lg border border-gray-200 p-4">
         <h2 className="font-medium mb-3">Add a login</h2>
         <div className="flex flex-wrap items-end gap-3">
           <label className="text-xs">Username
@@ -109,7 +111,7 @@ export default function HrUsersPage() {
             {busy ? 'Creating…' : 'Add login'}
           </button>
         </div>
-      </form>
+      </form>}
 
       {/* User list */}
       <div className="rounded-lg border border-gray-200 overflow-hidden">
@@ -130,10 +132,10 @@ export default function HrUsersPage() {
                 <td className="px-4 py-2">{u.full_name}</td>
                 <td className="px-4 py-2 text-xs text-gray-500">{u.role}{u.role === 'admin' ? ' (all access)' : ''}</td>
                 <td className="px-4 py-2 text-center">
-                  <input type="checkbox" checked={hasHr(u)} disabled={u.role === 'admin'} onChange={e => toggle(u, 'hr', e.target.checked)} />
+                  <input type="checkbox" checked={hasHr(u)} disabled={!canEdit || u.role === 'admin'} onChange={e => toggle(u, 'hr', e.target.checked)} />
                 </td>
                 <td className="px-4 py-2 text-center">
-                  <input type="checkbox" checked={hasDriver(u)} disabled={u.role === 'admin'} onChange={e => toggle(u, 'driver', e.target.checked)} />
+                  <input type="checkbox" checked={hasDriver(u)} disabled={!canEdit || u.role === 'admin'} onChange={e => toggle(u, 'driver', e.target.checked)} />
                 </td>
               </tr>
             ))}

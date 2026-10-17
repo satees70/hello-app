@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { timingSafeEqual } from 'crypto'
 import { can, type ModuleKey, type Action, type Permissions, type LocationPerms } from '@/lib/permissions'
 
 // Server-side auth for the service-role API routes.
@@ -30,6 +31,8 @@ export interface CallerProfile {
   readonly_factories: string[] | null
   location_perms: LocationPerms | null
   warehouse_user: boolean | null
+  factory_code: string | null
+  factory_codes: string[] | null
 }
 export interface Caller {
   userId: string
@@ -52,7 +55,7 @@ export async function getCaller(request: Request): Promise<Caller | null> {
   if (error || !user) return null
   const { data: profile } = await admin
     .from('profiles')
-    .select('id, role, full_name, permissions, readonly_factories, location_perms, warehouse_user')
+    .select('id, role, full_name, permissions, readonly_factories, location_perms, warehouse_user, factory_code, factory_codes')
     .eq('id', user.id)
     .single()
   if (!profile) return null
@@ -93,4 +96,27 @@ export async function requireAdmin(request: Request): Promise<Caller | NextRespo
   if (!caller) return unauth()
   if (caller.profile.role !== 'admin') return forbidden()
   return caller
+}
+
+// Admin, or a Head Office user (HO sees every factory). Mirrors is_ho_or_admin() in the DB.
+export function isHoOrAdmin(p: Pick<CallerProfile, 'role' | 'factory_code'>): boolean {
+  return p.role === 'admin' || p.factory_code === 'HEAD_OFFICE'
+}
+
+// Does the caller belong to this factory? HO/admin belong to all of them;
+// otherwise it's their main factory or one of their extra factory_codes.
+export function callerHasFactory(p: Pick<CallerProfile, 'role' | 'factory_code' | 'factory_codes'>, fc: string | null | undefined): boolean {
+  if (isHoOrAdmin(p)) return true
+  if (!fc) return false
+  return p.factory_code === fc || (p.factory_codes || []).includes(fc)
+}
+
+// Constant-time compare for shared secrets (cron key, push secret), so the
+// response time doesn't leak how many leading characters matched. An unset /
+// empty expected secret never matches.
+export function secretMatches(given: string | null | undefined, expected: string | null | undefined): boolean {
+  if (!given || !expected) return false
+  const a = Buffer.from(given), b = Buffer.from(expected)
+  if (a.length !== b.length) return false
+  return timingSafeEqual(a, b)
 }

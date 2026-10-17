@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
+import { apiFetch } from '@/lib/api'
 
 // Customer Credit Notes + returns. The CN (with costing) is raised in SQL Account; here we upload
 // its PDF (auto-read) and handle the QUANTITY when goods come back: returned goods → RETURNS
@@ -50,9 +51,8 @@ export default function WmsCreditNotesPage() {
   async function readPdf(f: File) {
     setReading(true); setErr('')
     try {
-      const { data: sess } = await supabase.auth.getSession()
       const fd = new FormData(); fd.append('file', f)
-      const r = await fetch('/api/extract-credit-note', { method: 'POST', headers: { Authorization: `Bearer ${sess.session?.access_token || ''}` }, body: fd })
+      const r = await apiFetch('/api/extract-credit-note', { method: 'POST', body: fd })
       const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Could not read the PDF.')
       const d = j.data || {}
       if (d.cn_number) setCnNo(String(d.cn_number)); if (d.customer_name) setCust(String(d.customer_name))

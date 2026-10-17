@@ -1,7 +1,10 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
-import { requirePerm } from '@/lib/apiAuth'
+import { requirePerm, callerHasFactory } from '@/lib/apiAuth'
+import { can } from '@/lib/permissions'
+import { logError, MAX_UPLOAD_BYTES } from '@/lib/log'
+import { EXTRACTION_MODEL, TOO_LONG_MSG } from '@/app/api/_lib/extraction'
 
 // Server-only clients — these keys must never reach the browser.
 const supabaseAdmin = createClient(
@@ -9,9 +12,6 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
-// A delivery order is a clean table — Sonnet reads it accurately and much faster than Opus,
-// which avoids the serverless timeout that left documents stuck on "Processing".
-const MODEL = 'claude-sonnet-4-6'
 
 // Allow up to 60s for Claude to read the PDF (default can be as low as 10s).
 export const maxDuration = 60
@@ -69,17 +69,33 @@ export async function POST(request: Request) {
   const auth = await requirePerm(request, 'goods_received', 'edit', { allowWarehouse: true, anyLocation: true })
   if (auth instanceof NextResponse) return auth
 
-  const { doId, filePath } = await request.json()
-  if (!doId || !filePath) return NextResponse.json({ error: 'Missing document reference.' }, { status: 400 })
+  const { doId } = await request.json()
+  if (!doId) return NextResponse.json({ error: 'Missing document reference.' }, { status: 400 })
+
+  // Load the document server-side — never trust a client-sent file path. Same
+  // per-factory rule as the page (canEditFac): uploader, own factory, warehouse
+  // staff, or edit at that factory. Only an in-flight read may be re-run.
+  const { data: doc } = await supabaseAdmin.from('delivery_orders')
+    .select('id, file_path, factory_code, status, uploaded_by').eq('id', doId).maybeSingle()
+  if (!doc) return NextResponse.json({ error: 'Document not found.' }, { status: 404 })
+  const p = auth.profile
+  if (doc.uploaded_by !== auth.userId && !p.warehouse_user && !callerHasFactory(p, doc.factory_code) && !can(p, 'goods_received', 'edit', doc.factory_code)) {
+    return NextResponse.json({ error: 'You don’t have permission to do that.' }, { status: 403 })
+  }
+  if (doc.status !== 'Processing' && doc.status !== 'Error') {
+    return NextResponse.json({ error: `This document is already ${doc.status} — it can’t be re-read.` }, { status: 409 })
+  }
+  const filePath = doc.file_path as string
   if (!process.env.ANTHROPIC_API_KEY) { await markError(doId); return NextResponse.json({ error: 'Extraction is not configured (missing API key).' }, { status: 500 }) }
 
   try {
     const { data: fileBlob, error: dlError } = await supabaseAdmin.storage.from('delivery-orders').download(filePath)
     if (dlError || !fileBlob) { await markError(doId); return NextResponse.json({ error: `Could not read file: ${dlError?.message}` }, { status: 400 }) }
+    if (fileBlob.size > MAX_UPLOAD_BYTES) { await markError(doId); return NextResponse.json({ error: `File is too large (max ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB).` }, { status: 413 }) }
     const base64 = Buffer.from(await fileBlob.arrayBuffer()).toString('base64')
 
     const message = await anthropic.messages.create({
-      model: MODEL,
+      model: EXTRACTION_MODEL,
       max_tokens: 4000,
       tools: [EXTRACTION_TOOL],
       tool_choice: { type: 'tool', name: 'record_delivery_order' },
@@ -91,6 +107,7 @@ export async function POST(request: Request) {
         ],
       }],
     })
+    if (message.stop_reason === 'max_tokens') { await markError(doId); return NextResponse.json({ error: TOO_LONG_MSG }, { status: 422 }) }
     const toolUse = message.content.find(b => b.type === 'tool_use')
     if (!toolUse || toolUse.type !== 'tool_use') { await markError(doId); return NextResponse.json({ error: 'No data could be read from the document.' }, { status: 400 }) }
     const input = toolUse.input as { do_number: string; do_date: string; factory_no: string; pick_run_no?: string; so_number?: string; lines: DoLine[] }
@@ -121,6 +138,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ count: lines.length })
   } catch (e) {
     await markError(doId)
+    logError('extract-delivery-order', e, { doId })
     const msg = e instanceof Error ? e.message : 'Extraction failed.'
     return NextResponse.json({ error: msg }, { status: 500 })
   }

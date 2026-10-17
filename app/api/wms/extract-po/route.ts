@@ -2,11 +2,12 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { requirePerm } from '@/lib/apiAuth'
+import { logError, MAX_UPLOAD_BYTES } from '@/lib/log'
+import { EXTRACTION_MODEL, TOO_LONG_MSG } from '@/app/api/_lib/extraction'
 
 const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 export const maxDuration = 60
-const MODEL = 'claude-sonnet-4-6'
 
 const EXTRACTION_TOOL: Anthropic.Tool = {
   name: 'record_purchase_order',
@@ -50,19 +51,35 @@ Ignore totals, tax, terms and any summary blocks — only the real ordered produ
 export async function POST(request: Request) {
   const auth = await requirePerm(request, 'warehouse', 'edit')
   if (auth instanceof NextResponse) return auth
-  const { poId, filePath } = await request.json()
+  const { poId } = await request.json()
+  if (!poId) return NextResponse.json({ error: 'Missing PO reference.' }, { status: 400 })
+
+  // Load the PO server-side — never trust a client-sent file path. Only a PO still
+  // being read (Processing, or a failed read) may be re-extracted, so an Open /
+  // receiving PO can't have its lines (and received progress) wiped.
+  const { data: po } = await supabaseAdmin.from('wms_purchase_orders')
+    .select('id, file_path, status').eq('id', poId).maybeSingle()
+  if (!po) return NextResponse.json({ error: 'PO not found.' }, { status: 404 })
+  if (po.status !== 'Processing' && po.status !== 'Error') {
+    return NextResponse.json({ error: `This PO is already ${po.status} — it can’t be re-read.` }, { status: 409 })
+  }
+  if (!po.file_path) return NextResponse.json({ error: 'This PO has no PDF to read.' }, { status: 400 })
+  const filePath = po.file_path as string
+
   try {
     const { data: fileBlob, error: dlError } = await supabaseAdmin.storage.from('wms-grn').download(filePath)
     if (dlError || !fileBlob) { await markError(poId, dlError?.message); return NextResponse.json({ error: `Could not read file: ${dlError?.message}` }, { status: 400 }) }
+    if (fileBlob.size > MAX_UPLOAD_BYTES) { const tooBig = `File is too large (max ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB).`; await markError(poId, tooBig); return NextResponse.json({ error: tooBig }, { status: 413 }) }
     const base64 = Buffer.from(await fileBlob.arrayBuffer()).toString('base64')
 
     const message = await anthropic.messages.create({
-      model: MODEL, max_tokens: 8000, tools: [EXTRACTION_TOOL], tool_choice: { type: 'tool', name: 'record_purchase_order' },
+      model: EXTRACTION_MODEL, max_tokens: 8000, tools: [EXTRACTION_TOOL], tool_choice: { type: 'tool', name: 'record_purchase_order' },
       messages: [{ role: 'user', content: [
         { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
         { type: 'text', text: PROMPT },
       ] }],
     })
+    if (message.stop_reason === 'max_tokens') { await markError(poId, TOO_LONG_MSG); return NextResponse.json({ error: TOO_LONG_MSG }, { status: 422 }) }
     const toolUse = message.content.find(b => b.type === 'tool_use')
     if (!toolUse || toolUse.type !== 'tool_use') { await markError(poId, 'No data extracted'); return NextResponse.json({ error: 'No data could be read from the document.' }, { status: 400 }) }
     const out = toolUse.input as { po_number?: string; supplier_name?: string; order_date?: string; expected_date?: string; lines?: POLine[] }
@@ -96,6 +113,7 @@ export async function POST(request: Request) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
     await markError(poId, msg)
+    logError('wms/extract-po', e, { poId })
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

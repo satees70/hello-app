@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { fetchPunches } from '@/lib/zklink'
-import { requirePerm } from '@/lib/apiAuth'
+import { requirePerm, secretMatches } from '@/lib/apiAuth'
 
 // ZKLink → attendance_punches sync.
 // ----------------------------------------------------------------------------
@@ -10,9 +10,10 @@ import { requirePerm } from '@/lib/apiAuth'
 // backfill start on the very first run. Triggered by a cron, or manually in the
 // browser. Override the window with ?from=yyyy-MM-dd.
 //
-// Protection: if CRON_SECRET is set, the request must pass ?key=<secret> (or an
-// Authorization: Bearer <secret> header). With no CRON_SECRET set it's open —
-// fine for dev, set the secret before exposing this publicly.
+// Protection: a scheduler passes CRON_SECRET as ?key=<secret> (for external
+// cron services that can only call a URL) or as an Authorization: Bearer <secret>
+// header (Vercel Cron). Anything else must be a signed-in user with HR edit (the
+// manual "Sync" button). With no CRON_SECRET set, only signed-in HR users can sync.
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60   // paging through many days can take a while
@@ -35,11 +36,12 @@ function klToday(): string {
 export async function GET(request: Request) {
   const url = new URL(request.url)
 
-  // Auth: allow EITHER the cron secret (Vercel Cron sends it as ?key= or a
-  // Bearer header) OR a signed-in HR user with edit (the manual "Sync" button).
+  // Auth: allow EITHER the cron secret (?key= from an external scheduler, or the
+  // Bearer header Vercel Cron sends) OR a signed-in HR user with edit (the manual
+  // "Sync" button). Compared in constant time.
   const secret = process.env.CRON_SECRET
   const authHeader = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') || ''
-  const isCron = !!secret && (url.searchParams.get('key') === secret || authHeader === secret)
+  const isCron = secretMatches(url.searchParams.get('key'), secret) || secretMatches(authHeader, secret)
   if (!isCron) {
     const auth = await requirePerm(request, 'hr', 'edit')
     if (auth instanceof NextResponse) return auth

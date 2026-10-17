@@ -1,14 +1,17 @@
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
-import { getCaller } from '@/lib/apiAuth'
-import { can } from '@/lib/permissions'
+import { requirePerm } from '@/lib/apiAuth'
 import { logError, MAX_UPLOAD_BYTES } from '@/lib/log'
+import { EXTRACTION_MODEL, TOO_LONG_MSG } from '@/app/api/_lib/extraction'
 
 // Reads a customer Credit Note PDF (raised in SQL Account) and returns its header + line items so
 // the upload form can auto-fill. Nothing is written to the DB here — the page saves after review.
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 export const maxDuration = 60
-const MODEL = 'claude-sonnet-4-6'
+
+// What the model accepts: PDFs as a document, these image types as an image.
+const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] as const
+type ImageType = typeof IMAGE_TYPES[number]
 
 const TOOL: Anthropic.Tool = {
   name: 'record_credit_note',
@@ -46,23 +49,23 @@ const PROMPT = `This is a customer CREDIT NOTE (CN) PDF from an accounting syste
 Call record_credit_note with what you find. If a field isn't present, use an empty string (or an empty list for lines).`
 
 export async function POST(request: Request) {
-  // Credit Notes live in the warehouse app but are also sales data — allow either grant.
-  const caller = await getCaller(request)
-  if (!caller) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
-  if (!can(caller.profile, 'warehouse', 'view') && !can(caller.profile, 'sales', 'view')) {
-    return NextResponse.json({ error: 'You don’t have permission to do that.' }, { status: 403 })
-  }
+  // Match the Credit Notes page: only warehouse editors see the upload / auto-read form.
+  const auth = await requirePerm(request, 'warehouse', 'edit')
+  if (auth instanceof NextResponse) return auth
   try {
     const form = await request.formData()
     const file = form.get('file')
     if (!(file instanceof Blob)) return NextResponse.json({ error: 'No file uploaded.' }, { status: 400 })
     if (file.size > MAX_UPLOAD_BYTES) return NextResponse.json({ error: `File is too large (max ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB).` }, { status: 413 })
+    const media = file.type || 'application/pdf'
+    const isPdf = media === 'application/pdf'
+    if (!isPdf && !(IMAGE_TYPES as readonly string[]).includes(media)) {
+      return NextResponse.json({ error: 'Please upload a PDF or an image (JPG, PNG, WebP or GIF).' }, { status: 415 })
+    }
     const base64 = Buffer.from(await file.arrayBuffer()).toString('base64')
-    const media = (file.type || 'application/pdf')
-    const isPdf = media.includes('pdf')
 
     const message = await anthropic.messages.create({
-      model: MODEL,
+      model: EXTRACTION_MODEL,
       max_tokens: 4000,
       tools: [TOOL],
       tool_choice: { type: 'tool', name: 'record_credit_note' },
@@ -71,11 +74,12 @@ export async function POST(request: Request) {
         content: [
           isPdf
             ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
-            : { type: 'image', source: { type: 'base64', media_type: (media as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif'), data: base64 } },
+            : { type: 'image', source: { type: 'base64', media_type: (media as ImageType), data: base64 } },
           { type: 'text', text: PROMPT },
         ],
       }],
     })
+    if (message.stop_reason === 'max_tokens') return NextResponse.json({ error: TOO_LONG_MSG }, { status: 422 })
     const toolUse = message.content.find(b => b.type === 'tool_use')
     if (!toolUse || toolUse.type !== 'tool_use') return NextResponse.json({ error: 'Could not read the document.' }, { status: 400 })
     return NextResponse.json({ success: true, data: toolUse.input })

@@ -2,6 +2,8 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { requirePerm } from '@/lib/apiAuth'
+import { logError, MAX_UPLOAD_BYTES } from '@/lib/log'
+import { EXTRACTION_MODEL, TOO_LONG_MSG } from '@/app/api/_lib/extraction'
 
 // Server-only clients — these keys must never reach the browser.
 const supabaseAdmin = createClient(
@@ -12,9 +14,6 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
 // Reading a PDF can run longer than the default ~10s limit; allow up to 60s.
 export const maxDuration = 60
-
-// Sonnet is fast + cheap for this extraction (same choice as extract-sales-order).
-const MODEL = 'claude-sonnet-4-6'
 
 // Structured-output tool: forces clean fields instead of prose. Only doc_type is
 // strictly required — a given document (sales order / invoice / BL) will only
@@ -104,7 +103,18 @@ export async function POST(request: Request) {
   const auth = await requirePerm(request, 'import', 'edit')
   if (auth instanceof NextResponse) return auth
 
-  const { documentId, filePath } = await request.json()
+  const { documentId } = await request.json()
+  if (!documentId) return NextResponse.json({ error: 'Missing document reference.' }, { status: 400 })
+
+  // Load the document server-side — never trust a client-sent file path. Only a
+  // document not yet applied (Uploaded / Processing / a failed read) may be re-read.
+  const { data: doc } = await supabaseAdmin.from('import_documents')
+    .select('id, file_path, status').eq('id', documentId).maybeSingle()
+  if (!doc) return NextResponse.json({ error: 'Document not found.' }, { status: 404 })
+  if (!['Uploaded', 'Processing', 'Error'].includes(doc.status)) {
+    return NextResponse.json({ error: `This document is already ${doc.status} — it can’t be re-read.` }, { status: 409 })
+  }
+  const filePath = doc.file_path as string
 
   try {
     // 1. Pull the PDF back out of storage.
@@ -114,6 +124,11 @@ export async function POST(request: Request) {
     if (dlError || !fileBlob) {
       await markError(documentId, dlError?.message || 'Could not read file')
       return NextResponse.json({ error: `Could not read file: ${dlError?.message}` }, { status: 400 })
+    }
+    if (fileBlob.size > MAX_UPLOAD_BYTES) {
+      const tooBig = `File is too large (max ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB).`
+      await markError(documentId, tooBig)
+      return NextResponse.json({ error: tooBig }, { status: 413 })
     }
     const base64 = Buffer.from(await fileBlob.arrayBuffer()).toString('base64')
 
@@ -126,7 +141,7 @@ export async function POST(request: Request) {
 
     // 3. Ask Claude to read the PDF and return structured fields.
     const message = await anthropic.messages.create({
-      model: MODEL,
+      model: EXTRACTION_MODEL,
       max_tokens: 8000,
       tools: [EXTRACTION_TOOL],
       tool_choice: { type: 'tool', name: 'record_import_document' },
@@ -139,6 +154,10 @@ export async function POST(request: Request) {
       }],
     })
 
+    if (message.stop_reason === 'max_tokens') {
+      await markError(documentId, TOO_LONG_MSG)
+      return NextResponse.json({ error: TOO_LONG_MSG }, { status: 422 })
+    }
     const toolUse = message.content.find(b => b.type === 'tool_use')
     if (!toolUse || toolUse.type !== 'tool_use') {
       await markError(documentId, 'No data extracted from the document.')
@@ -156,6 +175,7 @@ export async function POST(request: Request) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
     await markError(documentId, msg)
+    logError('extract-import-document', e, { documentId })
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

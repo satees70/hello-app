@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import webpush from 'web-push'
 import { logError } from '@/lib/log'
+import { secretMatches } from '@/lib/apiAuth'
 
 export const runtime = 'nodejs'
 
@@ -13,7 +14,8 @@ interface Notif { id: string; factory_code: string; user_id: string | null; titl
 interface Sub { endpoint: string; p256dh: string; auth: string }
 
 export async function POST(req: Request) {
-  if (req.headers.get('x-push-secret') !== process.env.PUSH_SECRET) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  // Constant-time check; an unset PUSH_SECRET rejects everything.
+  if (!secretMatches(req.headers.get('x-push-secret'), process.env.PUSH_SECRET)) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   if (!process.env.VAPID_PRIVATE_KEY) return NextResponse.json({ error: 'push not configured' }, { status: 500 })
   webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:satees@srrieaswari.com', VAPID_PUBLIC, process.env.VAPID_PRIVATE_KEY)
   const { id } = await req.json().catch(() => ({ id: null }))
