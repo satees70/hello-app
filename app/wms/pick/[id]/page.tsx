@@ -7,6 +7,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { can } from '@/lib/permissions'
 import ScanGate from '@/components/ScanGate'
 import { matchBin, matchItem } from '@/lib/qr'
+import { klDateKey } from '@/lib/attendance'
 
 interface Order { id: string; order_no: string | null; customer_name: string | null; status: string; delivery_date: string | null; source: string | null; pick_checked_by_name: string | null; pick_checked_at: string | null; pick_check_note: string | null; assigned_to_name: string | null; pick_started_at: string | null; pick_completed_at: string | null }
 interface Line { id: string; line_no: number | null; item_id: string | null; item_code: string; description: string | null; quantity: number; qty_picked: number; uom: string | null; source_hint: string | null; remarks: string | null; no_stock?: boolean; no_stock_qty?: number | null; no_stock_by_name?: string | null }
@@ -18,7 +19,8 @@ const fmtQty = (n: number) => clean(n).toLocaleString(undefined, { maximumFracti
 const fmtDate = (d: string | null) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB') : ''
 // FEFO effective expiry: real expiry, else (batch date YYMMDD + 1 year), else
 // (received date + 1 year). Used only to sort; never stored or shown.
-const plusYear = (ymd: string) => { const d = new Date(ymd + 'T00:00:00'); d.setFullYear(d.getFullYear() + 1); return d.toISOString().slice(0, 10) }
+// Pure calendar math in UTC so the result never shifts a day with the browser's timezone.
+const plusYear = (ymd: string) => { const [y, m, d] = ymd.split('-').map(Number); return new Date(Date.UTC(y + 1, m - 1, d)).toISOString().slice(0, 10) }
 const batchDate = (batch: string): string | null => {
   const m = /^(\d{2})(\d{2})(\d{2})/.exec(batch || ''); if (!m) return null
   const mo = Number(m[2]), d = Number(m[3]); if (mo < 1 || mo > 12 || d < 1 || d > 31) return null
@@ -26,7 +28,7 @@ const batchDate = (batch: string): string | null => {
 }
 const effExp = (s: { exp_date: string | null; batch_no: string; created_at: string }) => {
   if (s.exp_date) return s.exp_date
-  const bd = batchDate(s.batch_no); return bd ? plusYear(bd) : plusYear(s.created_at.slice(0, 10))
+  const bd = batchDate(s.batch_no); return bd ? plusYear(bd) : plusYear(klDateKey(new Date(s.created_at)))
 }
 // EXPIRY POLICY: a lot is expired only if it HAS a real exp_date in the past (null = never
 // expired). Near-expiry = within 180 days (non-blocking warning). Uses the RAW exp_date,

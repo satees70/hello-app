@@ -2,6 +2,8 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { requirePerm } from '@/lib/apiAuth'
+import { logError, MAX_UPLOAD_BYTES } from '@/lib/log'
+import { EXTRACTION_MODEL, TOO_LONG_MSG } from '@/app/api/_lib/extraction'
 
 // Server-only clients — these keys must never reach the browser.
 const supabaseAdmin = createClient(
@@ -12,9 +14,6 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
 // Reading a PDF can run longer than the default ~10s limit.
 export const maxDuration = 60
-
-// Sonnet is fast + cheap for document extraction (same choice as extract-sales-order).
-const MODEL = 'claude-sonnet-4-6'
 
 const EXTRACTION_TOOL: Anthropic.Tool = {
   name: 'record_warehouse_order',
@@ -69,7 +68,20 @@ export async function POST(request: Request) {
   const auth = await requirePerm(request, 'warehouse', 'edit')
   if (auth instanceof NextResponse) return auth
 
-  const { orderId, filePath } = await request.json()
+  const { orderId } = await request.json()
+  if (!orderId) return NextResponse.json({ error: 'Missing order reference.' }, { status: 400 })
+
+  // Load the order server-side — never trust a client-sent file path. Only an
+  // order still being read (Processing, or a failed read) may be re-extracted, so
+  // a released / picked order can't have its lines wiped.
+  const { data: order } = await supabaseAdmin.from('wms_orders')
+    .select('id, file_path, status').eq('id', orderId).maybeSingle()
+  if (!order) return NextResponse.json({ error: 'Order not found.' }, { status: 404 })
+  if (order.status !== 'Processing' && order.status !== 'Error') {
+    return NextResponse.json({ error: `This order is already ${order.status} — it can’t be re-read.` }, { status: 409 })
+  }
+  if (!order.file_path) return NextResponse.json({ error: 'This order has no PDF to read.' }, { status: 400 })
+  const filePath = order.file_path as string
 
   try {
     const { data: fileBlob, error: dlError } = await supabaseAdmin.storage.from('wms-orders').download(filePath)
@@ -77,10 +89,15 @@ export async function POST(request: Request) {
       await markError(orderId, dlError?.message)
       return NextResponse.json({ error: `Could not read file: ${dlError?.message}` }, { status: 400 })
     }
+    if (fileBlob.size > MAX_UPLOAD_BYTES) {
+      const tooBig = `File is too large (max ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB).`
+      await markError(orderId, tooBig)
+      return NextResponse.json({ error: tooBig }, { status: 413 })
+    }
     const base64 = Buffer.from(await fileBlob.arrayBuffer()).toString('base64')
 
     const message = await anthropic.messages.create({
-      model: MODEL,
+      model: EXTRACTION_MODEL,
       max_tokens: 8000,
       tools: [EXTRACTION_TOOL],
       tool_choice: { type: 'tool', name: 'record_warehouse_order' },
@@ -93,6 +110,10 @@ export async function POST(request: Request) {
       }],
     })
 
+    if (message.stop_reason === 'max_tokens') {
+      await markError(orderId, TOO_LONG_MSG)
+      return NextResponse.json({ error: TOO_LONG_MSG }, { status: 422 })
+    }
     const toolUse = message.content.find(b => b.type === 'tool_use')
     if (!toolUse || toolUse.type !== 'tool_use') {
       await markError(orderId, 'No data extracted')
@@ -142,6 +163,7 @@ export async function POST(request: Request) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
     await markError(orderId, msg)
+    logError('wms/extract-order', e, { orderId })
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

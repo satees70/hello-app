@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
+import { visibleInterval } from '@/hooks/useVisiblePoll'
 
 // WMS Approvals — one place for a warehouse HOD (Head Office / admin) to clear every
 // warehouse-side request in one go, the same "Approve all" idea as the production /
@@ -163,8 +164,8 @@ export default function WmsApprovalsPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'wms_manual_pick_requests' }, () => load())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'wms_damage_reports' }, () => load())
       .subscribe()
-    const timer = setInterval(load, 20000)
-    return () => { supabase.removeChannel(ch); clearInterval(timer) }
+    const stopPoll = visibleInterval(load, 20000)
+    return () => { supabase.removeChannel(ch); stopPoll() }
   }, [profile, load])
 
   // RPC wrappers — each refreshes the list and surfaces a friendly message.

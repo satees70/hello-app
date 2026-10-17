@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { supabase, fetchAll } from '@/lib/supabase'
 import { apiFetch } from '@/lib/api'
+import { klDateKey } from '@/lib/attendance'
 
 type DayWin = { start: string; end: string } | null
 interface ShiftProfile { id: string; name: string; normal_hours: number; lunch_rule: string; lunch_minutes: number; week_schedule: Record<string, DayWin> | null; attendance_mode: string | null }
@@ -28,7 +29,7 @@ export default function EmployeesSetupPage() {
   const [error, setError] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [pulling, setPulling] = useState(false)
-  const [reportMonth, setReportMonth] = useState(() => new Date().toISOString().slice(0, 7))
+  const [reportMonth, setReportMonth] = useState(() => klDateKey(new Date()).slice(0, 7))
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: '', dir: 1 })
   const toggleSort = (key: string) => setSort(s => s.key === key ? { key, dir: (s.dir === 1 ? -1 : 1) } : { key, dir: 1 })
   const [newProf, setNewProf] = useState({ name: '', normal_hours: '7.5', lunch_rule: 'punch', lunch_minutes: '60', attendance_mode: 'pair' })

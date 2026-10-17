@@ -1,8 +1,10 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
-import { requirePerm } from '@/lib/apiAuth'
+import { requirePerm, callerHasFactory } from '@/lib/apiAuth'
+import { can } from '@/lib/permissions'
 import { logError, MAX_UPLOAD_BYTES } from '@/lib/log'
+import { EXTRACTION_MODEL, TOO_LONG_MSG } from '@/app/api/_lib/extraction'
 
 // Server-only clients — these keys must never reach the browser.
 const supabaseAdmin = createClient(
@@ -14,11 +16,6 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 // Reading a PDF with the model can take longer than the default ~10s function
 // limit, which would leave the document stuck on "Processing". Allow up to 60s.
 export const maxDuration = 60
-
-// Sonnet is much faster (and cheaper) than Opus for this extraction, which
-// avoids documents getting stuck on "Processing" when Opus runs long.
-// Switch to 'claude-opus-4-8' if you ever need maximum accuracy on a messy doc.
-const MODEL = 'claude-sonnet-4-6'
 
 // Structured-output tool: forces Claude to return clean rows instead of prose.
 const EXTRACTION_TOOL: Anthropic.Tool = {
@@ -70,7 +67,23 @@ export async function POST(request: Request) {
   const auth = await requirePerm(request, 'sales', 'view')
   if (auth instanceof NextResponse) return auth
 
-  const { importId, filePath } = await request.json()
+  const { importId } = await request.json()
+  if (!importId) return NextResponse.json({ error: 'Missing document reference.' }, { status: 400 })
+
+  // Load the document server-side — never trust a client-sent file path. Only a
+  // document still being read (Processing, or a failed read) may be re-extracted,
+  // so a finished import can't have its lines wiped by a stray call.
+  const { data: doc } = await supabaseAdmin.from('sales_imports')
+    .select('id, file_path, factory_code, status, uploaded_by').eq('id', importId).maybeSingle()
+  if (!doc) return NextResponse.json({ error: 'Document not found.' }, { status: 404 })
+  const p = auth.profile
+  if (doc.uploaded_by !== auth.userId && !callerHasFactory(p, doc.factory_code) && !can(p, 'sales', 'edit', doc.factory_code)) {
+    return NextResponse.json({ error: 'You don’t have permission to do that.' }, { status: 403 })
+  }
+  if (doc.status !== 'Processing' && doc.status !== 'Error') {
+    return NextResponse.json({ error: `This document is already ${doc.status} — it can’t be re-read.` }, { status: 409 })
+  }
+  const filePath = doc.file_path as string
 
   try {
     // 1. Pull the PDF back out of Supabase storage.
@@ -89,7 +102,7 @@ export async function POST(request: Request) {
 
     // 2. Ask Claude to read the PDF and return structured rows.
     const message = await anthropic.messages.create({
-      model: MODEL,
+      model: EXTRACTION_MODEL,
       max_tokens: 8000,
       tools: [EXTRACTION_TOOL],
       tool_choice: { type: 'tool', name: 'record_sales_order_lines' },
@@ -102,6 +115,10 @@ export async function POST(request: Request) {
       }],
     })
 
+    if (message.stop_reason === 'max_tokens') {
+      await markError(importId)
+      return NextResponse.json({ error: TOO_LONG_MSG }, { status: 422 })
+    }
     const toolUse = message.content.find(b => b.type === 'tool_use')
     if (!toolUse || toolUse.type !== 'tool_use') {
       await markError(importId)
@@ -132,8 +149,17 @@ export async function POST(request: Request) {
     //    confirmation screen before anything is marked Processed.
     await supabaseAdmin.from('sales_order_lines').delete().eq('import_id', importId)
     if (lines.length > 0) {
+      // Copy only the schema fields — the model's tool input is untrusted, so
+      // no stray keys (e.g. import_id/id) can ride along into the insert.
       const rows = lines.map(l => ({
-        ...l,
+        customer_name: l.customer_name,
+        so_number: l.so_number,
+        item_code: l.item_code,
+        description: l.description,
+        quantity: l.quantity,
+        outstanding_qty: l.outstanding_qty,
+        delivery_date: l.delivery_date,
+        location_code: l.location_code,
         import_id: importId,
         factory_code: lmMap.get(l.location_code) || '',
       }))

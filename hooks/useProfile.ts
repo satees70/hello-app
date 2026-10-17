@@ -19,11 +19,6 @@ export interface Profile {
   location_perms?: Record<string, Permissions> | null
 }
 
-async function fetchProfile(userId: string) {
-  const { data } = await supabase.from('profiles').select('*').eq('id', userId).single()
-  return data
-}
-
 export function useProfile() {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)

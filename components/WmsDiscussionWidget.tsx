@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useProfile } from '@/hooks/useProfile'
 import DiscussionPanel from '@/components/DiscussionPanel'
+import { visibleInterval } from '@/hooks/useVisiblePoll'
 
 // A floating "💬 Discussion" button on EVERY WMS page. It offers BOTH:
 //   • a shared WMS channel (everyone with warehouse access) — the current page is the
@@ -91,8 +92,7 @@ export default function WmsDiscussionWidget() {
   useEffect(() => {
     if (!profile || open) return
     countUnread()
-    const t = setInterval(countUnread, 30000)
-    return () => clearInterval(t)
+    return visibleInterval(countUnread, 30000)
   }, [profile, open, countUnread])
 
   // Open straight into a specific record's thread when a page asks (openWmsDiscussion(...)).

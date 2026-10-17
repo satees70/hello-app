@@ -18,7 +18,9 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
 // filters/ordering to the query (e.g. q => q.gt('qty', 0).order('exp_date')).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type QueryModify = (q: any) => any
-export async function fetchAll<T = Record<string, unknown>>(table: string, columns: string, orderByOrModify?: string | QueryModify): Promise<T[]> {
+// Pass { strict: true } to throw on a failed page instead of returning the rows read
+// so far — use it where a silently short list would give wrong numbers (payroll).
+export async function fetchAll<T = Record<string, unknown>>(table: string, columns: string, orderByOrModify?: string | QueryModify, opts?: { strict?: boolean }): Promise<T[]> {
   const all: T[] = []
   let from = 0
   const size = 1000
@@ -28,6 +30,7 @@ export async function fetchAll<T = Record<string, unknown>>(table: string, colum
     if (typeof orderByOrModify === 'string') q = q.order(orderByOrModify)
     else if (orderByOrModify) q = orderByOrModify(q)
     const { data, error } = await q.range(from, from + size - 1)
+    if (error && opts?.strict) throw new Error(`Loading ${table} failed: ${error.message}`)
     if (error || !data || data.length === 0) break
     all.push(...(data as T[]))
     if (data.length < size) break

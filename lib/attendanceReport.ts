@@ -94,25 +94,53 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
   const toUtc = `${to}T23:59:59+08:00`
   const todayKL = klDateKey(new Date())   // future days (> today) haven't happened → never absent/review
 
+  // Every lookup below feeds the payroll numbers, so a failed query must stop the
+  // report (an empty holiday/leave list would silently mark people absent). The
+  // queries are independent, so run them all at once.
+  const must = async <T,>(label: string, p: PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> => {
+    const { data, error } = await p
+    if (error) throw new Error(`Loading ${label} failed: ${error.message}`)
+    return data || []
+  }
+  const month = from.slice(0, 7)
   // Punches can be thousands — page past Supabase's 1000-row limit with fetchAll.
-  const [punches, { data: emps }, { data: profs }, { data: reviews }] = await Promise.all([
+  const [punches, emps, profs, reviews, hols, trips, tripOv, leaves, excuses, overrides, dayFlags, otOff, noContra, ignRows, ostrips] = await Promise.all([
     fetchAll<Punch>('attendance_punches', 'employee_code, punch_time, department_name',
-      q => q.gte('punch_time', fromUtc).lte('punch_time', toUtc).order('punch_time')),
-    supabase.from('employees').select('employee_code, name, shift_profile_id, delivery_name, crew_role, join_date, resign_date'),
-    supabase.from('shift_profiles').select('id, name, normal_hours, lunch_rule, lunch_minutes, shift_start, shift_end, week_schedule, attendance_mode'),
-    supabase.from('attendance_reviews').select('employee_code, work_date, lunch_decision, manual_minutes, manual_time')
-      .gte('work_date', from).lte('work_date', to),
+      q => q.gte('punch_time', fromUtc).lte('punch_time', toUtc).order('punch_time'), { strict: true }),
+    must('employees', supabase.from('employees').select('employee_code, name, shift_profile_id, delivery_name, crew_role, join_date, resign_date')),
+    must('shift profiles', supabase.from('shift_profiles').select('id, name, normal_hours, lunch_rule, lunch_minutes, shift_start, shift_end, week_schedule, attendance_mode')),
+    must('reviews', supabase.from('attendance_reviews').select('employee_code, work_date, lunch_decision, manual_minutes, manual_time')
+      .gte('work_date', from).lte('work_date', to)),
+    must('public holidays', supabase.from('public_holidays').select('holiday_date').gte('holiday_date', from).lte('holiday_date', to)),
+    // Driver trips from the delivery schedule: (driver name | date) → category.
+    must('delivery trips', supabase.from('delivery_trips').select('driver, kelindan, delivery_date, category').gte('delivery_date', from).lte('delivery_date', to)),
+    // Manual per-day trip overrides (employee_code | date) → trip_type.
+    must('trip overrides', supabase.from('driver_trip_overrides').select('employee_code, work_date, trip_type').gte('work_date', from).lte('work_date', to)),
+    // Leave types set on absent days: (employee_code | date) → leave_type.
+    must('leave days', supabase.from('leave_days').select('employee_code, work_date, leave_type').gte('work_date', from).lte('work_date', to)),
+    // Per-day late/early excuses (a row = that day's late/early is not deducted).
+    must('late excuses', supabase.from('late_excuses').select('employee_code, work_date').gte('work_date', from).lte('work_date', to)),
+    // Per-person monthly override (no_deduct = never deduct that person's late/early).
+    must('deduction overrides', supabase.from('late_deduction_overrides').select('employee_code, no_deduct').eq('month', month)),
+    // Per-day flags: exclude that day's OT and/or force it to a half day.
+    must('day flags', supabase.from('attendance_day_flags').select('employee_code, work_date, exclude_ot, force_half').gte('work_date', from).lte('work_date', to)),
+    // Per-person monthly "Count OT" switch off → skip all of that person's OT.
+    must('OT month switches', supabase.from('ot_month_off').select('employee_code').eq('month', month)),
+    // Per-person monthly "keep Sunday" (don't contra UL against Sunday work).
+    must('Sunday contra switches', supabase.from('sunday_no_contra').select('employee_code').eq('month', month)),
+    // Ignored punches: a stray tap (e.g. a fingerprint enrolment) to drop from the day's pairing.
+    must('ignored punches', supabase.from('attendance_ignored_punches').select('employee_code, work_date, punch_hm').gte('work_date', from).lte('work_date', to)),
+    // Outstation trips overlapping the range.
+    must('outstation trips', supabase.from('outstation_trips').select('id, employee_code, start_date, end_date')
+      .lte('start_date', to).gte('end_date', from)),
   ])
-  const { data: hols } = await supabase.from('public_holidays').select('holiday_date').gte('holiday_date', from).lte('holiday_date', to)
-  const holidaySet = new Set((hols || []).map(h => h.holiday_date))
-  // Driver trips from the delivery schedule: (driver name | date) → category.
-  const { data: trips } = await supabase.from('delivery_trips').select('driver, kelindan, delivery_date, category').gte('delivery_date', from).lte('delivery_date', to)
+  const holidaySet = new Set(hols.map(h => h.holiday_date))
   // Trip category per person per date — from BOTH the Driver slot and every name
   // in the Kelindan slot (comma-separated). Keyed by lowercased name so a person
   // is caught whether they drove or rode as a kelindan. Whether that trip costs
   // them their OT is decided later by their crew_role, not by which slot.
   const tripByKey = new Map<string, string>()   // `${nameLower}|${date}` -> category
-  for (const t of trips || []) {
+  for (const t of trips) {
     if (!t.category || !t.delivery_date) continue
     if (t.driver) tripByKey.set(`${t.driver.trim().toLowerCase()}|${t.delivery_date}`, t.category)
     for (const k of (t.kelindan || '').split(',')) {
@@ -120,48 +148,29 @@ export async function loadReport(from: string, to: string): Promise<ReportData> 
       if (kn) tripByKey.set(`${kn}|${t.delivery_date}`, t.category)
     }
   }
-  // Manual per-day trip overrides (employee_code | date) → trip_type.
-  const { data: tripOv } = await supabase.from('driver_trip_overrides').select('employee_code, work_date, trip_type').gte('work_date', from).lte('work_date', to)
   const overrideByKey = new Map<string, string>()
-  for (const o of tripOv || []) if (o.trip_type) overrideByKey.set(`${o.employee_code}|${o.work_date}`, o.trip_type)
+  for (const o of tripOv) if (o.trip_type) overrideByKey.set(`${o.employee_code}|${o.work_date}`, o.trip_type)
   // Trip-type options for the dropdown = the schedule's categories + overrides.
   const opts = new Set<string>(['LOCAL', 'GCH', 'OS1', 'OS2'])
-  for (const t of trips || []) if (t.category) opts.add(t.category)
-  for (const o of tripOv || []) if (o.trip_type) opts.add(o.trip_type)
+  for (const t of trips) if (t.category) opts.add(t.category)
+  for (const o of tripOv) if (o.trip_type) opts.add(o.trip_type)
   const tripOptions = [...opts].sort()
-  // Leave types set on absent days: (employee_code | date) → leave_type.
-  const { data: leaves } = await supabase.from('leave_days').select('employee_code, work_date, leave_type').gte('work_date', from).lte('work_date', to)
   const leaveByKey = new Map<string, string>()
-  for (const l of leaves || []) if (l.leave_type) leaveByKey.set(`${l.employee_code}|${l.work_date}`, l.leave_type)
-  // Per-day late/early excuses (a row = that day's late/early is not deducted).
-  const { data: excuses } = await supabase.from('late_excuses').select('employee_code, work_date').gte('work_date', from).lte('work_date', to)
-  const excusedSet = new Set<string>((excuses || []).map(e => `${e.employee_code}|${e.work_date}`))
-  // Per-person monthly override (no_deduct = never deduct that person's late/early).
-  const month = from.slice(0, 7)
-  const { data: overrides } = await supabase.from('late_deduction_overrides').select('employee_code, no_deduct').eq('month', month)
-  const noDeductSet = new Set<string>((overrides || []).filter(o => o.no_deduct).map(o => o.employee_code))
-  // Per-day flags: exclude that day's OT and/or force it to a half day.
-  const { data: dayFlags } = await supabase.from('attendance_day_flags').select('employee_code, work_date, exclude_ot, force_half').gte('work_date', from).lte('work_date', to)
-  const excludeOtSet = new Set<string>((dayFlags || []).filter(f => f.exclude_ot).map(f => `${f.employee_code}|${f.work_date}`))
-  const forceHalfSet = new Set<string>((dayFlags || []).filter(f => f.force_half).map(f => `${f.employee_code}|${f.work_date}`))
-  // Per-person monthly "Count OT" switch off → skip all of that person's OT.
-  const { data: otOff } = await supabase.from('ot_month_off').select('employee_code').eq('month', month)
-  const otMonthOffSet = new Set<string>((otOff || []).map(o => o.employee_code))
-  // Per-person monthly "keep Sunday" (don't contra UL against Sunday work).
-  const { data: noContra } = await supabase.from('sunday_no_contra').select('employee_code').eq('month', month)
-  const noContraSet = new Set<string>((noContra || []).map(o => o.employee_code))
-  // Ignored punches: a stray tap (e.g. a fingerprint enrolment) to drop from the
-  // day's pairing. (employee_code | date) → set of 'HH:mm' to remove.
-  const { data: ignRows } = await supabase.from('attendance_ignored_punches').select('employee_code, work_date, punch_hm').gte('work_date', from).lte('work_date', to)
+  for (const l of leaves) if (l.leave_type) leaveByKey.set(`${l.employee_code}|${l.work_date}`, l.leave_type)
+  const excusedSet = new Set<string>(excuses.map(e => `${e.employee_code}|${e.work_date}`))
+  const noDeductSet = new Set<string>(overrides.filter(o => o.no_deduct).map(o => o.employee_code))
+  const excludeOtSet = new Set<string>(dayFlags.filter(f => f.exclude_ot).map(f => `${f.employee_code}|${f.work_date}`))
+  const forceHalfSet = new Set<string>(dayFlags.filter(f => f.force_half).map(f => `${f.employee_code}|${f.work_date}`))
+  const otMonthOffSet = new Set<string>(otOff.map(o => o.employee_code))
+  const noContraSet = new Set<string>(noContra.map(o => o.employee_code))
+  // (employee_code | date) → set of 'HH:mm' to remove.
   const ignoredByKey = new Map<string, Set<string>>()
-  for (const r of ignRows || []) {
+  for (const r of ignRows) {
     const k = `${r.employee_code}|${r.work_date}`
     if (!ignoredByKey.has(k)) ignoredByKey.set(k, new Set())
     ignoredByKey.get(k)!.add(r.punch_hm)
   }
-  // Outstation trips overlapping the range → per-employee map of dateKey → trip id.
-  const { data: ostrips } = await supabase.from('outstation_trips').select('id, employee_code, start_date, end_date')
-    .lte('start_date', to).gte('end_date', from)
+  // Outstation trips → per-employee map of dateKey → trip id.
   const outstationByEmp = new Map<string, Map<string, string>>()
   for (const t of ostrips || []) {
     const m = outstationByEmp.get(t.employee_code) ?? new Map<string, string>()

@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-import { requirePerm } from '@/lib/apiAuth'
+import { requirePerm, isHoOrAdmin } from '@/lib/apiAuth'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -8,16 +8,24 @@ const supabaseAdmin = createClient(
 )
 
 const LOGIN_DOMAIN = 'avina.local'
+// The roles the app uses (the User Management page offers exactly these).
+const ROLES = ['user', 'admin']
 
 export async function POST(request: Request) {
   const auth = await requirePerm(request, 'users', 'edit')   // creating accounts is an edit action, not view
   if (auth instanceof NextResponse) return auth
 
-  const { username, email, password, full_name, factory_code, factory_codes, readonly_factories, warehouse_user, offsite_allowed, role, permissions, capabilities, location_perms, customer_filter } = await request.json()
+  const { username, email, password, full_name, factory_code, factory_codes, readonly_factories, warehouse_user, offsite_allowed, role: rawRole, permissions, capabilities, location_perms, customer_filter } = await request.json()
+  const role = rawRole ?? 'user'
+  if (!ROLES.includes(role)) return NextResponse.json({ error: `Unknown role "${role}".` }, { status: 400 })
 
   // Only an admin can create another admin.
   if (role === 'admin' && auth.profile.role !== 'admin') {
     return NextResponse.json({ error: 'Only an admin can grant the admin role.' }, { status: 403 })
+  }
+  // Head Office sees every factory — only HO/admin may create an HO login.
+  if (!isHoOrAdmin(auth.profile) && (factory_code === 'HEAD_OFFICE' || (Array.isArray(factory_codes) && factory_codes.includes('HEAD_OFFICE')))) {
+    return NextResponse.json({ error: 'Only Head Office can give Head Office access.' }, { status: 403 })
   }
 
   const uname = (username || '').trim().toLowerCase()

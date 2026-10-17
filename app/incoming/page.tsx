@@ -226,7 +226,8 @@ export default function IncomingPage() {
   async function tickAllQc() {
     if (!canEditFac(linesFor?.factory_code)) { setError("You have view-only access at this factory."); return }
     if (!linesFor) return
-    await supabase.from('delivery_order_lines').update({ qc_checked: true }).eq('do_id', linesFor.id).is('received_at', null)
+    const { error: e } = await supabase.from('delivery_order_lines').update({ qc_checked: true }).eq('do_id', linesFor.id).is('received_at', null)
+    if (e) { setError(`Could not tick QC: ${e.message}`); return }
     reloadLines()
   }
 
@@ -366,7 +367,8 @@ export default function IncomingPage() {
   // QC ticks a line as checked (or unchecks)
   async function toggleQc(line: DoLine) {
     if (!canEditFac(linesFor?.factory_code)) { setError("You have view-only access at this factory."); return }
-    await supabase.from('delivery_order_lines').update({ qc_checked: !line.qc_checked }).eq('id', line.id)
+    const { error: e } = await supabase.from('delivery_order_lines').update({ qc_checked: !line.qc_checked }).eq('id', line.id)
+    if (e) { setError(`Could not update QC: ${e.message}`); return }
     reloadLines()
   }
 
@@ -400,7 +402,8 @@ export default function IncomingPage() {
       const path = `photos/${linesFor.id}/${line.id}.jpg`
       const { error: upErr } = await supabase.storage.from('delivery-orders').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
       if (upErr) { setError(`Photo upload failed: ${upErr.message}`); setBusyLine(''); return }
-      await supabase.from('delivery_order_lines').update({ photo_path: path }).eq('id', line.id)
+      const { error: e } = await supabase.from('delivery_order_lines').update({ photo_path: path }).eq('id', line.id)
+      if (e) { setError(`Photo uploaded but could not be saved on the line: ${e.message}`); setBusyLine(''); return }
       await reloadLines()
     } catch { setError('Could not process the photo.') }
     setBusyLine('')
@@ -415,7 +418,8 @@ export default function IncomingPage() {
   async function reExtract(doc: DeliveryOrder) {
     if (!canEditFac(doc.factory_code)) { setError("You have view-only access at this factory."); return }
     setError(''); setSuccess('')
-    await supabase.from('delivery_orders').update({ status: 'Processing' }).eq('id', doc.id)
+    const { error: stErr } = await supabase.from('delivery_orders').update({ status: 'Processing' }).eq('id', doc.id)
+    if (stErr) { setError(`Could not restart reading: ${stErr.message}`); return }
     loadDocs()
     try {
       const res = await apiFetch('/api/extract-delivery-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doId: doc.id, filePath: doc.file_path }) })
@@ -435,9 +439,15 @@ export default function IncomingPage() {
   async function handleDelete(doc: DeliveryOrder) {
     if (!canEditFac(doc.factory_code)) { setError("You have view-only access at this factory."); return }
     if (!confirm(`Delete "${doc.file_name}"? This removes the document record (received stock is not reversed).`)) return
-    await supabase.storage.from('delivery-orders').remove([doc.file_path])
-    await supabase.from('delivery_order_lines').delete().eq('do_id', doc.id)
-    await supabase.from('delivery_orders').delete().eq('id', doc.id)
+    setError(''); setSuccess('')
+    // Delete the record first (its lines go with it — on delete cascade); only remove the
+    // PDF once the record is really gone (an RLS-blocked delete returns no error but 0
+    // rows, so check a row came back).
+    const { data: gone, error: dErr } = await supabase.from('delivery_orders').delete().eq('id', doc.id).select('id')
+    if (dErr) { setError(`Could not delete the document: ${dErr.message}`); loadDocs(); return }
+    if (!gone || gone.length === 0) { setError('Could not delete the document — you may not have permission. Ask Head Office.'); loadDocs(); return }
+    const { error: fErr } = await supabase.storage.from('delivery-orders').remove([doc.file_path])
+    if (fErr) setError(`Document deleted, but the PDF file could not be removed: ${fErr.message}`)
     if (linesFor?.id === doc.id) setLinesFor(null)
     loadDocs()
   }
@@ -555,7 +565,8 @@ export default function IncomingPage() {
     const anyReceived = currentLines.some(l => l.received_at)
     const allReceived = receivable.length > 0 && receivable.every(l => l.received_at)
     const status = allReceived ? 'Received' : anyReceived ? 'Partially Received' : 'Review'
-    await supabase.from('delivery_orders').update({ status }).eq('id', linesFor.id)
+    const { error: e } = await supabase.from('delivery_orders').update({ status }).eq('id', linesFor.id)
+    if (e) { setError(`Could not update the document status: ${e.message}`); return }
     setLinesFor({ ...linesFor, status })
     loadDocs()
   }
@@ -617,7 +628,7 @@ export default function IncomingPage() {
     const ok = await receiveLine(l, false, actual)
     if (!ok || actual === doQty) return
     const diff = Number((actual - doQty).toFixed(3))
-    await supabase.from('notifications').insert({
+    const { error: nErr } = await supabase.from('notifications').insert({
       factory_code: linesFor.factory_code, type: 'grn',
       title: `${diff > 0 ? '⬆ Over' : '⬇ Short'} receipt: ${l.item_code}`,
       body: `DO ${linesFor.do_number || '—'}: ${l.description || l.item_code} — DO ${doQty}, received ${actual} ${l.unit || ''} (${diff > 0 ? '+' : ''}${diff})${reason ? ' · ' + reason : ''}.`,
@@ -626,10 +637,11 @@ export default function IncomingPage() {
     // Also log it as a tracked thread in the Goods Received discussion so it can
     // be checked off / discussed (no @mention here — the notification above is the ping).
     const doTopic = linesFor.do_number || linesFor.file_name || linesFor.id
-    await supabase.from('discussions').insert({
+    const { error: dErr } = await supabase.from('discussions').insert({
       channel: 'goods_received', author_id: profile?.id, author_name: profile?.full_name || null, topic: doTopic,
       body: `${diff > 0 ? '⬆ Over' : '⬇ Short'}: ${l.description || l.item_code} — DO ${doQty}, received ${actual} ${l.unit || ''} (${diff > 0 ? '+' : ''}${diff})${reason ? ' · ' + reason : ''}.`,
     })
+    if (nErr || dErr) { setError(`Received ${actual} ${l.unit || ''}, but the ${diff > 0 ? 'over' : 'short'} flag to Head Office failed: ${(nErr || dErr)?.message}. Please tell Head Office.`); setSuccess(''); return }
     setSuccess(`Received ${actual} ${l.unit || ''} and flagged ${diff > 0 ? 'over' : 'short'} by ${Math.abs(diff)} to Head Office.`)
   }
 
