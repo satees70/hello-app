@@ -35,7 +35,7 @@ self.addEventListener('notificationclick', event => {
    - GET + same-origin only. API routes and cross-origin (Supabase/Anthropic) are never
      touched, so data writes always go straight to the network — nothing is queued or
      replayed (that would risk double-posting stock/delivery actions). */
-const CACHE = 'easwari-cache-v1'
+const CACHE = 'easwari-cache-v2'   // bump to drop old caches (activate cleanup below)
 const OFFLINE_URL = '/offline'
 const PRECACHE = [OFFLINE_URL, '/icon.svg']
 
@@ -67,12 +67,16 @@ self.addEventListener('fetch', event => {
     event.respondWith((async () => {
       try {
         const fresh = await fetch(req)
-        const cache = await caches.open(CACHE)
-        cache.put(req, fresh.clone())
+        // Only keep good, final pages — never cache errors or redirects (e.g. login bounce).
+        // Key by path without ?query so the cache doesn't grow one entry per query string.
+        if (fresh && fresh.ok && !fresh.redirected) {
+          const cache = await caches.open(CACHE)
+          cache.put(url.origin + url.pathname, fresh.clone())
+        }
         return fresh
       } catch (e) {
         const cache = await caches.open(CACHE)
-        return (await cache.match(req)) || (await cache.match(OFFLINE_URL)) || Response.error()
+        return (await cache.match(url.origin + url.pathname)) || (await cache.match(OFFLINE_URL)) || Response.error()
       }
     })())
     return
@@ -83,7 +87,7 @@ self.addEventListener('fetch', event => {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE)
       const cached = await cache.match(req)
-      const network = fetch(req).then(res => { if (res && res.ok) cache.put(req, res.clone()); return res }).catch(() => cached)
+      const network = fetch(req).then(res => { if (res && res.ok && !res.redirected) cache.put(req, res.clone()); return res }).catch(() => cached)
       return cached || network
     })())
   }

@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { visibleInterval } from '@/hooks/useVisiblePoll'
 
 interface Msg { id: string; author_id: string | null; author_name: string | null; body: string; created_at: string; so_number: string | null; topic: string | null; mention_ids: string[] | null; mention_factories: string[] | null; reply_to: string | null; attachment_path: string | null; attachment_name: string | null }
 
@@ -54,7 +55,7 @@ export default function DiscussionPanel({ channel = 'warehouse', me, meName, tit
     if (!error) setCompleted(new Set((data || []).map(r => r.so_number)))
   }
   useEffect(() => { try { setSeen(JSON.parse(localStorage.getItem(seenKey) || '{}')) } catch { /* ignore */ } }, [seenKey])
-  useEffect(() => { load(); loadCompleted(); const id = setInterval(load, 20000); return () => clearInterval(id) }, [channel]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); loadCompleted(); return visibleInterval(load, 20000) }, [channel]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     supabase.rpc('list_users').then(({ data }) => setUsers((data as { id: string; full_name: string }[]) || []))
     supabase.from('factories').select('code, name').order('code').then(({ data }) => setFactories((data as { code: string; name: string }[]) || []))

@@ -4,7 +4,6 @@ import Navbar from '@/components/Navbar'
 import { useProfile } from '@/hooks/useProfile'
 import { supabase } from '@/lib/supabase'
 import { tomorrowISO, nextDeliveryISO } from '@/lib/delivery'
-import * as XLSX from 'xlsx'
 
 interface Sched {
   id: string; so_number: string; customer_name: string | null; route: string | null
@@ -313,7 +312,7 @@ export default function DeliverySchedulePage() {
     setError(''); setSuccess('')
     const { data, error: e } = await supabase.storage.from('delivery-files').download(u.path)
     if (e || !data) { setError('Could not open the saved file.'); return }
-    try { const buf = await data.arrayBuffer(); if (loadWorkbook(buf, u.file_name)) setSuccess(`Re-opened "${u.file_name}" — tick the orders and assign them to a line.`) }
+    try { const buf = await data.arrayBuffer(); if (await loadWorkbook(buf, u.file_name)) setSuccess(`Re-opened "${u.file_name}" — tick the orders and assign them to a line.`) }
     catch { setError('Could not read the saved file.') }
   }
   async function deleteUpload(u: { id: string; path: string }) {
@@ -324,7 +323,8 @@ export default function DeliverySchedulePage() {
   }
 
   // Parse an Excel/CSV buffer into the assign preview (used by upload AND re-open).
-  function loadWorkbook(buf: ArrayBuffer, name: string): boolean {
+  async function loadWorkbook(buf: ArrayBuffer, name: string): Promise<boolean> {
+    const XLSX = await import('xlsx')   // loaded on demand — keeps the page bundle small
     const wb = XLSX.read(buf, { type: 'array', cellDates: true })
     const ws = wb.Sheets[wb.SheetNames[0]]
     const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false }) as unknown[][]
@@ -342,7 +342,7 @@ export default function DeliverySchedulePage() {
     setError(''); setSuccess('')
     try {
       const buf = await f.arrayBuffer()
-      if (!loadWorkbook(buf, f.name)) return
+      if (!(await loadWorkbook(buf, f.name))) return
       // Keep the file so the schedule can be amended later.
       try {
         const safe = f.name.replace(/[^a-zA-Z0-9._-]/g, '_')

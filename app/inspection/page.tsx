@@ -6,6 +6,7 @@ import { useRequireView } from '@/hooks/useRequireView'
 import { requestTimerCancel } from '@/lib/corrections'
 import { supabase } from '@/lib/supabase'
 import { can } from '@/lib/permissions'
+import { visibleInterval } from '@/hooks/useVisiblePoll'
 
 interface Hourly { time: string; weight: string; ink: string; qc_color: string; qc_odour: string; qc_phy: string; temp: string; speed: string; press: string; drop: string; alu: string; fe: string; nonfe: string; ss: string; remarks: string }
 // One batch of a material used: which stock batch and how much
@@ -136,7 +137,7 @@ function FoodLossQueries({ profile }: { profile: { factory_code: string; factory
     const { data, error } = await q.order('query_at', { ascending: true })
     if (!error) setQs((data as FlQuery[]) || [])
   }
-  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); return visibleInterval(load, 30000) }, []) // eslint-disable-line react-hooks/exhaustive-deps
   async function answer(a: FlQuery) {
     const text = (ans[a.id] || '').trim(); if (!text) return
     setBusy(a.id)

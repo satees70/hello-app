@@ -1,6 +1,5 @@
 'use client'
 import { useEffect, useRef } from 'react'
-import jsQR from 'jsqr'
 
 // Live camera QR reader. Calls onDetect with the decoded text (throttled so the
 // same code doesn't fire repeatedly). Uses the back camera on phones/tablets.
@@ -13,13 +12,14 @@ export default function QrScanner({ onDetect, onError }: { onDetect: (value: str
     let stream: MediaStream | null = null
     let raf = 0
     let cancelled = false
+    let jsQR: (typeof import('jsqr'))['default'] | null = null   // decoder loaded when scanning starts
     const last = { v: '', t: 0 }
     const canvas = document.createElement('canvas')
     const ctx = canvas.getContext('2d', { willReadFrequently: true })
 
     function loop() {
       const v = videoRef.current
-      if (v && v.readyState === v.HAVE_ENOUGH_DATA && ctx) {
+      if (v && v.readyState === v.HAVE_ENOUGH_DATA && ctx && jsQR) {
         canvas.width = v.videoWidth; canvas.height = v.videoHeight
         ctx.drawImage(v, 0, 0, canvas.width, canvas.height)
         const img = ctx.getImageData(0, 0, canvas.width, canvas.height)
@@ -34,8 +34,11 @@ export default function QrScanner({ onDetect, onError }: { onDetect: (value: str
 
     (async () => {
       try {
+        const decoder = import('jsqr')   // fetch the decoder while the camera starts
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
         if (cancelled) { stream.getTracks().forEach(t => t.stop()); return }
+        jsQR = (await decoder).default
+        if (cancelled) return
         const v = videoRef.current!; v.srcObject = stream; await v.play(); loop()
       } catch (e) { errRef.current?.(e instanceof Error ? e.message : 'Camera not available') }
     })()

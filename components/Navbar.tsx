@@ -1,10 +1,11 @@
 'use client'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { can, canWmsArea, WMS_AREA_MODULES, type ModuleKey, type Permissions } from '@/lib/permissions'
 import { enablePush, pushAlreadyOn, pushSupported } from '@/lib/push'
+import { visibleInterval } from '@/hooks/useVisiblePoll'
 
 interface NavbarProps {
   factoryCode: string
@@ -53,15 +54,18 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   const profileLike = { role, permissions: perms }
 
   useEffect(() => {
+    let cancelled = false
     supabase.auth.getSession().then(async ({ data }) => {
-      if (!data.session) return
+      if (cancelled || !data.session) return
       setMe(data.session.user.id)
       const { data: p } = await supabase.from('profiles').select('permissions, factory_codes, notifications_seen_at, offsite_allowed').eq('id', data.session.user.id).single()
+      if (cancelled) return
       setPerms((p?.permissions as Permissions) ?? {})
       setMyFactories((p?.factory_codes as string[]) ?? [])
       setNotifSeenAt((p?.notifications_seen_at as string) ?? '')
       setOffsiteAllowed(!!p?.offsite_allowed)
     })
+    return () => { cancelled = true }
   }, [])
 
   // Notifications for this user's location(s) — HO sees all
@@ -73,8 +77,12 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     if (isHO) q = q.or(`user_id.eq.${me},user_id.is.null`)
     else q = q.or(`user_id.eq.${me},and(user_id.is.null,factory_code.in.(${myFacs.join(',')}))`)
     const { data } = await q
-    // Hide notifications this user has individually cleared (ticked off).
-    const { data: dism } = await supabase.from('notification_dismissals').select('notification_id').eq('user_id', me)
+    // Hide notifications this user has individually cleared (ticked off) — only look up
+    // dismissals for the notifications just loaded (the dismissals table grows forever).
+    const ids = ((data as Notif[]) || []).map(n => n.id)
+    const { data: dism } = ids.length
+      ? await supabase.from('notification_dismissals').select('notification_id').eq('user_id', me).in('notification_id', ids)
+      : { data: [] as { notification_id: string }[] }
     const dismissed = new Set((dism || []).map(d => d.notification_id as string))
     setNotifs(((data as Notif[]) || []).filter(n => n.author_id !== me && !dismissed.has(n.id)))   // don't show my own / cleared
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -84,7 +92,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
     setNotifs(ns => ns.filter(n => n.id !== id))
     await supabase.rpc('dismiss_notification', { p_id: id })
   }
-  useEffect(() => { loadNotifs(); const t = setInterval(loadNotifs, 30000); return () => clearInterval(t) }, [loadNotifs, pathname])
+  useEffect(() => { loadNotifs(); return visibleInterval(loadNotifs, 30000) }, [loadNotifs, pathname])
   const unseenCount = notifSeenAt ? notifs.filter(n => n.created_at > notifSeenAt).length : notifs.length
   function openNotifs() { setNotifOpen(o => !o) }   // opening no longer marks all read — use the button
   async function markAllRead() { await supabase.rpc('mark_notifications_seen'); setNotifSeenAt(new Date().toISOString()) }
@@ -125,20 +133,26 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   }
 
   // Head Office: total pending approvals across ALL approval types
+  const pendingAt = useRef(0)   // when the pending counts were last refreshed
   const refreshPending = useCallback(async () => {
     if (!isHO) return
+    pendingAt.current = Date.now()
     const results = await Promise.all(APPROVAL_TABLES.map(t =>
       supabase.from(t).select('id', { count: 'exact', head: true }).eq('status', 'Pending')))
     setPendingCount(results.reduce((s, r) => s + (r.count || 0), 0))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHO])
 
-  // Refresh on nav + every 30s
+  // Refresh every 30s (paused in the background) + live via realtime below.
   useEffect(() => {
     if (!isHO) return
     refreshPending()
-    const timer = setInterval(refreshPending, 30000)
-    return () => clearInterval(timer)
+    return visibleInterval(refreshPending, 30000)
+  }, [isHO, refreshPending])
+  // Also refresh on navigation — but only if the counts are >10s old, so clicking quickly
+  // between pages doesn't fire ~20 count queries every time.
+  useEffect(() => {
+    if (isHO && Date.now() - pendingAt.current > 10000) refreshPending()
   }, [isHO, pathname, refreshPending])
 
   // WMS approvals badge (Head Office only, on warehouse pages) — mirrors the WMS Approvals page.
@@ -160,8 +174,8 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       if (alive) setWmsPending(r.reduce((s, x) => s + (x.count || 0), 0))
     }
     count()
-    const t = setInterval(count, 30000)
-    return () => { alive = false; clearInterval(t) }
+    const stop = visibleInterval(count, 30000)
+    return () => { alive = false; stop() }
   }, [isHO, onWarehouse, pathname])
 
   // Live notifications:
@@ -170,8 +184,9 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
   useEffect(() => {
     let channel: ReturnType<typeof supabase.channel> | null = null
     let myId: string | null = null
+    let cancelled = false   // unmounted before getSession resolved → don't open a channel (it would leak)
     supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) return
+      if (cancelled || !data.session) return
       myId = data.session.user.id
       supabase.realtime.setAuth(data.session.access_token)
       channel = supabase.channel('approvals-feed')
@@ -193,15 +208,16 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
       }
       channel.subscribe()
     })
-    return () => { if (channel) supabase.removeChannel(channel) }
+    return () => { cancelled = true; if (channel) supabase.removeChannel(channel) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHO, refreshPending])
 
   // Live location notifications → toast + prepend to the bell list
   useEffect(() => {
     let channel: ReturnType<typeof supabase.channel> | null = null
+    let cancelled = false   // see approvals-feed above
     supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) return
+      if (cancelled || !data.session) return
       supabase.realtime.setAuth(data.session.access_token)
       channel = supabase.channel('notif-feed')
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, payload => {
@@ -214,7 +230,7 @@ export default function Navbar({ factoryCode, fullName, role }: NavbarProps) {
         })
         .subscribe()
     })
-    return () => { if (channel) supabase.removeChannel(channel) }
+    return () => { cancelled = true; if (channel) supabase.removeChannel(channel) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHO, me, myFacs.join(',')])
 

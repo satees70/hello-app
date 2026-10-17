@@ -5,6 +5,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { useRequireView } from '@/hooks/useRequireView'
 import { supabase } from '@/lib/supabase'
 import MultiFilter from '@/components/MultiFilter'
+import { visibleInterval } from '@/hooks/useVisiblePoll'
 
 interface ChangeRequest {
   id: string
@@ -237,8 +238,8 @@ export default function PendingChangesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mr_qty_move_requests' }, () => loadQtyMoves())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'food_loss_alerts' }, () => loadFoodLoss())
       .subscribe()
-    const timer = setInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadMrCancelItems(); loadLabelOverrides(); loadSoBalCancels(); loadGrnBypasses(); loadPaperReceipts(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadWmsChecks() }, 20000)
-    return () => { supabase.removeChannel(channel); clearInterval(timer) }
+    const stopPoll = visibleInterval(() => { loadRequests(); loadCorrections(); loadDoChanges(); loadSplits(); loadStockAdjs(); loadRunModes(); loadMrCancels(); loadMrCancelItems(); loadLabelOverrides(); loadSoBalCancels(); loadGrnBypasses(); loadPaperReceipts(); loadDocDels(); loadRetEdits(); loadFgEdits(); loadItemChanges(); loadSoChanges(); loadQtyMoves(); loadFactoryChanges(); loadWmsChecks() }, 20000)
+    return () => { supabase.removeChannel(channel); stopPoll() }
   }, [profile])
 
   async function loadRequests() {

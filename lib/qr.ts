@@ -1,5 +1,3 @@
-import QRCode from 'qrcode'
-
 // QR payloads are tiny prefixed strings so a scan instantly says what it is:
 //   bin   → "BIN|A105"
 //   stock → "ITEM|<item_code>|<batch>|<expiry>"
@@ -41,5 +39,7 @@ export function matchItem(raw: string, itemCode: string, batch: string): boolean
 }
 
 export async function qrDataUrl(text: string, width = 260): Promise<string> {
+  // Loaded on demand so pages that only parse/match QR strings don't ship the encoder.
+  const { default: QRCode } = await import('qrcode')
   return QRCode.toDataURL(text, { margin: 1, width, errorCorrectionLevel: 'M' })
 }
